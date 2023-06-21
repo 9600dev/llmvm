@@ -1,0 +1,7 @@
+.python-version
+.repl_history
+.vscode/
+__pycache__/
+mozilla.pdf
+faiss_index
+*.log
