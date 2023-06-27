@@ -2,7 +2,7 @@ import asyncio
 import re
 from enum import Enum, IntEnum
 from itertools import cycle, islice
-from typing import Any, Dict, Generator, List, Tuple
+from typing import Any, Callable, Dict, Generator, List, Tuple
 
 import guidance
 import nest_asyncio
@@ -16,7 +16,18 @@ from torch import Tensor
 class Helpers():
     @staticmethod
     def flatten(l):
-        return [item for sublist in l for item in sublist]
+        def __has_list(l):
+            for item in l:
+                if isinstance(item, list):
+                    return True
+            return False
+        def __inner_flatten(l):
+            return [item for sublist in l for item in sublist]
+
+        while __has_list(l):
+            l = __inner_flatten(l)
+
+        return l
 
     @staticmethod
     def extract_token(s, ident):
@@ -35,13 +46,46 @@ class Helpers():
         if end == '\n' and '\n' not in s:
             return s[s.find(start) + len(start):]
 
-        return s[s.find(start) + len(start):s.rfind(end)]
+        after_start = s[s.find(start) + len(start):]
+        part = after_start[:after_start.find(end)]
+        return part
+
+        # return s[s.find(start) + len(start):s.rfind(end)]
+
+    @staticmethod
+    def extract_context(s, start, end):
+        def capture(s, stop_tokens, backwards=False):
+            if backwards:
+                for i in range(len(s) - 1, -1, -1):
+                    if s[i] in stop_tokens:
+                        return s[i + 1:]
+                return s
+            else:
+                for i in range(0, len(s)):
+                    if s[i] in stop_tokens:
+                        return s[:i]
+                return s
+
+        stop_tokens = ['\n', '.', '?', '!']
+        if end == '\n' and '\n' not in s:
+            s += '\n'
+
+        left_of_start = s.split(start)[0]
+        right_of_end = s.split(end)[-1]
+        return str(capture(left_of_start, stop_tokens, backwards=True)) + str(capture(right_of_end, stop_tokens))
 
     @staticmethod
     def strip_between(s: str, start: str, end: str):
         first = s[:s.find(start)]
         rest = s[s.find(start) + len(start):]
         return first + rest[rest.find(end) + len(end):]
+
+    @staticmethod
+    def split_between(s: str, start: str, end: str):
+        first = s[:s.find(start)]
+        rest = s[s.find(start) + len(start):]
+        return (first, rest[rest.find(end) + len(end):])
+
 
     @staticmethod
     def first(predicate, iterable):
@@ -185,16 +229,18 @@ class Helpers():
         }
 
     @staticmethod
-    def calculate_tokens(content: str):
-        words = content.split()
-        return len(words) / 0.75
-
-    @staticmethod
     def messages_to_str(messages: List[Dict[str, str]]) -> str:
         words = []
         for m in messages:
             words.append([w.split() for w in m.values()])
         return ' '.join(Helpers.flatten(words))
+
+    @staticmethod
+    def calculate_tokens(content: str | List[Dict[str, str]]):
+        if isinstance(content, list):
+            return len(Helpers.messages_to_str(content).split()) / 0.75
+        else:
+            return len(content.split()) / 0.75
 
     @staticmethod
     async def generator_for_new_tokens(program, *args, **kwargs):
@@ -322,8 +368,31 @@ class Helpers():
                 }
 
             return {
+                # todo: refactor this to be name
                 'invoked_by': invoked_by,
                 'description': description,
                 'parameters': [p.arg_name for p in parse(func.__doc__).params],
             }
 
+    @staticmethod
+    def parse_function_call(call: str, functions: List[Callable]):
+        function_description: Dict[str, Any] = {}
+
+        function_name = Helpers.in_between(call, '', '(')
+        function_args = [p.strip() for p in Helpers.in_between(call, '(', ')').split(',')]
+
+        for f in functions:
+            if f.__name__.lower() in function_name.lower():
+                function_description = Helpers.get_function_description(f, openai_format=True)
+                continue
+
+        if not function_description:
+            return None
+
+        argument_count = 0
+
+        for name, parameter in function_description['parameters']['properties'].items():
+            parameter.update({'argument': function_args[argument_count]})
+            argument_count += 1
+
+        return function_description

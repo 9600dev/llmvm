@@ -165,8 +165,9 @@ class WebHelpers():
 
             driver.execute_script('setTimeout(function() { return; }, 0);')
             driver.execute_script('window.print();')
+            driver.execute_script('setTimeout(function() { return; }, 0);')
             import time
-            time.sleep(3)
+            time.sleep(5)
 
         if os.path.exists('mozilla.pdf'):
             return os.path.abspath('mozilla.pdf')
@@ -176,11 +177,21 @@ class WebHelpers():
 
     @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:
-        """Extracts the career information from a person's LinkedIn profile"""
+        """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
         pdf_file = WebHelpers.pdf_url_firefox(linkedin_url)
         data = PdfHelpers.parse_pdf(pdf_file)
         return data
+
+    @staticmethod
+    def search_linkedin_profile(first_name: str, last_name: str, company_name: str) -> str:
+        """Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text"""
+        searcher = SerpAPISearcher(link_limit=1)
+        links: List[Dict] = searcher.search_internet('{} {} {} LinkedIn profile'.format(first_name, last_name, company_name))
+        if len(links) > 0:
+            return WebHelpers.get_linkedin_profile(links[0]['link'])
+        else:
+            return ''
 
     @staticmethod
     def get_news(url: str) -> str:

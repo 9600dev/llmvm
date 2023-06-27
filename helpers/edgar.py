@@ -79,7 +79,7 @@ class EdgarHelpers():
     def get_latest_form_text(
         symbol: str,
         form_type: FormType,
-    ):
+    ) -> str:
         """Gets the latest 10Q or 10K for a given NASDAQ or NYSE market symbol"""
         logging.debug('get_latest_form_text: {}'.format(symbol))
 
