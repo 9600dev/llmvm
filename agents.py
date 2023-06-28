@@ -32,6 +32,7 @@ from eightbitvicuna import VicunaEightBit
 from helpers.edgar import EdgarHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
+from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.websearch import WebHelpers
 
@@ -329,8 +330,8 @@ class ExecutionFlow(Generic[T]):
         if len(self.flow) == 0:
             return None
 
-        if index >= 0:
-            logging.warning('ExecutionFlow.peek index must be negative')
+        if index > 0:
+            logging.warning('ExecutionFlow.peek index must be zero or negative')
 
         if self.order == Order.QUEUE:
             if len(self.flow) <= abs(index):
@@ -612,7 +613,8 @@ class OpenAIExecutor(Executor):
             WebHelpers.search_linkedin_profile,
             WebHelpers.get_linkedin_profile,
             EdgarHelpers.get_latest_form_text,
-            PdfHelpers.parse_pdf
+            PdfHelpers.parse_pdf,
+            MarketHelpers.get_latest_stock_price,
         ]
         self.chat = chat
         self.messages: List[Dict] = []
@@ -668,6 +670,50 @@ class OpenAIExecutor(Executor):
             )
             return response  # type: ignore
 
+    def execute_tool_response(
+        self,
+        call: LLMCall,
+        response: str,
+        tool_str: str,
+    ) -> Assistant:
+        logging.debug('execute_tool_response')
+
+        user_message = call.messages[-1]['content']
+
+        tool_prompt_message = '''
+            You asked me to invoke a helper function {}.
+            Here is the helper function response: {}.
+            Please perform the task that was required using this helper function response.
+            If there are still outstanding helper function requests, I'll send the results of those next.
+        '''
+
+        tool_prompt_message = tool_prompt_message.format(tool_str, response)
+
+        messages = [Message.to_dict(m) for m in call.messages]
+        messages.append({'role': 'user', 'content': tool_prompt_message})
+
+        chat_response = self.execute_direct(
+            model=self.model,
+            temperature=1.0,
+            max_tokens=self.max_tokens,
+            messages=messages,
+            chat_format=True,
+        )
+
+        chat_response = chat_response['choices'][0]['message']  # type: ignore
+        messages.append(chat_response)
+
+        if len(chat_response) == 0:
+            return Assistant(Content(Text('The model could not execute the query.')), error=True)
+        else:
+            logging.debug('OpenAI Assistant Response: {}'.format(chat_response['content']))
+            return Assistant(
+                message=Content(Text(chat_response['content'])),
+                error=False,
+                messages_context=[Message.from_dict(m) for m in messages],
+                llm_call_context=call,
+            )
+
     def execute_with_tools(
         self,
         call: LLMCall,
@@ -679,7 +725,8 @@ class OpenAIExecutor(Executor):
         messages = []
         message_results = []
 
-        functions = [Helpers.get_function_description(f, True) for f in self.agents]
+        # functions = [Helpers.get_function_description(f, False, True) for f in self.agents]
+        functions = [Helpers.get_function_description(f, True, False) for f in self.agents]
         function_dict = {}
         function_dict.update({'functions': functions})
 
@@ -691,29 +738,51 @@ class OpenAIExecutor(Executor):
 
         tool_prompt_message = '''
             As a helpful assistant with access to API helper functions,
-            I will give you a json list of API functions under "Functions:",
+            I will give you a json of helper functions under "Functions:",
             then I will give you a question or task under "Input:".
             Re-write the Question and inject function calls if required to complete the task.
+            Only use the helper functions specified under "Functions:".
+
+            You can use the [[=>]] token to chain the results of function calls together.
+            You can use the [[FOREACH]] token to ensure that a function call specified on the right
+            hand side of the [[FOREACH]] is repeatedly executed for each list element on the left hand
+            side of the [[FOREACH]] token. The [[END]] token can be used to close the [[FOREACH]] block.
 
             List of functions:
         '''
 
         functions_message = json.dumps(function_dict)
+        # functions_message = '\n'.join(functions)
 
         example_message = '''
         Here are examples of calling the APIs:
 
         Example:
-        Input: Search for and summarize the profile of Jane Doe from Alphabet.
-        Output: Summarize the profile of Jane Doe [[Helpers.search_linkedin_profile('Jane', 'Doe', 'Alphabet')]] from Alphabet.
+        Input: Search for and summarize the profile of Jane Doe from Alphabet, John James from Facebook, and Jeff Dean from Google.
+        Output:
+
+        Summarize the profile of Jane Doe from Alphabet. [[Helpers.search_linkedin_profile('Jane', 'Doe', 'Alphabet')]]
+        Summarize the profile of John James from Facebook. [[Helpers.search_linkedin_profile('John', 'James', 'Facebook')]]
+        Summarize the profile of Jeff Dean from Google. [[Helpers.search_linkedin_profile('Jeff', 'Dean', 'Google')]]
 
         Example:
         Input: Who is the current CEO of AMD?
-        Output: Who is the current CEO of AMD [[Helpers.search_internet('current CEO of AMD')]] ?
+        Output: Who is the current CEO of AMD? [[Helpers.search_internet('current CEO of AMD')]] ?
 
         Example:
         Input: What is the latest strategy updates from NVDA?
         Output: What is the latest strategy updates from NVDA [[EdgarHelpers.get_latest_form_text('NVDA')]] ?
+
+        Example:
+        Input: Build a profile of the leadership team of NVDA. Include education credentials and the last
+        company each executive worked at.
+
+        Output:
+        Generate a list of the leadership team of NVDA: [[Helpers.search_internet('leadership team of NVDA')]] [[=>]]
+        For each executive in the list, summarize their profile:
+        [[FOREACH]] Summarize the profile of [[Helpers.search_linkedin_profile(executive, company)]]
+        [[END]]
+
         '''
 
         user_message = f'Now here is your task:\n\nInput: {user_message}'
@@ -724,7 +793,7 @@ class OpenAIExecutor(Executor):
 
         chat_response = self.execute_direct(
             model=self.model,
-            temperature=1,
+            temperature=1.0,
             max_tokens=self.max_tokens,
             messages=messages,
             chat_format=True,
@@ -928,7 +997,7 @@ class ParserController():
 
                     function_call_str = Helpers.in_between(text, start_token, end_token)
                     function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
-                    function_context = Helpers.extract_context(text, start_token, end_token)
+                    function_context = text  # Helpers.extract_context(text, start_token, end_token, stop_tokens=['\n'])
 
                     split_text = Helpers.split_between(text, start_token, end_token)
                     sequence.append(Text(split_text[0]))
@@ -1029,6 +1098,7 @@ class ParserController():
 
         counter = 0
         node: Optional[AstNode] = execution.peek()
+        execution_backup = node.executor
 
         while node is not None:
             if isinstance(node, LLMCall):
@@ -1088,13 +1158,21 @@ class ParserController():
 
                 callee = execution.peek(-1)
 
-                # rewrite instances of this FunctionCall in the graph with the function response
+                # remove the function call
                 rewriter = ReplacementVisitor(
                     node_lambda=lambda n: match_function(n, function_call.name, function_args),
-                    replacement_lambda=lambda n: Content(Text(function_response))
+                    replacement_lambda=lambda n: Content(Text(''))
                 )
 
                 tree_traverse(callee, rewriter)
+
+                tool_result = execution_backup.execute_tool_response(
+                    callee._llm_call_context,
+                    function_response,
+                    '{}({})'.format(function_call.name, ','.join(function_args.values()))
+                )
+
+                results.append(tool_result)
 
                 # todo: this is the wrong way to do this, but for now it works
                 # grab the callee

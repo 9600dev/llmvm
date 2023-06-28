@@ -34,6 +34,7 @@ from sentence_transformers import SentenceTransformer, util
 from serpapi import BingSearch, GoogleSearch
 from torch import Tensor
 
+from helpers.firefox import FirefoxHelpers
 from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
 from helpers.search import SerpAPISearcher
@@ -115,65 +116,12 @@ class WebHelpers():
         This is useful for hard to extract text, an exception thrown by the other functions,
         or when searching/extracting from sites that require logins liked LinkedIn, Facebook, Gmail etc.
         """
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.webdriver.support.wait import WebDriverWait
-
-        logging.debug('WebHelpers.get_url_firefox: {}'.format(url))
-        profile_directory = '/home/joelp/.mozilla/firefox/cp6sgb0s.selenium'
-
-        options = FirefoxOptions()
-        options.headless = False
-
-        profile = webdriver.FirefoxProfile(profile_directory)
-        service_args = ['--marionette-port', '2828']
-
-        # options.add_argument("--headless")
-        with webdriver.Firefox(firefox_profile=profile, options=options, service_args=service_args) as driver:
-            driver.get(url)
-            driver.implicitly_wait(5)
-            wait = WebDriverWait(driver, 5)
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, 'p')))
-
-            driver.execute_script('setTimeout(function() { return; }, 0);')
-            return driver.page_source
+        return FirefoxHelpers.get_url(url)
 
     @staticmethod
     def pdf_url_firefox(url: str) -> str:
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.webdriver.support.wait import WebDriverWait
-
-        logging.debug('WebHelpers.get_url_firefox: {}'.format(url))
-        profile_directory = '/home/joelp/.mozilla/firefox/cp6sgb0s.selenium'
-
-        options = FirefoxOptions()
-        options.headless = False
-        options.set_preference("print.always_print_silent", True)
-        options.set_preference("print.printer_Mozilla_Save_to_PDF.print_to_file", True)
-        options.set_preference("print_printer", "Mozilla Save to PDF")
-
-        profile = webdriver.FirefoxProfile(profile_directory)
-        service_args = ['--marionette-port', '2828']
-
-        # options.add_argument("--headless")
-        with webdriver.Firefox(firefox_profile=profile, options=options, service_args=service_args) as driver:
-            driver.get(url)
-            driver.implicitly_wait(5)
-            wait = WebDriverWait(driver, 5)
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, 'p')))
-
-            driver.execute_script('setTimeout(function() { return; }, 0);')
-            driver.execute_script('window.print();')
-            driver.execute_script('setTimeout(function() { return; }, 0);')
-            import time
-            time.sleep(5)
-
-        if os.path.exists('mozilla.pdf'):
-            return os.path.abspath('mozilla.pdf')
-        else:
-            logging.debug('WebHelpers.get_url_firefox: pdf not found')
-            return ''
+        """Gets a pdf version of the url using the Firefox browser."""
+        return FirefoxHelpers().pdf_url(url)
 
     @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:
@@ -185,7 +133,9 @@ class WebHelpers():
 
     @staticmethod
     def search_linkedin_profile(first_name: str, last_name: str, company_name: str) -> str:
-        """Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text"""
+        """
+        Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
+        """
         searcher = SerpAPISearcher(link_limit=1)
         links: List[Dict] = searcher.search_internet('{} {} {} LinkedIn profile'.format(first_name, last_name, company_name))
         if len(links) > 0:

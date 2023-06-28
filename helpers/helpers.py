@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import re
 from enum import Enum, IntEnum
 from itertools import cycle, islice
@@ -53,7 +54,7 @@ class Helpers():
         # return s[s.find(start) + len(start):s.rfind(end)]
 
     @staticmethod
-    def extract_context(s, start, end):
+    def extract_context(s, start, end, stop_tokens = ['\n', '.', '?', '!']):
         def capture(s, stop_tokens, backwards=False):
             if backwards:
                 for i in range(len(s) - 1, -1, -1):
@@ -66,7 +67,6 @@ class Helpers():
                         return s[:i]
                 return s
 
-        stop_tokens = ['\n', '.', '?', '!']
         if end == '\n' and '\n' not in s:
             s += '\n'
 
@@ -85,7 +85,6 @@ class Helpers():
         first = s[:s.find(start)]
         rest = s[s.find(start) + len(start):]
         return (first, rest[rest.find(end) + len(end):])
-
 
     @staticmethod
     def first(predicate, iterable):
@@ -302,7 +301,22 @@ class Helpers():
         return {'prompt_result': str(prompt_result), 'answer': assistant_result}
 
     @staticmethod
-    def get_function_description(func, openai_format: bool):
+    def __get_class_of_func(func):
+        if inspect.ismethod(func):
+            for cls in inspect.getmro(func.__self__.__class__):
+                if cls.__dict__.get(func.__name__) is func:
+                    return cls
+            func = func.__func__  # fallback to __qualname__ parsing
+        if inspect.isfunction(func):
+            cls = getattr(inspect.getmodule(func),
+                        func.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0])
+            if isinstance(cls, type):
+                return cls
+        return getattr(func, '__objclass__', None)  # handle special descriptor objects
+
+
+    @staticmethod
+    def get_function_description(func, openai_format: bool, flat_format: bool = False):
         def parse_type(t):
             if t is str:
                 return 'string'
@@ -320,7 +334,9 @@ class Helpers():
         import inspect
 
         description = parse(func.__doc__).short_description if func.__doc__ else ''
-        invoked_by = func.__name__
+        func_name = func.__name__
+        func_class = Helpers.__get_class_of_func(func)
+        invoked_by = f'{func_class.__name__}.{func_name}' if func_class else func_name
 
         if openai_format:
             params = {}
@@ -359,6 +375,9 @@ class Helpers():
                 'required': list(params.keys()),
             }
             return function
+        elif flat_format:
+            text_params = ','.join(list(inspect.signature(func).parameters.keys()))
+            return f'Helpers.{invoked_by}({text_params})  # {description}'
         else:
             if not func.__doc__:
                 return {
@@ -366,7 +385,6 @@ class Helpers():
                     'description': description,
                     'parameters': list(inspect.signature(func).parameters.keys())
                 }
-
             return {
                 # todo: refactor this to be name
                 'invoked_by': invoked_by,

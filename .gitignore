@@ -5,3 +5,5 @@ __pycache__/
 mozilla.pdf
 faiss_index
 *.log
+download/
+config.yaml

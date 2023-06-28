@@ -1,4 +1,6 @@
+import tempfile
 from io import BytesIO
+from typing import List
 from urllib.parse import urlparse
 
 import pdf2image
@@ -14,6 +16,18 @@ logging = setup_logging()
 
 
 class PdfHelpers():
+    @staticmethod
+    def parse_pdf_image(url_or_file: str) -> str:
+        result = urlparse(url_or_file)
+
+        text: List[str] = []
+        images = pdf2image.convert_from_path(result.path)  # type: ignore
+        for pil_im in images:
+            ocr_dict = pytesseract.image_to_data(pil_im, output_type=Output.DICT)
+            text.append(' '.join(ocr_dict['text']))
+
+        return '\n'.join(text)
+
     @staticmethod
     def parse_pdf(url_or_file: str) -> str:
         """Parse a pdf file and return the text
