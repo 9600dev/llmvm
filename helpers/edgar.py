@@ -80,7 +80,11 @@ class EdgarHelpers():
         symbol: str,
         form_type: FormType,
     ) -> str:
-        """Gets the latest 10Q or 10K for a given NASDAQ or NYSE market symbol"""
+        """
+        Gets the latest 10Q or 10K text for a given company symbol
+        This is useful to get the latest financial information for a company,
+        their current strategy, investments and risks.
+        """
         logging.debug('get_latest_form_text: {}'.format(symbol))
 
         sections_10q = [

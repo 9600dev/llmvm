@@ -43,11 +43,12 @@ class EmailHelpers():
         return events
 
     @staticmethod
-    def send_email(
+    def __send_email_helper(
         sender: str,
         receiver: str,
-        mime_text: MIMEMultipart,
+        mime_text: MIMEMultipart | MIMEText,
     ):
+        """Send an email from sender to receiver with the specified subject and body text"""
         container = Container()
         smtp_server = container.get('smtp_server')
         smtp_port = int(container.get('smtp_port'))
@@ -61,6 +62,25 @@ class EmailHelpers():
             receiver,
             mime_text.as_string())
         mailserver.quit()
+
+    @staticmethod
+    def send_email(
+        sender_email: str,
+        receiver_email: str,
+        subject: str,
+        body: str,
+    ):
+        """Send an email from sender to receiver with the specified subject and body text"""
+        msg = MIMEText(body)
+        msg['Subject'] = subject
+        msg['From'] = sender_email
+        msg['To'] = receiver_email
+
+        EmailHelpers.__send_email_helper(
+            sender_email,
+            receiver_email,
+            msg,
+        )
 
     @staticmethod
     def send_calendar_invite(
@@ -151,7 +171,7 @@ class EmailHelpers():
                 msg.attach(part)
 
                 for attendee_email in attendee_emails:
-                    EmailHelpers.send_email(
+                    EmailHelpers.__send_email_helper(
                         from_email,
                         attendee_email,
                         msg,

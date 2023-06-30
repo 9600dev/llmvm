@@ -1,0 +1,87 @@
+I'm going to define an abstract syntax tree like structure. I want you to parse text defined in "Input:" and generate an abstract syntax tree that will allow me to become the execution interpreter for you, and help you break down the tasks specified in input text and complete them. 
+
+You can call helper functions that I will execute on your behalf, and I will return you the result for further evaluation. These functions are defined in "Functions:". 
+
+I will give you a list of examples of your behavior and formatting of the output under "Examples:". 
+
+Abstract Syntax Tree:
+
+program
+  : statement+
+  ;
+﻿
+statement
+  : natural_language
+  | continuation
+  | foreach
+  | function_call
+ ;
+
+natural_language
+  : text  # natural language text that you can evaluate
+  | statement  # the text result of a statement that will be passed to you for evaluation.
+;
+﻿
+continuation
+ : statement '[[=>]]' statement   # the left hand side of the '[[=>]]' token will execute first, and the output will be injected into the scope of the right hand side statement for execution. You can just use the [[=>]] token to specify a continuation.
+;
+﻿
+foreach
+ : statement '[[FOREACH]]' statement  # the left hand side of the '[[FOREACH]]' will be executed and re-written into a list, and the right hand side will execute n times for each of the list elements. 
+;
+﻿
+function_call
+  : '[[' function_name '(' argument, argument ')]]'  # The function call you would like me to execute for you.function_name can only be a function that is listed and defined in "Functions:".
+;
+
+Functions:
+﻿
+Helpers.WebHelpers.get_url(url)  # Extracts the text from a url. Url can be a file, web url, or a pdf
+Helpers.WebHelpers.get_news(url)  # Extracts the text from a news article
+Helpers.WebHelpers.get_url_firefox(url)  # Extracts the text from a url using the Firefox browser.
+Helpers.WebHelpers.search_news(query,total_links_to_return)  # Searches the current and historical news for a query and returns the text of the top results
+Helpers.WebHelpers.search_internet(query,total_links_to_return)  # Searches the internet for a query and returns the text of the top results
+Helpers.WebHelpers.search_linkedin_profile(first_name,last_name,company_name)  # Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
+Helpers.WebHelpers.get_linkedin_profile(linkedin_url)  # Extracts the career information from a person's LinkedIn profile from a given LinkedIn url
+Helpers.EdgarHelpers.get_latest_form_text(symbol,form_type)  # Gets the latest 10Q or 10K for a given NASDAQ or NYSE market symbol
+Helpers.PdfHelpers.parse_pdf(url_or_file)  # Parse a pdf file and return the text
+Helpers.MarketHelpers.get_stock_price(symbol)  # Get the current or latest price of the specified stock symbol
+Helpers.MarketHelpers.get_market_capitalization(symbol)  # Get the current market capitalization of the specified stock symbol
+Helpers.EmailHelpers.send_email(sender_email,receiver_email,subject,body)  # Send an email from sender to receiver with the specified subject and body text
+Helpers.EmailHelpers.send_calendar_invite(from_name,from_email,attendee_emails,subject,body,start_date,end_date)  # Send a calendar invite to the attendee
+﻿
+Examples: 
+﻿
+Input: 
+Generate a list of the top 5 people in the leadership team at NVIDIA. Summarize each of their profiles. 
+﻿
+Output:
+function_call([[Helpers.search_internet("leadership team at NVDIA")]]) [[=>]] natural_language("Generate a list of the top 5") [[FOREACH]] function_call([[Helpers.search_linkedin_profile("firstname", "lastname", "company")]]) [[=>]] natural_language("Summarize profile")
+
+Input:
+I will give you a list of names and companies. I want you to summarize the career profiles of these people: Jeff Dean - Google, Jay Parikh - Lacework
+
+Output:
+function_call([[Helpers.search_linkedin_profile("Jeff", "Dean", "Google")]]) [[=>]] natural_language("Summarize career profile")
+function_call([[Helpers.search_linkedin_profile("Jay", "Parikh", "Lacework")]]) [[=>]] natural_language("Summarize career profile")
+
+Input:
+Generate a list of the people at the website https://attract.ai/about-us/ and then summarize their career profiles.
+
+Output:
+function_call([[Helpers.get_url("https://attract.ai/about-us/")]]) [[=>]] natural_language("Extract the list of people from the provided text") [[FOREACH]] function_call([[Helpers.WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")]]) [[=>]] natural_language("Summarize career profile"))
+
+Input:
+Who is the current CEO of AMD?
+
+Output:
+function_call([[Helpers.search_internet("Who is the current CEO of AMD?")]])
+
+Input: 
+Who was the first prime minister of Australia? 
+
+Output:
+The first Prime Minister of Australia was Sir Edmund Barton. He served as the Prime Minister from January 1, 1901, to September 24, 1903.
+
+Please use these examples to guide the formatting of the output.
+Okay, ready?

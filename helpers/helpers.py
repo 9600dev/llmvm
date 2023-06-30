@@ -51,8 +51,6 @@ class Helpers():
         part = after_start[:after_start.find(end)]
         return part
 
-        # return s[s.find(start) + len(start):s.rfind(end)]
-
     @staticmethod
     def extract_context(s, start, end, stop_tokens = ['\n', '.', '?', '!']):
         def capture(s, stop_tokens, backwards=False):
@@ -314,9 +312,8 @@ class Helpers():
                 return cls
         return getattr(func, '__objclass__', None)  # handle special descriptor objects
 
-
     @staticmethod
-    def get_function_description(func, openai_format: bool, flat_format: bool = False):
+    def get_function_description(func, openai_format: bool):
         def parse_type(t):
             if t is str:
                 return 'string'
@@ -333,7 +330,12 @@ class Helpers():
 
         import inspect
 
-        description = parse(func.__doc__).short_description if func.__doc__ else ''
+        description = ''
+        if func.__doc__ and parse(func.__doc__).long_description:
+            description = parse(func.__doc__).long_description
+        elif func.__doc__ and parse(func.__doc__).short_description:
+            description = parse(func.__doc__).short_description
+
         func_name = func.__name__
         func_class = Helpers.__get_class_of_func(func)
         invoked_by = f'{func_class.__name__}.{func_name}' if func_class else func_name
@@ -375,9 +377,6 @@ class Helpers():
                 'required': list(params.keys()),
             }
             return function
-        elif flat_format:
-            text_params = ','.join(list(inspect.signature(func).parameters.keys()))
-            return f'Helpers.{invoked_by}({text_params})  # {description}'
         else:
             if not func.__doc__:
                 return {
@@ -393,6 +392,11 @@ class Helpers():
             }
 
     @staticmethod
+    def get_function_description_flat(function: Callable) -> str:
+        description = Helpers.get_function_description(f, openai_format=False)
+        return (f'{description["invoked_by"]}({", ".join(description["parameters"])})  # {description["description"]}')
+
+    @staticmethod
     def parse_function_call(call: str, functions: List[Callable]):
         function_description: Dict[str, Any] = {}
 
@@ -401,7 +405,7 @@ class Helpers():
 
         for f in functions:
             if f.__name__.lower() in function_name.lower():
-                function_description = Helpers.get_function_description(f, openai_format=True)
+                function_description = Helpers.get_function_description(f, openai_format=True, flat_format=False)
                 continue
 
         if not function_description:
@@ -414,3 +418,42 @@ class Helpers():
             argument_count += 1
 
         return function_description
+
+    @staticmethod
+    def load_prompt(prompt_filename: str) -> Dict[str, Any]:
+        with open(prompt_filename, 'r') as f:
+            prompt = f.read()
+
+            if '[system_message]' not in prompt:
+                raise ValueError('Prompt file must contain [system_message]')
+
+            if '[user_prompt'] not in prompt:
+                raise ValueError('Prompt file must contain [user_message]')
+
+            system_prompt = Helpers.in_between(prompt, '[system_message]', '[user_message]')
+            user_message = prompt[:prompt.find('[user_message]')+len('[user_message]')].strip()
+            templates = []
+
+            temp_prompt = prompt
+            while '{{' and '}}' in temp_prompt:
+                templates.append(Helpers.in_between(temp_prompt, '{{', '}}'))
+                temp_prompt = temp_prompt.split('}}', 1)[-1]
+
+            return {
+                'system_message': system_prompt,
+                'user_message': user_message,
+                'templates': templates
+            }
+
+    @staticmethod
+    def load_and_populate_prompt(
+        prompt_filename: str,
+        template: Dict[str, str],
+    ):
+        prompt = Helpers.load_prompt(prompt_filename)
+
+        for key, value in template.items():
+            prompt['system_message'] = prompt['system_message'].replace(f'{{{key}}}', value)
+            prompt['user_message'] = prompt['user_message'].replace(f'{{{key}}}', value)
+
+        return prompt

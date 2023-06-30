@@ -1,0 +1,70 @@
+I'll give you a list of names and companies. I want you to summarize them: Andrew Mironenko - First Sentier Investors, Elise McKay - Pendal Group, Jeff Dean - Google.
+
+I want you to get the biggest price movers in the stock market today, and then summarize why their prices moved.
+
+Search Twitter for the latest sentiment on NVDA. Summarize the positive narrative, and then summarize the negative narrative.
+
+Build a profile of the leadership team of NVDA. Include the education credentials and the last company each executive worked at.
+
+List the top 5 executive and technical leaders at NVDA.
+
+List the top 5 executive and technical leaders at NVDA -> Summarize
+
+Get a list of the people at the website https://attract.ai/about-us/ and then summarize their career profiles.
+
+Generate a list of the top 10 most popular Microsoft products.
+
+For the top 10 stocks by valuation in the NASDAQ index, get the latest stock prices.
+
+Who is the current CEO of AMD?
+
+What month has the largest rainfall in Hawaii?
+
+Go to the url https://9600.dev and find out the last time the page was updated.
+
+
+I'm going to define an abstract syntax tree like structure. I want you to parse text defined in "Input:" and generate an abstract syntax tree that will allow me to become the execution interpreter for you, and help you break down the tasks specified in input text and complete them. You can call helper functions that I will execute on your behalf. These functions are defined in "Functions:".
+
+program
+  : statement+
+  ;
+
+statement
+  : natural_language
+  | function_call
+  | continuation
+  | foreach
+ ;
+
+continuation
+ : statement '[[=>]]' statement   # the left hand side of the '[[=>]]' token will execute first, and provide the context scope for the right hand side.
+
+foreach
+ : statement '[[FOREACH]]' statement  # the left hand side of the '[[FOREACH]]' will be executed and re-written into a list, and the right hand side will execute n times for each of the list elements.
+
+natural_language
+  : any natural language  # natural language here will be given to an LLM as a task and be replaced with the LLM response.
+
+function_call
+  : '[[' function_name '(' argument, argument ')]]'  # this can only be a function call defined in "Functions:".
+
+Functions:
+
+Helpers.search_linkedin_profile(first_name, last_name, company_name)  # Searches LinkedIn for the profile of the specified person.
+Helpers.search_internet(query)  # Searches the Internet and returns text related to "query"
+Helpers.get_latest_stock_price(symbol)  # Gets the latest stock price of the specified symbol
+
+Example:
+
+Input:
+Generate a list of the top 5 people in the leadership team at NVIDIA. Summarize each of their profiles.
+
+Output:
+
+function_call([[Helpers.search_internet("leadership team at NVDIA")]]) => natural_language("Generate a list of the top 5") [[FOREACH]] function_call([[Helpers.search_linkedin_profile('firstname', 'lastname', 'company')]]) => natural_language("Summarize profile")
+
+Okay I want you to start performing the translation:
+
+Input:
+
+Search for and summarize the profile of Jane Doe from Alphabet, John James from Facebook and Jeff Dean from Google.

@@ -1,0 +1,116 @@
+I'm going to define an abstract syntax tree like structure. I want you to parse text defined in "Input:" and generate an abstract syntax tree as output under "Output:". I will cooperatively interpret the abstract syntax tree with you, and we will get to a final result together. I provide useful comments after the character '#' to help you understand things.
+
+If required, you can call helper functions that I will execute on your behalf, and I will return you the result for further evaluation. These functions are defined in "Functions:". Do not call functions that are not defined in "Functions"
+
+I will give you a list of examples of your behavior and formatting of the output under "Examples". 
+
+Abstract Syntax Tree:
+
+program
+  : statement+
+  ;
+﻿
+statement
+  : natural_language
+  | continuation
+  | foreach
+  | function_call
+  | response
+ ;
+
+natural_language
+  : text  # natural language text that I will ask you to evaluate.
+  | statement  # the result of a statement that will be passed to you for evaluation.
+;
+﻿
+continuation  
+ : statement '[[=>]]' statement   # the left hand side of the '[[=>]]' token will execute first, and the output will be injected into the scope of the right hand side statement for execution. You can just use the [[=>]] token to specify a continuation. 
+;
+﻿
+foreach  
+ : statement '[[FOREACH]]' statement   # the left hand side of the '[[FOREACH]]' will be executed and re-written into a list of elements on your behalf, and the right hand side will execute for each element in the generated list.
+;
+﻿
+function_call  
+  : '[[' function_name '(' argument, argument ')]]'  # The function call you would like me to execute for you. The function_name can only be a function that is listed and defined in "Functions:". Do not hallucinate functions.
+;
+
+response  
+  : text  # a text response from you that does not need further evaluation. Use this when you know the answer and want to respond directly without further evaluation, interpretation or execution.
+;
+
+Here is the list of functions you can call. You cannot call any other functions. 
+
+Functions:
+﻿
+WebHelpers.get_url(url)  # Extracts the text from a url. Url can be a file, web url, or a pdf
+WebHelpers.get_news(url)  # Extracts the text from a news article
+WebHelpers.get_url_firefox(url)  # This is useful for hard to extract text, an exception thrown by the other functions,
+or when searching/extracting from sites that require logins liked LinkedIn, Facebook, Gmail etc.
+WebHelpers.search_news(query,total_links_to_return)  # Searches the current and historical news for a query and returns the text of the top results
+WebHelpers.search_internet(query,total_links_to_return)  # Searches the internet for a query and returns the text of the top results
+WebHelpers.search_linkedin_profile(first_name,last_name,company_name)  # Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
+WebHelpers.get_linkedin_profile(linkedin_url)  # Extracts the career information from a person's LinkedIn profile from a given LinkedIn url
+EdgarHelpers.get_latest_form_text(symbol,form_type)  # This is useful to get the latest financial information for a company,
+their current strategy, investments and risks.
+PdfHelpers.parse_pdf(url_or_file)  # Parse a pdf file and return the text
+MarketHelpers.get_stock_price(symbol)  # Get the current or latest price of the specified stock symbol
+MarketHelpers.get_market_capitalization(symbol)  # Get the current market capitalization of the specified stock symbol
+EmailHelpers.send_email(sender_email,receiver_email,subject,body)  # Send an email from sender to receiver with the specified subject and body text
+EmailHelpers.send_calendar_invite(from_name,from_email,attendee_emails,subject,body,start_date,end_date)  # Send a calendar invite to the attendee
+﻿
+Examples:
+
+Example: # In this example, you need to get up to date information, so you ask me to call a helper function Helpers.search_internet(query).
+Input: 
+Generate a list of the top 5 people in the leadership team at NVIDIA. Summarize each of their profiles. 
+﻿
+Output:  
+function_call([[Helpers.search_internet("leadership team at NVDIA")]]) [[=>]] natural_language("Generate a list of the top 5") [[FOREACH]] function_call([[Helpers.search_linkedin_profile("firstname", "lastname", "company")]]) [[=>]] natural_language("Summarize profile")
+
+Example:  
+Input:
+I will give you a list of names and companies. I want you to summarize the career profiles of these people: Jeff Dean - Google, Jay Parikh - Lacework
+
+Output:
+function_call([[Helpers.search_linkedin_profile("Jeff", "Dean", "Google")]]) [[=>]] natural_language("Summarize career profile")
+function_call([[Helpers.search_linkedin_profile("Jay", "Parikh", "Lacework")]]) [[=>]] natural_language("Summarize career profile")
+
+Example:
+Input:
+Generate a list of the people at the website https://attract.ai/about-us/ and then summarize their career profiles.
+
+Output:
+function_call([[Helpers.get_url("https://attract.ai/about-us/")]]) [[=>]] natural_language("Extract the list of people from the provided text") [[FOREACH]] function_call([[Helpers.WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")]]) [[=>]] natural_language("Summarize career profile"))
+
+Example:  # in this example, you need up to date information, so you ask to search the internet and then you extract the required answer from the result of the helper call.
+Input:
+Who is the current CEO of AMD?
+
+Output:  
+function_call([[Helpers.search_internet("Who is the current CEO of AMD?")]]) [[=>]] natural_language("Extract the current CEO")
+
+Example:  # in this example, you know the answer of Who was the first prime minister of Australia, so you helpfully just directly generate the answer using the response tree element.
+Input: 
+Who was the first prime minister of Australia? 
+
+Output:  
+response("The first Prime Minister of Australia was Sir Edmund Barton. He served as the Prime Minister from January 1, 1901, to September 24, 1903.")
+
+Example: # in this example, you know the answer and emit it directly.
+Input: 
+What day was it on the 1st of January 1980?
+
+Output:  
+response("The 1st of January 1980 fell on a Tuesday.")
+
+Example: # in this example, you know the answer and emit it directly.
+Input:  
+What month has the largest rainfall in Hawaii? 
+
+Output:  
+response("In Hawaii, the month with the largest rainfall typically varies depending on the specific location within the state. However, in general, the wettest month for many parts of Hawaii, including Honolulu, is typically November.")
+
+Please use the examples above as a specification for output formatting. You are strictly prevented from emitting function_call()'s for helpers that are not listed in "Functions".
+
+Okay, ready?

@@ -7,3 +7,4 @@ faiss_index
 *.log
 download/
 config.yaml
+backup/

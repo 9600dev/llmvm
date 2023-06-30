@@ -30,10 +30,12 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
 from eightbitvicuna import VicunaEightBit
 from helpers.edgar import EdgarHelpers
+from helpers.email_helpers import EmailHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
+from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
 
 logging = setup_logging()
@@ -73,6 +75,17 @@ class Executor(ABC):
         pass
 
     @abstractmethod
+    def chat_execute(self, messages: List['Message']) -> 'Assistant':
+        pass
+
+    def execute_one_shot(
+        self,
+        system_message: str,
+        user_message: str,
+    ) -> 'Assistant':
+        pass
+
+    @abstractmethod
     def can_execute(self, query: Union[str, List[Dict]], data: str) -> bool:
         pass
 
@@ -82,6 +95,10 @@ class Executor(ABC):
 
     @abstractmethod
     def chat_context(self, chat: bool):
+        pass
+
+    @abstractmethod
+    def max_tokens(self):
         pass
 
 
@@ -107,10 +124,11 @@ class AstNode(ABC):
     def __init__(
         self
     ):
-        pass
+        self.original_text: str = ''
 
     def accept(self, visitor: Visitor) -> 'AstNode':
         return visitor.visit(self)
+
 
 class Text(AstNode):
     def __init__(
@@ -125,12 +143,6 @@ class Text(AstNode):
     def __repr__(self):
         return f'Text({self.text})'
 
-class Data(Text):
-    def __str__(self):
-        return str(self.text)
-
-    def __repr__(self):
-        return f'Data({self.text})'
 
 class Content(AstNode):
     def __init__(
@@ -152,6 +164,7 @@ class Content(AstNode):
 
     def __repr__(self):
         return f'Content({self.sequence})'
+
 
 class Message(AstNode):
     def __init__(
@@ -183,6 +196,7 @@ class Message(AstNode):
     def to_dict(message: 'Message') -> Dict[str, str]:
         return {'role': message.role(), 'content': str(message.message)}
 
+
 class User(Message):
     def __init__(
         self,
@@ -199,6 +213,7 @@ class User(Message):
     def __repr__(self):
         return f'Message({self.message})'
 
+
 class System(Message):
     def __init__(
         self,
@@ -214,6 +229,7 @@ class System(Message):
 
     def __repr__(self):
         return f'SystemPrompt({self.message})'
+
 
 class Assistant(Message):
     def __init__(
@@ -239,24 +255,53 @@ class Assistant(Message):
     def __repr__(self):
         return f'Assistant({self.message} {self.error})'
 
-class ExprNode(AstNode):
+
+class Statement(AstNode):
     pass
 
-class Call(ExprNode):
-    pass
 
-class LLMCall(Call):
+class Call(Statement):
+    def __init__(
+        self,
+    ):
+        self.call_response: Optional[str] = None
+
+    def response(self) -> str:
+        return self.call_response or ''
+
+
+class NaturalLanguage(Call):
     def __init__(
         self,
         messages: List[Message],
-        system: System,
-        executor: Executor,
-        data: Data = Data(),
+        system: Optional[System] = None,
+        executor: Optional[Executor] = None,
     ):
         self.messages: List[Message] = messages
-        self.data: Data = data
-        self.system: System = system
-        self.executor: Executor = executor
+        self.system = system
+        self.executor = executor
+
+
+
+class Continuation(Statement):
+    def __init__(
+        self,
+        lhs: Statement,
+        rhs: Statement,
+    ):
+        self.lhs = lhs
+        self.rhs = rhs
+
+
+class ForEach(Statement):
+    def __init__(
+        self,
+        lhs: List[Statement],
+        rhs: Statement,
+    ):
+        self.lhs = lhs
+        self.rhs = rhs
+
 
 class FunctionCall(Call):
     def __init__(
@@ -270,15 +315,10 @@ class FunctionCall(Call):
         self.args = args
         self.types = types
         self.context = context
+        self.result: Optional[Text] = None
 
-class ChainedCall(Call):
-    def __init__(
-        self,
-        calls: List[Call],
-    ):
-        self.calls = calls
 
-class Result(ExprNode):
+class Answer(Statement):
     def __init__(
         self,
         conversation: List[AstNode] = [],
@@ -290,10 +330,39 @@ class Result(ExprNode):
         self.error = error
 
     def __str__(self):
-        result = f'Result({self.error}, {self.result})\n'
+        result = f'Answer({self.error}, {self.result})\n'
         result += 'Conversation:\n'
         result += '\n'.join([str(n) for n in self.conversation])
         return result
+
+
+class UncertainOrError(Statement):
+    def __init__(
+        self,
+        conversation: List[AstNode] = [],
+        result: object = None,
+        error: object = None,
+    ):
+        self.conversation = conversation,
+        self.result = result
+        self.error = error
+
+    def __str__(self):
+        result = f'uncertain_or_error({self.error}, {self.result})\n'
+        result += 'Conversation:\n'
+        result += '\n'.join([str(n) for n in self.conversation])
+        return result
+
+
+class Program(AstNode):
+    def __init__(
+        self,
+        executor: Executor,
+        flow: 'ExecutionFlow'['AstNode'],
+    ):
+        self.statements: List[Statement] = []
+        self.flow = flow
+        self.executor: Executor = executor
 
 
 class PromptStrategy(Enum):
@@ -368,19 +437,23 @@ def tree_map(node: AstNode, call: Callable[[AstNode], Any]) -> List[Any]:
         visited.extend(tree_map(node.message, call))
     elif isinstance(node, Assistant):
         visited.extend(tree_map(node.message, call))
-    elif isinstance(node, ChainedCall):
-        for n in node.calls:
-            visited.extend(tree_map(n, call))
+    elif isinstance(node, ForEach):
+        for statement in node.lhs:
+            visited.extend(tree_map(statement, call))
+        visited.extend(tree_map(node.rhs, call))
+    elif isinstance(node, Continuation):
+        visited.extend(tree_map(node.lhs, call))
+        visited.extend(tree_map(node.rhs, call))
     elif isinstance(node, FunctionCall):
         visited.extend(tree_map(node.context, call))
-    elif isinstance(node, LLMCall):
+    elif isinstance(node, NaturalLanguage):
         for n in node.messages:
             visited.extend(tree_map(n, call))
-        visited.extend(tree_map(node.system, call))
-        visited.extend(tree_map(node.data, call))
-    elif isinstance(node, ChainedCall):
-        for n in node.calls:
-            visited.extend(tree_map(n, call))
+        if node.system:
+            visited.extend(tree_map(node.system, call))
+    elif isinstance(node, Program):
+        for statement in node.statements:
+            visited.extend(tree_map(statement, call))
     else:
         raise ValueError('not implemented')
     return visited
@@ -398,14 +471,17 @@ def tree_traverse(node, visitor: Visitor):
         node.message = cast(Content, tree_traverse(node.message, visitor))
     elif isinstance(node, Text):
         pass
-    elif isinstance(node, LLMCall):
+    elif isinstance(node, NaturalLanguage):
         node.messages = [cast(Message, tree_traverse(child, visitor)) for child in node.messages]
-        node.system = cast(System, tree_traverse(node.system, visitor))
+        if node.system:
+            node.system = cast(System, tree_traverse(node.system, visitor))
     elif isinstance(node, FunctionCall):
         node.context = cast(Content, tree_traverse(node.context, visitor))
-    elif isinstance(node, ChainedCall):
-        node.calls = [cast(Call, tree_traverse(child, visitor)) for child in node.calls]
-
+    elif isinstance(node, Continuation):
+        node.lhs = cast(Statement, tree_traverse(node.lhs, visitor))
+        node.rhs = cast(Statement, tree_traverse(node.rhs, visitor))
+    elif isinstance(node, Program):
+        node.statements = [cast(Statement, tree_traverse(child, visitor)) for child in node.statements]
     return node.accept(visitor)
 
 
@@ -425,200 +501,24 @@ class ReplacementVisitor(Visitor):
             return node
 
 
-class LangChainExecutor(Executor):
-    def __init__(
-            self,
-            openai_key: str,
-            temperature: float = 0.6,
-            verbose: bool = True,
-    ):
-        self.openai_key = openai_key
-        self.temperature = temperature
-        self.verbose = verbose
-        self.gpt = langchain_OpenAI(temperature=temperature)  # type: ignore
-        # Next, let's load some tools to use. Note that the `llm-math` tool uses an LLM, so we need to pass that in.
-        self.tools = load_tools(
-            ["serpapi", "llm-math", "news-api"],
-            llm=self.gpt,
-            news_api_key='ecdb70595c9c4464ac70d338610c9390'
-        )
-        self.chat = False
-
-        self.context: Any = None
-
-    def name(self) -> str:
-        return 'langchain'
-
-    def chat_context(self, chat: bool):
-        self.chat = chat
-
-    def parse_action(self, query: str) -> Tuple[str, Callable]:
-        if '.pdf' in query:
-            from langchain.vectorstores import FAISS
-
-            url = Helpers.extract_token(query, '.pdf')
-            from urllib.parse import urlparse
-
-            from langchain.document_loaders import PyPDFLoader
-
-            documents = []
-
-            result = urlparse(url)
-            if result.scheme == '' or result.scheme == 'file':
-                logging.debug('LangChainExecutor.parse_action loading and splitting {}'.format(result))
-                loader: BaseLoader = PyPDFLoader(result.path)
-                documents = loader.load_and_split()
-
-                if len(documents) == 0:
-                    # use tesseract to do the parsing instead
-                    import pdf2image
-                    import pytesseract
-                    from langchain.document_loaders import TextLoader
-                    from pytesseract import Output, TesseractError
-
-                    text: List[str] = []
-                    images = pdf2image.convert_from_path(result.path)  # type: ignore
-                    for pil_im in images:
-                        ocr_dict = pytesseract.image_to_data(pil_im, output_type=Output.DICT)
-                        text.append(' '.join(ocr_dict['text']))
-
-                    with tempfile.NamedTemporaryFile('w') as temp:
-                        temp.write('\n'.join(text))
-                        temp.flush()
-
-                        loader = TextLoader(temp.name)
-                        documents = loader.load()
-
-            elif result.scheme == 'https' or result.scheme == 'http':
-                import io
-                response = requests.get(url=url, timeout=20)
-                with tempfile.NamedTemporaryFile(suffix='.pdf', mode='wb', delete=True) as temp_file:
-                    temp_file.write(response.content)
-                    loader = PyPDFLoader(temp_file.name)
-                    documents = loader.load_and_split()
-
-            text_splitter = TokenTextSplitter(chunk_size=500, chunk_overlap=100)
-            texts = text_splitter.split_documents(documents)
-
-            embeddings = OpenAIEmbeddings(
-                model='text-embedding-ada-002',
-                openai_api_key=self.openai_key,
-            )  # type: ignore
-
-            logging.debug('LangChainExecutor.parse_action FAISS.from_documents {}'.format(result))
-            docsearch = FAISS.from_documents(texts, embeddings)
-            llm = ChatOpenAI(
-                openai_api_key=self.openai_key,
-                model_name='gpt-3.5-turbo',  # type: ignore
-                temperature=self.temperature,
-            )  # type: ignore
-
-            qa = RetrievalQA.from_chain_type(
-                llm=llm,
-                chain_type='stuff',
-                retriever=docsearch.as_retriever()
-            )
-
-            self.context = qa
-            return (query, qa.run)
-        elif 'edgar(' in query:
-            symbol = Helpers.in_between(query, 'edgar(', ')')
-            logging.debug('loading firefox and getting the latest 10Q for {}'.format(symbol))
-            report_text = EdgarHelpers.get_latest_form_text(symbol, EdgarHelpers.FormType.TENQ)
-            with open('edgar.text', 'w') as f:
-                f.write(report_text)
-
-            query = Helpers.strip_between(query, 'edgar(', ')')
-
-            documents = []
-
-            from langchain.document_loaders.text import TextLoader
-
-            with tempfile.NamedTemporaryFile(suffix='.txt', mode='w', delete=True) as t:
-                t.write(report_text)
-                t.seek(0)
-                logging.debug('parsing in BeautifulSoup')
-                html_loader = TextLoader(t.name)
-                data = html_loader.load()
-                documents = html_loader.load_and_split()
-
-            logging.debug('token splitting')
-            text_splitter = TokenTextSplitter(chunk_size=500, chunk_overlap=100)
-            texts = text_splitter.split_documents(documents)
-
-            embeddings = OpenAIEmbeddings(
-                model='text-embedding-ada-002',
-                openai_api_key=self.openai_key,
-            )  # type: ignore
-
-            logging.debug('LangChainExecutor.parse_action FAISS.from_documents {}'.format(symbol))
-            docsearch = FAISS.from_documents(texts, embeddings)
-            llm = ChatOpenAI(
-                openai_api_key=self.openai_key,
-                model_name='gpt-3.5-turbo',  # type: ignore
-                temperature=self.temperature,
-            )  # type: ignore
-
-            qa = RetrievalQA.from_chain_type(
-                llm=llm,
-                chain_type='stuff',
-                retriever=docsearch.as_retriever()
-            )
-
-            self.context = qa
-            return (query, qa.run)
-        else:
-            # generic langchain
-            agent = initialize_agent(self.tools, self.gpt, agent='zero-shot-react-description', verbose=self.verbose)  # type: ignore
-            self.context = agent
-
-            def execute_agent(query: str):
-                result = agent({'input': query})
-                return result['output']
-            return (query, execute_agent)
-
-    def execute(self, query: Union[str, List[Dict]], data: str) -> Assistant:
-        logging.debug('LangChainExecutor.execute_query query={}'.format(query))
-
-        # todo check to see if we've got repl context
-        prompt, action = self.parse_action(str(query))
-        return Assistant(
-            message=Content(Text(action(prompt))),
-            error=False,
-            llm_call_context=None,
-        )
-
-    def can_execute(self, query: Union[str, List[Dict]], data: str) -> bool:
-        return True
-
-
 class OpenAIExecutor(Executor):
     def __init__(
         self,
         openai_key: str,
         chat: bool = False,
-        verbose: bool = True,
         max_function_calls: int = 5,
+        max_tokens: int = 4096,
+        model: str = 'gpt-3.5-turbo-16k',
+        agents: List = [],
+        verbose: bool = True,
     ):
         self.openai_key = openai_key
-        # self.agents = agents
         self.verbose = verbose
-        self.model = 'gpt-3.5-turbo-16k'
-        self.agents = [
-            WebHelpers.get_url,
-            WebHelpers.get_news,
-            WebHelpers.get_url_firefox,
-            WebHelpers.search_news,
-            WebHelpers.search_internet,
-            WebHelpers.search_linkedin_profile,
-            WebHelpers.get_linkedin_profile,
-            EdgarHelpers.get_latest_form_text,
-            PdfHelpers.parse_pdf,
-            MarketHelpers.get_latest_stock_price,
-        ]
+        self.model = model
+        self.agents = agents
         self.chat = chat
         self.messages: List[Dict] = []
-        self.max_tokens = 4000
+        self.max_tokens = max_tokens
         self.max_function_calls = max_function_calls
 
     def name(self) -> str:
@@ -632,7 +532,7 @@ class OpenAIExecutor(Executor):
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
         model: str = 'gpt-3.5-turbo-16k',
-        max_tokens: int = 4000,
+        max_tokens: int = 4096,
         temperature: float = 1.0,
         chat_format: bool = True,
     ) -> Dict:
@@ -711,6 +611,50 @@ class OpenAIExecutor(Executor):
                 message=Content(Text(chat_response['content'])),
                 error=False,
                 messages_context=[Message.from_dict(m) for m in messages],
+                llm_call_context=call,
+            )
+
+    def execute_with_tools_2(
+        self,
+        call: NaturalLanguage,
+    ) -> Assistant:
+        logging.debug('execute_query_with_tools')
+
+        user_message = call.messages[-1]['content']
+        messages = []
+        message_results = []
+
+        prompt = Helpers.get_prompt('prompts/tool_execution_prompt.prompt')
+
+        function_system_message = prompt['system_message']
+        tool_prompt_message = prompt['user_message']
+        functions = [Helpers.get_function_description_flat(f) for f in agents]
+
+        tool_prompt_message.replace('{{functions}}', '\n'.join(functions))
+        tool_prompt_message.replace('{{user_input}}', user_message)
+
+        messages.append({'role': 'user', 'content': tool_prompt_message})
+
+        chat_response = self.execute_direct(
+            model=self.model,
+            temperature=1.0,
+            max_tokens=self.max_tokens,
+            messages=messages,
+            chat_format=True,
+        )
+
+        chat_response = chat_response['choices'][0]['message']  # type: ignore
+        message_results.append(chat_response)
+
+        if len(chat_response) == 0:
+            return Assistant(Content(Text('The model could not execute the query.')), error=True)
+        else:
+            logging.debug('OpenAI Assistant Response: {}'.format(chat_response['content']))
+            return Assistant(
+                message=Content(Text(chat_response['content'])),
+                error=False,
+                messages_context=[Message.from_dict(m) for m in messages],
+                system_context=function_system_message,
                 llm_call_context=call,
             )
 
@@ -923,28 +867,20 @@ class OpenAIExecutor(Executor):
         return self.execute_query(query, data)
 
 
-class ParserController():
+class Parser():
     def __init__(
         self,
-        execution_contexts: List[Executor],
-        chat_mode: bool = False,
-        current_chat_context: List[str] = [],
-        agents: List[Callable] = [
-            WebHelpers.get_url,
-            WebHelpers.get_news,
-            WebHelpers.get_url_firefox,
-            WebHelpers.search_news,
-            WebHelpers.search_internet,
-            WebHelpers.search_linkedin_profile,
-            WebHelpers.get_linkedin_profile,
-            EdgarHelpers.get_latest_form_text,
-            PdfHelpers.parse_pdf
-        ]
+        message_type = User,
     ):
-        self.execution_contexts = execution_contexts
-        self.chat_context: List[str] = current_chat_context
-        self.chat_mode = chat_mode
-        self.agents = agents
+        self.message: str = ''
+        self.remainder: str = ''
+        self.index = 0
+        self.agents: List[Callable] = []
+        self.message_type: type = message_type
+
+    def consume(self, token: str):
+        if token in self.remainder:
+            self.remainder = self.remainder[:self.remainder.index(token) + len(token)]
 
     def to_function_call(self, call_str: str) -> Optional[FunctionCall]:
         function_description = Helpers.parse_function_call(call_str, self.agents)
@@ -962,6 +898,298 @@ class ParserController():
                 types=types
             )
         return None
+
+    def parse_function_call(
+        self,
+    ) -> Optional[FunctionCall]:
+        text = self.remainder
+
+        sequence: List[AstNode] = []
+        if (
+                ('[[' not in text and ']]' not in text)
+                and ('```python' not in text)
+                and ('[' not in text and ']]' not in text)
+        ):
+            return None
+
+        while (
+            ('[[' in text and ')]]' in text)
+            and ('[' in text and ')]' in text)
+            or ('```python' in text and '```\n' in text)
+        ):
+            start_token = ''
+            end_token = ''
+
+            match text:
+                case _ if '```python' in text:
+                    start_token = '```python'
+                    end_token = '```\n'
+                case _ if '[[' and ']]' in text:
+                    start_token = '[['
+                    end_token = ']]'
+                case _ if '[' and ')]' in text:
+                    start_token = '['
+                    end_token = ']'
+
+            function_call_str = Helpers.in_between(text, start_token, end_token)
+            function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
+            function_context = text  # Helpers.extract_context(text, start_token, end_token, stop_tokens=['\n'])
+
+            split_text = Helpers.split_between(text, start_token, end_token)
+            sequence.append(Text(split_text[0]))
+            if function_call:
+                function_call.context = Content(Text(function_context))
+                sequence.append(function_call)
+            else:
+                sequence.append(
+                    Text(function_call_str)
+                )
+            text = split_text[1]
+            self.remainder = text
+
+    def parse_ast_node(
+        self,
+    ) -> AstNode:
+        re = self.remainder
+
+        while re.strip() != '':
+            if re.startswith('"') and re.endswith('"'):
+                self.remainder = self.remainder[:1]
+                self.consume('"')
+                return Text(re.strip('"'))
+            else:
+                result = Text(self.remainder)
+                self.remainder = ''
+                return result
+        return Text('')
+
+    def parse_statement(
+        self,
+        stack: List[Statement],
+    ) -> Statement:
+        def parse_continuation():
+            lhs = stack.pop()
+            continuation = Continuation(lhs=lhs, rhs=Statement())
+
+            stack.append(continuation)
+
+            continuation.rhs = self.parse_statement(stack)
+            return continuation
+
+        re = self.remainder
+
+        while re.strip() != '':
+            if re.startswith('answer(') and ')' in re:
+                answer = Helpers.in_between(re, 'answer(', ')')
+                self.consume(')')
+                return Answer(conversation=[Text(answer)])
+
+            if re.startswith('function_call(') and ')' in re:
+                function_call = self.parse_function_call()
+                if not function_call:
+                    # push past the function call and keep parsing
+                    self.consume(')')
+                    re = self.remainder
+                else:
+                    return function_call
+
+            if re.startswith('natural_language(') and ')' in re:
+                language = Helpers.in_between(re, 'natural_language(', ')')
+                self.consume(')')
+                return NaturalLanguage(messages=[User(Content(language))])  # type: ignore
+
+            if re.startswith('continuation(') and ')' in re:
+                continuation = parse_continuation()
+                self.consume(')')
+                return continuation
+
+            if re.startswith('[[=>]]'):
+                self.consume('[[=>]]')
+                return parse_continuation()
+
+            if re.startswith('[[FOREACH]]'):
+                self.consume('[[FOREACH]]')
+                fe = ForEach(lhs=stack, rhs=Statement())
+                fe.rhs = self.parse_statement(stack)
+                return fe
+
+            # we have no idea, so return something the LLM can figure out
+            if re.startswith('"'):
+                message = self.message_type(self.parse_ast_node())
+                return NaturalLanguage(messages=[message])
+
+            result = NaturalLanguage(messages=[self.message_type(Text(self.remainder))])
+            self.remainder = ''
+            return result
+        return Statement()
+
+    def parse_program(
+        self,
+        message: str,
+        agents: List[Callable],
+        executor: Executor,
+        execution_flow: ExecutionFlow[AstNode],
+    ) -> Program:
+        self.message = message
+        self.agents = agents
+
+        program = Program(executor, execution_flow)
+        stack: List[Statement] = []
+
+        while self.remainder.strip() != '':
+            program.statements.append(self.parse_statement(stack))
+
+        self.message = ''
+        self.agents = []
+
+        return program
+
+
+class ExecutionController():
+    def __init__(
+        self,
+        execution_contexts: List[Executor],
+        agents: List[Callable] = [],
+        vector_store: Optional[VectorStore] = None,
+    ):
+        self.execution_contexts: List[Executor] = execution_contexts
+        self.agents = agents
+        self.parser = Parser()
+        self.messages: List[Message] = []
+        self.vector_store = vector_store
+
+    def classify_tool_or_direct(
+        self,
+        prompt: str,
+    ) -> Dict[str, float]:
+        def parse_result(result: str) -> Dict[str, float]:
+            if ',' in result:
+                first = result.split(',')[0]
+                second = result.split(',')[1]
+                try:
+                    if first.startswith('tool') or first.startswith('"tool"'):
+                        return {'tool': float(second)}
+                    elif first.startswith('direct') or first.startswith('"direct"'):
+                        return {'direct': float(second)}
+                    else:
+                        return {'tool': 1.0}
+                except ValueError as ex:
+                    return {'tool': 1.0}
+            return {'tool': 1.0}
+
+        executor = self.execution_contexts[0]
+
+        # assess the type of task
+        function_list = [Helpers.get_function_description_flat(f) for f in self.agents]
+        query_understanding = Helpers.load_and_populate_prompt(
+            prompt_filename='prompts/query_understanding.prompt',
+            template={
+                'functions': '\n'.join(function_list),
+                'user_input': prompt,
+            }
+        )
+
+        assistant: Assistant = executor.execute_one_shot(
+            system_message=query_understanding['system_message'],
+            user_message=query_understanding['user_message'],
+        )
+
+        if assistant.error or not parse_result(str(assistant.message)):
+            return {'tool': 1.0}
+        return parse_result(str(assistant.message))
+
+    def execute_statement(
+        self,
+        statement: Statement,
+        executor: Executor,
+        callee: Optional[Statement] = None,
+    ) -> Statement:
+
+        # we have an answer to the query, return it
+        if isinstance(statement, Answer):
+            return statement
+
+        elif isinstance(statement, FunctionCall) and not statement.response():
+            # unpack the args, call the function
+            function_call = statement
+            function_args_desc = statement.args
+            function_args = {}
+
+            # Note: the JSON response from the model may not be valid JSON
+            func: Callable | None = Helpers.first(lambda f: f.__name__ in function_call.name, self.agents)
+
+            if not func:
+                logging.error('Could not find function {}'.format(function_call.name))
+                return UncertainOrError(conversation=[Text('I could find the function {}'.format(function_call.name))])
+
+            # check for enum types and marshal from string to enum
+            counter = 0
+            for p in inspect.signature(func).parameters.values():
+                if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumMeta':
+                    function_args[p.name] = p.annotation(function_args_desc[counter][p.name])
+                else:
+                    function_args[p.name] = function_args_desc[counter][p.name]
+                counter += 1
+
+            try:
+                function_response = func(**function_args)
+            except Exception as e:
+                logging.error(e)
+                return UncertainOrError(conversation=[Text('The function could not execute. It raised an exception: {}'.format(e))])
+
+            function_call.call_response = function_response
+            return function_call
+
+        elif isinstance(statement, NaturalLanguage) and not statement.response() and callee:
+            # callee provides context for the natural language statement
+            messages: List[Message] = []
+            messages.extend(statement.messages)
+
+            response = executor.chat_execute(messages=messages)
+            statement.call_response = str(response.message)
+            return statement
+
+        elif isinstance(statement, NaturalLanguage) and statement.response():
+            #
+
+
+
+    def execute_program(
+        self,
+        program: Program,
+        execution: ExecutionFlow[Statement]
+    ):
+        executor = self.execution_contexts[0]
+        answers: List[Statement] = []
+
+        for s in reversed(program.statements):
+            execution.push(s)
+
+        while statement := execution.pop():
+            answers.append(self.execute_statement(statement))
+
+
+
+    def execute(
+        self,
+        prompt: str,
+    ):
+        # pick the right execution context that will get the task done
+        # for now, we just grab the first
+        executor = self.execution_contexts[0]
+
+        # create an execution flow
+        execution: ExecutionFlow[Statement] = ExecutionFlow(Order.QUEUE)
+
+        # assess the type of task
+        classification = self.classify_tool_or_direct(prompt)
+
+        if 'tool' in classification:
+            program = self.parse(prompt)
+            self.execute_program(program)
+        else:
+            self.execute_simple(prompt)
+
 
     def rewrite(self, node: AstNode) -> AstNode:
         def function_call_rewriter(node: AstNode) -> AstNode:
@@ -996,7 +1224,7 @@ class ParserController():
                             end_token = ']'
 
                     function_call_str = Helpers.in_between(text, start_token, end_token)
-                    function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
+                    function_call: Optional[FunctionCall] = self.parser.to_function_call(function_call_str)
                     function_context = text  # Helpers.extract_context(text, start_token, end_token, stop_tokens=['\n'])
 
                     split_text = Helpers.split_between(text, start_token, end_token)
@@ -1026,11 +1254,8 @@ class ParserController():
     def parse(
         self,
         prompt: str,
-        data: str,
-        max_tokens: int = 4000,
-        prompt_strategy: PromptStrategy = PromptStrategy.SEARCH,
         max_api_calls: int = 5,
-    ) -> ExecutionFlow[ExprNode]:
+    ) -> Program:
         executor = self.execution_contexts[0]
 
         execution: ExecutionFlow[ExprNode] = ExecutionFlow(Order.QUEUE)
@@ -1254,7 +1479,8 @@ class Repl():
         parser = ParserController(
             execution_contexts=executor_contexts,
             chat_mode=False,
-            current_chat_context=[]
+            current_chat_context=[],
+            agents = agents,
         )
 
         commands = {
@@ -1343,6 +1569,22 @@ class Repl():
                 console.print_exception(max_frames=10)
 
 
+agents = [
+    WebHelpers.get_url,
+    WebHelpers.get_news,
+    WebHelpers.get_url_firefox,
+    WebHelpers.search_news,
+    WebHelpers.search_internet,
+    WebHelpers.search_linkedin_profile,
+    WebHelpers.get_linkedin_profile,
+    EdgarHelpers.get_latest_form_text,
+    PdfHelpers.parse_pdf,
+    MarketHelpers.get_stock_price,
+    MarketHelpers.get_market_capitalization,
+    EmailHelpers.send_email,
+    EmailHelpers.send_calendar_invite,
+]
+
 def start(
     context: Optional[str],
     prompt: Optional[str],
@@ -1357,7 +1599,7 @@ def start(
         return openai_executor
 
     def openai_executor():
-        openai_executor = OpenAIExecutor(openai_key, verbose=verbose)
+        openai_executor = OpenAIExecutor(openai_key, verbose=verbose, agents=agents)
         return openai_executor
 
     executors = {

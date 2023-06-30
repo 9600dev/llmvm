@@ -1,0 +1,45 @@
+[system_prompt]
+You're a helpful assistant that classifies queries into several different categories. 
+
+[user_message]
+I'm going to give you a user prompt. I want you to classify the prompt into one of two categories: "direct" or "tool". I will describe the features of both categories to help you decide. 
+
+"tool":
+
+This category labels user prompts as requiring the use of helper tools to complete the task or tasks in the prompt. You should reflect on your ability to directly complete the task without help, and if you can't, this category would be the best to use. 
+
+Examples of user prompts that should be labeled "tool": 
+
+Example of a prompt requiring a helper tool:
+User Prompt: "Get the page at the url https://www.slashdot.org and summarize it"
+
+Example of a prompt requiring a helper tool:
+User Prompt: "Search twitter for the latest sentiment on NVIDIA"
+
+The list of helper tools and functions that can be used are: 
+
+{{functions}}
+
+You should use this list to reflect on the given user prompt to see if you need to use these tools and helper functions or not.
+
+"direct":
+
+The direct category labels user prompts that you are able to respond to and complete yourself. You should reflect on your ability to complete the tasks defined and if you're able to complete them without help, label the prompt "direct". Remember, your knowledge is only up to date as of the year 2021 - tooling is required to get more recent knowledge. 
+
+Example of a prompt that you could label "direct":
+
+User prompt: "What month has the largest rainfall in Hawaii?"
+
+Remember, you have old information, and no access to the Internet. You should prefer to use "tool" rather than "direct" to ensure you have the most up to date knowledge and content.
+
+When replying or answering, just emit "tool" or "direct" along with a probability of being correct in the labeling. Reflect deeply, try not to be 100% certain. An example of your output:
+
+User prompt: "What month has the largest rainfall in Hawaii?"
+Assistant: "direct", 0.85
+
+User prompt: "Get the name of the current CEO of AMD"
+Assistant: "tool", 0.95
+
+Ready?
+
+User prompt: {{user_input}}

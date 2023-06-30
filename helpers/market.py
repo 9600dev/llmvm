@@ -3,9 +3,9 @@ import yfinance as yf
 
 class MarketHelpers():
     @staticmethod
-    def get_latest_stock_price(symbol: str):
+    def get_stock_price(symbol: str) -> float:
         """
-        Get the latest price of the symbol
+        Get the current or latest price of the specified stock symbol
 
         :param symbol: The symbol of the stock
         """
@@ -14,10 +14,11 @@ class MarketHelpers():
         return ticker.history().tail(1)['Close'].iloc[0]
 
     @staticmethod
-    def get_last_week_average_price(symbol: str):
+    def get_market_capitalization(symbol: str) -> str:
         """
-        Get the average price of the symbol for the last week
+        Get the current market capitalization of the specified stock symbol
+
         :param symbol: The symbol of the stock
         """
         ticker = yf.Ticker(symbol)
-        return ticker.history(period='1wk')['Close'].mean()
+        return str(ticker.info.get('marketCap'))
