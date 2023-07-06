@@ -1,4 +1,4 @@
-[system_prompt]
+[system_message]
 You're a helpful assistant that classifies queries into several different categories. 
 
 [user_message]

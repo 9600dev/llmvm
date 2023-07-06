@@ -71,22 +71,18 @@ class Visitor(ABC):
 
 class Executor(ABC):
     @abstractmethod
-    def execute(self, query: Union[str, List[Dict]], data: str) -> 'Assistant':
-        pass
-
-    @abstractmethod
-    def chat_execute(self, messages: List['Message']) -> 'Assistant':
-        pass
-
-    def execute_one_shot(
+    def execute(
         self,
-        system_message: str,
-        user_message: str,
+        system_message: 'System',
+        user_messages: List['User'],
     ) -> 'Assistant':
         pass
 
     @abstractmethod
-    def can_execute(self, query: Union[str, List[Dict]], data: str) -> bool:
+    def execute_with_tools(
+        self,
+        call: 'NaturalLanguage',
+    ) -> 'Assistant':
         pass
 
     @abstractmethod
@@ -94,11 +90,7 @@ class Executor(ABC):
         pass
 
     @abstractmethod
-    def chat_context(self, chat: bool):
-        pass
-
-    @abstractmethod
-    def max_tokens(self):
+    def max_tokens(self) -> int:
         pass
 
 
@@ -150,7 +142,7 @@ class Content(AstNode):
         sequence: AstNode | List[AstNode],
     ):
         if type(sequence) is Content:
-            self.sequence = sequence.sequence
+            self.sequence = sequence.sequence  # type: ignore
         if type(sequence) is AstNode:
             self.sequence = [sequence]
         else:
@@ -217,7 +209,11 @@ class User(Message):
 class System(Message):
     def __init__(
         self,
-        message: Text = Text('Don\'t make assumptions about what values to plug into functions. Ask for clarification if a user request is ambiguous.')  # type: ignore
+        message: Text = Text('''
+            You are a helpful assistant.
+            Dont make assumptions about what values to plug into functions.
+            Ask for clarification if a user request is ambiguous.
+        ''')
     ):
         super().__init__(Content(message))
 
@@ -280,7 +276,6 @@ class NaturalLanguage(Call):
         self.messages: List[Message] = messages
         self.system = system
         self.executor = executor
-
 
 
 class Continuation(Statement):
@@ -358,7 +353,7 @@ class Program(AstNode):
     def __init__(
         self,
         executor: Executor,
-        flow: 'ExecutionFlow'['AstNode'],
+        flow: 'ExecutionFlow',
     ):
         self.statements: List[Statement] = []
         self.flow = flow
@@ -505,9 +500,7 @@ class OpenAIExecutor(Executor):
     def __init__(
         self,
         openai_key: str,
-        chat: bool = False,
         max_function_calls: int = 5,
-        max_tokens: int = 4096,
         model: str = 'gpt-3.5-turbo-16k',
         agents: List = [],
         verbose: bool = True,
@@ -516,29 +509,34 @@ class OpenAIExecutor(Executor):
         self.verbose = verbose
         self.model = model
         self.agents = agents
-        self.chat = chat
-        self.messages: List[Dict] = []
-        self.max_tokens = max_tokens
+       #  self.messages: List[Dict] = []
         self.max_function_calls = max_function_calls
+
+    def max_tokens(self) -> int:
+        match self.model:
+            case 'gpt-3.5-turbo-16k':
+                return 16385
+            case _:
+                return 4096
 
     def name(self) -> str:
         return 'openai'
-
-    def chat_context(self, chat: bool):
-        self.chat = chat
 
     def execute_direct(
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
         model: str = 'gpt-3.5-turbo-16k',
-        max_tokens: int = 4096,
+        max_completion_tokens: int = 256,
         temperature: float = 1.0,
         chat_format: bool = True,
     ) -> Dict:
         total_tokens = Helpers.calculate_tokens(messages)
-        if total_tokens > max_tokens:
-            raise Exception('Prompt too long, max_tokens: {}, calculated tokens: {}'.format(max_tokens, total_tokens))
+        if total_tokens + max_completion_tokens > self.max_tokens():
+            raise Exception(
+                'Prompt too long, calculated user tokens: {}, completion tokens: {}'
+                .format(total_tokens, max_completion_tokens)
+            )
 
         if not chat_format and len(functions) > 0:
             raise Exception('Functions are not supported in non-chat format')
@@ -548,7 +546,7 @@ class OpenAIExecutor(Executor):
                 response = openai.ChatCompletion.create(
                     model=model,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_tokens=max_completion_tokens,
                     functions=functions,
                     messages=messages,
                 )
@@ -557,7 +555,7 @@ class OpenAIExecutor(Executor):
                 response = openai.ChatCompletion.create(
                     model=model,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_tokens=max_completion_tokens,
                     messages=messages,
                 )
             return response  # type: ignore
@@ -565,14 +563,14 @@ class OpenAIExecutor(Executor):
             response = openai.Completion.create(
                 model=model,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=max_completion_tokens,
                 messages=messages,
             )
             return response  # type: ignore
 
     def execute_tool_response(
         self,
-        call: LLMCall,
+        call: NaturalLanguage,
         response: str,
         tool_str: str,
     ) -> Assistant:
@@ -595,7 +593,7 @@ class OpenAIExecutor(Executor):
         chat_response = self.execute_direct(
             model=self.model,
             temperature=1.0,
-            max_tokens=self.max_tokens,
+            max_completion_tokens=1024,
             messages=messages,
             chat_format=True,
         )
@@ -614,31 +612,35 @@ class OpenAIExecutor(Executor):
                 llm_call_context=call,
             )
 
-    def execute_with_tools_2(
+    def execute_with_tools(
         self,
         call: NaturalLanguage,
     ) -> Assistant:
-        logging.debug('execute_query_with_tools')
+        logging.debug('execute_with_tools')
 
-        user_message = call.messages[-1]['content']
+        user_message: User = cast(User, call.messages[-1])
         messages = []
         message_results = []
 
-        prompt = Helpers.get_prompt('prompts/tool_execution_prompt.prompt')
-
-        function_system_message = prompt['system_message']
-        tool_prompt_message = prompt['user_message']
         functions = [Helpers.get_function_description_flat(f) for f in agents]
 
-        tool_prompt_message.replace('{{functions}}', '\n'.join(functions))
-        tool_prompt_message.replace('{{user_input}}', user_message)
+        prompt = Helpers.load_and_populate_prompt(
+            prompt_filename='prompts/tool_execution_prompt.prompt',
+            template={
+                'functions': '\n'.join(functions),
+                'user_input': str(user_message),
+            }
+        )
 
-        messages.append({'role': 'user', 'content': tool_prompt_message})
+        # todo, we probably need to figure out if we should pass in the
+        # entire message history or not.
+        messages.append({'role': 'system', 'content': prompt['system_message']})
+        messages.append({'role': 'user', 'content': prompt['user_message']})
 
         chat_response = self.execute_direct(
             model=self.model,
             temperature=1.0,
-            max_tokens=self.max_tokens,
+            max_completion_tokens=2048,  # todo: calculate this properly
             messages=messages,
             chat_format=True,
         )
@@ -654,15 +656,15 @@ class OpenAIExecutor(Executor):
                 message=Content(Text(chat_response['content'])),
                 error=False,
                 messages_context=[Message.from_dict(m) for m in messages],
-                system_context=function_system_message,
+                system_context=prompt['system_message'],
                 llm_call_context=call,
             )
 
-    def execute_with_tools(
+    def execute_with_tools_simple(
         self,
-        call: LLMCall,
+        call: NaturalLanguage,
     ) -> Assistant:
-        logging.debug('execute_query_with_tools')
+        logging.debug('execute_with_tools_simple')
 
         user_message = call.messages[-1]['content']
 
@@ -670,7 +672,7 @@ class OpenAIExecutor(Executor):
         message_results = []
 
         # functions = [Helpers.get_function_description(f, False, True) for f in self.agents]
-        functions = [Helpers.get_function_description(f, True, False) for f in self.agents]
+        functions = [Helpers.get_function_description(f, True) for f in self.agents]
         function_dict = {}
         function_dict.update({'functions': functions})
 
@@ -738,7 +740,7 @@ class OpenAIExecutor(Executor):
         chat_response = self.execute_direct(
             model=self.model,
             temperature=1.0,
-            max_tokens=self.max_tokens,
+            max_completion_tokens=2048,  # todo: calculate this properly
             messages=messages,
             chat_format=True,
         )
@@ -758,119 +760,48 @@ class OpenAIExecutor(Executor):
                 llm_call_context=call,
             )
 
-    def __chat_completion_request(
+    def execute(
         self,
-        messages: List[Dict],
-        functions: List[Dict] = [],
-    ) -> List[Dict[str, str]]:
-        message_results: List[Dict[str, str]] = []
+        system_message: System,
+        user_messages: List[User],
+    ) -> Assistant:
+        logging.debug('OpenAIExecutor.execute system_message={} user_messages={}'
+                      .format(system_message, user_messages))
 
-        response = self.execute_direct(
-            model=self.model,
-            messages=messages,
-            functions=functions,
-        )
+        messages: List[Dict[str, str]] = []
 
-        message = response['choices'][0]['message']  # type: ignore
-        message_results.append(message)
-        counter = 1
+        messages.append(Message.to_dict(system_message))
+        for message in user_messages:
+            messages.append(Message.to_dict(message))
 
-        # loop until function calls are all resolved
-        while message.get('function_call') and counter < self.max_function_calls:
-            function_name = message['function_call']['name']
-            function_args = json.loads(message['function_call']['arguments'])
-            logging.debug('__chat_completion_request function_name={} function_args={}'.format(function_name, function_args))
-
-            # Step 3, call the function
-            # Note: the JSON response from the model may not be valid JSON
-            func: Callable | None = Helpers.first(lambda f: f.__name__ == function_name, self.agents)
-
-            if not func:
-                return []
-
-            # check for enum types and marshal from string to enum
-            for p in inspect.signature(func).parameters.values():
-                if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumMeta':
-                    function_args[p.name] = p.annotation(function_args[p.name])
-
-            try:
-                function_response = func(**function_args)
-            except Exception as e:
-                function_response = 'The function could not execute. It raised an exception: {}'.format(e)
-
-            # Step 4, send model the info on the function call and function response
-            message_results.append({
-                "role": "function",
-                "name": function_name,
-                "content": function_response,
-            })
-
-            second_response = self.execute_direct(
-                model=self.model,
-                messages=messages + message_results,
-            )
-
-            message = second_response['choices'][0]['message']  # type: ignore
-            message_results.append(message)
-            counter += 1
-
-        return message_results
-
-    def execute_query(
-        self,
-        query: Union[str, List[Dict]],
-        data: str,
-    ) -> ExprNode:
-        logging.debug('execute_query query={}'.format(query))
-
-        functions = [Helpers.get_function_description(f, True) for f in self.agents]
-
-        function_system_message = '''
-            Dont make assumptions about what values to plug into functions. Ask for clarification if a user request is ambiguous.
-            If a function returns a value that does not address the users request, you should call a different function.
-        '''
-
-        self.messages.append({'role': 'system', 'content': function_system_message})
-        self.messages.append({'role': 'user', 'content': query})
-        if data:
-            self.messages.append({'role': 'user', 'content': data})
-
-        chat_response = self.__chat_completion_request(
-            self.messages,
-            functions,
+        chat_response = self.execute_direct(
+            messages,
+            max_completion_tokens=2048,  # tood: calculate this properly
+            chat_format=True,
         )
 
         if len(chat_response) == 0:
-            return Result(error='The model could not execute the query.')
+            return Assistant(
+                message=Content(Text('The model could not execute the query.')),
+                error=True,
+                messages_context=[Message.from_dict(m) for m in messages],
+                system_context=system_message,
+            )
 
-        for message in chat_response:
-            self.messages.append(message)
+        messages.append(chat_response['choices'][0]['message'])
 
-        if not self.chat:
-            self.messages = []
+        conversation: List[Message] = [Message.from_dict(m) for m in messages]
 
-        conversation: List[AstNode] = []
-        for message in self.messages:
-            if message['role'] == 'user':
-                conversation.append(User(message['content']))
-            elif message['role'] == 'system':
-                conversation.append(System(message['content']))
-            elif message['role'] == 'assistant':
-                conversation.append(Assistant(message['content']))
-
-        return Result(result={'answer': chat_response[-1]['content']}, conversation=conversation)
-
-    def can_execute(self, query: Union[str, List[Dict]]) -> bool:
-        return True
-
-    def execute(self, query: Union[str, List[Dict]], data: str) -> ExprNode:
-        return self.execute_query(query, data)
+        return Assistant(
+            message=conversation[-1].message,
+            messages_context=conversation
+        )
 
 
 class Parser():
     def __init__(
         self,
-        message_type = User,
+        message_type=User,
     ):
         self.message: str = ''
         self.remainder: str = ''
@@ -880,7 +811,8 @@ class Parser():
 
     def consume(self, token: str):
         if token in self.remainder:
-            self.remainder = self.remainder[:self.remainder.index(token) + len(token)]
+            self.remainder = self.remainder[self.remainder.index(token) + len(token):]
+            self.remainder = self.remainder.strip()
 
     def to_function_call(self, call_str: str) -> Optional[FunctionCall]:
         function_description = Helpers.parse_function_call(call_str, self.agents)
@@ -905,6 +837,7 @@ class Parser():
         text = self.remainder
 
         sequence: List[AstNode] = []
+
         if (
                 ('[[' not in text and ']]' not in text)
                 and ('```python' not in text)
@@ -933,19 +866,14 @@ class Parser():
 
             function_call_str = Helpers.in_between(text, start_token, end_token)
             function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
-            function_context = text  # Helpers.extract_context(text, start_token, end_token, stop_tokens=['\n'])
-
-            split_text = Helpers.split_between(text, start_token, end_token)
-            sequence.append(Text(split_text[0]))
             if function_call:
-                function_call.context = Content(Text(function_context))
-                sequence.append(function_call)
-            else:
-                sequence.append(
-                    Text(function_call_str)
-                )
-            text = split_text[1]
-            self.remainder = text
+                function_call.context = Content(Text(text))
+
+            # remainder is the stuff after the end_token
+            self.remainder = text[text.index(end_token) + len(end_token):]
+            return function_call
+
+        return None
 
     def parse_ast_node(
         self,
@@ -976,9 +904,13 @@ class Parser():
             continuation.rhs = self.parse_statement(stack)
             return continuation
 
-        re = self.remainder
+        re = self.remainder.strip()
 
-        while re.strip() != '':
+        while re != '':
+            if re.startswith('Output:'):
+                self.consume('Output:')
+                return self.parse_statement(stack)
+
             if re.startswith('answer(') and ')' in re:
                 answer = Helpers.in_between(re, 'answer(', ')')
                 self.consume(')')
@@ -1028,10 +960,11 @@ class Parser():
         message: str,
         agents: List[Callable],
         executor: Executor,
-        execution_flow: ExecutionFlow[AstNode],
+        execution_flow: ExecutionFlow[Statement],
     ) -> Program:
         self.message = message
         self.agents = agents
+        self.remainder = message
 
         program = Program(executor, execution_flow)
         stack: List[Statement] = []
@@ -1089,9 +1022,9 @@ class ExecutionController():
             }
         )
 
-        assistant: Assistant = executor.execute_one_shot(
-            system_message=query_understanding['system_message'],
-            user_message=query_understanding['user_message'],
+        assistant: Assistant = executor.execute(
+            system_message=System(Text(query_understanding['system_message'])),
+            user_messages=[User(Content(Text(query_understanding['user_message'])))],
         )
 
         if assistant.error or not parse_result(str(assistant.message)):
@@ -1140,7 +1073,11 @@ class ExecutionController():
             function_call.call_response = function_response
             return function_call
 
-        elif isinstance(statement, NaturalLanguage) and not statement.response() and callee:
+        elif (
+            isinstance(statement, NaturalLanguage)
+            and not statement.response()
+            and callee
+        ):
             # callee provides context for the natural language statement
             messages: List[Message] = []
             messages.extend(statement.messages)
@@ -1150,15 +1087,21 @@ class ExecutionController():
             return statement
 
         elif isinstance(statement, NaturalLanguage) and statement.response():
-            #
+            return statement
 
+        elif isinstance(statement, ForEach):
+            return UncertainOrError()
 
+        elif isinstance(statement, Continuation):
+            return UncertainOrError()
+
+        return UncertainOrError()
 
     def execute_program(
         self,
         program: Program,
         execution: ExecutionFlow[Statement]
-    ):
+    ) -> List[Statement]:
         executor = self.execution_contexts[0]
         answers: List[Statement] = []
 
@@ -1166,14 +1109,26 @@ class ExecutionController():
             execution.push(s)
 
         while statement := execution.pop():
-            answers.append(self.execute_statement(statement))
+            answers.append(self.execute_statement(statement, program.executor))
 
+        return answers
 
+    def execute_simple(
+        self,
+        system_message: str,
+        user_message: str,
+    ) -> Assistant:
+        executor = self.execution_contexts[0]
+        return executor.execute(
+            system_message=System(Text(system_message)),
+            user_messages=[User(Content(Text(user_message)))])
 
     def execute(
         self,
         prompt: str,
-    ):
+    ) -> List[Statement]:
+        results: List[Statement] = []
+
         # pick the right execution context that will get the task done
         # for now, we just grab the first
         executor = self.execution_contexts[0]
@@ -1184,257 +1139,31 @@ class ExecutionController():
         # assess the type of task
         classification = self.classify_tool_or_direct(prompt)
 
+        # if it requires tooling, hand it off to the AST execution engine
         if 'tool' in classification:
-            program = self.parse(prompt)
-            self.execute_program(program)
-        else:
-            self.execute_simple(prompt)
-
-
-    def rewrite(self, node: AstNode) -> AstNode:
-        def function_call_rewriter(node: AstNode) -> AstNode:
-            if isinstance(node, Text):
-                text = node.text
-                sequence: List[AstNode] = []
-
-                if (
-                        ('[[' not in text and ']]' not in text)
-                        and ('```python' not in text)
-                        and ('[' not in text and ']]' not in text)
-                ):
-                    return node
-
-                while (
-                    ('[[' in text and ']]' in text)
-                    and ('[' in text and ')]' in text)
-                    or ('```python' in text and '```\n' in text)
-                ):
-                    start_token = ''
-                    end_token = ''
-
-                    match text:
-                        case _ if '```python' in text:
-                            start_token = '```python'
-                            end_token = '```\n'
-                        case _ if '[[' and ']]' in text:
-                            start_token = '[['
-                            end_token = ']]'
-                        case _ if '[' and ')]' in text:
-                            start_token = '['
-                            end_token = ']'
-
-                    function_call_str = Helpers.in_between(text, start_token, end_token)
-                    function_call: Optional[FunctionCall] = self.parser.to_function_call(function_call_str)
-                    function_context = text  # Helpers.extract_context(text, start_token, end_token, stop_tokens=['\n'])
-
-                    split_text = Helpers.split_between(text, start_token, end_token)
-                    sequence.append(Text(split_text[0]))
-                    if function_call:
-                        function_call.context = Content(Text(function_context))
-                        sequence.append(function_call)
-                    else:
-                        sequence.append(
-                            Text(function_call_str)
-                        )
-                    text = split_text[1]
-
-                # add the left over text
-                sequence.append(Text(text))
-                return Content(sequence)
-            else:
-                return node
-
-        rewriter = ReplacementVisitor(
-            node_lambda=lambda node: isinstance(node, Text),
-            replacement_lambda=function_call_rewriter
-        )
-
-        return tree_traverse(node, rewriter)
-
-    def parse(
-        self,
-        prompt: str,
-        max_api_calls: int = 5,
-    ) -> Program:
-        executor = self.execution_contexts[0]
-
-        execution: ExecutionFlow[ExprNode] = ExecutionFlow(Order.QUEUE)
-
-        if Helpers.calculate_tokens(prompt) > max_tokens and prompt_strategy == PromptStrategy.THROW:
-            raise Exception('Prompt and data too long: {}, {}'.format(prompt, data))
-
-        elif Helpers.calculate_tokens(prompt) > max_tokens and prompt_strategy == PromptStrategy.SEARCH:
-            sections = Helpers.chunk_and_rank(prompt, data, max_chunk_length=max_tokens)
-            calls: List[Call] = []
-            for section in sections:
-                calls.append(
-                    LLMCall(
-                        messages=[User(Content(Text(prompt)))],
-                        data=Data(data),
-                        system=System(),
-                        executor=executor,
-                    )
-                )
-            execution.push(ChainedCall(calls))
-
-        elif Helpers.calculate_tokens(prompt) > max_tokens and prompt_strategy == PromptStrategy.SUMMARIZE:
-            data_chunks = Helpers.split_text_into_chunks(data)
-            if max_api_calls == 0:
-                max_api_calls = len(data_chunks)
-
-            calls = []
-            for chunk in data_chunks[0:max_api_calls]:
-                calls.append(
-                    LLMCall(
-                        messages=[User(Content(Text(prompt)))],
-                        data=Data(chunk),
-                        system=System(),
-                        executor=executor,
-                    )
-                )
-            execution.push(ChainedCall(calls))
-
-        else:
-            execution.push(
-                LLMCall(
-                    messages=[User(Content(Text(prompt)))],
-                    data=Data(data),
-                    system=System(),
-                    executor=executor,
-                )
+            # call the LLM, asking it to hand back an AST
+            llm_call = NaturalLanguage(
+                messages=[User(Content(Text(prompt)))],
+                executor=executor
             )
 
-        return execution
+            response = executor.execute_with_tools(llm_call)
+            assistant_response = str(response.message)
 
-    def parse_tree_execute(self, execution: ExecutionFlow[AstNode]) -> List[AstNode]:
-        def __increment_counter():
-            nonlocal counter
-            nonlocal node
-            counter += 1
-            if counter >= execution.count():
-                node = None
-            else:
-                node = execution[counter]
+            program = Parser().parse_program(assistant_response, self.agents, executor, execution)
+            answers: List[Statement] = self.execute_program(program, execution)
+            results.extend(answers)
+        # else, just execute it.
+        else:
+            assistant_reply: Assistant = self.execute_simple(
+                system_message='You are a helpful assistant.',
+                user_message=prompt
+            )
+            results.append(Answer(
+                conversation=[Text(str(assistant_reply.message))],
+                result=assistant_reply
+            ))
 
-        if execution.count() <= 0:
-            raise ValueError('No nodes to execute')
-
-        results: List[AstNode] = []
-
-        counter = 0
-        node: Optional[AstNode] = execution.peek()
-        execution_backup = node.executor
-
-        while node is not None:
-            if isinstance(node, LLMCall):
-                assistant_result: Assistant = node.executor.execute_with_tools(node)  # str(node.user.prompt), node.data.data.text)
-                rewritten_result: Assistant = cast(Assistant, self.rewrite(assistant_result))
-
-                if any(tree_map(rewritten_result, lambda n: isinstance(n, Call))):
-                    # we still have work to do
-                    execution.push(rewritten_result)
-                else:
-                    results.append(Result(conversation=[assistant_result.message]))
-                    __increment_counter()
-
-            elif isinstance(node, ChainedCall):
-                for call in node.calls:
-                    if type(call) is LLMCall:
-                        execute_node = call.executor.execute([Message.to_dict(m) for m in call.messages], call.data.text)
-                        if type(execute_node) is Result:
-                            results.append(execute_node)
-                            __increment_counter()
-                        elif type(execute_node) is ExprNode:
-                            execution.push(execute_node)
-
-            elif isinstance(node, FunctionCall):
-                # unpack the args, call the function
-                function_call = node
-                function_args_desc = node.args
-                function_args = {}
-
-                # Note: the JSON response from the model may not be valid JSON
-                func: Callable | None = Helpers.first(lambda f: f.__name__ in function_call.name, self.agents)
-
-                if not func:
-                    raise ValueError('Could not find function {}'.format(function_call.name))
-
-                # check for enum types and marshal from string to enum
-                counter = 0
-                for p in inspect.signature(func).parameters.values():
-                    if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumMeta':
-                        function_args[p.name] = p.annotation(function_args_desc[counter][p.name])
-                    else:
-                        function_args[p.name] = function_args_desc[counter][p.name]
-                    counter += 1
-
-                try:
-                    function_response = func(**function_args)
-                except Exception as e:
-                    logging.error(e)
-                    function_response = 'The function could not execute. It raised an exception: {}'.format(e)
-
-                def match_function(node: AstNode, name: str, args: Dict[str, object]) -> bool:
-                    return (
-                        isinstance(node, FunctionCall)
-                        and node.name == function_call.name
-                        and node.args == function_call.args
-                    )
-
-                callee = execution.peek(-1)
-
-                # remove the function call
-                rewriter = ReplacementVisitor(
-                    node_lambda=lambda n: match_function(n, function_call.name, function_args),
-                    replacement_lambda=lambda n: Content(Text(''))
-                )
-
-                tree_traverse(callee, rewriter)
-
-                tool_result = execution_backup.execute_tool_response(
-                    callee._llm_call_context,
-                    function_response,
-                    '{}({})'.format(function_call.name, ','.join(function_args.values()))
-                )
-
-                results.append(tool_result)
-
-                # todo: this is the wrong way to do this, but for now it works
-                # grab the callee
-                # callee = execution.peek(-1)
-
-                # if isinstance(callee, Assistant):
-                #     # assistant probably shouldn't have all the system/user prompt stuff
-                #     # attached to it, as this can be captured by the execution stack
-                #     messages = callee._messages_context
-                #     messages.append(User(Content(Text(function_response))))
-                #     callee_executor = cast(OpenAIExecutor, callee._llm_call_context.executor)
-                #     call = LLMCall(messages=messages, system=callee._system_context, executor=callee_executor)
-                #     response_message = call.executor.execute_direct(messages=messages, functions=[], chat_format=True)
-
-                #     chat_response = response_message['choices'][0]['message']  # type: ignore
-                #     results.append(Result(conversation=[Text(chat_response)]))
-
-                #     # pop the FunctionCall
-                #     execution.pop()
-
-            elif isinstance(node, Assistant) and any(tree_map(node.message, lambda n: isinstance(n, Call))):
-                # there's still work to do
-                execution.push(node)
-
-                for ast_node in tree_map(node.message, lambda n: n):
-                    if isinstance(ast_node, Call):
-                        execution.push(ast_node)
-
-            # we're done
-            elif isinstance(node, Assistant):
-                results.append(Result([node.message]))
-                __increment_counter()
-            elif isinstance(node, Result):
-                results.append(node)
-                __increment_counter()
-
-            node = execution.pop()
         return results
 
 
@@ -1446,23 +1175,9 @@ class Repl():
         self.executors: List[Executor] = executors
         self.agents: List[Agent] = []
 
-    def print_response(self, result: Union[str, Result]):
-        if type(result) is str:
-            rich.print(f'[bold cyan]{result}[/bold cyan] ')
-
-        elif type(result) is Result:
-            rich.print('[bold cyan]Conversation:[/bold cyan] ')
-            for message in result.conversation:
-                rich.print('  ' + str(message))
-            rich.print(f'[bold cyan]Answer:[/bold cyan]')
-            if type(result.result) is str:
-                rich.print(f'{result.result}')
-            elif type(result.result) is dict and 'answer' in result.result:
-                rich.print('{}'.format(cast(dict, result.result)['answer']))
-            else:
-                rich.print('{}'.format(str(result.result)))
-        else:
-            rich.print(str(result))
+    def print_response(self, statements: List[Statement]):
+        for statement in statements:
+            rich.print(str(statement))
 
     def repl(self):
         console = rich.console.Console()
@@ -1476,17 +1191,14 @@ class Repl():
         executor_names = [executor.name() for executor in executor_contexts]
 
         current_context = 'openai'
-        parser = ParserController(
+        execution_controller = ExecutionController(
             execution_contexts=executor_contexts,
-            chat_mode=False,
-            current_chat_context=[],
-            agents = agents,
+            agents=agents,
         )
 
         commands = {
             'exit': 'exit the repl',
             '/context': 'change the current context',
-            '/chat': 'change to chat mode',
             '/agents': 'list the available agents',
             '/any': 'execute the query in all contexts',
         }
@@ -1520,20 +1232,6 @@ class Repl():
                         rich.print('Invalid context: {}'.format(current_context))
                     continue
 
-                if '/chat' in query:
-                    chat = Helpers.in_between(query, '/chat', '\n').strip()
-                    if chat == 'true':
-                        for executor in executor_contexts:
-                            executor.chat_context(True)
-                            parser.chat_mode = True
-                    elif chat == 'false':
-                        for executor in executor_contexts:
-                            executor.chat_context(False)
-                            parser.chat_mode = False
-                    else:
-                        rich.print('Invalid chat value: {}'.format(chat))
-                    continue
-
                 if '/agents' in query:
                     rich.print('Agents:')
                     for agent in self.agents:
@@ -1545,20 +1243,9 @@ class Repl():
                     executor_contexts = self.executors
                     continue
 
-                # for agent in self.agents:
-                #     if agent.is_task(query):
-                #         result = agent.perform_task(query)
+                results = execution_controller.execute(prompt=query)
 
-                # result = self.execute(query=query, executors=executor_contexts)
-                # self.print_response(result)
-
-                data = prompt('data>> ', history=history, enable_history_search=True, vi_mode=True)
-
-                expr_tree = parser.parse(prompt=query, data=data)
-                results = parser.parse_tree_execute(expr_tree)
-
-                for result in results:
-                    self.print_response(str(result))
+                self.print_response(results)
                 rich.print()
 
             except KeyboardInterrupt:
@@ -1594,9 +1281,9 @@ def start(
     openai_key = str(os.environ.get('OPENAI_API_KEY'))
     execution_environments = []
 
-    def langchain_executor():
-        openai_executor = LangChainExecutor(openai_key, verbose=verbose)
-        return openai_executor
+    # def langchain_executor():
+    #    openai_executor = LangChainExecutor(openai_key, verbose=verbose)
+    #    return openai_executor
 
     def openai_executor():
         openai_executor = OpenAIExecutor(openai_key, verbose=verbose, agents=agents)
@@ -1604,7 +1291,7 @@ def start(
 
     executors = {
         'openai': openai_executor(),
-        'langchain': langchain_executor(),
+        # 'langchain': langchain_executor(),
     }
 
     if context:

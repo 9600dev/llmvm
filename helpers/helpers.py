@@ -16,19 +16,19 @@ from torch import Tensor
 
 class Helpers():
     @staticmethod
-    def flatten(l):
-        def __has_list(l):
-            for item in l:
+    def flatten(lst):
+        def __has_list(lst):
+            for item in lst:
                 if isinstance(item, list):
                     return True
             return False
-        def __inner_flatten(l):
-            return [item for sublist in l for item in sublist]
 
-        while __has_list(l):
-            l = __inner_flatten(l)
+        def __inner_flatten(lst):
+            return [item for sublist in lst for item in sublist]
 
-        return l
+        while __has_list(lst):
+            lst = __inner_flatten(lst)
+        return lst
 
     @staticmethod
     def extract_token(s, ident):
@@ -52,7 +52,7 @@ class Helpers():
         return part
 
     @staticmethod
-    def extract_context(s, start, end, stop_tokens = ['\n', '.', '?', '!']):
+    def extract_context(s, start, end, stop_tokens=['\n', '.', '?', '!']):
         def capture(s, stop_tokens, backwards=False):
             if backwards:
                 for i in range(len(s) - 1, -1, -1):
@@ -306,8 +306,10 @@ class Helpers():
                     return cls
             func = func.__func__  # fallback to __qualname__ parsing
         if inspect.isfunction(func):
-            cls = getattr(inspect.getmodule(func),
-                        func.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0])
+            cls = getattr(
+                inspect.getmodule(func),
+                func.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0]
+            )
             if isinstance(cls, type):
                 return cls
         return getattr(func, '__objclass__', None)  # handle special descriptor objects
@@ -393,7 +395,7 @@ class Helpers():
 
     @staticmethod
     def get_function_description_flat(function: Callable) -> str:
-        description = Helpers.get_function_description(f, openai_format=False)
+        description = Helpers.get_function_description(function, openai_format=False)
         return (f'{description["invoked_by"]}({", ".join(description["parameters"])})  # {description["description"]}')
 
     @staticmethod
@@ -405,7 +407,10 @@ class Helpers():
 
         for f in functions:
             if f.__name__.lower() in function_name.lower():
-                function_description = Helpers.get_function_description(f, openai_format=True, flat_format=False)
+                function_description = Helpers.get_function_description(
+                    f,
+                    openai_format=True
+                )
                 continue
 
         if not function_description:
@@ -414,7 +419,8 @@ class Helpers():
         argument_count = 0
 
         for name, parameter in function_description['parameters']['properties'].items():
-            parameter.update({'argument': function_args[argument_count]})
+            if len(function_args) < argument_count:
+                parameter.update({'argument': function_args[argument_count]})
             argument_count += 1
 
         return function_description
@@ -427,11 +433,11 @@ class Helpers():
             if '[system_message]' not in prompt:
                 raise ValueError('Prompt file must contain [system_message]')
 
-            if '[user_prompt'] not in prompt:
+            if '[user_message]' not in prompt:
                 raise ValueError('Prompt file must contain [user_message]')
 
-            system_prompt = Helpers.in_between(prompt, '[system_message]', '[user_message]')
-            user_message = prompt[:prompt.find('[user_message]')+len('[user_message]')].strip()
+            system_message = Helpers.in_between(prompt, '[system_message]', '[user_message]')
+            user_message = prompt[prompt.find('[user_message]') + len('[user_message]'):].strip()
             templates = []
 
             temp_prompt = prompt
@@ -440,7 +446,7 @@ class Helpers():
                 temp_prompt = temp_prompt.split('}}', 1)[-1]
 
             return {
-                'system_message': system_prompt,
+                'system_message': system_message,
                 'user_message': user_message,
                 'templates': templates
             }

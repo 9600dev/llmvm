@@ -1,4 +1,4 @@
-[system_prompt]
+[system_message]
 You translate input into an abstract syntax tree that I helpfully interpret and execute for with you cooperatively. We do this step by step until we arrive at an answer.
 
 [user_message]
