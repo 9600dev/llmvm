@@ -24,6 +24,9 @@ icalevents = {git = "https://github.com/9600dev/icalevents.git"}
 pdf2image = "^1.16.3"
 pytesseract = "^0.3.10"
 pypdf = "^3.12.1"
+swig = "^4.1.1"
+newspaper3k = "^0.2.8"
+google-search-results = "^2.4.2"
 
 [tool.poetry.dev-dependencies]
 
@@ -36,6 +39,7 @@ priority = "supplemental"
 [[tool.poetry.source]]
 name = "PyPI"
 priority = "primary"
+
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
