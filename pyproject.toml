@@ -8,8 +8,34 @@ authors = ["Sonny Bonds <contact@9600dev.com>"]
 python = "^3.10"
 requests = "^2.31.0"
 openai = "^0.27.8"
+click = "^8.1.4"
+rich = "^13.4.2"
+docstring-parser = "^0.15"
+guidance = "^0.0.64"
+langchain = "^0.0.230"
+prompt-toolkit = "^3.0.39"
+selenium = "^4.10.0"
+transformers = "^4.30.2"
+sec-api = "^1.0.16"
+torch = {version = "^2.0.1+cu118", source = "pytorch"}
+sentence-transformers = "^2.2.2"
+yfinance = "^0.2.22"
+icalevents = {git = "https://github.com/9600dev/icalevents.git"}
+pdf2image = "^1.16.3"
+pytesseract = "^0.3.10"
+pypdf = "^3.12.1"
 
 [tool.poetry.dev-dependencies]
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu118"
+priority = "supplemental"
+
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "primary"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
