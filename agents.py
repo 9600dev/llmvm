@@ -86,6 +86,18 @@ class Executor(ABC):
         pass
 
     @abstractmethod
+    def execute_direct(
+        self,
+        messages: List[Dict[str, str]],
+        functions: List[Dict[str, str]] = [],
+        model: str = 'gpt-3.5-turbo-16k',
+        max_completion_tokens: int = 256,
+        temperature: float = 1.0,
+        chat_format: bool = True,
+    ) -> Dict:
+        pass
+
+    @abstractmethod
     def name(self) -> str:
         pass
 
@@ -269,11 +281,11 @@ class Call(Statement):
 class NaturalLanguage(Call):
     def __init__(
         self,
-        messages: List[Message],
+        messages: List[User],
         system: Optional[System] = None,
         executor: Optional[Executor] = None,
     ):
-        self.messages: List[Message] = messages
+        self.messages: List[User] = messages
         self.system = system
         self.executor = executor
 
@@ -467,7 +479,7 @@ def tree_traverse(node, visitor: Visitor):
     elif isinstance(node, Text):
         pass
     elif isinstance(node, NaturalLanguage):
-        node.messages = [cast(Message, tree_traverse(child, visitor)) for child in node.messages]
+        node.messages = [cast(User, tree_traverse(child, visitor)) for child in node.messages]
         if node.system:
             node.system = cast(System, tree_traverse(node.system, visitor))
     elif isinstance(node, FunctionCall):
@@ -509,7 +521,6 @@ class OpenAIExecutor(Executor):
         self.verbose = verbose
         self.model = model
         self.agents = agents
-       #  self.messages: List[Dict] = []
         self.max_function_calls = max_function_calls
 
     def max_tokens(self) -> int:
@@ -568,15 +579,13 @@ class OpenAIExecutor(Executor):
             )
             return response  # type: ignore
 
-    def execute_tool_response(
+    def __execute_tool_response(
         self,
         call: NaturalLanguage,
         response: str,
         tool_str: str,
     ) -> Assistant:
-        logging.debug('execute_tool_response')
-
-        user_message = call.messages[-1]['content']
+        logging.debug('__execute_tool_response')
 
         tool_prompt_message = '''
             You asked me to invoke a helper function {}.
@@ -657,106 +666,6 @@ class OpenAIExecutor(Executor):
                 error=False,
                 messages_context=[Message.from_dict(m) for m in messages],
                 system_context=prompt['system_message'],
-                llm_call_context=call,
-            )
-
-    def execute_with_tools_simple(
-        self,
-        call: NaturalLanguage,
-    ) -> Assistant:
-        logging.debug('execute_with_tools_simple')
-
-        user_message = call.messages[-1]['content']
-
-        messages = []
-        message_results = []
-
-        # functions = [Helpers.get_function_description(f, False, True) for f in self.agents]
-        functions = [Helpers.get_function_description(f, True) for f in self.agents]
-        function_dict = {}
-        function_dict.update({'functions': functions})
-
-        function_system_message = '''
-            You are a helpful assistant with access to helper functions.
-            Don't make assumptions about what values to plug into functions.
-            Ask for clarification if a user request is ambiguous.
-        '''
-
-        tool_prompt_message = '''
-            As a helpful assistant with access to API helper functions,
-            I will give you a json of helper functions under "Functions:",
-            then I will give you a question or task under "Input:".
-            Re-write the Question and inject function calls if required to complete the task.
-            Only use the helper functions specified under "Functions:".
-
-            You can use the [[=>]] token to chain the results of function calls together.
-            You can use the [[FOREACH]] token to ensure that a function call specified on the right
-            hand side of the [[FOREACH]] is repeatedly executed for each list element on the left hand
-            side of the [[FOREACH]] token. The [[END]] token can be used to close the [[FOREACH]] block.
-
-            List of functions:
-        '''
-
-        functions_message = json.dumps(function_dict)
-        # functions_message = '\n'.join(functions)
-
-        example_message = '''
-        Here are examples of calling the APIs:
-
-        Example:
-        Input: Search for and summarize the profile of Jane Doe from Alphabet, John James from Facebook, and Jeff Dean from Google.
-        Output:
-
-        Summarize the profile of Jane Doe from Alphabet. [[Helpers.search_linkedin_profile('Jane', 'Doe', 'Alphabet')]]
-        Summarize the profile of John James from Facebook. [[Helpers.search_linkedin_profile('John', 'James', 'Facebook')]]
-        Summarize the profile of Jeff Dean from Google. [[Helpers.search_linkedin_profile('Jeff', 'Dean', 'Google')]]
-
-        Example:
-        Input: Who is the current CEO of AMD?
-        Output: Who is the current CEO of AMD? [[Helpers.search_internet('current CEO of AMD')]] ?
-
-        Example:
-        Input: What is the latest strategy updates from NVDA?
-        Output: What is the latest strategy updates from NVDA [[EdgarHelpers.get_latest_form_text('NVDA')]] ?
-
-        Example:
-        Input: Build a profile of the leadership team of NVDA. Include education credentials and the last
-        company each executive worked at.
-
-        Output:
-        Generate a list of the leadership team of NVDA: [[Helpers.search_internet('leadership team of NVDA')]] [[=>]]
-        For each executive in the list, summarize their profile:
-        [[FOREACH]] Summarize the profile of [[Helpers.search_linkedin_profile(executive, company)]]
-        [[END]]
-
-        '''
-
-        user_message = f'Now here is your task:\n\nInput: {user_message}'
-
-        prompt_message = f'{tool_prompt_message}\n\n{functions_message}\n\n{example_message}\n\n{user_message}\nOutput: '
-
-        messages.append({'role': 'user', 'content': prompt_message})
-
-        chat_response = self.execute_direct(
-            model=self.model,
-            temperature=1.0,
-            max_completion_tokens=2048,  # todo: calculate this properly
-            messages=messages,
-            chat_format=True,
-        )
-
-        chat_response = chat_response['choices'][0]['message']  # type: ignore
-        message_results.append(chat_response)
-
-        if len(chat_response) == 0:
-            return Assistant(Content(Text('The model could not execute the query.')), error=True)
-        else:
-            logging.debug('OpenAI Assistant Response: {}'.format(chat_response['content']))
-            return Assistant(
-                message=Content(Text(chat_response['content'])),
-                error=False,
-                messages_context=[Message.from_dict(m) for m in messages],
-                system_context=function_system_message,
                 llm_call_context=call,
             )
 
@@ -1068,7 +977,9 @@ class ExecutionController():
                 function_response = func(**function_args)
             except Exception as e:
                 logging.error(e)
-                return UncertainOrError(conversation=[Text('The function could not execute. It raised an exception: {}'.format(e))])
+                return UncertainOrError(
+                    conversation=[Text('The function could not execute. It raised an exception: {}'.format(e))]
+                )
 
             function_call.call_response = function_response
             return function_call
@@ -1079,10 +990,11 @@ class ExecutionController():
             and callee
         ):
             # callee provides context for the natural language statement
-            messages: List[Message] = []
+            messages: List[User] = []
             messages.extend(statement.messages)
 
-            response = executor.chat_execute(messages=messages)
+            system_message = statement.system if statement.system else System(Text('You are a helpful assistant.'))
+            response = executor.execute(system_message=system_message, user_messages=messages)
             statement.call_response = str(response.message)
             return statement
 
@@ -1102,7 +1014,6 @@ class ExecutionController():
         program: Program,
         execution: ExecutionFlow[Statement]
     ) -> List[Statement]:
-        executor = self.execution_contexts[0]
         answers: List[Statement] = []
 
         for s in reversed(program.statements):
@@ -1153,7 +1064,6 @@ class ExecutionController():
             program = Parser().parse_program(assistant_response, self.agents, executor, execution)
             answers: List[Statement] = self.execute_program(program, execution)
             results.extend(answers)
-        # else, just execute it.
         else:
             assistant_reply: Assistant = self.execute_simple(
                 system_message='You are a helpful assistant.',

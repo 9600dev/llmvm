@@ -6,7 +6,6 @@ import faiss
 import openai
 from langchain.docstore.document import Document
 from langchain.document_loaders import TextLoader
-from langchain.document_loaders.text import TextLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import (CharacterTextSplitter,
                                      MarkdownTextSplitter,
@@ -34,7 +33,10 @@ class VectorStore():
             self.store = FAISS.from_texts([''], self.embeddings)
             self.store.save_local(self.store_filename)
 
-        self.store = FAISS.load_local(self.store_filename, self.embeddings) if self.store_filename else FAISS.from_texts([''], self.embeddings)  # type: ignore
+        self.store = FAISS.load_local(
+            self.store_filename,
+            self.embeddings
+        ) if self.store_filename else FAISS.from_texts([''], self.embeddings)  # type: ignore
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
 
@@ -61,6 +63,3 @@ class VectorStore():
     def search(self, query: str, max_results: int = 4) -> List[str]:
         result = self.store.similarity_search(query, k=max_results)
         return [a.page_content for a in result]
-
-
-

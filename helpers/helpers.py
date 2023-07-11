@@ -268,7 +268,13 @@ class Helpers():
     @staticmethod
     def strip_roles(text: str) -> str:
         text = text.replace('{{llm.default_system_prompt}}', '')
-        return text.replace('{{#system~}}', '').replace('{{~/system}}', '').replace('{{#user~}}', '').replace('{{~/user}}', '').replace('{{#assistant~}}', '').replace('{{~/assistant}}', '')
+        result = text.replace('{{#system~}}', '') \
+            .replace('{{~/system}}', '') \
+            .replace('{{#user~}}', '') \
+            .replace('{{~/user}}', '') \
+            .replace('{{#assistant~}}', '') \
+            .replace('{{~/assistant}}', '')
+        return result
 
     @staticmethod
     async def execute_llm_template_async(template: str, llm: LLM, **kwargs) -> Dict[str, str]:
@@ -356,7 +362,7 @@ class Helpers():
 
                 if param.annotation and issubclass(param.annotation, Enum):
                     values = [v.value for v in param.annotation.__members__.values()]
-                    parameter[param.name]['enum'] = values # type: ignore
+                    parameter[param.name]['enum'] = values  # type: ignore
 
                 params.update(parameter)
 
