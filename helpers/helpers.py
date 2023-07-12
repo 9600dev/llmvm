@@ -417,7 +417,7 @@ class Helpers():
                     f,
                     openai_format=True
                 )
-                continue
+                break
 
         if not function_description:
             return None
@@ -425,7 +425,7 @@ class Helpers():
         argument_count = 0
 
         for name, parameter in function_description['parameters']['properties'].items():
-            if len(function_args) < argument_count:
+            if argument_count < len(function_args):
                 parameter.update({'argument': function_args[argument_count]})
             argument_count += 1
 

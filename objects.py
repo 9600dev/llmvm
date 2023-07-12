@@ -27,9 +27,10 @@ class Executor(ABC):
         pass
 
     @abstractmethod
-    def execute_with_tools(
+    def execute_with_agents(
         self,
         call: 'NaturalLanguage',
+        agents: List[Callable],
     ) -> 'Assistant':
         pass
 
@@ -233,6 +234,7 @@ class NaturalLanguage(Call):
         system: Optional[System] = None,
         executor: Optional[Executor] = None,
     ):
+        super().__init__()
         self.messages: List[User] = messages
         self.system = system
         self.executor = executor
@@ -266,6 +268,7 @@ class FunctionCall(Call):
         types: List[Dict[str, object]],
         context: Content = Content(Text('')),
     ):
+        super().__init__()
         self.name = name
         self.args = args
         self.types = types
@@ -285,9 +288,10 @@ class Answer(Statement):
         self.error = error
 
     def __str__(self):
-        result = f'Answer({self.error}, {self.result})\n'
-        result += 'Conversation:\n'
-        result += '\n'.join([str(n) for n in self.conversation])
+        result = f'Answer({self.result})\n'
+        result = f'Error: {self.error}\n'
+        result += '  Conversation:\n'
+        result += '\n  '.join([str(n) for n in self.conversation])
         return result
 
 
@@ -303,9 +307,9 @@ class UncertainOrError(Statement):
         self.error = error
 
     def __str__(self):
-        result = f'uncertain_or_error({self.error}, {self.result})\n'
-        result += 'Conversation:\n'
-        result += '\n'.join([str(n) for n in self.conversation])
+        result = f'UncertainOrError({self.error}, {self.result})\n'
+        result += '  Conversation:\n'
+        result += '\n  '.join([str(n) for n in self.conversation])
         return result
 
 

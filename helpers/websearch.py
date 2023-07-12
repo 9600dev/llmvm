@@ -93,7 +93,10 @@ class WebHelpers():
         search_results = searcher(query)
 
         for result in search_results:
-            return_results.append(parser(result['link']))
+            try:
+                return_results.append(parser(result['link']))
+            except Exception as e:
+                pass
 
         return ' '.join(return_results)
 
@@ -171,7 +174,11 @@ class WebHelpers():
                 return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
 
         if result.scheme == 'http' or result.scheme == 'https':
-            text = requests.get(url, timeout=10).text
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # type: ignore
+            }
+
+            text = requests.get(url, headers=headers, timeout=10, allow_redirects=True).text
             if text:
                 return WebHelpers.convert_html_to_markdown(text)
             else:

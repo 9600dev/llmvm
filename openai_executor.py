@@ -19,13 +19,11 @@ class OpenAIExecutor(Executor):
         openai_key: str,
         max_function_calls: int = 5,
         model: str = 'gpt-3.5-turbo-16k',
-        agents: List = [],
         verbose: bool = True,
     ):
         self.openai_key = openai_key
         self.verbose = verbose
         self.model = model
-        self.agents = agents
         self.max_function_calls = max_function_calls
 
     def max_tokens(self) -> int:
@@ -126,9 +124,10 @@ class OpenAIExecutor(Executor):
                 llm_call_context=call,
             )
 
-    def execute_with_tools(
+    def execute_with_agents(
         self,
         call: NaturalLanguage,
+        agents: List[Callable],
     ) -> Assistant:
         logging.debug('execute_with_tools')
 

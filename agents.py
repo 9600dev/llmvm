@@ -40,6 +40,11 @@ from openai_executor import OpenAIExecutor
 logging = setup_logging()
 
 
+# https://glean.com/product/ai-search
+# https://dust.tt/
+# https://support.apple.com/guide/automator/welcome/mac
+
+
 def vector_store():
     from langchain.vectorstores import FAISS
 
@@ -84,8 +89,11 @@ class Parser():
             arguments = []
             types = []
             for arg_name, metadata in function_description['parameters']['properties'].items():
-                arguments.append({arg_name: metadata['argument']})
-                types.append({arg_name: metadata['type']})
+                # todo if we don't have an argument here, we should ensure that
+                # the function has a default value for the parameter
+                if 'argument' in metadata:
+                    arguments.append({arg_name: metadata['argument']})
+                    types.append({arg_name: metadata['type']})
 
             return FunctionCall(
                 name=name,
@@ -186,6 +194,7 @@ class Parser():
                     self.consume(')')
                     re = self.remainder
                 else:
+                    self.consume(')')
                     return function_call
 
             if re.startswith('natural_language(') and ')' in re:
@@ -233,7 +242,9 @@ class Parser():
         stack: List[Statement] = []
 
         while self.remainder.strip() != '':
-            program.statements.append(self.parse_statement(stack))
+            statement = self.parse_statement(stack)
+            program.statements.append(statement)
+            stack.append(statement)
 
         self.message = ''
         self.agents = []
@@ -323,8 +334,10 @@ class ExecutionController():
             for p in inspect.signature(func).parameters.values():
                 if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumMeta':
                     function_args[p.name] = p.annotation(function_args_desc[counter][p.name])
-                else:
+                elif counter < len(function_args_desc):
                     function_args[p.name] = function_args_desc[counter][p.name]
+                else:
+                    function_args[p.name] = p.default
                 counter += 1
 
             try:
@@ -412,7 +425,7 @@ class ExecutionController():
                 executor=executor
             )
 
-            response = executor.execute_with_tools(llm_call)
+            response = executor.execute_with_agents(call=llm_call, agents=agents)
             assistant_response = str(response.message)
 
             program = Parser().parse_program(assistant_response, self.agents, executor, execution)
@@ -550,7 +563,7 @@ def start(
     #    return openai_executor
 
     def openai_executor():
-        openai_executor = OpenAIExecutor(openai_key, verbose=verbose, agents=agents)
+        openai_executor = OpenAIExecutor(openai_key, verbose=verbose)
         return openai_executor
 
     executors = {
