@@ -83,8 +83,9 @@ class Parser():
             self.remainder = self.remainder.strip()
 
     def to_function_call(self, call_str: str) -> Optional[FunctionCall]:
-        function_description = Helpers.parse_function_call(call_str, self.agents)
-        if function_description:
+        parsed_function = Helpers.parse_function_call(call_str, self.agents)
+        if parsed_function:
+            func, function_description = parsed_function
             name = function_description['name']
             arguments = []
             types = []
@@ -98,7 +99,8 @@ class Parser():
             return FunctionCall(
                 name=name,
                 args=arguments,
-                types=types
+                types=types,
+                func=func,
             )
         return None
 
@@ -297,8 +299,10 @@ class ExecutionController():
         )
 
         assistant: Assistant = executor.execute(
-            system_message=System(Text(query_understanding['system_message'])),
-            user_messages=[User(Content(Text(query_understanding['user_message'])))],
+            messages=[
+                System(Text(query_understanding['system_message'])),
+                User(Content(Text(query_understanding['user_message'])))
+            ],
         )
 
         if assistant.error or not parse_result(str(assistant.message)):
@@ -309,14 +313,14 @@ class ExecutionController():
         self,
         statement: Statement,
         executor: Executor,
-        callee: Optional[Statement] = None,
+        callee_or_context: Optional[Statement] = None,
     ) -> Statement:
 
         # we have an answer to the query, return it
         if isinstance(statement, Answer):
             return statement
 
-        elif isinstance(statement, FunctionCall) and not statement.response():
+        elif isinstance(statement, FunctionCall) and not statement.result():
             # unpack the args, call the function
             function_call = statement
             function_args_desc = statement.args
@@ -329,13 +333,31 @@ class ExecutionController():
                 logging.error('Could not find function {}'.format(function_call.name))
                 return UncertainOrError(conversation=[Text('I could find the function {}'.format(function_call.name))])
 
+            def marshal(value: object, type: str) -> Any:
+                def strip_quotes(value: str) -> str:
+                    if value.startswith('\'') or value.startswith('"'):
+                        value = value[1:]
+                    if value.endswith('\'') or value.endswith('"'):
+                        value = value[:-1]
+                    return value
+
+                if type == 'str':
+                    result = str(value)
+                    return strip_quotes(result)
+                elif type == 'int':
+                    return int(strip_quotes(str(value)))
+                elif type == 'float':
+                    return float(strip_quotes(str(value)))
+                else:
+                    return value
+
             # check for enum types and marshal from string to enum
             counter = 0
             for p in inspect.signature(func).parameters.values():
                 if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumMeta':
                     function_args[p.name] = p.annotation(function_args_desc[counter][p.name])
                 elif counter < len(function_args_desc):
-                    function_args[p.name] = function_args_desc[counter][p.name]
+                    function_args[p.name] = marshal(function_args_desc[counter][p.name], p.annotation.__name__)
                 else:
                     function_args[p.name] = p.default
                 counter += 1
@@ -348,33 +370,116 @@ class ExecutionController():
                     conversation=[Text('The function could not execute. It raised an exception: {}'.format(e))]
                 )
 
-            function_call.call_response = function_response
+            function_call._result = function_response
             return function_call
 
         elif (
             isinstance(statement, NaturalLanguage)
-            and not statement.response()
-            and callee
+            and not statement.result()
+            and callee_or_context
         ):
             # callee provides context for the natural language statement
-            messages: List[User] = []
+            messages: List[Message] = []
             messages.extend(statement.messages)
 
+            # system_message = statement.system if statement.system else System(Text('You are a helpful assistant.'))
+
+            if isinstance(callee_or_context, FunctionCall):
+                function_call = callee_or_context
+                function_args_desc = function_call.args
+                function_args = {}
+                function_result = function_call.result()
+
+                query_understanding = Helpers.load_and_populate_prompt(
+                    prompt_filename='prompts/continuation_function.prompt',
+                    template={
+                        'function_name': function_call.to_code_call(),
+                        'function_result': str(function_result),
+                        'natural_language': str(statement.messages[0]),
+                    }
+                )
+
+                messages.append(User(Content(Text(query_understanding['user_message']))))
+                assistant: Assistant = executor.execute(messages)
+                statement._result = assistant
+                return statement
+            else:
+                # generic continuation response
+                query_understanding = Helpers.load_and_populate_prompt(
+                    prompt_filename='prompts/continuation_generic.prompt',
+                    template={
+                        'context': str(callee_or_context.result()),
+                        'query': str(statement.messages[0]),
+                    }
+                )
+                messages.append(User(Content(Text(query_understanding['user_message']))))
+                assistant: Assistant = executor.execute(messages)
+                statement._result = assistant
+                return statement
+
+        elif (
+            isinstance(statement, NaturalLanguage)
+            and not statement.result()
+            and not callee_or_context
+        ):
+            messages: List[Message] = []
             system_message = statement.system if statement.system else System(Text('You are a helpful assistant.'))
-            response = executor.execute(system_message=system_message, user_messages=messages)
-            statement.call_response = str(response.message)
+            messages.append(system_message)
+            messages.extend(statement.messages)
+            result = executor.execute(messages)
+            statement._result = result
             return statement
 
-        elif isinstance(statement, NaturalLanguage) and statement.response():
+        elif isinstance(statement, NaturalLanguage) and statement.result():
             return statement
 
         elif isinstance(statement, ForEach):
-            return UncertainOrError()
+            messages: List[Message] = []
+
+            if isinstance(statement.rhs, FunctionCall):
+                query_understanding = Helpers.load_and_populate_prompt(
+                    prompt_filename='prompts/foreach_functioncall.prompt',
+                    template={
+                        'function_call': statement.rhs.to_code_call(),
+                        'list': '\n'.join([str(s.result()) for s in statement.lhs]),
+                    }
+                )
+                messages.append(User(Content(Text(query_understanding['user_message']))))
+                result = executor.execute(messages)
+
+                # parse the result
+                foreach_parser = Parser()
+                flow = ExecutionFlow(Order.QUEUE)
+                program = foreach_parser.parse_program(str(result.message), self.agents, executor, flow)
+
+                # execute the program
+                program_result = self.execute_program(program, flow)
+
+                if len(program_result) > 0:
+                    statement._result = program_result[-1]
+
+                return statement
+
+            elif isinstance(statement.rhs, NaturalLanguage):
+                query_understanding = Helpers.load_and_populate_prompt(
+                    prompt_filename='prompts/foreach_functioncall.prompt',
+                    template={
+                        'list': '\n'.join([str(s.result()) for s in statement.lhs]),
+                        'natural_language': str(statement.rhs.messages[0]),
+                    }
+                )
+                messages.append(User(Content(Text(query_understanding['user_message']))))
+                result = executor.execute(messages)
+                statement._result = result
+                return statement
 
         elif isinstance(statement, Continuation):
-            return UncertainOrError()
+            result = self.execute_statement(statement.rhs, executor, statement.lhs)
+            statement._result = result
+            return statement
 
-        return UncertainOrError()
+        else:
+            raise ValueError('shouldnt be here')
 
     def execute_program(
         self,
@@ -387,7 +492,11 @@ class ExecutionController():
             execution.push(s)
 
         while statement := execution.pop():
-            answers.append(self.execute_statement(statement, program.executor))
+            callee_context = None
+            if len(answers) > 0:
+                callee_context = answers[-1]
+
+            answers.append(self.execute_statement(statement, program.executor, callee_or_context=callee_context))
 
         return answers
 
@@ -398,8 +507,11 @@ class ExecutionController():
     ) -> Assistant:
         executor = self.execution_contexts[0]
         return executor.execute(
-            system_message=System(Text(system_message)),
-            user_messages=[User(Content(Text(user_message)))])
+            messages=[
+                System(Text(system_message)),
+                User(Content(Text(user_message)))
+            ]
+        )
 
     def execute(
         self,
@@ -454,7 +566,13 @@ class Repl():
 
     def print_response(self, statements: List[Statement]):
         for statement in statements:
-            rich.print(str(statement))
+            if isinstance(statement, FunctionCall):
+                logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
+                continue
+            elif isinstance(statement, Continuation):
+                rich.print(str(statement.result()))
+            else:
+                rich.print(str(statement))
 
     def repl(self):
         console = rich.console.Console()

@@ -129,7 +129,7 @@ class OpenAIExecutor(Executor):
         call: NaturalLanguage,
         agents: List[Callable],
     ) -> Assistant:
-        logging.debug('execute_with_tools')
+        logging.debug('execute_with_agents')
 
         user_message: User = cast(User, call.messages[-1])
         messages = []
@@ -175,20 +175,26 @@ class OpenAIExecutor(Executor):
 
     def execute(
         self,
-        system_message: System,
-        user_messages: List[User],
+        messages: List[Message],
     ) -> Assistant:
+        # find the system message
+        system_message = Helpers.first(lambda x: x.role() == 'system', messages)
+        user_messages = Helpers.filter(lambda x: x.role() == 'user', messages)
+
+        if not system_message:
+            system_message = System(Text('You are a helpful assistant.'))
+
         logging.debug('OpenAIExecutor.execute system_message={} user_messages={}'
                       .format(system_message, user_messages))
 
-        messages: List[Dict[str, str]] = []
+        messages_list: List[Dict[str, str]] = []
 
-        messages.append(Message.to_dict(system_message))
+        messages_list.append(Message.to_dict(system_message))
         for message in user_messages:
-            messages.append(Message.to_dict(message))
+            messages_list.append(Message.to_dict(message))
 
         chat_response = self.execute_direct(
-            messages,
+            messages_list,
             max_completion_tokens=2048,  # tood: calculate this properly
             chat_format=True,
         )
@@ -197,13 +203,13 @@ class OpenAIExecutor(Executor):
             return Assistant(
                 message=Content(Text('The model could not execute the query.')),
                 error=True,
-                messages_context=[Message.from_dict(m) for m in messages],
+                messages_context=[Message.from_dict(m) for m in messages_list],
                 system_context=system_message,
             )
 
-        messages.append(chat_response['choices'][0]['message'])
+        messages_list.append(chat_response['choices'][0]['message'])
 
-        conversation: List[Message] = [Message.from_dict(m) for m in messages]
+        conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
 
         return Assistant(
             message=conversation[-1].message,

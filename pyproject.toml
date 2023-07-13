@@ -27,6 +27,8 @@ pypdf = "^3.12.1"
 swig = "^4.1.1"
 newspaper3k = "^0.2.8"
 google-search-results = "^2.4.2"
+markdownify = "^0.11.6"
+
 
 [tool.poetry.dev-dependencies]
 

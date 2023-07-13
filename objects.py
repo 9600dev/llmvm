@@ -21,8 +21,7 @@ class Executor(ABC):
     @abstractmethod
     def execute(
         self,
-        system_message: 'System',
-        user_messages: List['User'],
+        messages: List['Message'],
     ) -> 'Assistant':
         pass
 
@@ -207,24 +206,33 @@ class Assistant(Message):
         return 'assistant'
 
     def __str__(self):
-        return f'Assistant({self.message}) {self.error})'
+        return f'{self.message}'
 
     def __repr__(self):
         return f'Assistant({self.message} {self.error})'
 
 
 class Statement(AstNode):
-    pass
+    def __init__(
+        self,
+    ):
+        self._result: object = None
+
+    def __str__(self):
+        if self._result:
+            return str(self._result)
+        else:
+            return str(type(self))
+
+    def result(self):
+        return self._result
 
 
 class Call(Statement):
     def __init__(
         self,
     ):
-        self.call_response: Optional[str] = None
-
-    def response(self) -> str:
-        return self.call_response or ''
+        super().__init__()
 
 
 class NaturalLanguage(Call):
@@ -246,8 +254,12 @@ class Continuation(Statement):
         lhs: Statement,
         rhs: Statement,
     ):
+        super().__init__()
         self.lhs = lhs
         self.rhs = rhs
+
+    def result(self) -> object:
+        return self.rhs.result()
 
 
 class ForEach(Statement):
@@ -256,8 +268,23 @@ class ForEach(Statement):
         lhs: List[Statement],
         rhs: Statement,
     ):
+        super().__init__()
         self.lhs = lhs
         self.rhs = rhs
+
+    def result(self) -> object:
+        return self.rhs.result()
+
+
+class DataFrame(Statement):
+    def __init__(
+        self,
+        columns: List[str],
+        rows: List[List[str]],
+    ):
+        super().__init__()
+        self.columns = columns
+        self.rows = rows
 
 
 class FunctionCall(Call):
@@ -267,14 +294,24 @@ class FunctionCall(Call):
         args: List[Dict[str, object]],
         types: List[Dict[str, object]],
         context: Content = Content(Text('')),
+        func: Optional[Callable] = None,
     ):
         super().__init__()
         self.name = name
         self.args = args
         self.types = types
         self.context = context
-        self.result: Optional[Text] = None
+        self._result: Optional[Text] = None
+        self.func: Optional[Callable] = func
 
+    def to_code_call(self):
+        arguments = []
+        for arg in self.args:
+            for k, v in arg.items():
+                arguments.append(v)
+
+        str_args = ', '.join([str(arg) for arg in arguments])
+        return f'{self.name}({str_args})'
 
 class Answer(Statement):
     def __init__(
@@ -283,16 +320,17 @@ class Answer(Statement):
         result: object = None,
         error: object = None,
     ):
+        super().__init__()
         self.conversation = conversation,
-        self.result = result
+        self._result = result
         self.error = error
 
     def __str__(self):
-        result = f'Answer({self.result})\n'
-        result = f'Error: {self.error}\n'
-        result += '  Conversation:\n'
-        result += '\n  '.join([str(n) for n in self.conversation])
-        return result
+        ret_result = f'Answer({self.result})\n'
+        ret_result = f'Error: {self.error}\n'
+        ret_result += '  Conversation:\n'
+        ret_result += '\n  '.join([str(n) for n in self.conversation])
+        return ret_result
 
 
 class UncertainOrError(Statement):
@@ -302,15 +340,16 @@ class UncertainOrError(Statement):
         result: object = None,
         error: object = None,
     ):
+        super().__init__()
         self.conversation = conversation,
-        self.result = result
+        self._result = result
         self.error = error
 
     def __str__(self):
-        result = f'UncertainOrError({self.error}, {self.result})\n'
-        result += '  Conversation:\n'
-        result += '\n  '.join([str(n) for n in self.conversation])
-        return result
+        ret_result = f'UncertainOrError({self.error}, {self.result})\n'
+        ret_result += '  Conversation:\n'
+        ret_result += '\n  '.join([str(n) for n in self.conversation])
+        return ret_result
 
 
 class Program(AstNode):

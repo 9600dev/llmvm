@@ -3,7 +3,7 @@ import inspect
 import re
 from enum import Enum, IntEnum
 from itertools import cycle, islice
-from typing import Any, Callable, Dict, Generator, List, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import guidance
 import nest_asyncio
@@ -91,6 +91,10 @@ class Helpers():
             return result
         except StopIteration as ex:
             return None
+
+    @staticmethod
+    def filter(predicate, iterable):
+        return [x for x in iterable if predicate(x)]
 
     @staticmethod
     def find_string_between_tokens(text, start_token, end_token):
@@ -321,7 +325,7 @@ class Helpers():
         return getattr(func, '__objclass__', None)  # handle special descriptor objects
 
     @staticmethod
-    def get_function_description(func, openai_format: bool):
+    def get_function_description(func, openai_format: bool) -> Dict[str, Any]:
         def parse_type(t):
             if t is str:
                 return 'string'
@@ -390,7 +394,7 @@ class Helpers():
                 return {
                     'invoked_by': invoked_by,
                     'description': description,
-                    'parameters': list(inspect.signature(func).parameters.keys())
+                    'parameters': list(inspect.signature(func).parameters.keys()),
                 }
             return {
                 # todo: refactor this to be name
@@ -405,11 +409,12 @@ class Helpers():
         return (f'{description["invoked_by"]}({", ".join(description["parameters"])})  # {description["description"]}')
 
     @staticmethod
-    def parse_function_call(call: str, functions: List[Callable]):
+    def parse_function_call(call: str, functions: List[Callable]) -> Optional[Tuple[Callable, Dict[str, Any]]]:
         function_description: Dict[str, Any] = {}
 
         function_name = Helpers.in_between(call, '', '(')
         function_args = [p.strip() for p in Helpers.in_between(call, '(', ')').split(',')]
+        func = functions[0]
 
         for f in functions:
             if f.__name__.lower() in function_name.lower():
@@ -417,6 +422,7 @@ class Helpers():
                     f,
                     openai_format=True
                 )
+                func = f
                 break
 
         if not function_description:
@@ -429,7 +435,7 @@ class Helpers():
                 parameter.update({'argument': function_args[argument_count]})
             argument_count += 1
 
-        return function_description
+        return func, function_description
 
     @staticmethod
     def load_prompt(prompt_filename: str) -> Dict[str, Any]:
@@ -465,7 +471,7 @@ class Helpers():
         prompt = Helpers.load_prompt(prompt_filename)
 
         for key, value in template.items():
-            prompt['system_message'] = prompt['system_message'].replace(f'{{{key}}}', value)
-            prompt['user_message'] = prompt['user_message'].replace(f'{{{key}}}', value)
+            prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
+            prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
 
         return prompt

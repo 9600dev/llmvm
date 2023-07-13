@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import nltk
 import requests
+from bs4 import BeautifulSoup
 from guidance.llms import LLM, OpenAI
 from guidance.llms.transformers import LLaMA, Vicuna
 from langchain.agents import initialize_agent, load_tools
@@ -19,6 +20,7 @@ from langchain.text_splitter import (MarkdownTextSplitter,
                                      PythonCodeTextSplitter, TokenTextSplitter)
 from langchain.vectorstores import FAISS
 from llama_cpp import LogitsProcessorList, StoppingCriteriaList
+from markdownify import MarkdownConverter
 from newspaper import Article
 from newspaper.configuration import Configuration
 from prompt_toolkit import prompt
@@ -41,8 +43,22 @@ from helpers.search import SerpAPISearcher
 
 logging = setup_logging()
 
+class IgnoringScriptConverter(MarkdownConverter):
+    def convert_script(self, el, text, convert_as_inline):
+        return ''
+
 
 class WebHelpers():
+    @staticmethod
+    def convert_html_to_markdown_soup(html: str) -> str:
+        logging.debug('convert_html_to_markdown_soup')
+        soup = BeautifulSoup(html, features='lxml')
+
+        for data in soup(['style', 'script']):
+            data.decompose()
+
+        return IgnoringScriptConverter().convert_soup(soup)
+
     @staticmethod
     def convert_html_to_markdown(html: str) -> str:
         """Converts html to markdown using pandoc"""
@@ -160,7 +176,7 @@ class WebHelpers():
         return article.text
 
     @staticmethod
-    def get_url(url: str) -> str:
+    def get_url(url: str, force_firefox: bool = False) -> str:
         """Extracts the text from a url. Url can be a file, web url, or a pdf"""
         logging.debug('WebHelpers.get_url: {}'.format(url))
 
@@ -178,10 +194,13 @@ class WebHelpers():
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # type: ignore
             }
 
+            if force_firefox:
+                return WebHelpers.convert_html_to_markdown_soup(WebHelpers.get_url_firefox(url))
+
             text = requests.get(url, headers=headers, timeout=10, allow_redirects=True).text
             if text:
-                return WebHelpers.convert_html_to_markdown(text)
+                return WebHelpers.convert_html_to_markdown_soup(text)
             else:
-                return WebHelpers.convert_html_to_markdown(WebHelpers.get_url_firefox(url))
+                return WebHelpers.convert_html_to_markdown_soup(WebHelpers.get_url_firefox(url))
 
         return ''
