@@ -101,9 +101,11 @@ class Content(AstNode):
         self,
         sequence: AstNode | List[AstNode],
     ):
-        if type(sequence) is Content:
+        if isinstance(sequence, Content):
             self.sequence = sequence.sequence  # type: ignore
-        if type(sequence) is AstNode:
+        elif isinstance(sequence, Text):
+            self.sequence = sequence
+        elif isinstance(sequence, AstNode):
             self.sequence = [sequence]
         else:
             self.sequence = cast(List[AstNode], sequence)
@@ -238,12 +240,12 @@ class Call(Statement):
 class NaturalLanguage(Call):
     def __init__(
         self,
-        messages: List[User],
+        messages: List[Message],
         system: Optional[System] = None,
         executor: Optional[Executor] = None,
     ):
         super().__init__()
-        self.messages: List[User] = messages
+        self.messages: List[Message] = messages
         self.system = system
         self.executor = executor
 
@@ -273,7 +275,8 @@ class ForEach(Statement):
         self.rhs = rhs
 
     def result(self) -> object:
-        return self.rhs.result()
+        return self._result
+        # return self.rhs.result()
 
 
 class DataFrame(Statement):

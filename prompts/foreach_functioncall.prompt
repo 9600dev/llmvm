@@ -16,4 +16,4 @@ List:
 
 {{list}}
 
-You might need to use extra context from previous messages to fill in any arguments to the helper functions that might be missing from the list.  
+You may need to use extra context from previous messages to fill in any arguments to the helper functions that might be missing from the list. If you're missing an argument, just use the string "missing" as the argument, but try your best to fill it. 

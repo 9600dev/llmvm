@@ -5,7 +5,7 @@ from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
 
 import openai
 
-from helpers.helpers import Helpers
+from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, Content, ExecutionFlow, Executor, Message,
                      NaturalLanguage, System, Text, User)
@@ -20,11 +20,13 @@ class OpenAIExecutor(Executor):
         max_function_calls: int = 5,
         model: str = 'gpt-3.5-turbo-16k',
         verbose: bool = True,
+        cache: Optional[PersistentCache] = None,
     ):
         self.openai_key = openai_key
         self.verbose = verbose
         self.model = model
         self.max_function_calls = max_function_calls
+        self.cache: PersistentCache = cache
 
     def max_tokens(self) -> int:
         match self.model:
@@ -82,53 +84,14 @@ class OpenAIExecutor(Executor):
             )
             return response  # type: ignore
 
-    def __execute_tool_response(
-        self,
-        call: NaturalLanguage,
-        response: str,
-        tool_str: str,
-    ) -> Assistant:
-        logging.debug('__execute_tool_response')
-
-        tool_prompt_message = '''
-            You asked me to invoke a helper function {}.
-            Here is the helper function response: {}.
-            Please perform the task that was required using this helper function response.
-            If there are still outstanding helper function requests, I'll send the results of those next.
-        '''
-
-        tool_prompt_message = tool_prompt_message.format(tool_str, response)
-
-        messages = [Message.to_dict(m) for m in call.messages]
-        messages.append({'role': 'user', 'content': tool_prompt_message})
-
-        chat_response = self.execute_direct(
-            model=self.model,
-            temperature=1.0,
-            max_completion_tokens=1024,
-            messages=messages,
-            chat_format=True,
-        )
-
-        chat_response = chat_response['choices'][0]['message']  # type: ignore
-        messages.append(chat_response)
-
-        if len(chat_response) == 0:
-            return Assistant(Content(Text('The model could not execute the query.')), error=True)
-        else:
-            logging.debug('OpenAI Assistant Response: {}'.format(chat_response['content']))
-            return Assistant(
-                message=Content(Text(chat_response['content'])),
-                error=False,
-                messages_context=[Message.from_dict(m) for m in messages],
-                llm_call_context=call,
-            )
-
     def execute_with_agents(
         self,
         call: NaturalLanguage,
         agents: List[Callable],
     ) -> Assistant:
+        if self.cache and self.cache.has_key(call.messages):
+            return cast(Assistant, self.cache.get(call.messages))
+
         logging.debug('execute_with_agents')
 
         user_message: User = cast(User, call.messages[-1])
@@ -165,7 +128,8 @@ class OpenAIExecutor(Executor):
             return Assistant(Content(Text('The model could not execute the query.')), error=True)
         else:
             logging.debug('OpenAI Assistant Response: {}'.format(chat_response['content']))
-            return Assistant(
+
+            assistant = Assistant(
                 message=Content(Text(chat_response['content'])),
                 error=False,
                 messages_context=[Message.from_dict(m) for m in messages],
@@ -173,10 +137,16 @@ class OpenAIExecutor(Executor):
                 llm_call_context=call,
             )
 
+            if self.cache: self.cache.set(call.messages, assistant)
+            return assistant
+
     def execute(
         self,
         messages: List[Message],
     ) -> Assistant:
+        if self.cache and self.cache.has_key(messages):
+            return cast(Assistant, self.cache.get(messages))
+
         # find the system message
         system_message = Helpers.first(lambda x: x.role() == 'system', messages)
         user_messages = Helpers.filter(lambda x: x.role() == 'user', messages)
@@ -211,7 +181,11 @@ class OpenAIExecutor(Executor):
 
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
 
-        return Assistant(
+        assistant = Assistant(
             message=conversation[-1].message,
             messages_context=conversation
         )
+
+        if self.cache: self.cache.set(messages, assistant)
+
+        return assistant

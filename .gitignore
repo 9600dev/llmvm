@@ -8,3 +8,5 @@ faiss_index
 download/
 config.yaml
 backup/
+logs/
+cache/

@@ -25,7 +25,7 @@ from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from eightbitvicuna import VicunaEightBit
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
-from helpers.helpers import Helpers
+from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
@@ -34,7 +34,7 @@ from helpers.websearch import WebHelpers
 from objects import (Agent, Answer, Assistant, AstNode, Content, Continuation,
                      ExecutionFlow, Executor, ForEach, FunctionCall, Message,
                      NaturalLanguage, Order, Program, Statement, System, Text,
-                     UncertainOrError, User)
+                     UncertainOrError, User, tree_map)
 from openai_executor import OpenAIExecutor
 
 logging = setup_logging()
@@ -219,6 +219,15 @@ class Parser():
                 fe.rhs = self.parse_statement(stack)
                 return fe
 
+            if re.startswith('[[') and not re.startswith('[[=>]]') and ')]]' in re:  # this is not great, it's not part of the ebnf, so I dunno
+                function_call = self.parse_function_call()
+                if not function_call:
+                    # push past the function call and keep parsing
+                    self.consume(']]')
+                    re = self.remainder
+                else:
+                    return function_call
+
             # we have no idea, so return something the LLM can figure out
             if re.startswith('"'):
                 message = self.message_type(self.parse_ast_node())
@@ -260,12 +269,14 @@ class ExecutionController():
         execution_contexts: List[Executor],
         agents: List[Callable] = [],
         vector_store: Optional[VectorStore] = None,
+        cache: PersistentCache = PersistentCache(),
     ):
         self.execution_contexts: List[Executor] = execution_contexts
         self.agents = agents
         self.parser = Parser()
         self.messages: List[Message] = []
         self.vector_store = vector_store
+        self.cache = cache
 
     def classify_tool_or_direct(
         self,
@@ -308,6 +319,12 @@ class ExecutionController():
         if assistant.error or not parse_result(str(assistant.message)):
             return {'tool': 1.0}
         return parse_result(str(assistant.message))
+
+    def __lhs_to_str(self, lhs: List[Statement]) -> str:
+        results = [r for r in lhs if r.result()]
+        # unique
+        results = list(set(results))
+        return '\n'.join([str(r) for r in results])
 
     def execute_statement(
         self,
@@ -363,7 +380,13 @@ class ExecutionController():
                 counter += 1
 
             try:
-                function_response = func(**function_args)
+                # let's check the cache first
+                if self.cache.has_key(function_args):
+                    function_response = self.cache.get(function_args)
+                else:
+                    function_response = func(**function_args)
+                    self.cache.set(function_args, function_response)
+
             except Exception as e:
                 logging.error(e)
                 return UncertainOrError(
@@ -403,6 +426,22 @@ class ExecutionController():
                 assistant: Assistant = executor.execute(messages)
                 statement._result = assistant
                 return statement
+
+            elif isinstance(callee_or_context, ForEach):
+                # the result() could have a list of things
+                if isinstance(callee_or_context.result(), list):
+                    result_list = []
+                    for foreach_result in cast(list, callee_or_context.result()):
+                        assistant_result = self.execute_statement(statement, executor, callee_or_context=foreach_result).result()
+                        # we have to unset the result so that the next iteration works properly
+                        statement._result = None
+                        # todo: we can remove this type cast, after execute_statement is just Statement
+                        assistant_result = cast(Assistant, assistant_result)
+                        # todo: not sure if "NaturalLanguage" is the right thing to return here.
+                        result_list.append(NaturalLanguage([assistant_result], executor=executor))
+
+                    statement._result = result_list
+
             else:
                 # generic continuation response
                 query_understanding = Helpers.load_and_populate_prompt(
@@ -441,11 +480,30 @@ class ExecutionController():
                     prompt_filename='prompts/foreach_functioncall.prompt',
                     template={
                         'function_call': statement.rhs.to_code_call(),
-                        'list': '\n'.join([str(s.result()) for s in statement.lhs]),
+                        'list': self.__lhs_to_str(statement.lhs),
                     }
                 )
+
+                def summarize_conversation(ast_node: AstNode) -> Optional[Message]:
+                    if isinstance(ast_node, FunctionCall) and ast_node.result():
+                        return User(Content(Text(str(ast_node.result()))))
+                    elif isinstance(ast_node, NaturalLanguage):
+                        return ast_node.messages[0]
+                    else:
+                        return None
+
+                # I need to add supporting context so that the LLM can fill in the callsite args
+                if callee_or_context:
+                    context_messages = cast(List[Message], tree_map(callee_or_context, summarize_conversation))
+                    context_messages = [m for m in context_messages if m is not None]
+                    messages.extend(context_messages)
+
                 messages.append(User(Content(Text(query_understanding['user_message']))))
                 result = executor.execute(messages)
+
+                # debug output
+                with (open('logs/ast.log', 'a')) as f:
+                    f.write(f'{str(dt.datetime.now())}: {result}\n')
 
                 # parse the result
                 foreach_parser = Parser()
@@ -456,7 +514,7 @@ class ExecutionController():
                 program_result = self.execute_program(program, flow)
 
                 if len(program_result) > 0:
-                    statement._result = program_result[-1]
+                    statement._result = program_result
 
                 return statement
 
@@ -540,6 +598,10 @@ class ExecutionController():
             response = executor.execute_with_agents(call=llm_call, agents=agents)
             assistant_response = str(response.message)
 
+            # debug output
+            with (open('logs/ast.log', 'a')) as f:
+                f.write(f'{str(dt.datetime.now())}: {assistant_response}\n')
+
             program = Parser().parse_program(assistant_response, self.agents, executor, execution)
             answers: List[Statement] = self.execute_program(program, execution)
             results.extend(answers)
@@ -569,8 +631,14 @@ class Repl():
             if isinstance(statement, FunctionCall):
                 logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
                 continue
+            elif isinstance(statement, NaturalLanguage):
+                for message in statement.messages:
+                    rich.print(f'[bold green]{message.role().capitalize()}[/bold green]: {str(message.message)}')
             elif isinstance(statement, Continuation):
-                rich.print(str(statement.result()))
+                if isinstance(statement.result(), list):
+                    self.print_response(cast(list, statement.result()))
+                else:
+                    rich.print(str(statement.result()))
             else:
                 rich.print(str(statement))
 
@@ -589,6 +657,7 @@ class Repl():
         execution_controller = ExecutionController(
             execution_contexts=executor_contexts,
             agents=agents,
+            cache=PersistentCache('cache/cache.db')
         )
 
         commands = {
@@ -681,7 +750,7 @@ def start(
     #    return openai_executor
 
     def openai_executor():
-        openai_executor = OpenAIExecutor(openai_key, verbose=verbose)
+        openai_executor = OpenAIExecutor(openai_key, verbose=verbose, cache=PersistentCache('cache/cache.db'))
         return openai_executor
 
     executors = {
