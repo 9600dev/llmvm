@@ -33,11 +33,15 @@ from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
 from objects import (Agent, Answer, Assistant, AstNode, Content, Continuation,
                      ExecutionFlow, Executor, ForEach, FunctionCall, Message,
-                     NaturalLanguage, Order, Program, Statement, System, Text,
+                     NaturalLanguage, Order, Program, Statement, System,
                      UncertainOrError, User, tree_map)
 from openai_executor import OpenAIExecutor
 
 logging = setup_logging()
+def response_writer(callee, message):
+    with (open('logs/ast.log', 'a')) as f:
+        f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')
+
 
 
 # https://glean.com/product/ai-search
@@ -140,7 +144,7 @@ class Parser():
             function_call_str = Helpers.in_between(text, start_token, end_token)
             function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
             if function_call:
-                function_call.context = Content(Text(text))
+                function_call.context = Content(text)
 
             # remainder is the stuff after the end_token
             self.remainder = text[text.index(end_token) + len(end_token):]
@@ -157,12 +161,12 @@ class Parser():
             if re.startswith('"') and re.endswith('"'):
                 self.remainder = self.remainder[:1]
                 self.consume('"')
-                return Text(re.strip('"'))
+                return Content(re.strip('"'))
             else:
-                result = Text(self.remainder)
+                result = Content(self.remainder)
                 self.remainder = ''
                 return result
-        return Text('')
+        return Content('')
 
     def parse_statement(
         self,
@@ -187,7 +191,7 @@ class Parser():
             if re.startswith('answer(') and ')' in re:
                 answer = Helpers.in_between(re, 'answer(', ')')
                 self.consume(')')
-                return Answer(conversation=[Text(answer)])
+                return Answer(conversation=[Content(answer)])
 
             if re.startswith('function_call(') and ')' in re:
                 function_call = self.parse_function_call()
@@ -219,7 +223,7 @@ class Parser():
                 fe.rhs = self.parse_statement(stack)
                 return fe
 
-            if re.startswith('[[') and not re.startswith('[[=>]]') and ')]]' in re:  # this is not great, it's not part of the ebnf, so I dunno
+            if re.startswith('[[') and not re.startswith('[[=>]]') and ')]]' in re:  # this is not great, it's not ebnf
                 function_call = self.parse_function_call()
                 if not function_call:
                     # push past the function call and keep parsing
@@ -228,14 +232,26 @@ class Parser():
                 else:
                     return function_call
 
-            # we have no idea, so return something the LLM can figure out
+            # might be a string
             if re.startswith('"'):
                 message = self.message_type(self.parse_ast_node())
                 return NaturalLanguage(messages=[message])
 
-            result = NaturalLanguage(messages=[self.message_type(Text(self.remainder))])
+            # we have no idea, so start packaging tokens into a Natural Language call until we see something we know
+            known_tokens = ['[[=>]]', '[[FOREACH]]', 'function_call', 'natural_language', 'answer', 'continuation', 'Output']
+            tokens = re.split(' ')
+            consumed_tokens = []
+            while len(tokens) > 0:
+                if tokens[0] in known_tokens:
+                    self.remainder = ' '.join(tokens)
+                    return NaturalLanguage(messages=[self.message_type(Content(' '.join(consumed_tokens)))])
+
+                consumed_tokens.append(tokens[0])
+                self.remainder = self.remainder[len(tokens[0]) + 1:]
+                tokens = tokens[1:]
+
             self.remainder = ''
-            return result
+            return NaturalLanguage(messages=[self.message_type(Content(' '.join(consumed_tokens)))])
         return Statement()
 
     def parse_program(
@@ -311,8 +327,8 @@ class ExecutionController():
 
         assistant: Assistant = executor.execute(
             messages=[
-                System(Text(query_understanding['system_message'])),
-                User(Content(Text(query_understanding['user_message'])))
+                System(Content(query_understanding['system_message'])),
+                User(Content(query_understanding['user_message']))
             ],
         )
 
@@ -325,6 +341,23 @@ class ExecutionController():
         # unique
         results = list(set(results))
         return '\n'.join([str(r) for r in results])
+
+    def __summarize_to_messages(self, node: AstNode) -> List[Message]:
+        def summarize_conversation(ast_node: AstNode) -> Optional[Message]:
+            if isinstance(ast_node, FunctionCall) and ast_node.result():
+                return User(Content(str(ast_node.result())))
+            elif isinstance(ast_node, NaturalLanguage):
+                return ast_node.messages[0]
+            else:
+                return None
+
+        # we probably need to do stuff to fit inside the context window etc
+        messages: List[Message] = []
+        context_messages = cast(List[Message], tree_map(node, summarize_conversation))
+        context_messages = [m for m in context_messages if m is not None]
+        messages.extend(context_messages)
+
+        return messages
 
     def execute_statement(
         self,
@@ -348,7 +381,7 @@ class ExecutionController():
 
             if not func:
                 logging.error('Could not find function {}'.format(function_call.name))
-                return UncertainOrError(conversation=[Text('I could find the function {}'.format(function_call.name))])
+                return UncertainOrError(conversation=[Content('I could find the function {}'.format(function_call.name))])
 
             def marshal(value: object, type: str) -> Any:
                 def strip_quotes(value: str) -> str:
@@ -390,7 +423,7 @@ class ExecutionController():
             except Exception as e:
                 logging.error(e)
                 return UncertainOrError(
-                    conversation=[Text('The function could not execute. It raised an exception: {}'.format(e))]
+                    conversation=[Content('The function could not execute. It raised an exception: {}'.format(e))]
                 )
 
             function_call._result = function_response
@@ -404,8 +437,6 @@ class ExecutionController():
             # callee provides context for the natural language statement
             messages: List[Message] = []
             messages.extend(statement.messages)
-
-            # system_message = statement.system if statement.system else System(Text('You are a helpful assistant.'))
 
             if isinstance(callee_or_context, FunctionCall):
                 function_call = callee_or_context
@@ -422,8 +453,9 @@ class ExecutionController():
                     }
                 )
 
-                messages.append(User(Content(Text(query_understanding['user_message']))))
+                messages.append(User(Content(query_understanding['user_message'])))
                 assistant: Assistant = executor.execute(messages)
+                response_writer('continuation_function.prompt', assistant)
                 statement._result = assistant
                 return statement
 
@@ -451,8 +483,9 @@ class ExecutionController():
                         'query': str(statement.messages[0]),
                     }
                 )
-                messages.append(User(Content(Text(query_understanding['user_message']))))
+                messages.append(User(Content(query_understanding['user_message'])))
                 assistant: Assistant = executor.execute(messages)
+                response_writer('continuation_generic.prompt', assistant)
                 statement._result = assistant
                 return statement
 
@@ -462,10 +495,11 @@ class ExecutionController():
             and not callee_or_context
         ):
             messages: List[Message] = []
-            system_message = statement.system if statement.system else System(Text('You are a helpful assistant.'))
+            system_message = statement.system if statement.system else System(Content('You are a helpful assistant.'))
             messages.append(system_message)
             messages.extend(statement.messages)
             result = executor.execute(messages)
+            response_writer('natural_language.prompt', result)
             statement._result = result
             return statement
 
@@ -476,17 +510,17 @@ class ExecutionController():
             messages: List[Message] = []
 
             if isinstance(statement.rhs, FunctionCall):
-                query_understanding = Helpers.load_and_populate_prompt(
+                foreach_function = Helpers.load_and_populate_prompt(
                     prompt_filename='prompts/foreach_functioncall.prompt',
                     template={
-                        'function_call': statement.rhs.to_code_call(),
+                        'function_call': statement.rhs.to_code_call(),  # statement.rhs.to_definition(),
                         'list': self.__lhs_to_str(statement.lhs),
                     }
                 )
 
                 def summarize_conversation(ast_node: AstNode) -> Optional[Message]:
                     if isinstance(ast_node, FunctionCall) and ast_node.result():
-                        return User(Content(Text(str(ast_node.result()))))
+                        return User(Content(str(ast_node.result())))
                     elif isinstance(ast_node, NaturalLanguage):
                         return ast_node.messages[0]
                     else:
@@ -494,16 +528,28 @@ class ExecutionController():
 
                 # I need to add supporting context so that the LLM can fill in the callsite args
                 if callee_or_context:
-                    context_messages = cast(List[Message], tree_map(callee_or_context, summarize_conversation))
-                    context_messages = [m for m in context_messages if m is not None]
-                    messages.extend(context_messages)
+                    messages.extend(self.__summarize_to_messages(callee_or_context))
 
-                messages.append(User(Content(Text(query_understanding['user_message']))))
+                messages.append(User(Content(foreach_function['user_message'])))
                 result = executor.execute(messages)
 
                 # debug output
-                with (open('logs/ast.log', 'a')) as f:
-                    f.write(f'{str(dt.datetime.now())}: {result}\n')
+                response_writer('foreach_functioncall.prompt', result)
+
+                # todo there needs to be some sort of error handling/backtracking here
+                if '"missing"' in str(result.message):
+                    # try pushing the LLM to re-write the correct function call
+                    function_call_rewrite = Helpers.load_and_populate_prompt(
+                        'prompts/functioncall_correction.prompt',
+                        template={
+                            'function_calls_missing': str(result.message),
+                            'function_call_signatures': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                            'previous_messages': '\n'.join([str(m.message) for m in messages[0:-1]])
+                        }
+                    )
+
+                    result = executor.execute(messages=[User(Content(function_call_rewrite['user_message']))])
+                    response_writer('functioncall_correction.prompt', result)
 
                 # parse the result
                 foreach_parser = Parser()
@@ -526,8 +572,9 @@ class ExecutionController():
                         'natural_language': str(statement.rhs.messages[0]),
                     }
                 )
-                messages.append(User(Content(Text(query_understanding['user_message']))))
+                messages.append(User(Content(query_understanding['user_message'])))
                 result = executor.execute(messages)
+                response_writer('foreach_functioncall.prompt', result)
                 statement._result = result
                 return statement
 
@@ -566,8 +613,8 @@ class ExecutionController():
         executor = self.execution_contexts[0]
         return executor.execute(
             messages=[
-                System(Text(system_message)),
-                User(Content(Text(user_message)))
+                System(Content(system_message)),
+                User(Content(user_message))
             ]
         )
 
@@ -591,7 +638,7 @@ class ExecutionController():
         if 'tool' in classification:
             # call the LLM, asking it to hand back an AST
             llm_call = NaturalLanguage(
-                messages=[User(Content(Text(prompt)))],
+                messages=[User(Content(prompt))],
                 executor=executor
             )
 
@@ -611,7 +658,7 @@ class ExecutionController():
                 user_message=prompt
             )
             results.append(Answer(
-                conversation=[Text(str(assistant_reply.message))],
+                conversation=[Content(assistant_reply.message)],
                 result=assistant_reply
             ))
 
@@ -628,9 +675,13 @@ class Repl():
 
     def print_response(self, statements: List[Statement]):
         for statement in statements:
-            if isinstance(statement, FunctionCall):
+            if isinstance(statement, Assistant):
+                # todo, this is a hack, Assistant not a Statement
+                rich.print(f'[bold green]Assistant[/bold green]: {str(statement.message)}')
+            elif isinstance(statement, FunctionCall):
                 logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
-                continue
+                rich.print(f'[bold yellow]FunctionCall[/bold yellow]: {statement.to_code_call()}')
+                rich.print(f'  {statement.result()}')
             elif isinstance(statement, NaturalLanguage):
                 for message in statement.messages:
                     rich.print(f'[bold green]{message.role().capitalize()}[/bold green]: {str(message.message)}')
@@ -638,7 +689,7 @@ class Repl():
                 if isinstance(statement.result(), list):
                     self.print_response(cast(list, statement.result()))
                 else:
-                    rich.print(str(statement.result()))
+                    self.print_response([cast(Statement, statement.result())])
             else:
                 rich.print(str(statement))
 

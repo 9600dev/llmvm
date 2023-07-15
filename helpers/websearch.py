@@ -158,6 +158,11 @@ class WebHelpers():
         searcher = SerpAPISearcher(link_limit=1)
         links: List[Dict] = searcher.search_internet('{} {} {} LinkedIn profile'.format(first_name, last_name, company_name))
         if len(links) > 0:
+            # search for linkedin urls
+            for link in links:
+                if 'linkedin.com' in link['link']:
+                    return WebHelpers.get_linkedin_profile(link['link'])
+
             return WebHelpers.get_linkedin_profile(links[0]['link'])
         else:
             return ''

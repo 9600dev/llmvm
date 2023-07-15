@@ -1,0 +1,28 @@
+[system_message]
+
+You are a helpful assistant.
+
+[user_message]
+
+I have a list of function calls that have "missing" arguments: 
+
+{{function_calls_missing}}
+
+Your job is to replace any "missing" arguments in these function calls with your best guess from the text and data under "Context". I have a list of function signatures under "Function Signatures" that show what kind of data is required by the "missing" argument. Try your best to replace the "missing" argument from the Context data, but if you can't figure it out, keep the argument as "missing". Do not use "" as the argument.
+
+The function signatures for these function calls will be in this list: 
+
+Function Signatures:
+
+{{function_call_signatures}}
+
+You must follow this pattern for outputting function calls: 
+
+[[Helpers.function_call_example("hello world", 2, "another argument")]]
+[[Helpers.example_two("string argument")]]
+
+Perform the job succinctly, do not explain yourself, or offer suggestions, just emit the re-written function calls.
+
+Context:
+
+{{previous_messages}}

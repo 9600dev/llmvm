@@ -8,7 +8,7 @@ import openai
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, Content, ExecutionFlow, Executor, Message,
-                     NaturalLanguage, System, Text, User)
+                     NaturalLanguage, System, User)
 
 logging = setup_logging()
 
@@ -20,7 +20,7 @@ class OpenAIExecutor(Executor):
         max_function_calls: int = 5,
         model: str = 'gpt-3.5-turbo-16k',
         verbose: bool = True,
-        cache: Optional[PersistentCache] = None,
+        cache: PersistentCache = PersistentCache(),
     ):
         self.openai_key = openai_key
         self.verbose = verbose
@@ -125,12 +125,12 @@ class OpenAIExecutor(Executor):
         message_results.append(chat_response)
 
         if len(chat_response) == 0:
-            return Assistant(Content(Text('The model could not execute the query.')), error=True)
+            return Assistant(Content('The model could not execute the query.'), error=True)
         else:
             logging.debug('OpenAI Assistant Response: {}'.format(chat_response['content']))
 
             assistant = Assistant(
-                message=Content(Text(chat_response['content'])),
+                message=Content(chat_response['content']),
                 error=False,
                 messages_context=[Message.from_dict(m) for m in messages],
                 system_context=prompt['system_message'],
@@ -152,7 +152,7 @@ class OpenAIExecutor(Executor):
         user_messages = Helpers.filter(lambda x: x.role() == 'user', messages)
 
         if not system_message:
-            system_message = System(Text('You are a helpful assistant.'))
+            system_message = System(Content('You are a helpful assistant.'))
 
         logging.debug('OpenAIExecutor.execute system_message={} user_messages={}'
                       .format(system_message, user_messages))
@@ -171,7 +171,7 @@ class OpenAIExecutor(Executor):
 
         if len(chat_response) == 0:
             return Assistant(
-                message=Content(Text('The model could not execute the query.')),
+                message=Content('The model could not execute the query.'),
                 error=True,
                 messages_context=[Message.from_dict(m) for m in messages_list],
                 system_context=system_message,

@@ -3,17 +3,15 @@ You are a helpful assistant.
 
 [user_message]
 
-I have a list below under "List". I need to iterate over this list and call the helper function [[{{function_call}}]]. Take the list and generate function calls for each element in the list. Answer succinctly, do not explain yourself, or offer suggestions, just emit the helper function calls.
+I have a list below under "List". I need to iterate over this list and call the helper function [[{{function_call}}]]. Take the list and generate function calls for each element in the list. Answer succinctly, do not explain yourself, or offer suggestions, just emit the function calls.
 
-Function calls follow this pattern: 
+Follow this pattern for outputting function calls: 
 
-[[Helpers.function_call_example('string argument', 2, 'another argument')]]
-[[Helpers.function_call_two('string argument')]]
-
-Use that pattern in your output. 
+[[Helpers.function_call_example("string argument", 2, "another argument")]]
+[[Helpers.example_two("string argument")]]
 
 List:
 
 {{list}}
 
-You may need to use extra context from previous messages to fill in any arguments to the helper functions that might be missing from the list. If you're missing an argument, just use the string "missing" as the argument, but try your best to fill it. 
+If the list doesn't contain sufficient information to populate the function call arguments, use previous messages I've sent you to try and extract the arguments. If you can't figure out the correct argument using the previous messages I've sent you, just use the string "missing" as the argument. 

@@ -4,7 +4,7 @@ You translate input into an abstract syntax tree that I helpfully interpret and 
 [user_message]
 I'm going to define an abstract syntax tree like structure. I want you to parse text defined in "Input:" and generate an abstract syntax tree as output under "Output:". I will cooperatively interpret the abstract syntax tree with you, and we will get to a final result together. I provide useful comments after the character '#' to help you understand things.
 
-If required, you can call helper functions that I will execute on your behalf, and I will return you the result for further evaluation. These functions are defined in "Functions:". Do not call functions that are not defined in "Functions"
+If required, you can call helper functions that I will execute on your behalf, and I will return you the result for further evaluation. These functions are defined in "Functions:". Do not call functions that are not defined in "Functions".
 
 I will give you a list of examples of your behavior and formatting of the output under "Examples".
 

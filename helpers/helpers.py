@@ -3,6 +3,7 @@ import inspect
 import os
 import re
 import shelve
+import typing
 from enum import Enum, IntEnum
 from itertools import cycle, islice
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
@@ -433,6 +434,13 @@ class Helpers():
                         }  # type: ignore
                     })
 
+            def required_params(func):
+                parameters = inspect.signature(func).parameters
+                return [
+                    name for name, param in parameters.items()
+                    if param.default == inspect.Parameter.empty and param.kind != param.VAR_KEYWORD
+                ]
+
             function = {
                 'name': invoked_by,
                 'description': description,
@@ -440,27 +448,36 @@ class Helpers():
                     'type': 'object',
                     'properties': params
                 },
-                'required': list(params.keys()),
+                'required': required_params(func),
             }
             return function
         else:
-            if not func.__doc__:
-                return {
-                    'invoked_by': invoked_by,
-                    'description': description,
-                    'parameters': list(inspect.signature(func).parameters.keys()),
-                }
+            # check to see if parameters are specified in the __doc__, often they're not
+            if not parse(func.__doc__).params:
+                parameters = list(inspect.signature(func).parameters.keys())
+            else:
+                parameters = [p.arg_name for p in parse(func.__doc__).params]
+
+            types = [p.__name__ for p in typing.get_type_hints(func).values()]
+
             return {
                 # todo: refactor this to be name
                 'invoked_by': invoked_by,
                 'description': description,
-                'parameters': [p.arg_name for p in parse(func.__doc__).params],
+                'parameters': parameters,
+                'types': types,
             }
 
     @staticmethod
     def get_function_description_flat(function: Callable) -> str:
         description = Helpers.get_function_description(function, openai_format=False)
         return (f'{description["invoked_by"]}({", ".join(description["parameters"])})  # {description["description"]}')
+
+    @staticmethod
+    def get_function_description_flat_extra(function: Callable) -> str:
+        description = Helpers.get_function_description(function, openai_format=False)
+        parameter_type_list = [f"{param}: {typ}" for param, typ in zip(description['parameters'], description['types'])]
+        return (f'{description["invoked_by"]}({", ".join(parameter_type_list)})  # {description["description"]}')
 
     @staticmethod
     def parse_function_call(call: str, functions: List[Callable]) -> Optional[Tuple[Callable, Dict[str, Any]]]:

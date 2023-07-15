@@ -92,13 +92,8 @@ class EmailHelpers():
         start_date: dt.datetime,
         end_date: dt.datetime,
     ):
-        """Send a calendar invite to the attendee
+        """Send a calendar invite to the attendee"""
 
-        Args:
-            from_name (str): name of the sender
-            from_email (str): email of the sender
-            attendee_email (str): email of the attendee
-        """
         cal = Calendar()
         cal.add('prodid', '-//9600//CalendarApp//EN')
         cal.add('version', '2.0')

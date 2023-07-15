@@ -82,33 +82,25 @@ class AstNode(ABC):
         return visitor.visit(self)
 
 
-class Text(AstNode):
-    def __init__(
-        self,
-        text: str = '',
-    ):
-        self.text = text
-
-    def __str__(self):
-        return self.text
-
-    def __repr__(self):
-        return f'Text({self.text})'
-
-
 class Content(AstNode):
     def __init__(
         self,
-        sequence: AstNode | List[AstNode],
+        sequence: Optional[AstNode | List[AstNode] | str] = None,
     ):
-        if isinstance(sequence, Content):
+        if sequence is None:
+            self.sequence = ''
+            return
+
+        if isinstance(sequence, str):
+            self.sequence = [sequence]
+        elif isinstance(sequence, Content):
             self.sequence = sequence.sequence  # type: ignore
-        elif isinstance(sequence, Text):
-            self.sequence = sequence
         elif isinstance(sequence, AstNode):
             self.sequence = [sequence]
+        elif isinstance(sequence, list) and len(sequence) > 0 and isinstance(sequence[0], AstNode):
+            self.sequence = sequence
         else:
-            self.sequence = cast(List[AstNode], sequence)
+            raise ValueError('not supported')
 
     def __str__(self):
         if isinstance(self.sequence, list):
@@ -136,11 +128,11 @@ class Message(AstNode):
         role = message['role']
         content = message['content']
         if role == 'user':
-            return User(Content(Text(content)))
+            return User(Content(content))
         elif role == 'system':
-            return System(Text(content))
+            return System(Content(content))
         elif role == 'assistant':
-            return Assistant(Content(Text(content)))
+            return Assistant(Content(content))
         raise ValueError('role not found supported')
 
     def __getitem__(self, key):
@@ -171,7 +163,7 @@ class User(Message):
 class System(Message):
     def __init__(
         self,
-        message: Text = Text('''
+        message: Content = Content('''
             You are a helpful assistant.
             Dont make assumptions about what values to plug into functions.
             Ask for clarification if a user request is ambiguous.
@@ -296,7 +288,7 @@ class FunctionCall(Call):
         name: str,
         args: List[Dict[str, object]],
         types: List[Dict[str, object]],
-        context: Content = Content(Text('')),
+        context: Content = Content(),
         func: Optional[Callable] = None,
     ):
         super().__init__()
@@ -304,7 +296,7 @@ class FunctionCall(Call):
         self.args = args
         self.types = types
         self.context = context
-        self._result: Optional[Text] = None
+        self._result: Optional[Content] = None
         self.func: Optional[Callable] = func
 
     def to_code_call(self):
@@ -314,6 +306,15 @@ class FunctionCall(Call):
                 arguments.append(v)
 
         str_args = ', '.join([str(arg) for arg in arguments])
+        return f'{self.name}({str_args})'
+
+    def to_definition(self):
+        definitions = []
+        for arg in self.types:
+            for k, v in arg.items():
+                definitions.append(f'{k}: {v}')
+
+        str_args = ', '.join([str(t) for t in definitions])
         return f'{self.name}({str_args})'
 
 class Answer(Statement):
@@ -429,11 +430,8 @@ def tree_map(node: AstNode, call: Callable[[AstNode], Any]) -> List[Any]:
     if isinstance(node, Content):
         if isinstance(node.sequence, list):
             for n in node.sequence:
-                visited.extend(tree_map(n, call))
-        else:
-            visited.extend(tree_map(node.sequence, call))
-    elif isinstance(node, Text):
-        pass
+                if isinstance(n, AstNode):
+                    visited.extend(tree_map(n, call))
     elif isinstance(node, User):
         visited.extend(tree_map(node.message, call))
     elif isinstance(node, Assistant):
@@ -463,15 +461,15 @@ def tree_map(node: AstNode, call: Callable[[AstNode], Any]) -> List[Any]:
 def tree_traverse(node, visitor: Visitor):
     if isinstance(node, Content):
         if isinstance(node.sequence, list):
-            node.sequence = Helpers.flatten([cast(AstNode, tree_traverse(child, visitor)) for child in node.sequence])
+            node.sequence = Helpers.flatten(
+                [cast(AstNode, tree_traverse(child, visitor)) for child in node.sequence if isinstance(child, AstNode)]
+            )
         elif isinstance(node, AstNode):
             node.sequence = [cast(AstNode, tree_traverse(node.sequence, visitor))]  # type: ignore
     elif isinstance(node, Assistant):
         node.message = cast(Content, tree_traverse(node.message, visitor))
     elif isinstance(node, Message):
         node.message = cast(Content, tree_traverse(node.message, visitor))
-    elif isinstance(node, Text):
-        pass
     elif isinstance(node, NaturalLanguage):
         node.messages = [cast(User, tree_traverse(child, visitor)) for child in node.messages]
         if node.system:

@@ -10,3 +10,4 @@ config.yaml
 backup/
 logs/
 cache/
+prompt_backup/
