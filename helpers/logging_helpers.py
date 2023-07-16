@@ -12,6 +12,8 @@ def setup_logging(
     default_level=logging.DEBUG,
 ):
     logging.getLogger('asyncio').setLevel(logging.WARNING)
+    logging.getLogger('markdown_it').setLevel(logging.WARNING)
+    logging.getLogger('markdown_it').setLevel(logging.WARNING)
 
     if module_name in global_loggers:
         return global_loggers[module_name]

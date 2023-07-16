@@ -32,18 +32,33 @@ class Repl():
         self.agents: List[Agent] = []
 
     def print_response(self, statements: List[Statement | AstNode]):
+        def contains_token(s, tokens):
+            return any(token in s for token in tokens)
+
+        def pprint(prepend: str, s: str):
+            markdown_tokens = ['###', '* ', '](', '```']
+            from rich.console import Console
+            from rich.markdown import Markdown
+            console = Console()
+
+            if contains_token(s, markdown_tokens):
+                console.print(f'{prepend}', end='')
+                console.print(Markdown(s))
+            else:
+                console.print(f'{prepend}{s}')
+
         for statement in statements:
             if isinstance(statement, Assistant):
                 # todo, this is a hack, Assistant not a Statement
-                rich.print(f'[bold green]Assistant[/bold green]: {str(statement.message)}')
+                pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
             elif isinstance(statement, Content):
-                rich.print(f'{str(statement).strip()}')
+                pprint('', str(statement).strip())
             elif isinstance(statement, System):
-                rich.print(f'[bold red]System[/bold red]: {str(statement.message)}')
+                pprint('[bold red]System[/bold red]: ', str(statement.message))
             elif isinstance(statement, User):
-                rich.print(f'[bold blue]User[/bold blue]: {str(statement.message)}')
+                pprint('[bold blue]User[/bold blue]: ', str(statement.message))
             elif isinstance(statement, Assistant):
-                rich.print(f'[bold green]Assistant[/bold green]: {str(statement.message)}')
+                pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
             elif isinstance(statement, Answer):
                 # todo, get rid of Answer
                 rich.print('[bold green]Assistant[/bold green]:')
@@ -51,25 +66,22 @@ class Repl():
             elif isinstance(statement, FunctionCall):
                 logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
                 if 'search_internet' in statement.name:
-                    rich.print(f'[bold yellow]FunctionCall[/bold yellow]: {statement.to_code_call()}')
-
-                    from rich.console import Console
-                    from rich.markdown import Markdown
-                    console = Console()
-                    console.print(Markdown(str(statement.result())))
+                    pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
                 else:
-                    rich.print(f'[bold yellow]FunctionCall[/bold yellow]: {statement.to_code_call()}')
-                    rich.print(f'  {statement.result()}')
+                    pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
+                    pprint('', f'  {statement.result()}')
             elif isinstance(statement, NaturalLanguage):
                 for message in statement.messages:
-                    rich.print(f'[bold green]{message.role().capitalize()}[/bold green]: {str(message.message)}')
+                    pprint(f'[bold green]{message.role().capitalize()}[/bold green]: ', str(message.message))
+                if statement.result():
+                    self.print_response([cast(AstNode, statement.result())])
             elif isinstance(statement, Continuation):
                 if isinstance(statement.result(), list):
                     self.print_response(cast(list, statement.result()))
                 else:
                     self.print_response([cast(Statement, statement.result())])
             else:
-                rich.print(str(statement))
+                pprint('', str(statement))
 
     def repl(self):
         console = rich.console.Console()
@@ -116,11 +128,13 @@ class Repl():
 
                 elif '/clear' in query:
                     messages = []
+                    continue
 
                 elif '/conversation' in query:
                     self.print_response(messages)  # type: ignore
+                    continue
 
-                if '/context' in query:
+                elif '/context' in query:
                     context = Helpers.in_between(query, '/context', '\n').strip()
 
                     if context in executor_names:
@@ -133,15 +147,26 @@ class Repl():
                         rich.print('Invalid context: {}'.format(current_context))
                     continue
 
-                if '/agents' in query:
+                elif '/agents' in query:
                     rich.print('Agents:')
                     for agent in self.agents:
                         rich.print('  [bold]{}[/bold]'.format(agent.__class__.__name__))
                         rich.print('    {}'.format(agent.instruction()))
                     continue
 
-                if '/any' in query:
+                elif '/any' in query:
                     executor_contexts = self.executors
+                    continue
+
+                elif query.startswith('/direct'):
+                    query = Helpers.in_between(query, '/direct', '\n').strip()
+                    messages.append(User(Content(query)))
+                    statement = execution_controller.execute_statement(
+                        statement=NaturalLanguage(messages=messages),
+                        executor=executor_contexts[0]
+                    )
+                    self.print_response([statement])
+                    rich.print()
                     continue
 
                 messages.append(User(Content(query)))

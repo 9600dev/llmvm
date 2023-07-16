@@ -305,7 +305,6 @@ class Helpers():
 
         return len(tiktoken.encoding_for_model(model).encode(content))
 
-
     @staticmethod
     async def generator_for_new_tokens(program, *args, **kwargs):
         future = program(*args, **kwargs, silent=True, async_mode=True)

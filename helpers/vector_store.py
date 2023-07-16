@@ -89,7 +89,7 @@ class VectorStore():
             text_splitter = splitter
         else:
             html_tokens = ['<html>', '<body>', '<div>', '<script>', '<style>']
-            markdown_tokens = ['###', '* ', '](']
+            markdown_tokens = ['###', '* ', '](', '```']
             if contains_token(s, html_tokens):
                 text_splitter = RecursiveCharacterTextSplitter.from_language(
                     language=Language.HTML,
