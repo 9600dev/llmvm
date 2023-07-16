@@ -2,7 +2,6 @@ import asyncio
 import inspect
 import os
 import re
-import shelve
 import typing
 from enum import Enum, IntEnum
 from itertools import cycle, islice
@@ -11,6 +10,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import dill
 import guidance
 import nest_asyncio
+import tiktoken
 from docstring_parser import parse
 from guidance.llms import LLM, OpenAI
 from guidance.llms.transformers import LLaMA, Vicuna
@@ -292,11 +292,19 @@ class Helpers():
         return ' '.join(Helpers.flatten(words))
 
     @staticmethod
-    def calculate_tokens(content: str | List[Dict[str, str]]):
+    def calculate_tokens_2(content: str | List[Dict[str, str]]):
         if isinstance(content, list):
             return len(Helpers.messages_to_str(content).split()) / 0.75
         else:
             return len(content.split()) / 0.75
+
+    @staticmethod
+    def calculate_tokens(content: str | List[Dict[str, str]], model: str = 'gpt-3.5-turbo-16k') -> int:
+        if isinstance(content, list):
+            content = Helpers.messages_to_str(content)
+
+        return len(tiktoken.encoding_for_model(model).encode(content))
+
 
     @staticmethod
     async def generator_for_new_tokens(program, *args, **kwargs):

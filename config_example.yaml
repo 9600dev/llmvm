@@ -5,4 +5,4 @@ smtp_server: 'localhost'
 smtp_port: 1025
 smtp_username: 'blah@blah.net'
 smtp_password: 'password'
-
+cache_filename: 'cache/cache.db'

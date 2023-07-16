@@ -50,8 +50,8 @@ class OpenAIExecutor(Executor):
         total_tokens = Helpers.calculate_tokens(messages)
         if total_tokens + max_completion_tokens > self.max_tokens():
             raise Exception(
-                'Prompt too long, calculated user tokens: {}, completion tokens: {}'
-                .format(total_tokens, max_completion_tokens)
+                'Prompt too long, calculated user tokens: {}, completion tokens: {} total model tokens: {}'
+                .format(total_tokens, max_completion_tokens, self.max_tokens())
             )
 
         if not chat_format and len(functions) > 0:

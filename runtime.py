@@ -1,5 +1,6 @@
 import datetime as dt
 import inspect
+import math
 import os
 import sys
 import time
@@ -18,8 +19,6 @@ from langchain.embeddings import OpenAIEmbeddings
 from langchain.llms import OpenAI as langchain_OpenAI
 from langchain.text_splitter import (MarkdownTextSplitter,
                                      PythonCodeTextSplitter, TokenTextSplitter)
-from prompt_toolkit import prompt
-from prompt_toolkit.history import FileHistory
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
 from eightbitvicuna import VicunaEightBit
@@ -41,7 +40,6 @@ logging = setup_logging()
 def response_writer(callee, message):
     with (open('logs/ast.log', 'a')) as f:
         f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')
-
 
 
 # https://glean.com/product/ai-search
@@ -190,6 +188,10 @@ class Parser():
 
             if re.startswith('answer(') and ')' in re:
                 answer = Helpers.in_between(re, 'answer(', ')')
+                if answer.startswith('"') and answer.endswith('"'):
+                    answer = answer[1:-1]
+                if answer.startswith('\'') and answer.endswith('\''):
+                    answer = answer[1:-1]
                 self.consume(')')
                 return Answer(conversation=[Content(answer)])
 
@@ -284,14 +286,13 @@ class ExecutionController():
         self,
         execution_contexts: List[Executor],
         agents: List[Callable] = [],
-        vector_store: Optional[VectorStore] = None,
+        vector_store: VectorStore = VectorStore(),
         cache: PersistentCache = PersistentCache(),
     ):
         self.execution_contexts: List[Executor] = execution_contexts
         self.agents = agents
         self.parser = Parser()
-        self.messages: List[Message] = []
-        self.vector_store = vector_store
+        self.vector_store: VectorStore = vector_store
         self.cache = cache
 
     def classify_tool_or_direct(
@@ -300,8 +301,11 @@ class ExecutionController():
     ) -> Dict[str, float]:
         def parse_result(result: str) -> Dict[str, float]:
             if ',' in result:
-                first = result.split(',')[0]
-                second = result.split(',')[1]
+                if result.startswith('Assistant: '):
+                    result = result[len('Assistant: '):].strip()
+
+                first = result.split(',')[0].strip()
+                second = result.split(',')[1].strip()
                 try:
                     if first.startswith('tool') or first.startswith('"tool"'):
                         return {'tool': float(second)}
@@ -332,9 +336,68 @@ class ExecutionController():
             ],
         )
 
+        response_writer('query_understanding.prompt', assistant)
+
         if assistant.error or not parse_result(str(assistant.message)):
             return {'tool': 1.0}
         return parse_result(str(assistant.message))
+
+    def __chunk_messages(
+        self,
+        query: Any,
+        messages: List[Message],
+        max_token_count: int,
+    ) -> List[Message]:
+        # force conversion to str
+        query = str(query)
+        total_message = '\n'.join([str(m.message) for m in messages])
+
+        if Helpers.calculate_tokens(total_message) + Helpers.calculate_tokens(query) < max_token_count:
+            return messages
+
+        total_tokens_per_message = math.floor(max_token_count / len(messages))
+
+        chunked_messages: List[Message] = []
+
+        for message in messages:
+            ranked: List[Tuple[str, float]] = self.vector_store.chunk_and_rank(
+                query,
+                str(message.message),
+                chunk_token_count=math.floor(total_tokens_per_message / 5),
+                max_tokens=total_tokens_per_message,
+            )
+            ranked_str = '\n\n'.join([r[0] for r in ranked])
+
+            while Helpers.calculate_tokens(ranked_str) + Helpers.calculate_tokens(query) > max_token_count:
+                ranked_str = ranked_str[0:len(ranked_str) - 16]
+
+            chunked_messages.append(message.__class__(Content(ranked_str)))
+        return chunked_messages
+
+    def __chunk_content(
+        self,
+        query: Any,
+        current_str: Any,
+        max_token_count: int,
+    ) -> str:
+        # force conversion to str
+        query = str(query)
+        current_str = str(current_str)
+
+        if Helpers.calculate_tokens(current_str) + Helpers.calculate_tokens(query) < max_token_count:
+            return str(current_str)
+
+        ranked: List[Tuple[str, float]] = self.vector_store.chunk_and_rank(
+            query,
+            current_str,
+            chunk_token_count=math.floor((max_token_count / 10)),
+        )
+
+        ranked_str = '\n\n'.join([r[0] for r in ranked])
+        while Helpers.calculate_tokens(ranked_str) + Helpers.calculate_tokens(query) > max_token_count:
+            ranked_str = ranked_str[0:len(ranked_str) - 16]
+
+        return ranked_str
 
     def __lhs_to_str(self, lhs: List[Statement]) -> str:
         results = [r for r in lhs if r.result()]
@@ -444,16 +507,20 @@ class ExecutionController():
                 function_args = {}
                 function_result = function_call.result()
 
-                query_understanding = Helpers.load_and_populate_prompt(
+                continuation_function = Helpers.load_and_populate_prompt(
                     prompt_filename='prompts/continuation_function.prompt',
                     template={
                         'function_name': function_call.to_code_call(),
-                        'function_result': str(function_result),
+                        'function_result': self.__chunk_content(
+                            query=statement.messages[0],
+                            current_str=function_result,
+                            max_token_count=executor.max_tokens()
+                        ),
                         'natural_language': str(statement.messages[0]),
                     }
                 )
 
-                messages.append(User(Content(query_understanding['user_message'])))
+                messages.append(User(Content(continuation_function['user_message'])))
                 assistant: Assistant = executor.execute(messages)
                 response_writer('continuation_function.prompt', assistant)
                 statement._result = assistant
@@ -476,14 +543,14 @@ class ExecutionController():
 
             else:
                 # generic continuation response
-                query_understanding = Helpers.load_and_populate_prompt(
+                continuation_generic = Helpers.load_and_populate_prompt(
                     prompt_filename='prompts/continuation_generic.prompt',
                     template={
                         'context': str(callee_or_context.result()),
                         'query': str(statement.messages[0]),
                     }
                 )
-                messages.append(User(Content(query_understanding['user_message'])))
+                messages.append(User(Content(continuation_generic['user_message'])))
                 assistant: Assistant = executor.execute(messages)
                 response_writer('continuation_generic.prompt', assistant)
                 statement._result = assistant
@@ -498,8 +565,14 @@ class ExecutionController():
             system_message = statement.system if statement.system else System(Content('You are a helpful assistant.'))
             messages.append(system_message)
             messages.extend(statement.messages)
-            result = executor.execute(messages)
+
+            result = executor.execute(self.__chunk_messages(
+                query=messages[-1],
+                messages=messages,
+                max_token_count=executor.max_tokens()
+            ))
             response_writer('natural_language.prompt', result)
+
             statement._result = result
             return statement
 
@@ -543,7 +616,9 @@ class ExecutionController():
                         'prompts/functioncall_correction.prompt',
                         template={
                             'function_calls_missing': str(result.message),
-                            'function_call_signatures': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                            'function_call_signatures': '\n'.join(
+                                [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+                            ),
                             'previous_messages': '\n'.join([str(m.message) for m in messages[0:-1]])
                         }
                     )
@@ -565,14 +640,14 @@ class ExecutionController():
                 return statement
 
             elif isinstance(statement.rhs, NaturalLanguage):
-                query_understanding = Helpers.load_and_populate_prompt(
+                foreach_functioncall = Helpers.load_and_populate_prompt(
                     prompt_filename='prompts/foreach_functioncall.prompt',
                     template={
                         'list': '\n'.join([str(s.result()) for s in statement.lhs]),
                         'natural_language': str(statement.rhs.messages[0]),
                     }
                 )
-                messages.append(User(Content(query_understanding['user_message'])))
+                messages.append(User(Content(foreach_functioncall['user_message'])))
                 result = executor.execute(messages)
                 response_writer('foreach_functioncall.prompt', result)
                 statement._result = result
@@ -605,242 +680,58 @@ class ExecutionController():
 
         return answers
 
-    def execute_simple(
+    def execute_chat(
         self,
-        system_message: str,
-        user_message: str,
+        messages: List[Message],
     ) -> Assistant:
         executor = self.execution_contexts[0]
-        return executor.execute(
-            messages=[
-                System(Content(system_message)),
-                User(Content(user_message))
-            ]
-        )
+        return executor.execute(messages)
 
     def execute(
         self,
-        prompt: str,
+        call: NaturalLanguage
     ) -> List[Statement]:
-        results: List[Statement] = []
-
         # pick the right execution context that will get the task done
         # for now, we just grab the first
+        results: List[Statement] = []
         executor = self.execution_contexts[0]
 
         # create an execution flow
         execution: ExecutionFlow[Statement] = ExecutionFlow(Order.QUEUE)
 
         # assess the type of task
-        classification = self.classify_tool_or_direct(prompt)
+        classification = self.classify_tool_or_direct(str(call.messages[-1].message))
 
         # if it requires tooling, hand it off to the AST execution engine
         if 'tool' in classification:
-            # call the LLM, asking it to hand back an AST
-            llm_call = NaturalLanguage(
-                messages=[User(Content(prompt))],
-                executor=executor
-            )
-
-            response = executor.execute_with_agents(call=llm_call, agents=agents)
+            response = executor.execute_with_agents(call=call, agents=self.agents)
             assistant_response = str(response.message)
 
             # debug output
-            with (open('logs/ast.log', 'a')) as f:
-                f.write(f'{str(dt.datetime.now())}: {assistant_response}\n')
+            response_writer('llm_call', assistant_response)
 
+            # parse the response
             program = Parser().parse_program(assistant_response, self.agents, executor, execution)
+
+            # execute the program
             answers: List[Statement] = self.execute_program(program, execution)
             results.extend(answers)
         else:
-            assistant_reply: Assistant = self.execute_simple(
-                system_message='You are a helpful assistant.',
-                user_message=prompt
-            )
-            results.append(Answer(
-                conversation=[Content(assistant_reply.message)],
-                result=assistant_reply
-            ))
+            assistant_reply: Assistant = self.execute_chat(call.messages)
+            results.append(Answer(conversation=[Content(str(assistant_reply.message))]))
 
         return results
 
-
-class Repl():
-    def __init__(
+    def execute_completion(
         self,
-        executors: List[Executor]
-    ):
-        self.executors: List[Executor] = executors
-        self.agents: List[Agent] = []
+        user_message: str,
+        system_message: str = 'You are a helpful assistant.'
+    ) -> List[Statement]:
+        call = NaturalLanguage(messages=[
+            System(Content(system_message)),
+            User(Content(user_message))
+        ])
 
-    def print_response(self, statements: List[Statement]):
-        for statement in statements:
-            if isinstance(statement, Assistant):
-                # todo, this is a hack, Assistant not a Statement
-                rich.print(f'[bold green]Assistant[/bold green]: {str(statement.message)}')
-            elif isinstance(statement, FunctionCall):
-                logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
-                rich.print(f'[bold yellow]FunctionCall[/bold yellow]: {statement.to_code_call()}')
-                rich.print(f'  {statement.result()}')
-            elif isinstance(statement, NaturalLanguage):
-                for message in statement.messages:
-                    rich.print(f'[bold green]{message.role().capitalize()}[/bold green]: {str(message.message)}')
-            elif isinstance(statement, Continuation):
-                if isinstance(statement.result(), list):
-                    self.print_response(cast(list, statement.result()))
-                else:
-                    self.print_response([cast(Statement, statement.result())])
-            else:
-                rich.print(str(statement))
-
-    def repl(self):
-        console = rich.console.Console()
-        history = FileHistory(".repl_history")
-
-        rich.print()
-        rich.print('[bold]I am a helpful assistant.[/bold]')
-        rich.print()
-
-        executor_contexts = self.executors
-        executor_names = [executor.name() for executor in executor_contexts]
-
-        current_context = 'openai'
-        execution_controller = ExecutionController(
-            execution_contexts=executor_contexts,
-            agents=agents,
-            cache=PersistentCache('cache/cache.db')
-        )
-
-        commands = {
-            'exit': 'exit the repl',
-            '/context': 'change the current context',
-            '/agents': 'list the available agents',
-            '/any': 'execute the query in all contexts',
-        }
-
-        while True:
-            try:
-                query = prompt('prompt>> ', history=history, enable_history_search=True, vi_mode=True)
-
-                if query is None or query == '':
-                    continue
-
-                if '/help' in query:
-                    rich.print('Commands:')
-                    for command, description in commands.items():
-                        rich.print('  [bold]{}[/bold] - {}'.format(command, description))
-                    continue
-
-                if 'exit' in query:
-                    sys.exit(0)
-
-                if '/context' in query:
-                    context = Helpers.in_between(query, '/context', '\n').strip()
-
-                    if context in executor_names:
-                        current_context = context
-                        executor_contexts = [executor for executor in self.executors if executor.name() == current_context]
-                        rich.print('Current context: {}'.format(current_context))
-                    elif context == '':
-                        rich.print([e.name() for e in self.executors])
-                    else:
-                        rich.print('Invalid context: {}'.format(current_context))
-                    continue
-
-                if '/agents' in query:
-                    rich.print('Agents:')
-                    for agent in self.agents:
-                        rich.print('  [bold]{}[/bold]'.format(agent.__class__.__name__))
-                        rich.print('    {}'.format(agent.instruction()))
-                    continue
-
-                if '/any' in query:
-                    executor_contexts = self.executors
-                    continue
-
-                results = execution_controller.execute(prompt=query)
-
-                self.print_response(results)
-                rich.print()
-
-            except KeyboardInterrupt:
-                print("\nKeyboardInterrupt")
-                break
-
-            except Exception:
-                console.print_exception(max_frames=10)
+        return self.execute(call)
 
 
-agents = [
-    WebHelpers.get_url,
-    WebHelpers.get_news,
-    WebHelpers.get_url_firefox,
-    WebHelpers.search_news,
-    WebHelpers.search_internet,
-    WebHelpers.search_linkedin_profile,
-    WebHelpers.get_linkedin_profile,
-    EdgarHelpers.get_latest_form_text,
-    PdfHelpers.parse_pdf,
-    MarketHelpers.get_stock_price,
-    MarketHelpers.get_market_capitalization,
-    EmailHelpers.send_email,
-    EmailHelpers.send_calendar_invite,
-]
-
-def start(
-    context: Optional[str],
-    prompt: Optional[str],
-    verbose: bool
-):
-
-    openai_key = str(os.environ.get('OPENAI_API_KEY'))
-    execution_environments = []
-
-    # def langchain_executor():
-    #    openai_executor = LangChainExecutor(openai_key, verbose=verbose)
-    #    return openai_executor
-
-    def openai_executor():
-        openai_executor = OpenAIExecutor(openai_key, verbose=verbose, cache=PersistentCache('cache/cache.db'))
-        return openai_executor
-
-    executors = {
-        'openai': openai_executor(),
-        # 'langchain': langchain_executor(),
-    }
-
-    if context:
-        execution_environments.append(executors[context])
-    else:
-        execution_environments.append(list(executors.values()))
-
-    if not prompt:
-        repl = Repl(execution_environments)
-        repl.repl()
-    else:
-        execution_environments[0].execute(prompt, '')
-
-
-@click.command()
-@click.option('--context', type=click.Choice(['openai', 'langchain', 'local']), required=False, default='openai')
-@click.option('--prompt', type=str, required=False, default='')
-@click.option('--verbose', type=bool, default=True)
-def main(
-    context: Optional[str],
-    prompt: Optional[str],
-    verbose: bool,
-):
-    if not os.environ.get('OPENAI_API_KEY'):
-        raise Exception('OPENAI_API_KEY environment variable not set')
-
-    if not verbose:
-        import logging as logging_library
-        logging_library.getLogger().setLevel(logging_library.ERROR)
-
-    start(
-        context,
-        prompt,
-        verbose)
-
-if __name__ == '__main__':
-    main()

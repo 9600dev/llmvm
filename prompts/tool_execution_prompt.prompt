@@ -82,6 +82,13 @@ Who is the current CEO of AMD?
 Output:
 function_call([[WebHelpers.search_internet("Who is the current CEO of AMD?")]]) [[=>]] natural_language("Extract the current CEO")
 
+Example:  # in this example, you're searching the internet for a bread recipe, then you're calling yourself again to get just one recipe, then calling yourself again to get a list of the ingredients.
+Input:
+Search the Internet for a fluffy bread recipe and then list the ingredients. 
+
+Output:
+function_call([[WebHelpers.search_internet("fluffy bread recipe")]]) [[=>]] natural_language("find and extract a bread recipe from these search results") => natural_language("get the list of ingredients")
+
 Example:  # in this example, you know the answer of Who was the first prime minister of Australia, so you helpfully just directly generate the answer using the response tree element.
 Input:
 Who was the first prime minister of Australia?

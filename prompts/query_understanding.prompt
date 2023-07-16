@@ -1,45 +1,43 @@
 [system_message]
-You're a helpful assistant that classifies queries into several different categories. 
+You're a helpful assistant that classifies user queries into two different categories. 
 
 [user_message]
-I'm going to give you a user prompt. I want you to classify the prompt into one of two categories: "direct" or "tool". I will describe the features of both categories to help you decide. 
-
-"tool":
-
-This category labels user prompts as requiring the use of helper tools to complete the task or tasks in the prompt. You should reflect on your ability to directly complete the task without help, and if you can't, this category would be the best to use. 
-
-Examples of user prompts that should be labeled "tool": 
-
-Example of a prompt requiring a helper tool:
-User Prompt: "Get the page at the url https://www.slashdot.org and summarize it"
-
-Example of a prompt requiring a helper tool:
-User Prompt: "Search twitter for the latest sentiment on NVIDIA"
-
-The list of helper tools and functions that can be used are: 
-
-{{functions}}
-
-You should use this list to reflect on the given user prompt to see if you need to use these tools and helper functions or not.
+I'm going to give you a user query at the bottom. I want you to classify the query into one of two categories: "direct" or "tool". I will describe the features of both direct and tool to help you decide which is best for a given user query. You should emit the category, and the probability of being correct in the classification. I will also give you a list of example classifications below. 
 
 "direct":
 
-The direct category labels user prompts that you are able to respond to and complete yourself. You should reflect on your ability to complete the tasks defined and if you're able to complete them without help, label the prompt "direct". Remember, your knowledge is only up to date as of the year 2021 - tooling is required to get more recent knowledge. 
+The "direct" category labels user queries that you are able to respond to and answer yourself. You should reflect on your ability to complete the tasks and answer the questions defined in the query and if you're able to compute them without help you should label the query "direct". Remember, your knowledge is only up to date as of the year 2021 - "direct" is not appropriate for questions or tasks that require up to date information or data. 
 
-Example of a prompt that you could label "direct":
+"tool":
 
-User prompt: "What month has the largest rainfall in Hawaii?"
+The "tool" category classifies user queries as requiring the use of helper functions to complete the task or tasks in the query. User queries that require up to date information or data should use helper functions and be classified as "tool". Words in the query like "current", "today", "recent" and so on should generally be categorized as "tool". Here is the list of helper function definitions that are available as tools. You can use this list to help classify a query as "tool".
 
-Remember, you have old information, and no access to the Internet. You should prefer to use "tool" rather than "direct" to ensure you have the most up to date knowledge and content.
+Helper functions: 
 
-When replying or answering, just emit "tool" or "direct" along with a probability of being correct in the labeling. Reflect deeply, try not to be 100% certain. An example of your output:
+{{functions}}
 
-User prompt: "What month has the largest rainfall in Hawaii?"
-Assistant: "direct", 0.85
+Examples of classification: 
 
-User prompt: "Get the name of the current CEO of AMD"
-Assistant: "tool", 0.95
+Here is a list of examples to help you complete the classification. It also demonstrates the output format and style I want.
 
-Ready?
+User: "Get the page at the url https://www.slashdot.org and summarize it"
+Assistant: tool, 1.0
 
-User prompt: {{user_input}}
+User: "Search twitter for the latest sentiment on NVIDIA"
+Assistant: tool, 1.0
+
+Assistant: direct, 0.85
+User: "What month has the largest rainfall in Hawaii?"
+
+User: Get the name of the current CEO of AMD
+Assistant: tool, 1.0 
+
+User: Who is the current head of state in Australia? 
+Assistant: tool, 1.0
+
+User: Generate a story based on two characters: Bill and Jane. The story should be magical and whimsical. 
+Assistant: direct, 0.75
+
+Okay, your turn. Here is the User query. Classify it as either "tool" or "direct" and output the probability. Do not explain yourself, only emit the format "classification, probability" like the examples above.
+
+User: {{user_input}}

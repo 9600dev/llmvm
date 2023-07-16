@@ -325,7 +325,7 @@ class Answer(Statement):
         error: object = None,
     ):
         super().__init__()
-        self.conversation = conversation,
+        self.conversation: List[AstNode] = conversation
         self._result = result
         self.error = error
 
