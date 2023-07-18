@@ -1,7 +1,5 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaTokenizer
-
-from guidance.llms._llm import LLM
 from guidance.llms._transformers import Transformers
+from transformers import AutoModelForCausalLM, LlamaTokenizer
 
 
 class VicunaEightBit(Transformers):

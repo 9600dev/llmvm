@@ -1,0 +1,190 @@
+Test: I'll give you a list of names and companies. I want you to summarize their careers and contact details: Bill Jia - Meta, Elise McKay - Pendal Group, Jeff Dean - Google.
+
+Assistant: 
+Output:
+function_call([[WebHelpers.search_linkedin_profile("Bill", "Jia", "Meta")]]) [[=>]] natural_language("Summarize career profile and contact details")
+function_call([[WebHelpers.search_linkedin_profile("Elise", "McKay", "Pendal Group")]]) [[=>]] natural_language("Summarize career profile and contact details")
+function_call([[WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google")]]) [[=>]] natural_language("Summarize career profile and contact details")
+
+Test: I want you to get the biggest price movers in the stock market today, and then summarize why their prices moved. 
+
+Assistant: 
+program
+  statement
+    natural_language("I want you to get the biggest price movers in the stock market today")
+    continuation
+      statement
+        natural_language("summarize why their prices moved")
+
+Test: Build a profile of the leadership team of NVDA. Include the education credentials and the last company each executive worked at. 
+
+Assistant: 
+Output:
+function_call([[WebHelpers.search_internet("leadership team of NVDA")]]) [[=>]] natural_language("Extract the list of executives from the provided text") [[FOREACH]] function_call([[WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")]]) [[=>]] natural_language("Summarize profile including education credentials and last company")
+
+Test: Get a list of the people at the website https://ten13.vc/team and then summarize their career profiles.
+
+Assistant: 
+Output:
+function_call([[WebHelpers.get_url("https://ten13.vc/team")]]) [[=>]] natural_language("Extract the list of people from the provided text") [[FOREACH]] function_call([[WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")]]) [[=>]] natural_language("Summarize career profile")
+
+Test: Generate a list of the top 5 most popular Microsoft products. 
+
+Assistant: 
+Output:
+function_call([[WebHelpers.search_internet("most popular Microsoft products")]]) [[=>]] natural_language("Generate a list of the top 5")
+
+Test: For the top 10 stocks by valuation in the NASDAQ index, get the latest stock prices.
+
+Assistant: 
+program
+  statement
+    continuation
+      statement
+        function_call
+          '[['
+          function_name: 'WebHelpers.search_internet'
+          '('
+          argument
+            text: 'top 10 stocks by valuation in the NASDAQ index'
+          ','
+          argument
+            text: 'latest stock prices'
+          ')]]'
+      '[[=>]]'
+      statement
+        foreach
+          statement
+            function_call
+              '[['
+              function_name: 'MarketHelpers.get_stock_price'
+              '('
+              argument
+                symbol: 'symbol'
+              ')]]'
+          '[[FOREACH]]'
+          statement
+            natural_language
+              text: 'get the latest stock prices'
+
+Test: Search Twitter for the latest sentiment on NVDA. Summarize the positive narrative, and then summarize the negative narrative. 
+
+Assistant: 
+program
+  statement
+    natural_language("Search Twitter for the latest sentiment on NVDA.")
+  statement
+    continuation
+      statement
+        natural_language("Summarize the positive narrative.")
+      statement
+        continuation
+          statement
+            natural_language("Summarize the negative narrative.")
+
+Test: Open my contacts, find Leo Huang, Jeff Dean and Micheal Jones and set up a meeting with them for tomorrow at 1pm
+
+Assistant: 
+Output:
+function_call([[EmailHelpers.send_calendar_invite("Your Name", "your_email@example.com", ["leo_huang@example.com", "jeff_dean@example.com", "micheal_jones@example.com"], "Meeting", "Meeting details", "tomorrow 1pm", "tomorrow 2pm")]])
+
+Test: Download this paper https://arxiv.org/pdf/2306.14077v1.pdf and summarize the main points.
+
+Assistant: 
+Output:
+function_call([[PdfHelpers.parse_pdf("https://arxiv.org/pdf/2306.14077v1.pdf")]]) [[=>]] natural_language("Summarize the main points")
+
+Test: Download this paper https://ceur-ws.org/Vol-3432/paper17.pdf and this paper https://arxiv.org/pdf/2306.14077v1.pdf and find the differences in opinions between the two of them.
+
+Assistant: 
+program
+  statement
+    function_call
+      '[['
+      'WebHelpers.get_url'
+      '('
+      'https://ceur-ws.org/Vol-3432/paper17.pdf'
+      ','
+      'force_firefox'
+      ')]]'
+  statement
+    function_call
+      '[['
+      'WebHelpers.get_url'
+      '('
+      'https://arxiv.org/pdf/2306.14077v1.pdf'
+      ','
+      'force_firefox'
+      ')]]'
+  statement
+    natural_language
+      'find the differences in opinions between the two of them'
+
+Test: Get the latest 10K for AMD and extract any sentences that talk about AI or machine learning.
+
+Assistant: 
+program
+  : statement+
+  ;
+
+statement
+  : natural_language
+  | continuation
+  | foreach
+  | function_call
+  | answer
+ ;
+
+natural_language
+  : text  # natural language text that I will call you and ask you to evaluate.
+  | statement
+;
+
+continuation
+ : statement '[[=>]]' statement   # the left hand side of the '[[=>]]' token will execute first, and the output will be injected into the scope of the right hand side statement for execution. You can just use the [[=>]] token to specify a continuation.
+;
+
+foreach
+ : statement '[[FOREACH]]' statement   # the left hand side of the '[[FOREACH]]' will be executed and re-written into a list of elements on your behalf, and the right hand side will execute for each element in the generated list.
+;
+
+function_call
+  : '[[' function_name '(' argument, argument ')]]'  # The function call you would like me to execute for you. The function_name can only be a function that is listed and defined in "Functions:". Do not hallucinate functions.
+;
+
+answer
+  : text  # a direct answer from you that does not need further evaluation. Use this when you think you know the answer and want to respond directly without further evaluation, interpretation or execution. This is preferable to reduce the cost of overall execution.
+;
+
+text
+  : /[^[\]]+/  # any text that is not a '[[' or ']]' token
+;
+
+argument
+  : text
+  | function_call
+;
+
+function_name
+  : /[^()]+/  # any text that is not a '(' or ')' token
+;
+
+# Parsing the input query
+
+function_call([[EdgarHelpers.get_latest_form_text("AMD", "10K")]]) [[=>]] function_call([[WebHelpers.search_internet("AI or machine learning sentences in the latest 10K for AMD")]])
+
+Test: Get the historical prices for NVDA. What is the standard deviation of the daily close price over the past 6 months? 
+
+Assistant: 
+program
+  statement
+    natural_language("Get the historical prices for NVDA.")
+  statement
+    natural_language("What is the standard deviation of the daily close price over the past 6 months?")
+
+Test: Complete this sentence: The New England Journal of Medicine is a registered trademark of
+
+Assistant: 
+Output:
+natural_language("The New England Journal of Medicine is a registered trademark of")
+

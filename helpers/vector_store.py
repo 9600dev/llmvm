@@ -6,13 +6,9 @@ from typing import List, Optional, Tuple
 from langchain.docstore.document import Document
 from langchain.document_loaders import TextLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.text_splitter import (CharacterTextSplitter, Language,
-                                     MarkdownTextSplitter,
-                                     PythonCodeTextSplitter,
+from langchain.text_splitter import (Language, MarkdownTextSplitter,
                                      RecursiveCharacterTextSplitter,
-                                     SpacyTextSplitter, TextSplitter,
-                                     TokenTextSplitter)
-from langchain.vectorstores import FAISS
+                                     SpacyTextSplitter, TextSplitter)
 
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
@@ -34,18 +30,26 @@ class VectorStore():
             openai_api_key=self.openai_key,
         )  # type: ignore
 
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
         self.store_filename: str = store_filename
 
         if not os.path.exists(self.store_filename):
+            from langchain.vectorstores import FAISS
+
             self.store: FAISS = FAISS.from_texts([''], self.embeddings)
             self.store.save_local(self.store_filename)
 
-        self.store = FAISS.load_local(
-            self.store_filename,
-            self.embeddings
-        ) if self.store_filename else FAISS.from_texts([''], self.embeddings)  # type: ignore
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
+    def load_store(self):
+        from langchain.vectorstores import FAISS
+
+        if not self.store:
+            self.store = FAISS.load_local(
+                self.store_filename,
+                self.embeddings
+            )
+
+        return self.store
 
     def load_text(self, text: str):
         documents = []
@@ -59,18 +63,18 @@ class VectorStore():
 
         text_splitter = SpacyTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
         split_texts = text_splitter.split_documents(documents)
-        self.store.add_documents(split_texts)
-        self.store.save_local(self.store_filename)
+        self.load_store().add_documents(split_texts)
+        self.load_store().save_local(self.store_filename)
 
     def search_document(self, query: str, max_results: int = 4) -> List[Document]:
-        return self.store.similarity_search(query, k=max_results)
+        return self.load_store().similarity_search(query, k=max_results)
 
     def search(self, query: str, max_results: int = 4) -> List[str]:
-        result = self.store.similarity_search(query, k=max_results)
+        result = self.load_store().similarity_search(query, k=max_results)
         return [a.page_content for a in result]
 
     def search_with_similarity(self, query: str, max_results: int = 4) -> List[Document]:
-        result = self.store.similarity_search(query, k=max_results)
+        result = self.load_store().similarity_search(query, k=max_results)
         return result
 
     def chunk_and_rank(
@@ -82,6 +86,8 @@ class VectorStore():
         max_tokens: int = 8196,
         splitter: Optional[TextSplitter] = None,
     ) -> List[Tuple[str, float]]:
+        from langchain.vectorstores import FAISS
+
         def contains_token(s, tokens):
             return any(token in s for token in tokens)
 
@@ -131,4 +137,3 @@ class VectorStore():
                 break
 
         return return_results
-

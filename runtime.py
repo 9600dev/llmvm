@@ -2,39 +2,18 @@ import datetime as dt
 import inspect
 import math
 import os
-import sys
 import time
 from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
 
-import click
-import rich
-from docstring_parser import parse as docstring_parse
-from guidance.llms.transformers import LLaMA, Vicuna
-from langchain.agents import initialize_agent, load_tools
-from langchain.chains import RetrievalQA
-from langchain.chat_models import ChatOpenAI
-from langchain.document_loaders.base import BaseLoader
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.llms import OpenAI as langchain_OpenAI
-from langchain.text_splitter import (MarkdownTextSplitter,
-                                     PythonCodeTextSplitter, TokenTextSplitter)
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-
 from eightbitvicuna import VicunaEightBit
-from helpers.edgar import EdgarHelpers
-from helpers.email_helpers import EmailHelpers
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import setup_logging
-from helpers.market import MarketHelpers
-from helpers.pdf import PdfHelpers
 from helpers.vector_store import VectorStore
-from helpers.websearch import WebHelpers
 from objects import (Agent, Answer, Assistant, AstNode, Content, Continuation,
                      ExecutionFlow, Executor, ForEach, FunctionCall, Message,
                      NaturalLanguage, Order, Program, Statement, System,
                      UncertainOrError, User, tree_map)
-from openai_executor import OpenAIExecutor
 
 logging = setup_logging()
 def response_writer(callee, message):
@@ -48,8 +27,6 @@ def response_writer(callee, message):
 
 
 def vector_store():
-    from langchain.vectorstores import FAISS
-
     from helpers.vector_store import VectorStore
 
     return VectorStore(openai_key=os.environ.get('OPENAI_API_KEY'), store_filename='faiss_index')  # type: ignore
@@ -111,8 +88,6 @@ class Parser():
     ) -> Optional[FunctionCall]:
         text = self.remainder
 
-        sequence: List[AstNode] = []
-
         if (
                 ('[[' not in text and ']]' not in text)
                 and ('```python' not in text)
@@ -143,6 +118,7 @@ class Parser():
             function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
             if function_call:
                 function_call.context = Content(text)
+                function_call._ast_text = f'function_call({start_token}{function_call_str}{end_token})'
 
             # remainder is the stuff after the end_token
             self.remainder = text[text.index(end_token) + len(end_token):]
@@ -193,7 +169,10 @@ class Parser():
                 if answer.startswith('\'') and answer.endswith('\''):
                     answer = answer[1:-1]
                 self.consume(')')
-                return Answer(conversation=[Content(answer)])
+                return Answer(
+                    conversation=[Content(answer)],
+                    ast_text=f'answer({answer}))'
+                )
 
             if re.startswith('function_call(') and ')' in re:
                 function_call = self.parse_function_call()
@@ -208,21 +187,28 @@ class Parser():
             if re.startswith('natural_language(') and ')' in re:
                 language = Helpers.in_between(re, 'natural_language(', ')')
                 self.consume(')')
-                return NaturalLanguage(messages=[User(Content(language))])  # type: ignore
+                return NaturalLanguage(
+                    messages=[User(Content(language))],
+                    ast_text=f'natural_language({language})'
+                )  # type: ignore
 
             if re.startswith('continuation(') and ')' in re:
                 continuation = parse_continuation()
+                # todo: sort out the proper ast_text
                 self.consume(')')
                 return continuation
 
             if re.startswith('[[=>]]'):
                 self.consume('[[=>]]')
-                return parse_continuation()
+                result = parse_continuation()
+                result._ast_text = '[[=>]]'
+                return result
 
             if re.startswith('[[FOREACH]]'):
                 self.consume('[[FOREACH]]')
                 fe = ForEach(lhs=stack, rhs=Statement())
                 fe.rhs = self.parse_statement(stack)
+                fe._ast_text = '[[FOREACH]]'
                 return fe
 
             if re.startswith('[[') and not re.startswith('[[=>]]') and ')]]' in re:  # this is not great, it's not ebnf
@@ -237,7 +223,9 @@ class Parser():
             # might be a string
             if re.startswith('"'):
                 message = self.message_type(self.parse_ast_node())
-                return NaturalLanguage(messages=[message])
+                result = NaturalLanguage(messages=[message])
+                result._ast_text = f'"{message}"'
+                return result
 
             # we have no idea, so start packaging tokens into a Natural Language call until we see something we know
             known_tokens = ['[[=>]]', '[[FOREACH]]', 'function_call', 'natural_language', 'answer', 'continuation', 'Output']
@@ -253,7 +241,10 @@ class Parser():
                 tokens = tokens[1:]
 
             self.remainder = ''
-            return NaturalLanguage(messages=[self.message_type(Content(' '.join(consumed_tokens)))])
+            return NaturalLanguage(
+                messages=[self.message_type(Content(' '.join(consumed_tokens)))],
+                ast_text=' '.join(consumed_tokens)
+            )
         return Statement()
 
     def parse_program(
@@ -263,6 +254,7 @@ class Parser():
         executor: Executor,
         execution_flow: ExecutionFlow[Statement],
     ) -> Program:
+        self.original_message = message
         self.message = message
         self.agents = agents
         self.remainder = message
@@ -334,9 +326,10 @@ class ExecutionController():
                 System(Content(query_understanding['system_message'])),
                 User(Content(query_understanding['user_message']))
             ],
+            temperature=0.0,
         )
 
-        response_writer('query_understanding.prompt', assistant)
+        response_writer(query_understanding['prompt_filename'], assistant)
 
         if assistant.error or not parse_result(str(assistant.message)):
             return {'tool': 1.0}
@@ -426,6 +419,7 @@ class ExecutionController():
         self,
         statement: Statement,
         executor: Executor,
+        program: Program,
         callee_or_context: Optional[Statement] = None,
     ) -> Statement:
 
@@ -444,7 +438,10 @@ class ExecutionController():
 
             if not func:
                 logging.error('Could not find function {}'.format(function_call.name))
-                return UncertainOrError(conversation=[Content('I could find the function {}'.format(function_call.name))])
+                return UncertainOrError(
+                    conversation=[Content('I could find the function {}'.format(function_call.name))],
+                    error='I could find the function {}'.format(function_call.name)
+                )
 
             def marshal(value: object, type: str) -> Any:
                 def strip_quotes(value: str) -> str:
@@ -486,7 +483,8 @@ class ExecutionController():
             except Exception as e:
                 logging.error(e)
                 return UncertainOrError(
-                    conversation=[Content('The function could not execute. It raised an exception: {}'.format(e))]
+                    conversation=[Content('The function could not execute. It raised an exception: {}'.format(e))],
+                    error='The function could not execute. It raised an exception: {}'.format(e),
                 )
 
             function_call._result = function_response
@@ -522,7 +520,7 @@ class ExecutionController():
 
                 messages.append(User(Content(continuation_function['user_message'])))
                 assistant: Assistant = executor.execute(messages)
-                response_writer('continuation_function.prompt', assistant)
+                response_writer(continuation_function['prompt_filename'], assistant)
                 statement._result = assistant
                 return statement
 
@@ -531,7 +529,12 @@ class ExecutionController():
                 if isinstance(callee_or_context.result(), list):
                     result_list = []
                     for foreach_result in cast(list, callee_or_context.result()):
-                        assistant_result = self.execute_statement(statement, executor, callee_or_context=foreach_result).result()
+                        assistant_result = self.execute_statement(
+                            statement,
+                            executor,
+                            program,
+                            callee_or_context=foreach_result
+                        ).result()
                         # we have to unset the result so that the next iteration works properly
                         statement._result = None
                         # todo: we can remove this type cast, after execute_statement is just Statement
@@ -552,7 +555,7 @@ class ExecutionController():
                 )
                 messages.append(User(Content(continuation_generic['user_message'])))
                 assistant: Assistant = executor.execute(messages)
-                response_writer('continuation_generic.prompt', assistant)
+                response_writer(continuation_generic['prompt_filename'], assistant)
                 statement._result = assistant
                 return statement
 
@@ -607,7 +610,7 @@ class ExecutionController():
                 result = executor.execute(messages)
 
                 # debug output
-                response_writer('foreach_functioncall.prompt', result)
+                response_writer(foreach_function['prompt_filename'], result)
 
                 # todo there needs to be some sort of error handling/backtracking here
                 if '"missing"' in str(result.message):
@@ -624,7 +627,7 @@ class ExecutionController():
                     )
 
                     result = executor.execute(messages=[User(Content(function_call_rewrite['user_message']))])
-                    response_writer('functioncall_correction.prompt', result)
+                    response_writer(function_call_rewrite['prompt_filename'], result)
 
                 # parse the result
                 foreach_parser = Parser()
@@ -649,14 +652,53 @@ class ExecutionController():
                 )
                 messages.append(User(Content(foreach_functioncall['user_message'])))
                 result = executor.execute(messages)
-                response_writer('foreach_functioncall.prompt', result)
+                response_writer(foreach_functioncall['prompt_filename'], result)
                 statement._result = result
                 return statement
 
         elif isinstance(statement, Continuation):
-            result = self.execute_statement(statement.rhs, executor, statement.lhs)
-            statement._result = result
-            return statement
+            result = self.execute_statement(
+                statement.rhs,
+                executor,
+                program,
+                statement.lhs
+            )
+
+            if isinstance(result, UncertainOrError):
+                foreach_functioncall = Helpers.load_and_populate_prompt(
+                    prompt_filename='prompts/continuation_uncertain_or_error.prompt',
+                    template={
+                        'lhs': str(statement.lhs._ast_text),
+                        'rhs': str(statement.rhs._ast_text),
+                        'error': str(result.error),
+                    }
+                )
+
+                messages: List[Message] = []
+                messages.extend(program.tool_response)
+                messages.append(User(Content(foreach_functioncall['user_message'])))
+                result = executor.execute(messages)
+                response_writer(foreach_functioncall['prompt_filename'], result)
+
+                # parse the result
+                foreach_parser = Parser()
+                flow = ExecutionFlow(Order.QUEUE)
+                rewritten_program = foreach_parser.parse_program(str(result.message), self.agents, executor, flow)
+
+                # execute the program
+                new_result = statement.execute_statement(
+                    rewritten_program.statements[-1],
+                )
+                program_result = self.execute_program(program, flow)
+
+                if len(program_result) > 0:
+                    statement._result = program_result
+
+                return statement
+
+            else:
+                statement._result = result
+                return statement
 
         else:
             raise ValueError('shouldnt be here')
@@ -676,7 +718,14 @@ class ExecutionController():
             if len(answers) > 0:
                 callee_context = answers[-1]
 
-            answers.append(self.execute_statement(statement, program.executor, callee_or_context=callee_context))
+            answers.append(
+                self.execute_statement(
+                    statement,
+                    program.executor,
+                    program,
+                    callee_or_context=callee_context
+                )
+            )
 
         return answers
 
@@ -704,7 +753,11 @@ class ExecutionController():
 
         # if it requires tooling, hand it off to the AST execution engine
         if 'tool' in classification:
-            response = executor.execute_with_agents(call=call, agents=self.agents)
+            response = executor.execute_with_agents(
+                call=call,
+                agents=self.agents,
+                temperature=0.0,
+            )
             assistant_response = str(response.message)
 
             # debug output
@@ -712,6 +765,7 @@ class ExecutionController():
 
             # parse the response
             program = Parser().parse_program(assistant_response, self.agents, executor, execution)
+            program.tool_response = response._messages_context + [Assistant(response.message)]
 
             # execute the program
             answers: List[Statement] = self.execute_program(program, execution)
@@ -733,5 +787,3 @@ class ExecutionController():
         ])
 
         return self.execute(call)
-
-

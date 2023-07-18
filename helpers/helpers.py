@@ -12,10 +12,7 @@ import guidance
 import nest_asyncio
 import tiktoken
 from docstring_parser import parse
-from guidance.llms import LLM, OpenAI
-from guidance.llms.transformers import LLaMA, Vicuna
-from sentence_transformers import SentenceTransformer, util
-from torch import Tensor
+from guidance.llms import LLM
 
 
 class PersistentCache:
@@ -227,6 +224,9 @@ class Helpers():
 
     @staticmethod
     def find_closest_sections(query: str, sections: list[str]):
+        from sentence_transformers import SentenceTransformer, util
+        from torch import Tensor
+
         model = SentenceTransformer('all-mpnet-base-v2')
         corpus_embeddings: List[Tensor] | Any = model.encode(sections, convert_to_tensor=True)
         query_embedding: List[Tensor] | Any = model.encode([query], convert_to_tensor=True)
@@ -545,11 +545,12 @@ class Helpers():
     def load_and_populate_prompt(
         prompt_filename: str,
         template: Dict[str, str],
-    ):
-        prompt = Helpers.load_prompt(prompt_filename)
+    ) -> Dict[str, Any]:
+        prompt: Dict[str, Any] = Helpers.load_prompt(prompt_filename)
 
         for key, value in template.items():
             prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
             prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
 
+        prompt['prompt_filename'] = prompt_filename
         return prompt

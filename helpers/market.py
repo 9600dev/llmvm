@@ -1,4 +1,3 @@
-import yfinance as yf
 
 
 class MarketHelpers():
@@ -10,6 +9,8 @@ class MarketHelpers():
         :param symbol: The symbol of the stock
         """
 
+        import yfinance as yf
+
         ticker = yf.Ticker(symbol)
         return ticker.history().tail(1)['Close'].iloc[0]
 
@@ -20,5 +21,8 @@ class MarketHelpers():
 
         :param symbol: The symbol of the stock
         """
+
+        import yfinance as yf
+
         ticker = yf.Ticker(symbol)
         return str(ticker.info.get('marketCap'))

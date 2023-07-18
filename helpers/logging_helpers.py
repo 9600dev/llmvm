@@ -13,7 +13,7 @@ def setup_logging(
 ):
     logging.getLogger('asyncio').setLevel(logging.WARNING)
     logging.getLogger('markdown_it').setLevel(logging.WARNING)
-    logging.getLogger('markdown_it').setLevel(logging.WARNING)
+    logging.getLogger('numexpr').setLevel(logging.WARNING)
 
     if module_name in global_loggers:
         return global_loggers[module_name]
@@ -27,3 +27,11 @@ def setup_logging(
     logger.addHandler(handler)
     global_loggers[module_name] = logger
     return logger
+
+def suppress_logging():
+    logging.getLogger().setLevel(logging.CRITICAL)
+    logging.getLogger('root').setLevel(logging.CRITICAL)
+    logging.getLogger('asyncio').setLevel(logging.CRITICAL)
+    logging.getLogger('markdown_it').setLevel(logging.CRITICAL)
+    logging.getLogger('numexpr').setLevel(logging.CRITICAL)
+    logging.getLogger('rich').setLevel(logging.CRITICAL)

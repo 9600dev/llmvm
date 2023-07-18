@@ -22,6 +22,7 @@ class Executor(ABC):
     def execute(
         self,
         messages: List['Message'],
+        temperature: float = 1.0,
     ) -> 'Assistant':
         pass
 
@@ -30,6 +31,7 @@ class Executor(ABC):
         self,
         call: 'NaturalLanguage',
         agents: List[Callable],
+        temperature: float = 1.0,
     ) -> 'Assistant':
         pass
 
@@ -76,7 +78,7 @@ class AstNode(ABC):
     def __init__(
         self
     ):
-        self.original_text: str = ''
+        pass
 
     def accept(self, visitor: Visitor) -> 'AstNode':
         return visitor.visit(self)
@@ -209,8 +211,10 @@ class Assistant(Message):
 class Statement(AstNode):
     def __init__(
         self,
+        ast_text: Optional[str] = None,
     ):
         self._result: object = None
+        self._ast_text: Optional[str] = ast_text
 
     def __str__(self):
         if self._result:
@@ -225,8 +229,9 @@ class Statement(AstNode):
 class Call(Statement):
     def __init__(
         self,
+        ast_text: Optional[str] = None,
     ):
-        super().__init__()
+        super().__init__(ast_text)
 
 
 class NaturalLanguage(Call):
@@ -235,8 +240,9 @@ class NaturalLanguage(Call):
         messages: List[Message],
         system: Optional[System] = None,
         executor: Optional[Executor] = None,
+        ast_text: Optional[str] = None,
     ):
-        super().__init__()
+        super().__init__(ast_text)
         self.messages: List[Message] = messages
         self.system = system
         self.executor = executor
@@ -247,8 +253,9 @@ class Continuation(Statement):
         self,
         lhs: Statement,
         rhs: Statement,
+        ast_text: Optional[str] = None,
     ):
-        super().__init__()
+        super().__init__(ast_text)
         self.lhs = lhs
         self.rhs = rhs
 
@@ -261,14 +268,14 @@ class ForEach(Statement):
         self,
         lhs: List[Statement],
         rhs: Statement,
+        ast_text: Optional[str] = None,
     ):
-        super().__init__()
+        super().__init__(ast_text)
         self.lhs = lhs
         self.rhs = rhs
 
     def result(self) -> object:
         return self._result
-        # return self.rhs.result()
 
 
 class DataFrame(Statement):
@@ -276,8 +283,9 @@ class DataFrame(Statement):
         self,
         columns: List[str],
         rows: List[List[str]],
+        ast_text: Optional[str] = None,
     ):
-        super().__init__()
+        super().__init__(ast_text)
         self.columns = columns
         self.rows = rows
 
@@ -290,8 +298,9 @@ class FunctionCall(Call):
         types: List[Dict[str, object]],
         context: Content = Content(),
         func: Optional[Callable] = None,
+        ast_text: Optional[str] = None,
     ):
-        super().__init__()
+        super().__init__(ast_text)
         self.name = name
         self.args = args
         self.types = types
@@ -323,8 +332,9 @@ class Answer(Statement):
         conversation: List[AstNode] = [],
         result: object = None,
         error: object = None,
+        ast_text: Optional[str] = None,
     ):
-        super().__init__()
+        super().__init__(ast_text)
         self.conversation: List[AstNode] = conversation
         self._result = result
         self.error = error
@@ -365,6 +375,7 @@ class Program(AstNode):
         self.statements: List[Statement] = []
         self.flow = flow
         self.executor: Executor = executor
+        self.tool_response: List[Message] = []
 
 
 class PromptStrategy(Enum):
@@ -378,7 +389,7 @@ class Order(Enum):
 
 
 class ExecutionFlow(Generic[T]):
-    def __init__(self, order: Order):
+    def __init__(self, order: Order = Order.QUEUE):
         self.flow: List[T] = []
         self.order = order
 

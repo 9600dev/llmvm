@@ -5,15 +5,13 @@ import smtplib
 import tempfile
 from email.encoders import encode_base64
 from email.mime.base import MIMEBase
-from email.mime.message import MIMEMessage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pathlib import Path
 from typing import Dict, List
 
 import icalevents.icalparser
 import pytz
-from icalendar import Calendar, Event, vCalAddress, vDatetime, vText
+from icalendar import Calendar, Event, vCalAddress, vText
 
 from helpers.container import Container
 

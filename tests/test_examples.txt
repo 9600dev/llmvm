@@ -1,0 +1,25 @@
+I'll give you a list of names and companies. I want you to summarize their careers and contact details: Bill Jia - Meta, Elise McKay - Pendal Group, Jeff Dean - Google.
+
+I want you to get the biggest price movers in the stock market today, and then summarize why their prices moved. 
+
+Build a profile of the leadership team of NVDA. Include the education credentials and the last company each executive worked at. 
+
+Get a list of the people at the website https://ten13.vc/team and then summarize their career profiles.
+
+Generate a list of the top 5 most popular Microsoft products. 
+
+For the top 10 stocks by valuation in the NASDAQ index, get the latest stock prices.
+
+Search Twitter for the latest sentiment on NVDA. Summarize the positive narrative, and then summarize the negative narrative. 
+
+Open my contacts, find Leo Huang, Jeff Dean and Micheal Jones and set up a meeting with them for tomorrow at 1pm
+
+Download this paper https://arxiv.org/pdf/2306.14077v1.pdf and summarize the main points.
+
+Download this paper https://ceur-ws.org/Vol-3432/paper17.pdf and this paper https://arxiv.org/pdf/2306.14077v1.pdf and find the differences in opinions between the two of them.
+
+Get the latest 10K for AMD and extract any sentences that talk about AI or machine learning.
+
+Get the historical prices for NVDA. What is the standard deviation of the daily close price over the past 6 months? 
+
+Complete this sentence: The New England Journal of Medicine is a registered trademark of

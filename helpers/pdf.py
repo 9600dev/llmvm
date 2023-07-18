@@ -6,9 +6,8 @@ from urllib.parse import urlparse
 import pdf2image
 import pytesseract
 import requests
-from langchain.document_loaders import TextLoader
 from pypdf import PdfReader
-from pytesseract import Output, TesseractError
+from pytesseract import Output
 
 from helpers.logging_helpers import setup_logging
 
@@ -30,7 +29,9 @@ class PdfHelpers():
 
     @staticmethod
     def parse_pdf(url_or_file: str) -> str:
-        """Parse a pdf file and return the text
+        """
+        Downloads a pdf file from the url_or_file argument and returns the text.
+        You can only use either a url or a path to a pdf file.
 
         Args:
             url_or_file (str): url or path to pdf file
@@ -44,8 +45,11 @@ class PdfHelpers():
         if url_result.scheme == 'http' or url_result.scheme == 'https':
             stream = BytesIO(requests.get(url_or_file).content)
         else:
-            with open(url_or_file, 'rb') as file:
-                stream = BytesIO(file.read())
+            try:
+                with open(url_or_file, 'rb') as file:
+                    stream = BytesIO(file.read())
+            except FileNotFoundError:
+                raise ValueError('The supplied argument url_or_file: {} is not a correct filename or url.'.format(url_or_file))
 
         reader = PdfReader(stream)
 

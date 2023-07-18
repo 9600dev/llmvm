@@ -88,6 +88,7 @@ class OpenAIExecutor(Executor):
         self,
         call: NaturalLanguage,
         agents: List[Callable],
+        temperature: float = 1.0,
     ) -> Assistant:
         if self.cache and self.cache.has_key(call.messages):
             return cast(Assistant, self.cache.get(call.messages))
@@ -115,7 +116,7 @@ class OpenAIExecutor(Executor):
 
         chat_response = self.execute_direct(
             model=self.model,
-            temperature=1.0,
+            temperature=temperature,
             max_completion_tokens=2048,  # todo: calculate this properly
             messages=messages,
             chat_format=True,
@@ -143,6 +144,7 @@ class OpenAIExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
+        temperature: float = 1.0,
     ) -> Assistant:
         if self.cache and self.cache.has_key(messages):
             return cast(Assistant, self.cache.get(messages))
@@ -167,6 +169,7 @@ class OpenAIExecutor(Executor):
             messages_list,
             max_completion_tokens=2048,  # tood: calculate this properly
             chat_format=True,
+            temperature=temperature,
         )
 
         if len(chat_response) == 0:

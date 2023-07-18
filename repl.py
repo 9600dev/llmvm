@@ -13,14 +13,67 @@ from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
+from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
 from objects import (Agent, Answer, Assistant, AstNode, Content, Continuation,
-                     Executor, FunctionCall, Message, NaturalLanguage,
-                     Statement, System, User)
+                     ExecutionFlow, Executor, FunctionCall, Message,
+                     NaturalLanguage, Program, Statement, System, User)
 from openai_executor import OpenAIExecutor
 from runtime import ExecutionController
 
 logging = setup_logging()
+
+def print_response(statements: List[Statement | AstNode]):
+    def contains_token(s, tokens):
+        return any(token in s for token in tokens)
+
+    def pprint(prepend: str, s: str):
+        markdown_tokens = ['###', '* ', '](', '```']
+        from rich.console import Console
+        from rich.markdown import Markdown
+        console = Console()
+
+        if contains_token(s, markdown_tokens):
+            console.print(f'{prepend}', end='')
+            console.print(Markdown(s))
+        else:
+            console.print(f'{prepend}{s}')
+
+    for statement in statements:
+        if isinstance(statement, Assistant):
+            # todo, this is a hack, Assistant not a Statement
+            pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
+        elif isinstance(statement, Content):
+            pprint('', str(statement).strip())
+        elif isinstance(statement, System):
+            pprint('[bold red]System[/bold red]: ', str(statement.message))
+        elif isinstance(statement, User):
+            pprint('[bold blue]User[/bold blue]: ', str(statement.message))
+        elif isinstance(statement, Assistant):
+            pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
+        elif isinstance(statement, Answer):
+            # todo, get rid of Answer
+            rich.print('[bold green]Assistant[/bold green]:')
+            print_response(statement.conversation)
+        elif isinstance(statement, FunctionCall):
+            logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
+            if 'search_internet' in statement.name:
+                pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
+            else:
+                pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
+                pprint('', f'  {statement.result()}')
+        elif isinstance(statement, NaturalLanguage):
+            for message in statement.messages:
+                pprint(f'[bold green]{message.role().capitalize()}[/bold green]: ', str(message.message))
+            if statement.result():
+                print_response([cast(AstNode, statement.result())])
+        elif isinstance(statement, Continuation):
+            if isinstance(statement.result(), list):
+                print_response(cast(list, statement.result()))
+            else:
+                print_response([cast(Statement, statement.result())])
+        else:
+            pprint('', str(statement))
 
 
 class Repl():
@@ -30,58 +83,6 @@ class Repl():
     ):
         self.executors: List[Executor] = executors
         self.agents: List[Agent] = []
-
-    def print_response(self, statements: List[Statement | AstNode]):
-        def contains_token(s, tokens):
-            return any(token in s for token in tokens)
-
-        def pprint(prepend: str, s: str):
-            markdown_tokens = ['###', '* ', '](', '```']
-            from rich.console import Console
-            from rich.markdown import Markdown
-            console = Console()
-
-            if contains_token(s, markdown_tokens):
-                console.print(f'{prepend}', end='')
-                console.print(Markdown(s))
-            else:
-                console.print(f'{prepend}{s}')
-
-        for statement in statements:
-            if isinstance(statement, Assistant):
-                # todo, this is a hack, Assistant not a Statement
-                pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
-            elif isinstance(statement, Content):
-                pprint('', str(statement).strip())
-            elif isinstance(statement, System):
-                pprint('[bold red]System[/bold red]: ', str(statement.message))
-            elif isinstance(statement, User):
-                pprint('[bold blue]User[/bold blue]: ', str(statement.message))
-            elif isinstance(statement, Assistant):
-                pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
-            elif isinstance(statement, Answer):
-                # todo, get rid of Answer
-                rich.print('[bold green]Assistant[/bold green]:')
-                self.print_response(statement.conversation)
-            elif isinstance(statement, FunctionCall):
-                logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
-                if 'search_internet' in statement.name:
-                    pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
-                else:
-                    pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
-                    pprint('', f'  {statement.result()}')
-            elif isinstance(statement, NaturalLanguage):
-                for message in statement.messages:
-                    pprint(f'[bold green]{message.role().capitalize()}[/bold green]: ', str(message.message))
-                if statement.result():
-                    self.print_response([cast(AstNode, statement.result())])
-            elif isinstance(statement, Continuation):
-                if isinstance(statement.result(), list):
-                    self.print_response(cast(list, statement.result()))
-                else:
-                    self.print_response([cast(Statement, statement.result())])
-            else:
-                pprint('', str(statement))
 
     def repl(self):
         console = rich.console.Console()
@@ -131,7 +132,7 @@ class Repl():
                     continue
 
                 elif '/conversation' in query:
-                    self.print_response(messages)  # type: ignore
+                    print_response(messages)  # type: ignore
                     continue
 
                 elif '/context' in query:
@@ -163,9 +164,10 @@ class Repl():
                     messages.append(User(Content(query)))
                     statement = execution_controller.execute_statement(
                         statement=NaturalLanguage(messages=messages),
-                        executor=executor_contexts[0]
+                        executor=executor_contexts[0],
+                        program=Program(executor_contexts[0], ExecutionFlow()),
                     )
-                    self.print_response([statement])
+                    print_response([statement])
                     rich.print()
                     continue
 
@@ -174,7 +176,7 @@ class Repl():
                     NaturalLanguage(messages=messages)
                 )
 
-                self.print_response(results)  # type: ignore
+                print_response(results)  # type: ignore
                 rich.print()
 
             except KeyboardInterrupt:
@@ -205,7 +207,6 @@ def start(
     prompt: Optional[str],
     verbose: bool
 ):
-
     openai_key = str(os.environ.get('OPENAI_API_KEY'))
     execution_environments = []
 
@@ -231,7 +232,15 @@ def start(
         repl = Repl(execution_environments)
         repl.repl()
     else:
-        execution_environments[0].execute(prompt, '')
+        controller = ExecutionController(
+            execution_environments,
+            agents=agents,
+            vector_store=VectorStore(),
+        )
+        results = controller.execute(
+            NaturalLanguage(messages=[User(Content(prompt))])
+        )
+        print_response(results)  # type: ignore
 
 
 @click.command()

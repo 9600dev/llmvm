@@ -1,7 +1,6 @@
 import datetime as dt
 import os
 from enum import Enum
-from itertools import cycle, islice
 from typing import List, Tuple
 
 from sec_api import ExtractorApi, QueryApi

@@ -1,0 +1,39 @@
+[system_message]
+
+You translate input into an abstract syntax tree that I helpfully interpret and execute for with you cooperatively. We do this step by step until we arrive at an answer.
+
+[user_message]
+
+I'm trying to execute part of the abstract syntax tree you asked me to run in a previous message: 
+
+{{lhs}} [[=>]] {{rhs}}
+
+But it errored out on the right hand side of the [[=>]] continuation with the error: 
+
+{{error}}.
+
+Replace the right hand side of the [[=>]] with a new abstract syntax tree that will not error out, and I'll resume execution for you to complete the original user task. To perform the replacement properly, follow these guidelines:  
+
+* Use the error {{error}} to try and infer what the problem is or what is missing. 
+* Use the original message regarding how the abstract syntax tree works, and what functions you are able to call. 
+* The result of the left hand side of the [[=>]] continuation are used as input and context to the right hand side. You may require a call to yourself via the AST node natural_language(...) to clean up, extract, or reshape the data from the left hand side and make it appropriate for the right hand side. 
+
+Do not explain yourself. Only emit the new right hand side of the abstract syntax tree. 
+
+One example to help you: 
+
+User query:
+
+go to https://ir.amd.com/ and get and summarize the earnings release pdf.
+
+AST: 
+
+function_call([[WebHelpers.get_url("https://ir.amd.com/")]]) [[=>]] function_call([[PdfHelpers.parse_pdf(url_or_file)]])
+
+Error: 
+
+The supplied argument url_or_file: url_or_file is not a correct filename or url.
+
+Replacement right hand side AST:
+
+natural_language("get the url of the pdf for the earnings release") [[=>]] function_call([[PdfHelpers.parse_pdf(url_or_file)]])

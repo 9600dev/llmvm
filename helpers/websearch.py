@@ -1,40 +1,15 @@
 import os
 import tempfile
-from abc import ABC, abstractmethod
-from enum import Enum
-from itertools import cycle, islice
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import nltk
 import requests
 from bs4 import BeautifulSoup
-from guidance.llms import LLM, OpenAI
-from guidance.llms.transformers import LLaMA, Vicuna
-from langchain.agents import initialize_agent, load_tools
-from langchain.chains import RetrievalQA
-from langchain.chat_models import ChatOpenAI
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.llms import OpenAI as langchain_OpenAI
-from langchain.text_splitter import (MarkdownTextSplitter,
-                                     PythonCodeTextSplitter, TokenTextSplitter)
-from langchain.vectorstores import FAISS
-from llama_cpp import LogitsProcessorList, StoppingCriteriaList
 from markdownify import MarkdownConverter
 from newspaper import Article
 from newspaper.configuration import Configuration
-from prompt_toolkit import prompt
-from prompt_toolkit.history import FileHistory
-from prompt_toolkit.key_binding import KeyBindings
-from pypdf import PdfReader
-from rich.logging import RichHandler
-from rich.traceback import install
-from sec_api import ExtractorApi, QueryApi
-from selenium import webdriver
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from sentence_transformers import SentenceTransformer, util
-from serpapi import BingSearch, GoogleSearch
-from torch import Tensor
 
 from helpers.firefox import FirefoxHelpers
 from helpers.logging_helpers import setup_logging
@@ -182,7 +157,10 @@ class WebHelpers():
 
     @staticmethod
     def get_url(url: str, force_firefox: bool = False) -> str:
-        """Extracts the text from a url. Url can be a file, web url, or a pdf"""
+        """
+        Connects to and downloads the text content from a url and returns the text content.
+        Url can be a http or https web url or a filename and directory location.
+        """
         logging.debug('WebHelpers.get_url: {}'.format(url))
 
         text = ''
