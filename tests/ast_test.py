@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 from helpers.logging_helpers import setup_logging, suppress_logging
 from helpers.vector_store import VectorStore
-from objects import Content, NaturalLanguage, User
+from objects import Content, LLMCall, User
 from openai_executor import OpenAIExecutor
 from repl import agents
 from runtime import ExecutionController
@@ -35,19 +35,17 @@ def run_ast_tests(
     with open('tests/test_results.txt', 'w') as f:
         for test in tests:
             assistant = executor.execute_with_agents(
-                NaturalLanguage(messages=[User(Content(test))]),
+                LLMCall(messages=[User(Content(test))]),
                 agents,
-                0.0,
+                0.5,
             )
             print('Test: ' + test)
             print()
-            print('Assistant Response:')
             print(assistant.message)
             print()
             print()
 
             f.write('Test: ' + test + '\n')
-            f.write('Assistant: ' + '\n')
             f.write(str(assistant.message) + '\n')
             f.write('\n')
             f.flush()

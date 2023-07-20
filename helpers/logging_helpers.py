@@ -1,3 +1,4 @@
+import datetime as dt
 import logging
 from logging import Logger
 from typing import Dict
@@ -35,3 +36,8 @@ def suppress_logging():
     logging.getLogger('markdown_it').setLevel(logging.CRITICAL)
     logging.getLogger('numexpr').setLevel(logging.CRITICAL)
     logging.getLogger('rich').setLevel(logging.CRITICAL)
+
+
+def response_writer(callee, message):
+    with (open('logs/ast.log', 'a')) as f:
+        f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')

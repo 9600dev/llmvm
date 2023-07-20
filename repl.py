@@ -15,9 +15,9 @@ from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
-from objects import (Agent, Answer, Assistant, AstNode, Content, Continuation,
-                     ExecutionFlow, Executor, FunctionCall, Message,
-                     NaturalLanguage, Program, Statement, System, User)
+from objects import (Agent, Answer, Assistant, AstNode, Content, ExecutionFlow,
+                     Executor, FunctionCall, LLMCall, Message, Program,
+                     Statement, System, User)
 from openai_executor import OpenAIExecutor
 from runtime import ExecutionController
 
@@ -52,9 +52,11 @@ def print_response(statements: List[Statement | AstNode]):
         elif isinstance(statement, Assistant):
             pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
         elif isinstance(statement, Answer):
-            # todo, get rid of Answer
-            rich.print('[bold green]Assistant[/bold green]:')
-            print_response(statement.conversation)
+            if isinstance(statement.result(), Statement):
+                print_response([cast(Statement, statement.result())])
+            else:
+                rich.print('[bold green]Assistant[/bold green]:')
+                print_response(statement.conversation)
         elif isinstance(statement, FunctionCall):
             logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
             if 'search_internet' in statement.name:
@@ -62,16 +64,12 @@ def print_response(statements: List[Statement | AstNode]):
             else:
                 pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
                 pprint('', f'  {statement.result()}')
-        elif isinstance(statement, NaturalLanguage):
-            for message in statement.messages:
+        elif isinstance(statement, LLMCall):
+            pprint(f'[bold green]{statement.message.role().capitalize()}[/bold green]: ', str(statement.message.message))
+            for message in statement.supporting_messages:
                 pprint(f'[bold green]{message.role().capitalize()}[/bold green]: ', str(message.message))
             if statement.result():
                 print_response([cast(AstNode, statement.result())])
-        elif isinstance(statement, Continuation):
-            if isinstance(statement.result(), list):
-                print_response(cast(list, statement.result()))
-            else:
-                print_response([cast(Statement, statement.result())])
         else:
             pprint('', str(statement))
 
@@ -131,7 +129,7 @@ class Repl():
                     messages = []
                     continue
 
-                elif '/conversation' in query:
+                elif '/messages' in query or '/conversations' in query:
                     print_response(messages)  # type: ignore
                     continue
 
@@ -161,22 +159,27 @@ class Repl():
 
                 elif query.startswith('/direct'):
                     query = Helpers.in_between(query, '/direct', '\n').strip()
-                    messages.append(User(Content(query)))
                     statement = execution_controller.execute_statement(
-                        statement=NaturalLanguage(messages=messages),
+                        statement=LLMCall(message=User(Content(query))),
                         executor=executor_contexts[0],
-                        program=Program(executor_contexts[0], ExecutionFlow()),
+                        program=Program(executor_contexts[0]),
                     )
                     print_response([statement])
                     rich.print()
                     continue
 
-                messages.append(User(Content(query)))
+                # execute the query
                 results = execution_controller.execute(
-                    NaturalLanguage(messages=messages)
+                    LLMCall(
+                        message=User(Content(query)),
+                        supporting_messages=messages
+                    )
                 )
 
                 print_response(results)  # type: ignore
+
+                # add the user message to the conversation
+                messages.append(User(Content(query)))
                 rich.print()
 
             except KeyboardInterrupt:
@@ -237,9 +240,12 @@ def start(
             agents=agents,
             vector_store=VectorStore(),
         )
+
         results = controller.execute(
-            NaturalLanguage(messages=[User(Content(prompt))])
-        )
+            LLMCall(
+                message=User(Content(prompt))
+            ))
+
         print_response(results)  # type: ignore
 
 

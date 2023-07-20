@@ -1,0 +1,5 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+{{foreach_result}}

@@ -1,0 +1,19 @@
+[system_message]
+You are a helpful assistant. 
+
+[user_message]
+Originally, I asked you the following query: 
+
+Query:
+
+{{original_query}}
+
+And I have your response: 
+
+Assistant Response:
+
+{{answer}}
+
+If we have not satisfactorally answered/responded to the original query, then rewrite the answer using your own knowledge, or the context, data, information in the previous messages provided above. If you think the answer satisfies the original query, then respond with the current answer. 
+
+In your next response, do not apologize, do not explain yourself. Just respond directly with either the rewritten answer, or the current answer. Think hard, and make sure the Query above is satisfied by the Assistant Response.

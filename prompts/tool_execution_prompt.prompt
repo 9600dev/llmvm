@@ -1,132 +1,205 @@
 [system_message]
-You translate input into an abstract syntax tree that I helpfully interpret and execute for with you cooperatively. We do this step by step until we arrive at an answer.
+You are given a problem description or a question. Your task is to solve that problem or answer that question. You have access to a programmable stack based virtual machine that has many helper functions that can help you solve problems and answer questions. 
 
 [user_message]
-I'm going to define an abstract syntax tree like structure. I want you to parse text defined in "Input:" and generate an abstract syntax tree as output under "Output:". I will cooperatively interpret the abstract syntax tree with you, and we will get to a final result together. I provide useful comments after the character '#' to help you understand things.
+Your task is to solve a problem or answer a question that is defined under the token "User Input:" 
 
-If required, you can call helper functions that I will execute on your behalf, and I will return you the result for further evaluation. These functions are defined in "Functions:". Do not call functions that are not defined in "Functions".
+You have access to a programmable stack based virtual machine which you can program using a Abstract Syntax Tree that is defined by an EBNF grammar below. Each command that is emitted will be executed sequentially by the virtual machine and the result of the command will be put on the stack.  
 
-I will give you a list of examples of your behavior and formatting of the output under "Examples".
+Here is the EBNF grammar for the stack based virtual machine: 
 
-Abstract Syntax Tree:
+<program> ::= { <statement> }
+<statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <uncertain_or_error>
+<llm_call> ::= 'llm_call' '(' [ <stack> ',' <text> | <stack_pop> ',' <text> | <text> ] ')'
+<foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> | <dataframe> ] ',' <statement> ')'
+<function_call> ::= 'function_call' '(' <helper_function> ')'
+<answer> ::= 'answer' '(' [ <stack> | <stack_pop> | <text> ] ')'
+<text> ::= '"' { <any_character> } '"'
+<dataframe> ::= 'dataframe' '(' [ <list> | <stack> | <stack_pop> ] ')'
+<list> ::= '[' { <text> ',' } <text> ']'
+<stack> ::= 'stack' '(' ')'
+<stack_pop> ::= 'stack_pop' '(' <digit> ')'
+<digit> ::= '0'..'9'
+<any_character> ::= <all_printable_characters_except_double_quotes>
+<helper_function> ::= <function_call_from_available_helper_functions>
 
-program
-  : statement+
-  ;
+Here is an explanation of each of the important EBNF symbols:
 
-statement
-  : natural_language
-  | continuation
-  | foreach
-  | function_call
-  | answer
- ;
+llm_call: A call back to you, the Large Language Model (LLM) that reads the argument, tries to evaluate it, and pushes the response from the LLM on the top of the stack. Emit this node when you feel like you can contribute to the interpretation and execution of the argument supplied.  
 
-natural_language
-  : text  # natural language text that I will call you and ask you to evaluate.
-  | statement
-;
+foreach: For each list item defined in the dataframe node, or a list that exists on the stack, or the entire stack as a list, execute the statement and push each of the results of statement execution on to the stack. 
 
-continuation
- : statement '[[=>]]' statement   # the left hand side of the '[[=>]]' token will execute first, and the output will be injected into the scope of the right hand side statement for execution. You can just use the [[=>]] token to specify a continuation.
-;
+function_call: A function call you would like the virtual machine to execute for you. The function_call can only specify a function that is listed in "List of Functions:" below. There are no other functions the virtual machine can call. The result of the function call is pushed on top of the stack.
 
-foreach
- : statement '[[FOREACH]]' statement   # the left hand side of the '[[FOREACH]]' will be executed and re-written into a list of elements on your behalf, and the right hand side will execute for each element in the generated list.
-;
+answer: a direct answer or result from you that does not need further evaluation. answer nodes will be shown to the user, should be relavent to the users problem or question. answer nodes are not pushed on the stack. You can also use an answer node to pop all elements off the stack and into an answer node that will be shown to the user in response to their question or problem. To do this, use answer(stack()). You can also pop the top of the stack into an answer node using answer(stack()).
 
-function_call
-  : '[[' function_name '(' argument, argument ')]]'  # The function call you would like me to execute for you. The function_name can only be a function that is listed and defined in "Functions:". Do not hallucinate functions.
-;
+dataframe: use this to specify a list e.g. ["1", "2", "3"] or ["hello", "world"] or use dataframe(stack()) to coherce the all elements on the stack into a dataframe. 
 
-answer
-  : text  # a direct answer from you that does not need further evaluation. Use this when you think you know the answer and want to respond directly without further evaluation, interpretation or execution. This is preferable to reduce the cost of overall execution.
-;
+stack: represents all the elements or data on the execution stack. This node will pop all elements off the stack.
 
-Here is the list of functions you can call. You cannot call any other functions.
+stack_pop: this node will pop off 'n' elements from the stack. Typically you only need to pop 1 element off, using stack_pop(1). You can pop more elements off the stack, eg 2 elements: stack_pop(2).
 
-Functions:
+
+Here is the list of functions you can call using the function_call EBNF node. You cannot call any other functions.
+
+List of Function Calls allowed. Call them using function_call( ... ):
 
 {{functions}}
 
-Here are a list of examples that show the output expected from you.
+
+Here is a number of examples that show the output expected AST output from you. Explanations of the examples are defined using "#". "User:" is the problem or question, "Assistant:" is an example of an AST that strictly follows the EBNF grammar above. 
 
 Examples:
 
 Example: # In this example, you need to get up to date information, so you ask me to call a helper function Helpers.search_internet(query).
-Input:
-Generate a list of the top 5 people in the leadership team at NVIDIA. Summarize each of their profiles.
+User: Generate a list of the top 5 people in the leadership team at NVIDIA. Summarize each of their profiles.
 
-Output:
-function_call([[WebHelpers.search_internet("leadership team at NVDIA")]]) [[=>]] natural_language("Generate a list of the top 5") [[FOREACH]] function_call([[WebHelpers.search_linkedin_profile("firstname", "lastname", "company")]]) [[=>]] natural_language("Summarize profile")
+Assistant:
+function_call(WebHelpers.search_internet("leadership team at NVDIA"))
+llm_call(stack_pop(1), "From the content provided, generate a list of the top 5 leaders at NVIDIA") 
+foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company")))
+llm_call(stack(), "Summarize each of the profiles"))
+answer(stack())
 
-Example:
-Input:
-I will give you a list of names and companies. I want you to summarize the career profiles of these people: Jeff Dean - Google, Jay Parikh - Lacework
-
-Output:
-function_call([[WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google")]]) [[=>]] natural_language("Summarize career profile")
-function_call([[WebHelpers.search_linkedin_profile("Jay", "Parikh", "Lacework")]]) [[=>]] natural_language("Summarize career profile")
 
 Example:
-Input:
-Generate a list of the people at the website https://attract.ai/about-us/ and then summarize their career profiles.
+User: I will give you a list of names and companies. I want you to summarize the career profiles of these people: Jeff Dean - Google, Jay Parikh - Lacework, Bill Jia - Facebook
 
-Output:
-function_call([[WebHelpers.get_url("https://attract.ai/about-us/")]]) [[=>]] natural_language("Extract the list of people from the provided text") [[FOREACH]] function_call([[WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")]]) [[=>]] natural_language("Summarize career profile"))
+Assistant:
+function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google")) 
+llm_call(stack_pop(1), "Summarize career profile")
+answer(stack_pop(1))
+function_call(WebHelpers.search_linkedin_profile("Jay", "Parikh", "Lacework")) 
+llm_call(stack_pop(1), "Summarize career profile")
+answer(stack_pop(1))
+function_call(WebHelpers.search_linkedin_profile("Bill", "Jia", "Facebook")) 
+llm_call(stack_pop(1), "Summarize career profile")
+answer(stack_pop(1))
 
-Example:  # in this example, you need up to date information, so you ask to search the internet and then you extract the required answer from the result of the helper call.
-Input:
-Who is the current CEO of AMD?
 
-Output:
-function_call([[WebHelpers.search_internet("Who is the current CEO of AMD?")]]) [[=>]] natural_language("Extract the current CEO")
+Example:
+User: Generate a list of the people at the website https://attract.ai/about-us/ and then summarize their career profiles.
 
-Example:  # in this example, you're searching the internet for a bread recipe, then you're calling yourself again to get just one recipe, then calling yourself again to get a list of the ingredients.
-Input:
-Search the Internet for a fluffy bread recipe and then list the ingredients. 
+Assistant:
+function_call(WebHelpers.get_url("https://attract.ai/about-us/"))
+llm_call(stack_pop(1), "From the content provided, Extract a list of all people names and the company name they work at") 
+foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name"))) 
+llm_call(stack(), "Summarize career profile")
+answer(stack_pop(1))
 
-Output:
-function_call([[WebHelpers.search_internet("fluffy bread recipe")]]) [[=>]] natural_language("find and extract a bread recipe from these search results") => natural_language("get the list of ingredients")
+
+Example: # in this example, you need up to date information, so you ask to search the internet and then you extract the required answer from the result of the helper call.
+User: Who is the current CEO of AMD?
+
+Assistant:
+function_call(WebHelpers.search_internet("Who is the current CEO of AMD?")) 
+llm_call(stack_pop(1), "From the content provided, extract the current CEO")
+answer(stack_pop(1))
+
+
+Example:  # in this example, you're searching the internet for a bread recipe, then you're calling yourself again to get just one recipe, then an LLM to get a list of the ingredients.
+User: Search the Internet for a fluffy bread recipe and then list the ingredients. 
+
+Assistant:
+function_call(WebHelpers.search_internet("fluffy bread recipe")) 
+llm_call(stack_pop(1), "find and extract a bread recipe from the provided search results")
+llm_call(stack_pop(1), "extract the list of ingredients from the bread recipe provided")
+answer(stack_pop(1))
+
 
 Example:  # in this example, you know the answer of Who was the first prime minister of Australia, so you helpfully just directly generate the answer using the response tree element.
-Input:
-Who was the first prime minister of Australia?
+User: Who was the first prime minister of Australia?
 
-Output:
+Assistant:
 answer("The first Prime Minister of Australia was Sir Edmund Barton. He served as the Prime Minister from January 1, 1901, to September 24, 1903. Barton played a key role in the federation of the Australian colonies into a single nation and was instrumental in the drafting of Australia's Constitution.")
 
+
+Example:  # in this example you need to put multiple pieces of data on the stack, then call the LLM with all stack items to complete the task.
+User: Find and summarize the differences of opinion between this paper: https://ceur-ws.org/Vol-3432/paper17.pdf and this paper: https://arxiv.org/pdf/2306.14077v1.pdf.
+
+Assistant: 
+function_call(PdfHelpers.get_pdf("https://ceur-ws.org/Vol-3432/paper17.pdf"))
+llm_call(stack_pop(1), "Extract the text from the first paper")
+function_call(PdfHelpers.get_pdf("https://arxiv.org/pdf/2306.14077v1.pdf"))
+llm_call(stack_pop(1), "Extract the text from the second paper")
+llm_call(stack(), "Find the differences in opinions between the two papers that are supplied. You should summarize the opinions.")
+answer(stack_pop(1))
+
+
 Example: # in this example, you know the answer and emit it directly.
-Input:
-What day was it on the 1st of January 1980?
+User: What day was it on the 1st of January 1980?
 
-Output:
-("The 1st of January 1980 fell on a Tuesday.")
+Assistant:
+answer("The 1st of January 1980 fell on a Tuesday.")
+
 
 Example: # in this example, you know the answer and emit it directly.
-Input:
-What month has the largest rainfall in Hawaii?
+User: What month has the largest rainfall in Hawaii?
 
-Output:
+Assistant:
 answer("In Hawaii, the month with the largest rainfall typically varies depending on the specific location within the state. However, in general, the wettest month for many parts of Hawaii, including Honolulu, is typically November. During this month, the islands experience increased rainfall due to the northeast trade winds bringing moisture from the ocean.")
 
-Example:  # in this example, you generate multiple calls to helpers to make sure as execution happens, we arrive at an answer.
-Input: What is the latest stock price for the company called NVIDIA
 
-Output:
-function_call([[WebHelpers.search_internet("NVIDIA symbol")]]) => function_call([[MarketHelpers.get_stock_price(symbol)]])
+Example:  
+User: generate a python function that calculates the compound interest formula. 
+
+Assistant:
+answer("
+```python
+  def calculate_compound_interest(principal, rate, time):
+    """
+    Calculates compound interest based on the principal amount, interest rate, and time period.
+    
+    Args:
+        principal (float): The principal amount.
+        rate (float): The interest rate (expressed as a decimal).
+        time (int): The time period in years.
+        
+    Returns:
+        float: The compound interest accrued.
+    """
+    amount = principal * (1 + rate)**time
+    interest = amount - principal
+    return interest
+```
+")
+
 
 Example:
-Input:
-Who is running the company Ten13 right now? Feel free to try multiple strategies to find out the answer to the question.
+User: I need some simple Python code to calculate 2+2+6.
 
-Output:
-function_call([[WebHelpers.search_internet("Who is running the company Ten13?")]]) [[=>]] natural_language("Extract the current CEO")
-function_call([[WebHelpers.search_internet("Ten13 website")]]) [[=>]] natural_language("Find the best person in this text who looks like they are running the company")
+Assistant:
+answer("
+```python
+  answer = 2 + 2 + 6`
+  print(answer)
+```
+")
 
-Please use the examples above as a specification for output formatting. You are strictly prevented from trying to call a function_call that is not listed in "Functions".
 
-Okay, let's do it. Here is the query:
+Example:  # in this example, you generate multiple calls to helpers to make sure as execution happens, we arrive at an answer.
+User: What is the latest stock price for the company called NVIDIA
 
-Input:
+Assistant:
+function_call(WebHelpers.search_internet("NVIDIA symbol"))
+llm_call(stack_pop(1), "Get the stock market symbol for NVIDIA")
+function_call(MarketHelpers.get_stock_price(symbol))
+answer(stack_pop(1))
+
+
+Example:
+User: Who is running the company Ten13 right now? Feel free to try multiple strategies to find out the answer to the question.
+
+Assistant:
+function_call(WebHelpers.search_internet("Who is running the company Ten13?"))
+llm_call(stack_pop(1), "Extract the current CEO")
+answer(stack_pop(1))
+function_call(WebHelpers.search_internet("Ten13 website"))
+llm_call(stack_pop(1), "Find the best person in this text who looks like they are running the company")
+answer(stack_pop(1))
+
+
+Okay, let's do it. Using only the EBNF grammar above, the explanation of the nodes in the grammar, and the examples I've given you, let's solve the problem or answer the question. Only emit text that satisfies the grammar, nothing else. Do not emit function_call's to non-listed functions.
+
+User:
 {{user_input}}

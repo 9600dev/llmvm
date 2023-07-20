@@ -1,190 +1,116 @@
 Test: I'll give you a list of names and companies. I want you to summarize their careers and contact details: Bill Jia - Meta, Elise McKay - Pendal Group, Jeff Dean - Google.
 
-Assistant: 
-Output:
-function_call([[WebHelpers.search_linkedin_profile("Bill", "Jia", "Meta")]]) [[=>]] natural_language("Summarize career profile and contact details")
-function_call([[WebHelpers.search_linkedin_profile("Elise", "McKay", "Pendal Group")]]) [[=>]] natural_language("Summarize career profile and contact details")
-function_call([[WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google")]]) [[=>]] natural_language("Summarize career profile and contact details")
+function_call(WebHelpers.search_linkedin_profile("Bill", "Jia", "Meta")) 
+llm_call("Summarize career profile and contact details")
+answer(stack_pop(1))
+function_call(WebHelpers.search_linkedin_profile("Elise", "McKay", "Pendal Group")) 
+llm_call("Summarize career profile and contact details")
+answer(stack_pop(1))
+function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google")) 
+llm_call("Summarize career profile and contact details")
+answer(stack_pop(1))
 
 Test: I want you to get the biggest price movers in the stock market today, and then summarize why their prices moved. 
 
-Assistant: 
-program
-  statement
-    natural_language("I want you to get the biggest price movers in the stock market today")
-    continuation
-      statement
-        natural_language("summarize why their prices moved")
+function_call(WebHelpers.search_news("biggest price movers in the stock market today"))
+llm_call(stack_pop(1), "From the news articles provided, extract the reasons for the price movements of the biggest price movers")
+answer(stack_pop(1))
 
 Test: Build a profile of the leadership team of NVDA. Include the education credentials and the last company each executive worked at. 
 
-Assistant: 
-Output:
-function_call([[WebHelpers.search_internet("leadership team of NVDA")]]) [[=>]] natural_language("Extract the list of executives from the provided text") [[FOREACH]] function_call([[WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")]]) [[=>]] natural_language("Summarize profile including education credentials and last company")
+function_call(WebHelpers.search_internet("leadership team at NVIDIA"))
+llm_call(stack_pop(1), "From the content provided, generate a list of the top executives at NVIDIA") 
+foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")))
+foreach(stack(), llm_call("Build a profile of the executive"))
+answer(stack())
 
 Test: Get a list of the people at the website https://ten13.vc/team and then summarize their career profiles.
 
-Assistant: 
-Output:
-function_call([[WebHelpers.get_url("https://ten13.vc/team")]]) [[=>]] natural_language("Extract the list of people from the provided text") [[FOREACH]] function_call([[WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")]]) [[=>]] natural_language("Summarize career profile")
+function_call(WebHelpers.get_url("https://ten13.vc/team"))
+llm_call("From the content provided, extract a list of all people names and the company name they work at")
+foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")))
+foreach(stack(), llm_call("Summarize career profile"))
+answer(stack())
 
 Test: Generate a list of the top 5 most popular Microsoft products. 
 
-Assistant: 
-Output:
-function_call([[WebHelpers.search_internet("most popular Microsoft products")]]) [[=>]] natural_language("Generate a list of the top 5")
+function_call(WebHelpers.search_internet("most popular Microsoft products"))
+llm_call(stack_pop(1), "From the content provided, extract a list of the top 5 most popular Microsoft products")
+answer(stack_pop(1))
 
 Test: For the top 10 stocks by valuation in the NASDAQ index, get the latest stock prices.
 
-Assistant: 
-program
-  statement
-    continuation
-      statement
-        function_call
-          '[['
-          function_name: 'WebHelpers.search_internet'
-          '('
-          argument
-            text: 'top 10 stocks by valuation in the NASDAQ index'
-          ','
-          argument
-            text: 'latest stock prices'
-          ')]]'
-      '[[=>]]'
-      statement
-        foreach
-          statement
-            function_call
-              '[['
-              function_name: 'MarketHelpers.get_stock_price'
-              '('
-              argument
-                symbol: 'symbol'
-              ')]]'
-          '[[FOREACH]]'
-          statement
-            natural_language
-              text: 'get the latest stock prices'
+function_call(MarketHelpers.get_market_capitalization("NASDAQ"))
+llm_call(stack_pop(1), "Get the top 10 stocks by valuation in the NASDAQ index")
+foreach(stack(), function_call(MarketHelpers.get_stock_price(symbol)))
+answer(stack())
 
 Test: Search Twitter for the latest sentiment on NVDA. Summarize the positive narrative, and then summarize the negative narrative. 
 
-Assistant: 
-program
-  statement
-    natural_language("Search Twitter for the latest sentiment on NVDA.")
-  statement
-    continuation
-      statement
-        natural_language("Summarize the positive narrative.")
-      statement
-        continuation
-          statement
-            natural_language("Summarize the negative narrative.")
+function_call(WebHelpers.search_internet("Latest sentiment on NVDA on Twitter"))
+llm_call(stack_pop(1), "Summarize the positive narrative")
+answer(stack_pop(1))
+llm_call(stack_pop(1), "Summarize the negative narrative")
+answer(stack_pop(1))
 
 Test: Open my contacts, find Leo Huang, Jeff Dean and Micheal Jones and set up a meeting with them for tomorrow at 1pm
 
-Assistant: 
-Output:
-function_call([[EmailHelpers.send_calendar_invite("Your Name", "your_email@example.com", ["leo_huang@example.com", "jeff_dean@example.com", "micheal_jones@example.com"], "Meeting", "Meeting details", "tomorrow 1pm", "tomorrow 2pm")]])
+function_call(WebHelpers.search_linkedin_profile("Leo", "Huang", ""))
+function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", ""))
+function_call(WebHelpers.search_linkedin_profile("Micheal", "Jones", ""))
+llm_call(stack_pop(3), "Extract the email addresses of Leo Huang, Jeff Dean, and Micheal Jones")
+function_call(EmailHelpers.send_calendar_invite("Your Name", "your_email@example.com", ["leo_huang@example.com", "jeff_dean@example.com", "micheal_jones@example.com"], "Meeting", "Meeting details", "tomorrow at 1pm", "tomorrow at 2pm"))
 
 Test: Download this paper https://arxiv.org/pdf/2306.14077v1.pdf and summarize the main points.
 
-Assistant: 
-Output:
-function_call([[PdfHelpers.parse_pdf("https://arxiv.org/pdf/2306.14077v1.pdf")]]) [[=>]] natural_language("Summarize the main points")
+function_call(PdfHelpers.get_pdf("https://arxiv.org/pdf/2306.14077v1.pdf"))
+llm_call(stack_pop(1), "Extract the text from the paper")
+llm_call(stack_pop(1), "Summarize the main points of the paper")
+answer(stack_pop(1))
 
-Test: Download this paper https://ceur-ws.org/Vol-3432/paper17.pdf and this paper https://arxiv.org/pdf/2306.14077v1.pdf and find the differences in opinions between the two of them.
+Test: List the differences and similarities between this paper: https://arxiv.org/pdf/2211.01910.pdf and this paper: https://arxiv.org/pdf/2210.02441.pdf
 
-Assistant: 
-program
-  statement
-    function_call
-      '[['
-      'WebHelpers.get_url'
-      '('
-      'https://ceur-ws.org/Vol-3432/paper17.pdf'
-      ','
-      'force_firefox'
-      ')]]'
-  statement
-    function_call
-      '[['
-      'WebHelpers.get_url'
-      '('
-      'https://arxiv.org/pdf/2306.14077v1.pdf'
-      ','
-      'force_firefox'
-      ')]]'
-  statement
-    natural_language
-      'find the differences in opinions between the two of them'
+function_call(PdfHelpers.get_pdf("https://arxiv.org/pdf/2211.01910.pdf"))
+llm_call(stack_pop(1), "Extract the text from the first paper")
+function_call(PdfHelpers.get_pdf("https://arxiv.org/pdf/2210.02441.pdf"))
+llm_call(stack_pop(1), "Extract the text from the second paper")
+llm_call(stack(), "Find the differences and similarities between the two papers that are supplied. You should summarize the findings.")
+answer(stack_pop(1))
 
 Test: Get the latest 10K for AMD and extract any sentences that talk about AI or machine learning.
 
-Assistant: 
-program
-  : statement+
-  ;
-
-statement
-  : natural_language
-  | continuation
-  | foreach
-  | function_call
-  | answer
- ;
-
-natural_language
-  : text  # natural language text that I will call you and ask you to evaluate.
-  | statement
-;
-
-continuation
- : statement '[[=>]]' statement   # the left hand side of the '[[=>]]' token will execute first, and the output will be injected into the scope of the right hand side statement for execution. You can just use the [[=>]] token to specify a continuation.
-;
-
-foreach
- : statement '[[FOREACH]]' statement   # the left hand side of the '[[FOREACH]]' will be executed and re-written into a list of elements on your behalf, and the right hand side will execute for each element in the generated list.
-;
-
-function_call
-  : '[[' function_name '(' argument, argument ')]]'  # The function call you would like me to execute for you. The function_name can only be a function that is listed and defined in "Functions:". Do not hallucinate functions.
-;
-
-answer
-  : text  # a direct answer from you that does not need further evaluation. Use this when you think you know the answer and want to respond directly without further evaluation, interpretation or execution. This is preferable to reduce the cost of overall execution.
-;
-
-text
-  : /[^[\]]+/  # any text that is not a '[[' or ']]' token
-;
-
-argument
-  : text
-  | function_call
-;
-
-function_name
-  : /[^()]+/  # any text that is not a '(' or ')' token
-;
-
-# Parsing the input query
-
-function_call([[EdgarHelpers.get_latest_form_text("AMD", "10K")]]) [[=>]] function_call([[WebHelpers.search_internet("AI or machine learning sentences in the latest 10K for AMD")]])
+function_call(EdgarHelpers.get_latest_form_text("AMD", "10-K"))
+llm_call(stack_pop(1), "Extract sentences that mention AI or machine learning from the 10-K document")
+answer(stack_pop(1))
 
 Test: Get the historical prices for NVDA. What is the standard deviation of the daily close price over the past 6 months? 
 
-Assistant: 
-program
-  statement
-    natural_language("Get the historical prices for NVDA.")
-  statement
-    natural_language("What is the standard deviation of the daily close price over the past 6 months?")
+function_call(MarketHelpers.get_stock_price("NVDA"))
+llm_call(stack_pop(1), "Get the historical prices for NVDA")
+llm_call(stack(), "Calculate the standard deviation of the daily close price over the past 6 months")
+answer(stack_pop(1))
 
 Test: Complete this sentence: The New England Journal of Medicine is a registered trademark of
 
-Assistant: 
-Output:
-natural_language("The New England Journal of Medicine is a registered trademark of")
+answer("The New England Journal of Medicine is a registered trademark of the Massachusetts Medical Society.")
+
+Test: Generate a haskell function that calculates simple interest. Generate a C# function that calculates simple interest.
+
+Assistant:
+function_call(WebHelpers.search_internet("calculate simple interest in Haskell"))
+llm_call(stack_pop(1), "Extract the code for calculating simple interest in Haskell")
+answer(stack_pop(1))
+function_call(WebHelpers.search_internet("calculate simple interest in C#"))
+llm_call(stack_pop(1), "Extract the code for calculating simple interest in C#")
+answer(stack_pop(1))
+
+Test: What is the square root of 128. 
+
+llm_call(stack(), "Calculate the square root of 128")
+
+Test: If Johnnie has $10.00 USD and gifts $5.00 of that to Annie in AUD. How much does Johnnie have left? The USD to AUD exchange rate is $1.50.
+
+function_call(MarketHelpers.convert_currency(5.00, "USD", "AUD", 1.50))
+llm_call(stack_pop(1), "Subtract the converted amount from Johnnie's original amount")
+answer(stack_pop(1))
 

@@ -29,7 +29,7 @@ class Executor(ABC):
     @abstractmethod
     def execute_with_agents(
         self,
-        call: 'NaturalLanguage',
+        call: 'LLMCall',
         agents: List[Callable],
         temperature: float = 1.0,
     ) -> 'Assistant':
@@ -225,6 +225,39 @@ class Statement(AstNode):
     def result(self):
         return self._result
 
+    def token(self):
+        return 'statement'
+
+
+class StackNode(Statement):
+    def __init__(
+        self,
+        value: int,
+    ):
+        self.value = value
+
+    def __str__(self):
+        if self.value == 0:
+            return 'stack()'
+        else:
+            return f'stack({self.value})'
+
+    def token(self):
+        return 'stack'
+
+
+class DataFrame(Statement):
+    def __init__(
+        self,
+        elements: List,
+        ast_text: Optional[str] = None,
+    ):
+        super().__init__(ast_text)
+        self.elements = elements
+
+    def token(self):
+        return 'dataframe'
+
 
 class Call(Statement):
     def __init__(
@@ -234,21 +267,27 @@ class Call(Statement):
         super().__init__(ast_text)
 
 
-class NaturalLanguage(Call):
+class LLMCall(Call):
     def __init__(
         self,
-        messages: List[Message],
-        system: Optional[System] = None,
-        executor: Optional[Executor] = None,
+        context: Optional[StackNode] = None,
+        message: Message = User(Content('')),
+        supporting_messages: List[Message] = [],
+        supporting_system: Optional[System] = None,
         ast_text: Optional[str] = None,
     ):
         super().__init__(ast_text)
-        self.messages: List[Message] = messages
-        self.system = system
-        self.executor = executor
+        self.context: Optional[StackNode] = context
+        self.message = message
+
+        self.supporting_messages: List[Message] = supporting_messages
+        self.supporting_system: Optional[System] = supporting_system
+
+    def token(self):
+        return 'llm_call'
 
 
-class Continuation(Statement):
+class ForEach(Statement):
     def __init__(
         self,
         lhs: Statement,
@@ -260,35 +299,10 @@ class Continuation(Statement):
         self.rhs = rhs
 
     def result(self) -> object:
-        return self.rhs.result()
-
-
-class ForEach(Statement):
-    def __init__(
-        self,
-        lhs: List[Statement],
-        rhs: Statement,
-        ast_text: Optional[str] = None,
-    ):
-        super().__init__(ast_text)
-        self.lhs = lhs
-        self.rhs = rhs
-
-    def result(self) -> object:
         return self._result
 
-
-class DataFrame(Statement):
-    def __init__(
-        self,
-        columns: List[str],
-        rows: List[List[str]],
-        ast_text: Optional[str] = None,
-    ):
-        super().__init__(ast_text)
-        self.columns = columns
-        self.rows = rows
-
+    def token(self):
+        return 'foreach'
 
 class FunctionCall(Call):
     def __init__(
@@ -326,6 +340,9 @@ class FunctionCall(Call):
         str_args = ', '.join([str(t) for t in definitions])
         return f'{self.name}({str_args})'
 
+    def token(self):
+        return 'function_call'
+
 class Answer(Statement):
     def __init__(
         self,
@@ -346,36 +363,46 @@ class Answer(Statement):
         ret_result += '\n  '.join([str(n) for n in self.conversation])
         return ret_result
 
+    def token(self):
+        return 'answer'
+
 
 class UncertainOrError(Statement):
     def __init__(
         self,
-        conversation: List[AstNode] = [],
-        result: object = None,
-        error: object = None,
+        error_message: Content,
+        supporting_conversation: List[AstNode] = [],
+        supporting_result: object = None,
+        supporting_error: object = None,
     ):
         super().__init__()
-        self.conversation = conversation,
-        self._result = result
-        self.error = error
+        self.error_message = error_message,
+        self.supporting_conversation = supporting_conversation
+        self._result = supporting_result
+        self.supporting_error = supporting_error
 
     def __str__(self):
-        ret_result = f'UncertainOrError({self.error}, {self.result})\n'
+        ret_result = f'UncertainOrError({str(self.error_message)} {self.supporting_error}, {self.result})\n'
         ret_result += '  Conversation:\n'
-        ret_result += '\n  '.join([str(n) for n in self.conversation])
+        ret_result += '\n  '.join([str(n) for n in self.supporting_conversation])
         return ret_result
+
+    def token(self):
+        return 'uncertain_or_error'
 
 
 class Program(AstNode):
     def __init__(
         self,
         executor: Executor,
-        flow: 'ExecutionFlow',
     ):
-        self.statements: List[Statement] = []
-        self.flow = flow
         self.executor: Executor = executor
-        self.tool_response: List[Message] = []
+        self.statements: List[Statement] = []
+        self.conversation: List[Message] = []
+        self.runtime_stack: Stack[Statement] = Stack[Statement]()
+        self.executed_stack: Stack[Statement] = Stack[Statement]()
+        self.answers: List[Answer] = []
+        self.original_query: str = ''
 
 
 class PromptStrategy(Enum):
@@ -386,6 +413,42 @@ class PromptStrategy(Enum):
 class Order(Enum):
     STACK = 'stack'
     QUEUE = 'queue'
+
+
+class Stack(Generic[T]):
+    def __init__(self):
+        self.stack: List[T] = []
+
+    def push(self, item: T):
+        self.stack.append(item)
+
+    def pop(self) -> Optional[T]:
+        if len(self.stack) == 0:
+            return None
+        return self.stack.pop()
+
+    def peek(self, n: int = 1) -> List[T]:
+        if len(self.stack) == 0:
+            return []
+
+        if n > 0:
+            result = []
+            for i in range(n):
+                result.append(self.stack[-1 - i])
+            return result
+        elif n == 0:
+            return self.stack
+        else:
+            return []
+
+    def is_empty(self) -> bool:
+        return len(self.stack) == 0
+
+    def count(self) -> int:
+        return len(self.stack)
+
+    def __getitem__(self, index):
+        return self.stack[index]
 
 
 class ExecutionFlow(Generic[T]):
@@ -447,20 +510,22 @@ def tree_map(node: AstNode, call: Callable[[AstNode], Any]) -> List[Any]:
         visited.extend(tree_map(node.message, call))
     elif isinstance(node, Assistant):
         visited.extend(tree_map(node.message, call))
+    elif isinstance(node, DataFrame):
+        for n in node.elements:
+            visited.extend(tree_map(n, call))
     elif isinstance(node, ForEach):
-        for statement in node.lhs:
-            visited.extend(tree_map(statement, call))
-        visited.extend(tree_map(node.rhs, call))
-    elif isinstance(node, Continuation):
         visited.extend(tree_map(node.lhs, call))
         visited.extend(tree_map(node.rhs, call))
     elif isinstance(node, FunctionCall):
         visited.extend(tree_map(node.context, call))
-    elif isinstance(node, NaturalLanguage):
-        for n in node.messages:
+    elif isinstance(node, LLMCall):
+        if node.context:
+            visited.extend(tree_map(node.context, call))
+        visited.extend(tree_map(node.message, call))
+        for n in node.supporting_messages:
             visited.extend(tree_map(n, call))
-        if node.system:
-            visited.extend(tree_map(node.system, call))
+        if node.supporting_system:
+            visited.extend(tree_map(node.supporting_system, call))
     elif isinstance(node, Program):
         for statement in node.statements:
             visited.extend(tree_map(statement, call))
@@ -481,15 +546,19 @@ def tree_traverse(node, visitor: Visitor):
         node.message = cast(Content, tree_traverse(node.message, visitor))
     elif isinstance(node, Message):
         node.message = cast(Content, tree_traverse(node.message, visitor))
-    elif isinstance(node, NaturalLanguage):
-        node.messages = [cast(User, tree_traverse(child, visitor)) for child in node.messages]
-        if node.system:
-            node.system = cast(System, tree_traverse(node.system, visitor))
-    elif isinstance(node, FunctionCall):
-        node.context = cast(Content, tree_traverse(node.context, visitor))
-    elif isinstance(node, Continuation):
+    elif isinstance(node, DataFrame):
+        node.elements = [cast(AstNode, tree_traverse(child, visitor)) for child in node.elements]
+    elif isinstance(node, ForEach):
         node.lhs = cast(Statement, tree_traverse(node.lhs, visitor))
         node.rhs = cast(Statement, tree_traverse(node.rhs, visitor))
+    elif isinstance(node, LLMCall):
+        node.context = cast(StackNode, tree_traverse(node.context, visitor))
+        node.message = cast(Message, tree_traverse(node.message, visitor))
+        node.supporting_messages = [cast(User, tree_traverse(child, visitor)) for child in node.supporting_messages]
+        if node.supporting_system:
+            node.supporting_system = cast(System, tree_traverse(node.supporting_system, visitor))
+    elif isinstance(node, FunctionCall):
+        node.context = cast(Content, tree_traverse(node.context, visitor))
     elif isinstance(node, Program):
         node.statements = [cast(Statement, tree_traverse(child, visitor)) for child in node.statements]
     return node.accept(visitor)

@@ -487,7 +487,10 @@ class Helpers():
         return (f'{description["invoked_by"]}({", ".join(parameter_type_list)})  # {description["description"]}')
 
     @staticmethod
-    def parse_function_call(call: str, functions: List[Callable]) -> Optional[Tuple[Callable, Dict[str, Any]]]:
+    def parse_function_call(
+        call: str,
+        functions: List[Callable]
+    ) -> Optional[Tuple[Callable, Dict[str, Any]]]:
         function_description: Dict[str, Any] = {}
 
         function_name = Helpers.in_between(call, '', '(')

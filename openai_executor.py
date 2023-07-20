@@ -6,9 +6,9 @@ from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
 import openai
 
 from helpers.helpers import Helpers, PersistentCache
-from helpers.logging_helpers import setup_logging
-from objects import (Assistant, Content, ExecutionFlow, Executor, Message,
-                     NaturalLanguage, System, User)
+from helpers.logging_helpers import response_writer, setup_logging
+from objects import (Assistant, Content, ExecutionFlow, Executor, LLMCall,
+                     Message, System, User)
 
 logging = setup_logging()
 
@@ -86,16 +86,16 @@ class OpenAIExecutor(Executor):
 
     def execute_with_agents(
         self,
-        call: NaturalLanguage,
+        call: LLMCall,
         agents: List[Callable],
         temperature: float = 1.0,
     ) -> Assistant:
-        if self.cache and self.cache.has_key(call.messages):
-            return cast(Assistant, self.cache.get(call.messages))
+        if self.cache and self.cache.has_key((call.message, call.supporting_messages)):
+            return cast(Assistant, self.cache.get((call.message, call.supporting_messages)))
 
-        logging.debug('execute_with_agents')
+        logging.debug('OpenAIExecutor.execute_with_agents: {}'.format(call.message))
 
-        user_message: User = cast(User, call.messages[-1])
+        user_message: User = cast(User, call.message)
         messages = []
         message_results = []
 
@@ -125,6 +125,8 @@ class OpenAIExecutor(Executor):
         chat_response = chat_response['choices'][0]['message']  # type: ignore
         message_results.append(chat_response)
 
+        response_writer(prompt['prompt_filename'], chat_response['content'])
+
         if len(chat_response) == 0:
             return Assistant(Content('The model could not execute the query.'), error=True)
         else:
@@ -138,7 +140,7 @@ class OpenAIExecutor(Executor):
                 llm_call_context=call,
             )
 
-            if self.cache: self.cache.set(call.messages, assistant)
+            if self.cache: self.cache.set((call.message, call.supporting_messages), assistant)
             return assistant
 
     def execute(

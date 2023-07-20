@@ -10,9 +10,9 @@ from eightbitvicuna import VicunaEightBit
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import setup_logging
 from helpers.vector_store import VectorStore
-from objects import (Agent, Answer, Assistant, AstNode, Content, Continuation,
-                     ExecutionFlow, Executor, ForEach, FunctionCall, Message,
-                     NaturalLanguage, Order, Program, Statement, System,
+from objects import (Agent, Answer, Assistant, AstNode, Content, DataFrame,
+                     ExecutionFlow, Executor, ForEach, FunctionCall, LLMCall,
+                     Message, Order, Program, StackNode, Statement, System,
                      UncertainOrError, User, tree_map)
 
 logging = setup_logging()
@@ -43,6 +43,23 @@ def invokeable(func):
         logging.debug(f"{func.__name__} ran in {end_time - start_time} seconds")
         return result
     return wrapper
+
+
+# <program> ::= { <statement> }
+# <statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <uncertain_or_error>
+# <llm_call> ::= 'llm_call' '(' [ <stack> | <stack_pop> | <text> ] ')'
+# <foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> ] ',' <statement> ')'
+# <function_call> ::= 'function_call' '(' <helper_function> ')'
+# <answer> ::= 'answer' '(' [ <stack> | <stack_pop> | <text> ] ')'
+# <uncertain_or_error> ::= 'uncertain_or_error' '(' <text> ')'
+# <text> ::= '"' { <any_character> } '"'
+# <dataframe> ::= '[' { <element> ',' } <element> ']'
+# <element> ::= <text> | <stack_pop> | <stack>
+# <stack> ::= 'stack' '(' ')'
+# <stack_pop> ::= 'stack_pop' '(' <digit> ')'
+# <digit> ::= '0'..'9'
+# <any_character> ::= <all_printable_characters_except_double_quotes>
+# <helper_function> ::= <function_call_from_available_helper_functions>
 
 
 class Parser():
@@ -87,162 +104,189 @@ class Parser():
         self,
     ) -> Optional[FunctionCall]:
         text = self.remainder
-
         if (
-                ('[[' not in text and ']]' not in text)
-                and ('```python' not in text)
-                and ('[' not in text and ']]' not in text)
+                ('(' not in text and '))' not in text)
         ):
             return None
 
         while (
-            ('[[' in text and ')]]' in text)
-            and ('[' in text and ')]' in text)
-            or ('```python' in text and '```\n' in text)
+            ('(' in text and '))' in text)
         ):
             start_token = ''
             end_token = ''
 
             match text:
-                case _ if '```python' in text:
-                    start_token = '```python'
-                    end_token = '```\n'
-                case _ if '[[' and ']]' in text:
-                    start_token = '[['
-                    end_token = ']]'
-                case _ if '[' and ')]' in text:
-                    start_token = '['
-                    end_token = ']'
+                case _ if '(' and ')' in text:
+                    start_token = '('
+                    end_token = '))'
 
-            function_call_str = Helpers.in_between(text, start_token, end_token)
+            function_call_str = Helpers.in_between(text, start_token, end_token) + ')'
             function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
             if function_call:
                 function_call.context = Content(text)
-                function_call._ast_text = f'function_call({start_token}{function_call_str}{end_token})'
+                function_call._ast_text = f'function_call({start_token}{function_call_str})'
 
             # remainder is the stuff after the end_token
             self.remainder = text[text.index(end_token) + len(end_token):]
             return function_call
-
         return None
 
-    def parse_ast_node(
+    def parse_string(
         self,
-    ) -> AstNode:
-        re = self.remainder
+    ) -> Optional[Content]:
+        if self.remainder.startswith('"') and '"' in self.remainder:
+            string_result = Helpers.in_between(self.remainder, '"', '"')
+            self.consume('"')
+            self.consume('"')
+            return Content(string_result)
+        elif self.remainder.startswith("'") and "'" in self.remainder:
+            string_result = Helpers.in_between(self.remainder, "'", "'")
+            self.consume("'")
+            self.consume("'")
+            return Content(string_result)
+        return None
 
-        while re.strip() != '':
-            if re.startswith('"') and re.endswith('"'):
-                self.remainder = self.remainder[:1]
-                self.consume('"')
-                return Content(re.strip('"'))
-            else:
-                result = Content(self.remainder)
-                self.remainder = ''
-                return result
-        return Content('')
+    def __strip_string(self, s):
+        if s.startswith('"') and s.endswith('"'):
+            s = s[1:-1]
+        if s.startswith('\'') and s.endswith('\''):
+            s = s[1:-1]
+        return s
+
+    def parse_dataframe(self) -> Optional[DataFrame]:
+        if self.remainder.startswith('dataframe('):
+            self.consume('dataframe(')
+            elements = []
+            while self.remainder.strip() != '' and not self.remainder.startswith(')'):
+                element = self.parse_string() or self.parse_stack()
+                if element:
+                    elements.append(element)
+                self.consume(',')
+            self.consume(')')
+            return DataFrame(elements)
+        else:
+            return None
+
+    def parse_stack(self) -> Optional[StackNode]:
+        re = self.remainder.strip()
+
+        if re.startswith('stack_pop(') and ')' in re:
+            num = Helpers.in_between(re, 'stack_pop(', ')')
+            self.consume(')')
+            return StackNode(int(num))
+        elif re.startswith('stack(') and ')' in re:
+            num = 0
+            self.consume(')')
+            return StackNode(0)
+        else:
+            return None
 
     def parse_statement(
         self,
         stack: List[Statement],
     ) -> Statement:
-        def parse_continuation():
-            lhs = stack.pop()
-            continuation = Continuation(lhs=lhs, rhs=Statement())
-
-            stack.append(continuation)
-
-            continuation.rhs = self.parse_statement(stack)
-            return continuation
 
         re = self.remainder.strip()
 
         while re != '':
-            if re.startswith('Output:'):
-                self.consume('Output:')
-                return self.parse_statement(stack)
+            # get rid of any prepend stuff that the LLM might throw up
+            if re.startswith('Assistant:'):
+                self.consume('Assistant:')
+                re = self.remainder.strip()
 
             if re.startswith('answer(') and ')' in re:
-                answer = Helpers.in_between(re, 'answer(', ')')
-                if answer.startswith('"') and answer.endswith('"'):
-                    answer = answer[1:-1]
-                if answer.startswith('\'') and answer.endswith('\''):
-                    answer = answer[1:-1]
+                # todo: sort out these '\n' things.
+                self.consume('answer(')
+                result = ''
+                if self.remainder.startswith('stack'):
+                    result = self.parse_stack()
+                else:
+                    result = self.parse_string()
+
                 self.consume(')')
+
                 return Answer(
-                    conversation=[Content(answer)],
-                    ast_text=f'answer({answer}))'
+                    conversation=[Content(result)],
+                    ast_text=f'answer({result}))',
+                    result=result,
                 )
 
-            if re.startswith('function_call(') and ')' in re:
+            if re.startswith('function_call(') and '))' in re:
                 function_call = self.parse_function_call()
                 if not function_call:
                     # push past the function call and keep parsing
                     self.consume(')')
                     re = self.remainder
                 else:
-                    self.consume(')')
+                    # end token was consumed in parse_function_call()
                     return function_call
 
-            if re.startswith('natural_language(') and ')' in re:
-                language = Helpers.in_between(re, 'natural_language(', ')')
+            if re.startswith('llm_call(') and ')' in re:
+                self.consume('llm_call(')
+                llm_call = LLMCall()
+                llm_call.context = self.parse_stack()
+                if self.remainder.startswith(','):
+                    self.consume(',')
+                string_message = self.parse_string() or Content('')
                 self.consume(')')
-                return NaturalLanguage(
-                    messages=[User(Content(language))],
-                    ast_text=f'natural_language({language})'
-                )  # type: ignore
+                llm_call.message = User(string_message)
+                llm_call._ast_text = f'llm_call({str(llm_call.context)}, "{str(llm_call.message)}")'
+                return llm_call
 
-            if re.startswith('continuation(') and ')' in re:
-                continuation = parse_continuation()
-                # todo: sort out the proper ast_text
+            if re.startswith('uncertain_or_error(') and ')' in re:
+                language = Helpers.in_between(re, 'uncertain_or_error(', ')')
                 self.consume(')')
-                return continuation
+                return UncertainOrError(
+                    error_message=Content(language),
+                )
 
-            if re.startswith('[[=>]]'):
-                self.consume('[[=>]]')
-                result = parse_continuation()
-                result._ast_text = '[[=>]]'
+            if re.startswith('foreach(') and ')' in re:
+                # <foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> ] ',' <statement> ')'
+                self.consume('foreach(')
+                context = self.parse_stack() or self.parse_dataframe()
+                if not context:
+                    raise ValueError('no foreach context')
+                else:
+                    fe = ForEach(
+                        lhs=context,
+                        rhs=Statement()
+                    )
+                    self.consume(',')
+
+                    fe.rhs = self.parse_statement(stack)
+                    fe._ast_text = f'foreach({str(fe.lhs)}, {str(fe.rhs)})'.format()
+                    self.consume(')')
+                    return fe
+
+            if re.startswith('dataframe(') and ')' in re:
+                result = self.parse_dataframe()
+                if not result: raise ValueError()
                 return result
-
-            if re.startswith('[[FOREACH]]'):
-                self.consume('[[FOREACH]]')
-                fe = ForEach(lhs=stack, rhs=Statement())
-                fe.rhs = self.parse_statement(stack)
-                fe._ast_text = '[[FOREACH]]'
-                return fe
-
-            if re.startswith('[[') and not re.startswith('[[=>]]') and ')]]' in re:  # this is not great, it's not ebnf
-                function_call = self.parse_function_call()
-                if not function_call:
-                    # push past the function call and keep parsing
-                    self.consume(']]')
-                    re = self.remainder
-                else:
-                    return function_call
 
             # might be a string
             if re.startswith('"'):
-                message = self.message_type(self.parse_ast_node())
-                result = NaturalLanguage(messages=[message])
-                result._ast_text = f'"{message}"'
-                return result
+                # message = self.message_type(self.parse_string())
+                # result = LLMCall(messages=[message])
+                # result._ast_text = f'"{message}"'
+                # return result
+                raise ValueError('we should probably figure out how to deal with random strings')
 
             # we have no idea, so start packaging tokens into a Natural Language call until we see something we know
-            known_tokens = ['[[=>]]', '[[FOREACH]]', 'function_call', 'natural_language', 'answer', 'continuation', 'Output']
+            known_tokens = ['function_call', 'foreach', 'uncertain_or_error', 'natural_language', 'answer', 'continuation']
             tokens = re.split(' ')
             consumed_tokens = []
             while len(tokens) > 0:
                 if tokens[0] in known_tokens:
                     self.remainder = ' '.join(tokens)
-                    return NaturalLanguage(messages=[self.message_type(Content(' '.join(consumed_tokens)))])
+                    return LLMCall(message=self.message_type(Content(' '.join(consumed_tokens))))
 
                 consumed_tokens.append(tokens[0])
                 self.remainder = self.remainder[len(tokens[0]) + 1:]
                 tokens = tokens[1:]
 
             self.remainder = ''
-            return NaturalLanguage(
-                messages=[self.message_type(Content(' '.join(consumed_tokens)))],
+            return LLMCall(
+                message=self.message_type(Content(' '.join(consumed_tokens))),
                 ast_text=' '.join(consumed_tokens)
             )
         return Statement()
@@ -252,14 +296,13 @@ class Parser():
         message: str,
         agents: List[Callable],
         executor: Executor,
-        execution_flow: ExecutionFlow[Statement],
     ) -> Program:
         self.original_message = message
         self.message = message
         self.agents = agents
         self.remainder = message
 
-        program = Program(executor, execution_flow)
+        program = Program(executor)
         stack: List[Statement] = []
 
         while self.remainder.strip() != '':
@@ -287,53 +330,90 @@ class ExecutionController():
         self.vector_store: VectorStore = vector_store
         self.cache = cache
 
-    def classify_tool_or_direct(
+    def __context_to_message(
         self,
-        prompt: str,
-    ) -> Dict[str, float]:
-        def parse_result(result: str) -> Dict[str, float]:
-            if ',' in result:
-                if result.startswith('Assistant: '):
-                    result = result[len('Assistant: '):].strip()
+        context: Statement,
+        query: User,
+        max_tokens: int,
+    ) -> User:
+        statement_result_prompts = {
+            'answer': 'prompts/answer_result.prompt',
+            'function_call': 'prompts/function_call_result.prompt',
+            'llm_call': 'prompts/llm_call_result.prompt',
+            'uncertain_or_error': 'prompts/uncertain_or_error_result.prompt',
+            'foreach': 'prompts/foreach_result.prompt',
+        }
 
-                first = result.split(',')[0].strip()
-                second = result.split(',')[1].strip()
-                try:
-                    if first.startswith('tool') or first.startswith('"tool"'):
-                        return {'tool': float(second)}
-                    elif first.startswith('direct') or first.startswith('"direct"'):
-                        return {'direct': float(second)}
-                    else:
-                        return {'tool': 1.0}
-                except ValueError as ex:
-                    return {'tool': 1.0}
-            return {'tool': 1.0}
+        if isinstance(context, FunctionCall):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_filename=statement_result_prompts[context.token()],
+                template={
+                    'function_call': context.to_code_call(),
+                    'function_signature': context.to_definition(),
+                    'function_result': self.__chunk_content(
+                        query=query.message,
+                        current_str=context.result(),
+                        max_token_count=max_tokens,
+                    ),
+                }
+            )
+            return (User(Content(result_prompt['user_message'])))
 
-        executor = self.execution_contexts[0]
+        if isinstance(context, LLMCall) or isinstance(context, ForEach):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_filename=statement_result_prompts[context.token()],
+                template={
+                    f'{context.token()}_result': self.__chunk_content(
+                        query=query.message,
+                        current_str=context.result(),
+                        max_token_count=max_tokens,
+                    ),
+                }
+            )
+            return (User(Content(result_prompt['user_message'])))
 
-        # assess the type of task
-        function_list = [Helpers.get_function_description_flat(f) for f in self.agents]
-        query_understanding = Helpers.load_and_populate_prompt(
-            prompt_filename='prompts/query_understanding.prompt',
-            template={
-                'functions': '\n'.join(function_list),
-                'user_input': prompt,
-            }
-        )
+        return User(Content(''))
 
-        assistant: Assistant = executor.execute(
-            messages=[
-                System(Content(query_understanding['system_message'])),
-                User(Content(query_understanding['user_message']))
-            ],
-            temperature=0.0,
-        )
+    def __stacknode_to_statement(
+        self,
+        program: Program,
+        stack_node: StackNode,
+    ):
+        return [node for node in program.runtime_stack.peek(stack_node.value)]
 
-        response_writer(query_understanding['prompt_filename'], assistant)
+    def __package_context(
+        self,
+        node: StackNode | DataFrame,
+        program: Program,
+    ) -> List[User]:
+        """
+        Either returns a Dataframe, or peeks at the stack to the depth specified by the StackNode.
+        It does not pop the stack.
+        """
+        if isinstance(node, StackNode):
+            return [User(Content(str(n.result()))) for n in program.runtime_stack.peek(node.value)]
+        elif isinstance(node, DataFrame):
+            logging.debug('todo')
+            return [User(Content('\n'.join([str(s.result()) for s in node.elements])))]
+        return []
 
-        if assistant.error or not parse_result(str(assistant.message)):
-            return {'tool': 1.0}
-        return parse_result(str(assistant.message))
+    def __marshal(self, value: object, type: str) -> Any:
+        def strip_quotes(value: str) -> str:
+            if value.startswith('\'') or value.startswith('"'):
+                value = value[1:]
+            if value.endswith('\'') or value.endswith('"'):
+                value = value[:-1]
+            return value
+
+        if type == 'str':
+            result = str(value)
+            return strip_quotes(result)
+        elif type == 'int':
+            return int(strip_quotes(str(value)))
+        elif type == 'float':
+            return float(strip_quotes(str(value)))
+        else:
+            return value
 
     def __chunk_messages(
         self,
@@ -402,8 +482,8 @@ class ExecutionController():
         def summarize_conversation(ast_node: AstNode) -> Optional[Message]:
             if isinstance(ast_node, FunctionCall) and ast_node.result():
                 return User(Content(str(ast_node.result())))
-            elif isinstance(ast_node, NaturalLanguage):
-                return ast_node.messages[0]
+            elif isinstance(ast_node, LLMCall):
+                return ast_node.message
             else:
                 return None
 
@@ -415,19 +495,101 @@ class ExecutionController():
 
         return messages
 
+    def classify_tool_or_direct(
+        self,
+        prompt: str,
+    ) -> Dict[str, float]:
+        def parse_result(result: str) -> Dict[str, float]:
+            if ',' in result:
+                if result.startswith('Assistant: '):
+                    result = result[len('Assistant: '):].strip()
+
+                first = result.split(',')[0].strip()
+                second = result.split(',')[1].strip()
+                try:
+                    if first.startswith('tool') or first.startswith('"tool"'):
+                        return {'tool': float(second)}
+                    elif first.startswith('direct') or first.startswith('"direct"'):
+                        return {'direct': float(second)}
+                    else:
+                        return {'tool': 1.0}
+                except ValueError as ex:
+                    return {'tool': 1.0}
+            return {'tool': 1.0}
+
+        executor = self.execution_contexts[0]
+
+        # assess the type of task
+        function_list = [Helpers.get_function_description_flat(f) for f in self.agents]
+        query_understanding = Helpers.load_and_populate_prompt(
+            prompt_filename='prompts/query_understanding.prompt',
+            template={
+                'functions': '\n'.join(function_list),
+                'user_input': prompt,
+            }
+        )
+
+        assistant: Assistant = executor.execute(
+            messages=[
+                System(Content(query_understanding['system_message'])),
+                User(Content(query_understanding['user_message']))
+            ],
+            temperature=0.0,
+        )
+
+        if assistant.error or not parse_result(str(assistant.message)):
+            return {'tool': 1.0}
+        return parse_result(str(assistant.message))
+
     def execute_statement(
         self,
         statement: Statement,
         executor: Executor,
         program: Program,
-        callee_or_context: Optional[Statement] = None,
     ) -> Statement:
 
         # we have an answer to the query, return it
         if isinstance(statement, Answer):
+            if isinstance(statement.result(), StackNode):
+                statement._result = program.runtime_stack.pop()
+
+            # check to see if the answer is partially or fully satisfactory of the
+            # original query.
+            # dataframe or stack context peek
+            messages: List[Message] = []
+            context = [
+                self.__context_to_message(
+                    context=s,
+                    query=User(Content(program.original_query)),
+                    max_tokens=executor.max_tokens()
+                ) for s in program.executed_stack.peek(0)
+            ]
+
+            messages.extend(context)
+
+            prompt = Helpers.load_and_populate_prompt(
+                prompt_filename=f'prompts/{statement.token()}_result.prompt',
+                template={
+                    'original_query': str(program.original_query),
+                    'answer': str(statement.result()),
+                }
+            )
+
+            # execute the llm_call
+            messages.append(User(Content(prompt['user_message'])))
+            assistant: Assistant = executor.execute(messages)
+
+            response_writer(prompt['prompt_filename'], assistant)
+            statement._result = assistant
+
+            program.answers.append(statement)
             return statement
 
-        elif isinstance(statement, FunctionCall) and not statement.result():
+        # execute function call
+        elif (
+            isinstance(statement, FunctionCall)
+            and not statement.result()
+        ):
             # unpack the args, call the function
             function_call = statement
             function_args_desc = statement.args
@@ -437,37 +599,18 @@ class ExecutionController():
             func: Callable | None = Helpers.first(lambda f: f.__name__ in function_call.name, self.agents)
 
             if not func:
-                logging.error('Could not find function {}'.format(function_call.name))
+                logging.error('Could not find function named: {}'.format(function_call.name))
                 return UncertainOrError(
-                    conversation=[Content('I could find the function {}'.format(function_call.name))],
-                    error='I could find the function {}'.format(function_call.name)
+                    error_message=Content('I could not find the function named: {}'.format(function_call.name)),
                 )
-
-            def marshal(value: object, type: str) -> Any:
-                def strip_quotes(value: str) -> str:
-                    if value.startswith('\'') or value.startswith('"'):
-                        value = value[1:]
-                    if value.endswith('\'') or value.endswith('"'):
-                        value = value[:-1]
-                    return value
-
-                if type == 'str':
-                    result = str(value)
-                    return strip_quotes(result)
-                elif type == 'int':
-                    return int(strip_quotes(str(value)))
-                elif type == 'float':
-                    return float(strip_quotes(str(value)))
-                else:
-                    return value
 
             # check for enum types and marshal from string to enum
             counter = 0
             for p in inspect.signature(func).parameters.values():
                 if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumMeta':
-                    function_args[p.name] = p.annotation(function_args_desc[counter][p.name])
+                    function_args[p.name] = p.annotation(self.__marshal(function_args_desc[counter][p.name], 'str'))
                 elif counter < len(function_args_desc):
-                    function_args[p.name] = marshal(function_args_desc[counter][p.name], p.annotation.__name__)
+                    function_args[p.name] = self.__marshal(function_args_desc[counter][p.name], p.annotation.__name__)
                 else:
                     function_args[p.name] = p.default
                 counter += 1
@@ -483,251 +626,182 @@ class ExecutionController():
             except Exception as e:
                 logging.error(e)
                 return UncertainOrError(
-                    conversation=[Content('The function could not execute. It raised an exception: {}'.format(e))],
-                    error='The function could not execute. It raised an exception: {}'.format(e),
+                    error_message=Content('The function could not execute. It raised an exception: {}'.format(e)),
+                    supporting_error=e,
                 )
 
             function_call._result = function_response
             return function_call
 
         elif (
-            isinstance(statement, NaturalLanguage)
+            isinstance(statement, LLMCall)
             and not statement.result()
-            and callee_or_context
         ):
-            # callee provides context for the natural language statement
             messages: List[Message] = []
-            messages.extend(statement.messages)
+            if statement.supporting_system: messages.append(statement.supporting_system)
+            if statement.supporting_messages: messages.extend(statement.supporting_messages)
 
-            if isinstance(callee_or_context, FunctionCall):
-                function_call = callee_or_context
-                function_args_desc = function_call.args
-                function_args = {}
-                function_result = function_call.result()
+            if statement.context and isinstance(statement.context, StackNode):
+                # dataframe or stack context peek
+                stack_statements = self.__stacknode_to_statement(program, statement.context)
+                context = [
+                    self.__context_to_message(
+                        context=s,
+                        query=User(Content(program.original_query)),
+                        max_tokens=executor.max_tokens()
+                    ) for s in stack_statements
+                ]
+                messages.extend(context)
 
-                continuation_function = Helpers.load_and_populate_prompt(
-                    prompt_filename='prompts/continuation_function.prompt',
-                    template={
-                        'function_name': function_call.to_code_call(),
-                        'function_result': self.__chunk_content(
-                            query=statement.messages[0],
-                            current_str=function_result,
-                            max_token_count=executor.max_tokens()
-                        ),
-                        'natural_language': str(statement.messages[0]),
-                    }
-                )
+            prompt = Helpers.load_and_populate_prompt(
+                prompt_filename=f'prompts/{statement.token()}.prompt',
+                template={
+                    'llm_call_message': str(statement.message),
+                }
+            )
 
-                messages.append(User(Content(continuation_function['user_message'])))
-                assistant: Assistant = executor.execute(messages)
-                response_writer(continuation_function['prompt_filename'], assistant)
-                statement._result = assistant
-                return statement
+            # execute the llm_call
+            messages.append(User(Content(prompt['user_message'])))
+            assistant: Assistant = executor.execute(messages)
 
-            elif isinstance(callee_or_context, ForEach):
-                # the result() could have a list of things
-                if isinstance(callee_or_context.result(), list):
-                    result_list = []
-                    for foreach_result in cast(list, callee_or_context.result()):
-                        assistant_result = self.execute_statement(
-                            statement,
-                            executor,
-                            program,
-                            callee_or_context=foreach_result
-                        ).result()
-                        # we have to unset the result so that the next iteration works properly
-                        statement._result = None
-                        # todo: we can remove this type cast, after execute_statement is just Statement
-                        assistant_result = cast(Assistant, assistant_result)
-                        # todo: not sure if "NaturalLanguage" is the right thing to return here.
-                        result_list.append(NaturalLanguage([assistant_result], executor=executor))
+            response_writer(prompt['prompt_filename'], assistant)
+            statement._result = assistant
+            return statement
 
-                    statement._result = result_list
-
-            else:
-                # generic continuation response
-                continuation_generic = Helpers.load_and_populate_prompt(
-                    prompt_filename='prompts/continuation_generic.prompt',
-                    template={
-                        'context': str(callee_or_context.result()),
-                        'query': str(statement.messages[0]),
-                    }
-                )
-                messages.append(User(Content(continuation_generic['user_message'])))
-                assistant: Assistant = executor.execute(messages)
-                response_writer(continuation_generic['prompt_filename'], assistant)
-                statement._result = assistant
-                return statement
-
+        # foreach
         elif (
-            isinstance(statement, NaturalLanguage)
+            isinstance(statement, ForEach)
             and not statement.result()
-            and not callee_or_context
         ):
-            messages: List[Message] = []
-            system_message = statement.system if statement.system else System(Content('You are a helpful assistant.'))
-            messages.append(system_message)
-            messages.extend(statement.messages)
+            # deal with the first argument (lhs), which is the list context for the foreach loop
+            # we will need to shape that into a dataframe that the foreach can execute
+            context: List[Message] = []
+            assistant: Assistant
 
-            result = executor.execute(self.__chunk_messages(
-                query=messages[-1],
-                messages=messages,
-                max_token_count=executor.max_tokens()
-            ))
-            response_writer('natural_language.prompt', result)
+            if isinstance(statement.lhs, StackNode):
+                # dataframe or stack context peek
+                stack_statements = self.__stacknode_to_statement(program, statement.lhs)
+                context_messages = [
+                    self.__context_to_message(
+                        context=s,
+                        query=User(Content(program.original_query)),
+                        max_tokens=executor.max_tokens()
+                    ) for s in stack_statements
+                ]
+                context.extend(context_messages)
 
-            statement._result = result
-            return statement
-
-        elif isinstance(statement, NaturalLanguage) and statement.result():
-            return statement
-
-        elif isinstance(statement, ForEach):
-            messages: List[Message] = []
-
+            # now deal with the right hand side
             if isinstance(statement.rhs, FunctionCall):
-                foreach_function = Helpers.load_and_populate_prompt(
-                    prompt_filename='prompts/foreach_functioncall.prompt',
+                prompt = Helpers.load_and_populate_prompt(
+                    prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
                     template={
-                        'function_call': statement.rhs.to_code_call(),  # statement.rhs.to_definition(),
-                        'list': self.__lhs_to_str(statement.lhs),
+                        'function_call': statement.rhs.to_definition(),
                     }
                 )
 
-                def summarize_conversation(ast_node: AstNode) -> Optional[Message]:
-                    if isinstance(ast_node, FunctionCall) and ast_node.result():
-                        return User(Content(str(ast_node.result())))
-                    elif isinstance(ast_node, NaturalLanguage):
-                        return ast_node.messages[0]
-                    else:
-                        return None
+                foreach_function_response = ''
+                messages = context + [User(Content(prompt['user_message']))]
 
-                # I need to add supporting context so that the LLM can fill in the callsite args
-                if callee_or_context:
-                    messages.extend(self.__summarize_to_messages(callee_or_context))
+                assistant = executor.execute(messages=messages)
+                response_writer(prompt['prompt_filename'], assistant)
+                foreach_function_response = str(assistant.message)
 
-                messages.append(User(Content(foreach_function['user_message'])))
-                result = executor.execute(messages)
-
-                # debug output
-                response_writer(foreach_function['prompt_filename'], result)
-
-                # todo there needs to be some sort of error handling/backtracking here
-                if '"missing"' in str(result.message):
+                if '"missing"' in str(assistant.message):
                     # try pushing the LLM to re-write the correct function call
+                    # todo: I think this is wrong, context should be enough.
+                    previous_messages = [str(s.result()) for s in program.runtime_stack.peek(0)]
+
                     function_call_rewrite = Helpers.load_and_populate_prompt(
-                        'prompts/functioncall_correction.prompt',
+                        f'prompts/{statement.token()}_error_correction.prompt',
                         template={
-                            'function_calls_missing': str(result.message),
+                            'function_calls_missing': str(assistant.message),
                             'function_call_signatures': '\n'.join(
                                 [Helpers.get_function_description_flat_extra(f) for f in self.agents]
                             ),
-                            'previous_messages': '\n'.join([str(m.message) for m in messages[0:-1]])
+
+                            'previous_messages': '\n'.join(previous_messages)
                         }
                     )
+                    assistant = executor.execute(messages=[User(Content(function_call_rewrite['user_message']))])
+                    response_writer(function_call_rewrite['prompt_filename'], assistant)
+                    # statement._result = assistant.message
+                    foreach_function_response = str(assistant.message)
 
-                    result = executor.execute(messages=[User(Content(function_call_rewrite['user_message']))])
-                    response_writer(function_call_rewrite['prompt_filename'], result)
-
-                # parse the result
-                foreach_parser = Parser()
-                flow = ExecutionFlow(Order.QUEUE)
-                program = foreach_parser.parse_program(str(result.message), self.agents, executor, flow)
-
-                # execute the program
-                program_result = self.execute_program(program, flow)
-
-                if len(program_result) > 0:
-                    statement._result = program_result
-
-                return statement
-
-            elif isinstance(statement.rhs, NaturalLanguage):
-                foreach_functioncall = Helpers.load_and_populate_prompt(
-                    prompt_filename='prompts/foreach_functioncall.prompt',
-                    template={
-                        'list': '\n'.join([str(s.result()) for s in statement.lhs]),
-                        'natural_language': str(statement.rhs.messages[0]),
-                    }
+                # if this is a program, we need to compile and interpret
+                foreach_program = Parser().parse_program(
+                    message=foreach_function_response,
+                    agents=self.agents,
+                    executor=program.executor
                 )
-                messages.append(User(Content(foreach_functioncall['user_message'])))
-                result = executor.execute(messages)
-                response_writer(foreach_functioncall['prompt_filename'], result)
-                statement._result = result
-                return statement
 
-        elif isinstance(statement, Continuation):
-            result = self.execute_statement(
-                statement.rhs,
-                executor,
-                program,
-                statement.lhs
-            )
+                # execute it
+                if foreach_program:
+                    statement._result = [
+                        self.execute_statement(s, executor, foreach_program).result()
+                        for s in foreach_program.statements
+                    ]
+                    return statement
+                else:
+                    statement._result = foreach_function_response
 
-            if isinstance(result, UncertainOrError):
-                foreach_functioncall = Helpers.load_and_populate_prompt(
-                    prompt_filename='prompts/continuation_uncertain_or_error.prompt',
+            elif isinstance(statement.rhs, LLMCall):
+                prompt = Helpers.load_and_populate_prompt(
+                    prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
                     template={
-                        'lhs': str(statement.lhs._ast_text),
-                        'rhs': str(statement.rhs._ast_text),
-                        'error': str(result.error),
+                        'message': str(statement.rhs.message),
                     }
                 )
 
-                messages: List[Message] = []
-                messages.extend(program.tool_response)
-                messages.append(User(Content(foreach_functioncall['user_message'])))
-                result = executor.execute(messages)
-                response_writer(foreach_functioncall['prompt_filename'], result)
+                messages = context + [User(Content(prompt['user_message']))]
+                assistant = executor.execute(messages=messages)
 
-                # parse the result
-                foreach_parser = Parser()
-                flow = ExecutionFlow(Order.QUEUE)
-                rewritten_program = foreach_parser.parse_program(str(result.message), self.agents, executor, flow)
+                response_writer(prompt['prompt_filename'], assistant)
+                statement._result = assistant.message
+                return statement
 
-                # execute the program
-                new_result = statement.execute_statement(
-                    rewritten_program.statements[-1],
+            elif isinstance(statement.rhs, Answer):
+                prompt = Helpers.load_and_populate_prompt(
+                    prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
+                    template={
+                        'message': str(statement.rhs._result),
+                    }
                 )
-                program_result = self.execute_program(program, flow)
 
-                if len(program_result) > 0:
-                    statement._result = program_result
+                messages = context + [User(Content(prompt['user_message']))]
+                assistant = executor.execute(messages=messages)
 
+                response_writer(prompt['prompt_filename'], assistant)
+                statement._result = assistant.message
                 return statement
 
             else:
-                statement._result = result
-                return statement
+                raise ValueError('shouldnt be here')
 
         else:
-            raise ValueError('shouldnt be here')
+            return Statement()
 
     def execute_program(
         self,
         program: Program,
-        execution: ExecutionFlow[Statement]
-    ) -> List[Statement]:
-        answers: List[Statement] = []
+    ) -> Program:
 
+        flow = ExecutionFlow(Order.QUEUE)
         for s in reversed(program.statements):
-            execution.push(s)
+            flow.push(s)
 
-        while statement := execution.pop():
-            callee_context = None
-            if len(answers) > 0:
-                callee_context = answers[-1]
-
-            answers.append(
-                self.execute_statement(
-                    statement,
-                    program.executor,
-                    program,
-                    callee_or_context=callee_context
-                )
+        while statement := flow.pop():
+            result = self.execute_statement(
+                statement,
+                program.executor,
+                program,
             )
+            if not isinstance(result, Answer):
+                program.runtime_stack.push(result)
+                # track all executed nodes so that Answer
+                # can do a double check.
+                program.executed_stack.push(result)
 
-        return answers
+        return program
 
     def execute_chat(
         self,
@@ -738,18 +812,15 @@ class ExecutionController():
 
     def execute(
         self,
-        call: NaturalLanguage
+        call: LLMCall
     ) -> List[Statement]:
         # pick the right execution context that will get the task done
         # for now, we just grab the first
         results: List[Statement] = []
         executor = self.execution_contexts[0]
 
-        # create an execution flow
-        execution: ExecutionFlow[Statement] = ExecutionFlow(Order.QUEUE)
-
         # assess the type of task
-        classification = self.classify_tool_or_direct(str(call.messages[-1].message))
+        classification = self.classify_tool_or_direct(str(call.message))
 
         # if it requires tooling, hand it off to the AST execution engine
         if 'tool' in classification:
@@ -764,14 +835,15 @@ class ExecutionController():
             response_writer('llm_call', assistant_response)
 
             # parse the response
-            program = Parser().parse_program(assistant_response, self.agents, executor, execution)
-            program.tool_response = response._messages_context + [Assistant(response.message)]
+            program = Parser().parse_program(assistant_response, self.agents, executor)
+            program.conversation.append(response)
+            program.original_query = str(call.message)
 
             # execute the program
-            answers: List[Statement] = self.execute_program(program, execution)
-            results.extend(answers)
+            program = self.execute_program(program)
+            results.extend(program.answers)
         else:
-            assistant_reply: Assistant = self.execute_chat(call.messages)
+            assistant_reply: Assistant = self.execute_chat(call.supporting_messages + [call.message])
             results.append(Answer(conversation=[Content(str(assistant_reply.message))]))
 
         return results
@@ -781,9 +853,10 @@ class ExecutionController():
         user_message: str,
         system_message: str = 'You are a helpful assistant.'
     ) -> List[Statement]:
-        call = NaturalLanguage(messages=[
-            System(Content(system_message)),
-            User(Content(user_message))
-        ])
+        call = LLMCall(
+            context=None,
+            message=User(Content(user_message)),
+            supporting_system=System(Content(system_message)),
+        )
 
         return self.execute(call)

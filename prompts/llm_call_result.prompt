@@ -1,0 +1,9 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+Here is extra context to solve the problem or answer the question in a future message:
+
+Extra context:
+
+{{llm_call_result}}

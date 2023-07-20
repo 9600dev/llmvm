@@ -1,0 +1,9 @@
+[system_message]
+You are a helpful assistant. 
+
+[user_message]
+Perform the task or answer the question below. Use text found in previous messages for data, information and context to help perform the tasks or answer any questions that are listed below. Don't ask for more context, or apologize for not knowing, just try your best to respond and remember to use previous messages for data, information and context to help.   
+
+Task or Question:
+
+{{llm_call_message}}

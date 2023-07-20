@@ -16,10 +16,16 @@ Open my contacts, find Leo Huang, Jeff Dean and Micheal Jones and set up a meeti
 
 Download this paper https://arxiv.org/pdf/2306.14077v1.pdf and summarize the main points.
 
-Download this paper https://ceur-ws.org/Vol-3432/paper17.pdf and this paper https://arxiv.org/pdf/2306.14077v1.pdf and find the differences in opinions between the two of them.
+List the differences and similarities between this paper: https://arxiv.org/pdf/2211.01910.pdf and this paper: https://arxiv.org/pdf/2210.02441.pdf
 
 Get the latest 10K for AMD and extract any sentences that talk about AI or machine learning.
 
 Get the historical prices for NVDA. What is the standard deviation of the daily close price over the past 6 months? 
 
 Complete this sentence: The New England Journal of Medicine is a registered trademark of
+
+Generate a haskell function that calculates simple interest. Generate a C# function that calculates simple interest.
+
+What is the square root of 128. 
+
+If Johnnie has $10.00 USD and gifts $5.00 of that to Annie in AUD. How much does Johnnie have left? The USD to AUD exchange rate is $1.50.

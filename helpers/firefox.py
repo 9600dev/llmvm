@@ -20,6 +20,7 @@ class FirefoxHelpers(metaclass=Singleton):
         logging.debug('FirefoxHelpers()')
 
         profile_directory = Container().get('firefox_profile')
+        profile = webdriver.FirefoxProfile(profile_directory)
         options = FirefoxOptions()
         options.headless = False
         options.set_preference("print.always_print_silent", True)
@@ -28,12 +29,9 @@ class FirefoxHelpers(metaclass=Singleton):
         options.set_preference("browser.download.dir", Container().get('firefox_download_dir'))
         options.set_preference("browser.download.folderList", 2)
         options.set_preference("browser.helperApps.neverAsk.saveToDisk", "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream")
-
-        profile = webdriver.FirefoxProfile(profile_directory)
+        options.profile = profile
         service_args = ['--marionette-port', str(Container().get('firefox_marionette_port'))]
-
-        # options.add_argument("--headless")
-        self.web_driver = webdriver.Firefox(firefox_profile=profile, options=options, service_args=service_args)
+        self.web_driver = webdriver.Firefox(options=options)
 
     def driver(self):
         return self.web_driver
@@ -65,7 +63,7 @@ class FirefoxHelpers(metaclass=Singleton):
         while True:
             try:
                 filename = driver.execute_script("return document.querySelector('#contentAreaDownloadsView .downloadMainArea .downloadContainer description:nth-of-type(1)').value")
-            except:
+            except Exception as ex:
                 pass
             time.sleep(1)
             if time.time() > end_time:

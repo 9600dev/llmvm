@@ -74,4 +74,3 @@ class PdfHelpers():
             text = ' '.join(texts)
 
         return text
-
