@@ -1,7 +1,3 @@
-[system_message]
-You are given a problem description or a question. Your task is to solve that problem or answer that question. You have access to a programmable stack based virtual machine that has many helper functions that can help you solve problems and answer questions. 
-
-[user_message]
 Your task is to solve a problem or answer a question that is defined under the token "User Input:" 
 
 You have access to a programmable stack based virtual machine which you can program using a Abstract Syntax Tree that is defined by an EBNF grammar below. Each command that is emitted will be executed sequentially by the virtual machine and the result of the command will be put on the stack.  
@@ -10,18 +6,18 @@ Here is the EBNF grammar for the stack based virtual machine:
 
 <program> ::= { <statement> }
 <statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <set> | <get> | <uncertain_or_error>
-<llm_call> ::= 'llm_call' '(' [ <stack> ',' <text> | <stack_pop> ',' <text> | <text> ] ')'
-<foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> | <dataframe> ] ',' <statement> ')'
-<function_call> ::= 'function_call' '(' <helper_function> ')'
-<answer> ::= 'answer' '(' [ <stack> | <stack_pop> | <text> ] ')'
-<get> ::= 'get' '(' <text> ')' 
-<set> ::= 'set' '(' <text> ')'
-<text> ::= '"' { <any_character> } '"'
-<dataframe> ::= 'dataframe' '(' [ <list> | <stack> | <stack_pop> ] ')'
-<list> ::= '[' { <text> ',' } <text> ']'
-<stack> ::= 'stack' '(' ')'
-<stack_pop> ::= 'stack_pop' '(' <digit> ')'
-<digit> ::= '0'..'9'
+<llm_call> ::= \'llm_call\' \'(\' [ <stack> \',\' <text> | <stack_pop> \',\' <text> | <text> ] \')\'
+<foreach> ::= \'foreach\' \'(\' [ <stack> | <stack_pop> | <dataframe> ] \',\' <statement> \')\'
+<function_call> ::= \'function_call\' \'(\' <helper_function> \')\'
+<answer> ::= \'answer\' \'(\' [ <stack> | <stack_pop> | <text> ] \')\'
+<get> ::= \'get\' \'(\' <text> \')\' 
+<set> ::= 'set\' \'(\' <text> \')\'
+<text> ::= \'"\' { <any_character> } \'"\'
+<dataframe> ::= \'dataframe\' \'(\' [ <list> | <stack> | <stack_pop> ] \')\'
+<list> ::= \'[\' { <text> \',\' } <text> \']\'
+<stack> ::= 'stack\' \'(\' \')\'
+<stack_pop> ::= 'stack_pop\' \'(\' <digit> \')\'
+<digit> ::= \'0\'..\'9\'
 <any_character> ::= <all_printable_characters_except_double_quotes>
 <helper_function> ::= <function_call_from_available_helper_functions>
 
@@ -39,7 +35,7 @@ dataframe: use this to specify a list e.g. ["1", "2", "3"] or ["hello", "world"]
 
 stack: represents all the elements or data on the execution stack. This node will pop all elements off the stack.
 
-stack_pop: this node will pop off 'n' elements from the stack. Typically you only need to pop 1 element off, using stack_pop(1). You can pop more elements off the stack, eg 2 elements: stack_pop(2).
+stack_pop: this node will pop off \'n\' elements from the stack. Typically you only need to pop 1 element off, using stack_pop(1). You can pop more elements off the stack, eg 2 elements: stack_pop(2).
 
 set: this node pops one element from the stack and copies the element into the supplied variable name. E.g set("var1") will pop the top of the stack and copy the element to "var1". It does not push anything on the stack. Use this node for storage of results for use at a later part of AST execution. 
 
@@ -50,7 +46,21 @@ Here is the list of functions you can call using the function_call EBNF node. Yo
 
 List of Function Calls allowed. Call them using function_call( ... ):
 
-{{functions}}
+WebHelpers.get_url(url, force_firefox)  # Url can be a http or https web url or a filename and directory location.
+WebHelpers.get_news(url)  # Extracts the text from a news article
+WebHelpers.get_url_firefox(url)  # This is useful for hard to extract text, an exception thrown by the other functions,
+or when searching/extracting from sites that require logins liked LinkedIn, Facebook, Gmail etc.
+WebHelpers.search_news(query, total_links_to_return)  # Searches the current and historical news for a query and returns the text of the top results
+WebHelpers.search_internet(query, total_links_to_return)  # Searches the internet for a query and returns the text of the top results
+WebHelpers.search_linkedin_profile(first_name, last_name, company_name)  # Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
+WebHelpers.get_linkedin_profile(linkedin_url)  # Extracts the career information from a person's LinkedIn profile from a given LinkedIn url
+EdgarHelpers.get_latest_form_text(symbol, form_type)  # This is useful to get the latest financial information for a company,
+their current strategy, investments and risks.
+PdfHelpers.parse_pdf(url_or_file)  # You can only use either a url or a path to a pdf file.
+MarketHelpers.get_stock_price(symbol)  # Get the current or latest price of the specified stock symbol
+MarketHelpers.get_market_capitalization(symbol)  # Get the current market capitalization of the specified stock symbol
+EmailHelpers.send_email(sender_email, receiver_email, subject, body)  # Send an email from sender to receiver with the specified subject and body text
+EmailHelpers.send_calendar_invite(from_name, from_email, attendee_emails, subject, body, start_date, end_date)  # Send a calendar invite to the attendee
 
 
 Here is a number of examples that show the output expected AST output from you. Explanations of the examples are defined using "#". "User:" is the problem or question, "Assistant:" is an example of an AST that strictly follows the EBNF grammar above. 
@@ -103,7 +113,7 @@ llm_call(stack_pop(1), "From the content provided, extract the current CEO")
 answer(stack_pop(1))
 
 
-Example:  # in this example, you're searching the internet for a bread recipe, then you're calling yourself again to get just one recipe, then an LLM to get a list of the ingredients.
+Example:  # in this example, you\'re searching the internet for a bread recipe, then you\'re calling yourself again to get just one recipe, then an LLM to get a list of the ingredients.
 User: Search the Internet for a fluffy bread recipe and then list the ingredients. 
 
 Assistant:
@@ -209,7 +219,5 @@ llm_call(stack_pop(1), "Find the best person in this text who looks like they ar
 answer(stack_pop(1))
 
 
-Okay, let's do it. Using only the EBNF grammar above, the explanation of the nodes in the grammar, and the examples I've given you, let's solve the problem or answer the question. Only emit text that satisfies the grammar, nothing else. Do not emit function_call's to non-listed functions.
+Okay, let's do it. Using only the EBNF grammar above, the explanation of the nodes in the grammar, and the examples I\'ve given you, let's solve the problem or answer the question. Only emit text that satisfies the grammar, nothing else. Do not emit function_call's to non-listed functions.
 
-User:
-{{user_input}}

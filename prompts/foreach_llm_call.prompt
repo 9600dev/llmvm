@@ -3,8 +3,18 @@ You are a helpful assistant.
 
 [user_message]
 
-The previous messages above contains data that I need to convert into a list, and then perform a task on that list. You should iterate over an appropriately generated list of data and apply the following task, query or transformation:
+Act as a list generator and task executor, do not act as an assistant or chat bot. I need you to perform the task listed below "Task" on data provided in previous messages. 
+
+The previous messages may contain a list of data, in which case, you should perform the task over all elements in that list of data. The previous messages may only contain one data item, in which case, perform the task directly on that single item. 
+
+In your output, follow these rules: 
+
+* Don't apologize 
+* Don't ask if there is anything else you can do
+* Don't explain yourself. 
+* Don't explain how you executed the task.
+* Do just output the result of the task, or the results of the task being applied over a list.
 
 Task:
 
-{message}
+{{message}}

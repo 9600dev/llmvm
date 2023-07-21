@@ -246,6 +246,38 @@ class StackNode(Statement):
         return 'stack'
 
 
+class Get(Statement):
+    def __init__(
+        self,
+        variable: str,
+        ast_text: Optional[str] = None,
+    ):
+        super().__init__(ast_text)
+        self.variable = variable
+
+    def __str__(self):
+        return f'get("{self.variable}")'
+
+    def token(self):
+        return 'get'
+
+
+class Set(Statement):
+    def __init__(
+        self,
+        variable: str,
+        ast_text: Optional[str] = None,
+    ):
+        super().__init__(ast_text)
+        self.variable = variable
+
+    def __str__(self):
+        return f'set("{self.variable}")'
+
+    def token(self):
+        return 'set'
+
+
 class DataFrame(Statement):
     def __init__(
         self,
@@ -297,6 +329,7 @@ class ForEach(Statement):
         super().__init__(ast_text)
         self.lhs = lhs
         self.rhs = rhs
+        self._result = []
 
     def result(self) -> object:
         return self._result
@@ -400,8 +433,10 @@ class Program(AstNode):
         self.statements: List[Statement] = []
         self.conversation: List[Message] = []
         self.runtime_stack: Stack[Statement] = Stack[Statement]()
-        self.executed_stack: Stack[Statement] = Stack[Statement]()
+        self.runtime_registers: Dict[str, Statement] = {}
         self.answers: List[Answer] = []
+
+        self.executed_stack: Stack[Statement] = Stack[Statement]()
         self.original_query: str = ''
 
 

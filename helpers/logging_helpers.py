@@ -15,6 +15,8 @@ def setup_logging(
     logging.getLogger('asyncio').setLevel(logging.WARNING)
     logging.getLogger('markdown_it').setLevel(logging.WARNING)
     logging.getLogger('numexpr').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+    logging.getLogger('openai').setLevel(logging.WARNING)
 
     if module_name in global_loggers:
         return global_loggers[module_name]

@@ -125,8 +125,6 @@ class OpenAIExecutor(Executor):
         chat_response = chat_response['choices'][0]['message']  # type: ignore
         message_results.append(chat_response)
 
-        response_writer(prompt['prompt_filename'], chat_response['content'])
-
         if len(chat_response) == 0:
             return Assistant(Content('The model could not execute the query.'), error=True)
         else:

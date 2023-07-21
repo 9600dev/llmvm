@@ -1,3 +1,4 @@
+import copy
 import datetime as dt
 import inspect
 import math
@@ -11,9 +12,9 @@ from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import setup_logging
 from helpers.vector_store import VectorStore
 from objects import (Agent, Answer, Assistant, AstNode, Content, DataFrame,
-                     ExecutionFlow, Executor, ForEach, FunctionCall, LLMCall,
-                     Message, Order, Program, StackNode, Statement, System,
-                     UncertainOrError, User, tree_map)
+                     ExecutionFlow, Executor, ForEach, FunctionCall, Get,
+                     LLMCall, Message, Order, Program, Set, StackNode,
+                     Statement, System, UncertainOrError, User, tree_map)
 
 logging = setup_logging()
 def response_writer(callee, message):
@@ -46,15 +47,16 @@ def invokeable(func):
 
 
 # <program> ::= { <statement> }
-# <statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <uncertain_or_error>
-# <llm_call> ::= 'llm_call' '(' [ <stack> | <stack_pop> | <text> ] ')'
-# <foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> ] ',' <statement> ')'
+# <statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <set> | <get> | <uncertain_or_error>
+# <llm_call> ::= 'llm_call' '(' [ <stack> ',' <text> | <stack_pop> ',' <text> | <text> ] ')'
+# <foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> | <dataframe> ] ',' <statement> ')'
 # <function_call> ::= 'function_call' '(' <helper_function> ')'
 # <answer> ::= 'answer' '(' [ <stack> | <stack_pop> | <text> ] ')'
-# <uncertain_or_error> ::= 'uncertain_or_error' '(' <text> ')'
+# <get> ::= 'get' '(' <text> ')'
+# <set> ::= 'set' '(' <text> ')'
 # <text> ::= '"' { <any_character> } '"'
-# <dataframe> ::= '[' { <element> ',' } <element> ']'
-# <element> ::= <text> | <stack_pop> | <stack>
+# <dataframe> ::= 'dataframe' '(' [ <list> | <stack> | <stack_pop> ] ')'
+# <list> ::= '[' { <text> ',' } <text> ']'
 # <stack> ::= 'stack' '(' ')'
 # <stack_pop> ::= 'stack_pop' '(' <digit> ')'
 # <digit> ::= '0'..'9'
@@ -133,17 +135,17 @@ class Parser():
 
     def parse_string(
         self,
-    ) -> Optional[Content]:
+    ) -> Optional[str]:
         if self.remainder.startswith('"') and '"' in self.remainder:
             string_result = Helpers.in_between(self.remainder, '"', '"')
             self.consume('"')
             self.consume('"')
-            return Content(string_result)
+            return string_result
         elif self.remainder.startswith("'") and "'" in self.remainder:
             string_result = Helpers.in_between(self.remainder, "'", "'")
             self.consume("'")
             self.consume("'")
-            return Content(string_result)
+            return string_result
         return None
 
     def __strip_string(self, s):
@@ -158,6 +160,7 @@ class Parser():
             self.consume('dataframe(')
             elements = []
             while self.remainder.strip() != '' and not self.remainder.startswith(')'):
+                # todo this is probably broken
                 element = self.parse_string() or self.parse_stack()
                 if element:
                     elements.append(element)
@@ -178,6 +181,28 @@ class Parser():
             num = 0
             self.consume(')')
             return StackNode(0)
+        else:
+            return None
+
+    def parse_get(self) -> Optional[Get]:
+        re = self.remainder.strip()
+
+        if re.startswith('get(') and ')' in re:
+            self.consume('get(')
+            variable = cast(str, self.parse_string())
+            self.consume(')')
+            return Get(variable)
+        else:
+            return None
+
+    def parse_set(self) -> Optional[Set]:
+        re = self.remainder.strip()
+
+        if re.startswith('set(') and ')' in re:
+            self.consume('set(')
+            variable = cast(str, self.parse_string())
+            self.consume(')')
+            return Set(variable)
         else:
             return None
 
@@ -211,12 +236,24 @@ class Parser():
                     result=result,
                 )
 
+            if re.startswith('set(') and ')' in re:
+                set_node = self.parse_set()
+                if set_node: return set_node
+
+            if re.startswith('get(') and ')' in re:
+                get_node = self.parse_get()
+                if get_node: return get_node
+
             if re.startswith('function_call(') and '))' in re:
                 function_call = self.parse_function_call()
                 if not function_call:
                     # push past the function call and keep parsing
-                    self.consume(')')
+                    function_call_text = Helpers.in_between(re, 'function_call(', '))')
+                    self.consume('))')
                     re = self.remainder
+                    return UncertainOrError(
+                        error_message=Content(f'The helper function {function_call_text} could not be found.')
+                    )
                 else:
                     # end token was consumed in parse_function_call()
                     return function_call
@@ -227,7 +264,7 @@ class Parser():
                 llm_call.context = self.parse_stack()
                 if self.remainder.startswith(','):
                     self.consume(',')
-                string_message = self.parse_string() or Content('')
+                string_message = Content(self.parse_string())
                 self.consume(')')
                 llm_call.message = User(string_message)
                 llm_call._ast_text = f'llm_call({str(llm_call.context)}, "{str(llm_call.message)}")'
@@ -272,7 +309,16 @@ class Parser():
                 raise ValueError('we should probably figure out how to deal with random strings')
 
             # we have no idea, so start packaging tokens into a Natural Language call until we see something we know
-            known_tokens = ['function_call', 'foreach', 'uncertain_or_error', 'natural_language', 'answer', 'continuation']
+            known_tokens = [
+                'function_call',
+                'foreach',
+                'uncertain_or_error',
+                'natural_language',
+                'answer',
+                'continuation',
+                'get',
+                'set',
+            ]
             tokens = re.split(' ')
             consumed_tokens = []
             while len(tokens) > 0:
@@ -330,7 +376,7 @@ class ExecutionController():
         self.vector_store: VectorStore = vector_store
         self.cache = cache
 
-    def __context_to_message(
+    def __statement_to_message(
         self,
         context: Statement,
         query: User,
@@ -378,8 +424,20 @@ class ExecutionController():
         self,
         program: Program,
         stack_node: StackNode,
+    ) -> List[Statement]:
+        return program.runtime_stack.peek(stack_node.value)
+
+    def __stacknode_to_runtime_pop(
+        self,
+        program: Program,
+        stack_node: StackNode,
     ):
-        return [node for node in program.runtime_stack.peek(stack_node.value)]
+        if stack_node.value == 0:
+            while len(program.runtime_stack.stack) > 0:
+                program.runtime_stack.pop()
+        else:
+            for i in range(0, stack_node.value):
+                program.runtime_stack.pop()
 
     def __package_context(
         self,
@@ -550,39 +608,69 @@ class ExecutionController():
 
         # we have an answer to the query, return it
         if isinstance(statement, Answer):
-            if isinstance(statement.result(), StackNode):
-                statement._result = program.runtime_stack.pop()
-
-            # check to see if the answer is partially or fully satisfactory of the
-            # original query.
-            # dataframe or stack context peek
             messages: List[Message] = []
-            context = [
-                self.__context_to_message(
-                    context=s,
-                    query=User(Content(program.original_query)),
-                    max_tokens=executor.max_tokens()
-                ) for s in program.executed_stack.peek(0)
-            ]
 
-            messages.extend(context)
+            # if statement.result() and isinstance(statement.result(), StackNode):
+            #     # dataframe or stack context peek
+            #     stack_statements = self.__stacknode_to_statement(program, cast(StackNode, statement.result()))
+            #     context = [
+            #         self.__context_to_message(
+            #             context=s,
+            #             query=User(Content(program.original_query)),
+            #             max_tokens=executor.max_tokens()
+            #         ) for s in stack_statements
+            #     ]
+            #     messages.extend(context)
+
+            answer = str(statement.result())
+            if statement.result() and isinstance(statement.result(), StackNode):
+                answer = '\n'.join(
+                    [
+                        str(s.result())
+                        for s in self.__stacknode_to_statement(program, cast(StackNode, statement.result()))
+                    ])
 
             prompt = Helpers.load_and_populate_prompt(
                 prompt_filename=f'prompts/{statement.token()}_result.prompt',
                 template={
                     'original_query': str(program.original_query),
-                    'answer': str(statement.result()),
+                    'answer': answer,
                 }
             )
 
-            # execute the llm_call
+            # execute the call to check to see if the Answer satisfies the original query
             messages.append(User(Content(prompt['user_message'])))
             assistant: Assistant = executor.execute(messages)
 
             response_writer(prompt['prompt_filename'], assistant)
             statement._result = assistant
 
+            # pop off any consumed elements on the stack
+            if statement.result() and isinstance(statement.result(), StackNode):
+                self.__stacknode_to_runtime_pop(program, cast(StackNode, statement.result()))
+
             program.answers.append(statement)
+            return statement
+
+        # get and set registers
+        elif (
+            isinstance(statement, Get)
+            and not statement.result()
+        ):
+            temp_statement = program.runtime_registers.get(statement.variable)
+            if temp_statement:
+                statement._result = temp_statement
+                # outer loop pushes this on to the runtime stack
+                return temp_statement
+
+        elif (
+            isinstance(statement, Set)
+            and not statement.result()
+        ):
+            temp_statement = program.runtime_stack.pop()
+            if temp_statement:
+                program.runtime_registers[statement.variable] = temp_statement
+            # outer loop ignores Set and Answer
             return statement
 
         # execute function call
@@ -645,7 +733,7 @@ class ExecutionController():
                 # dataframe or stack context peek
                 stack_statements = self.__stacknode_to_statement(program, statement.context)
                 context = [
-                    self.__context_to_message(
+                    self.__statement_to_message(
                         context=s,
                         query=User(Content(program.original_query)),
                         max_tokens=executor.max_tokens()
@@ -666,6 +754,14 @@ class ExecutionController():
 
             response_writer(prompt['prompt_filename'], assistant)
             statement._result = assistant
+
+            # todo: do a check to see if looks valid
+
+            # pop off any consumed elements on the stack
+            if statement.context and isinstance(statement.context, StackNode):
+                self.__stacknode_to_runtime_pop(program, statement.context)
+
+            # return the result
             return statement
 
         # foreach
@@ -676,106 +772,139 @@ class ExecutionController():
             # deal with the first argument (lhs), which is the list context for the foreach loop
             # we will need to shape that into a dataframe that the foreach can execute
             context: List[Message] = []
+            stack_statements: List[Statement] = []
+            foreach_results: List[Statement] = []
             assistant: Assistant
 
+            # deal with the left hand side
             if isinstance(statement.lhs, StackNode):
                 # dataframe or stack context peek
                 stack_statements = self.__stacknode_to_statement(program, statement.lhs)
                 context_messages = [
-                    self.__context_to_message(
+                    self.__statement_to_message(
                         context=s,
                         query=User(Content(program.original_query)),
                         max_tokens=executor.max_tokens()
                     ) for s in stack_statements
                 ]
                 context.extend(context_messages)
+            else:
+                stack_statements = [statement.lhs]
 
             # now deal with the right hand side
-            if isinstance(statement.rhs, FunctionCall):
-                prompt = Helpers.load_and_populate_prompt(
-                    prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
-                    template={
-                        'function_call': statement.rhs.to_definition(),
-                    }
-                )
+            # it can either be a something that has an unmarshalled list,
+            # or it can be an actual list of things
 
-                foreach_function_response = ''
-                messages = context + [User(Content(prompt['user_message']))]
-
-                assistant = executor.execute(messages=messages)
-                response_writer(prompt['prompt_filename'], assistant)
-                foreach_function_response = str(assistant.message)
-
-                if '"missing"' in str(assistant.message):
-                    # try pushing the LLM to re-write the correct function call
-                    # todo: I think this is wrong, context should be enough.
-                    previous_messages = [str(s.result()) for s in program.runtime_stack.peek(0)]
-
-                    function_call_rewrite = Helpers.load_and_populate_prompt(
-                        f'prompts/{statement.token()}_error_correction.prompt',
+            # do the actual foreach
+            for stack_statement in stack_statements:
+                if isinstance(statement.rhs, FunctionCall):
+                    prompt = Helpers.load_and_populate_prompt(
+                        prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
                         template={
-                            'function_calls_missing': str(assistant.message),
-                            'function_call_signatures': '\n'.join(
-                                [Helpers.get_function_description_flat_extra(f) for f in self.agents]
-                            ),
-
-                            'previous_messages': '\n'.join(previous_messages)
+                            'function_call': statement.rhs.to_definition(),
                         }
                     )
-                    assistant = executor.execute(messages=[User(Content(function_call_rewrite['user_message']))])
-                    response_writer(function_call_rewrite['prompt_filename'], assistant)
-                    # statement._result = assistant.message
+
+                    messages = [
+                        self.__statement_to_message(
+                            stack_statement,
+                            User(Content(program.original_query)),
+                            executor.max_tokens()
+                        ),
+                        User(Content(prompt['user_message']))
+                    ]
+
+                    assistant = executor.execute(messages=messages)
+                    response_writer(prompt['prompt_filename'], assistant)
                     foreach_function_response = str(assistant.message)
 
-                # if this is a program, we need to compile and interpret
-                foreach_program = Parser().parse_program(
-                    message=foreach_function_response,
-                    agents=self.agents,
-                    executor=program.executor
-                )
+                    if '"missing"' in str(assistant.message):
+                        # try pushing the LLM to re-write the correct function call
+                        # todo: I think this is wrong, context should be enough.
+                        previous_messages = [str(s.result()) for s in program.runtime_stack.peek(0)]
 
-                # execute it
-                if foreach_program:
-                    statement._result = [
-                        self.execute_statement(s, executor, foreach_program).result()
-                        for s in foreach_program.statements
+                        function_call_rewrite = Helpers.load_and_populate_prompt(
+                            f'prompts/{statement.token()}_error_correction.prompt',
+                            template={
+                                'function_calls_missing': str(assistant.message),
+                                'function_call_signatures': '\n'.join(
+                                    [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+                                ),
+
+                                'previous_messages': '\n'.join(previous_messages)
+                            }
+                        )
+                        assistant = executor.execute(messages=[User(Content(function_call_rewrite['user_message']))])
+                        response_writer(function_call_rewrite['prompt_filename'], assistant)
+                        # statement._result = assistant.message
+                        foreach_function_response = str(assistant.message)
+
+                    # if this is a program, we need to compile and interpret
+                    foreach_program = Parser().parse_program(
+                        message=foreach_function_response,
+                        agents=self.agents,
+                        executor=program.executor
+                    )
+
+                    # execute it
+                    if foreach_program:
+                        statement._result.extend([  # type: ignore
+                            self.execute_statement(s, executor, foreach_program)
+                            for s in foreach_program.statements
+                        ])
+                    else:
+                        statement._result.append(foreach_function_response)  # type: ignore
+
+                elif isinstance(statement.rhs, LLMCall):
+                    prompt = Helpers.load_and_populate_prompt(
+                        prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
+                        template={
+                            'message': str(statement.rhs.message),
+                        }
+                    )
+
+                    messages = [
+                        self.__statement_to_message(
+                            stack_statement,
+                            User(Content(program.original_query)),
+                            executor.max_tokens()
+                        ),
+                        User(Content(prompt['user_message']))
                     ]
-                    return statement
-                else:
-                    statement._result = foreach_function_response
+                    assistant = executor.execute(messages=messages)
+                    statement.rhs._result = assistant
 
-            elif isinstance(statement.rhs, LLMCall):
-                prompt = Helpers.load_and_populate_prompt(
-                    prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
-                    template={
-                        'message': str(statement.rhs.message),
-                    }
-                )
+                    response_writer(prompt['prompt_filename'], assistant)
+                    statement._result.append(copy.deepcopy(statement.rhs))  # type: ignore
 
-                messages = context + [User(Content(prompt['user_message']))]
-                assistant = executor.execute(messages=messages)
+                elif isinstance(statement.rhs, Answer):
+                    prompt = Helpers.load_and_populate_prompt(
+                        prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
+                        template={
+                            'message': str(statement.rhs._result),
+                        }
+                    )
 
-                response_writer(prompt['prompt_filename'], assistant)
-                statement._result = assistant.message
-                return statement
+                    messages = [
+                        self.__statement_to_message(
+                            stack_statement,
+                            User(Content(program.original_query)),
+                            executor.max_tokens()
+                        ),
+                        User(Content(prompt['user_message']))
+                    ]
+                    assistant = executor.execute(messages=messages)
 
-            elif isinstance(statement.rhs, Answer):
-                prompt = Helpers.load_and_populate_prompt(
-                    prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
-                    template={
-                        'message': str(statement.rhs._result),
-                    }
-                )
+                    response_writer(prompt['prompt_filename'], assistant)
+                    statement._result.append(copy.deepcopy(assistant))  # type: ignore
 
-                messages = context + [User(Content(prompt['user_message']))]
-                assistant = executor.execute(messages=messages)
+            # end of foreach tests
+            # pop off any consumed elements on the stack
+            if statement.lhs and isinstance(statement.lhs, StackNode):
+                self.__stacknode_to_runtime_pop(program, statement.lhs)
 
-                response_writer(prompt['prompt_filename'], assistant)
-                statement._result = assistant.message
-                return statement
-
-            else:
-                raise ValueError('shouldnt be here')
+            # not sure if I should return here
+            return statement
 
         else:
             return Statement()
@@ -795,10 +924,31 @@ class ExecutionController():
                 program.executor,
                 program,
             )
-            if not isinstance(result, Answer):
+            # these are nodes that are control flow or do not have a result
+            if (
+                not isinstance(result, Answer)
+                and not isinstance(result, Set)
+                and not isinstance(result, ForEach)
+            ):
                 program.runtime_stack.push(result)
-                # track all executed nodes so that Answer
-                # can do a double check.
+            elif (
+                isinstance(result, ForEach)
+            ):
+                if (
+                    isinstance(result.result(), list)
+                    and all([isinstance(r, Statement) for r in cast(list, result.result())])
+                ):
+                    # foreach generated a list of statements that we should push on the
+                    # runtime stack
+                    for r in cast(list, result.result()):
+                        program.runtime_stack.push(r)
+
+            # track all executed nodes so that Answer can do a final check
+            if (
+                not isinstance(result, Answer)
+                and not isinstance(result, Set)
+                and not isinstance(result, Get)
+            ):
                 program.executed_stack.push(result)
 
         return program

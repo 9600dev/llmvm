@@ -17,7 +17,7 @@ from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
 from objects import (Agent, Answer, Assistant, AstNode, Content, ExecutionFlow,
                      Executor, FunctionCall, LLMCall, Message, Program,
-                     Statement, System, User)
+                     StackNode, Statement, System, User)
 from openai_executor import OpenAIExecutor
 from runtime import ExecutionController
 
@@ -43,6 +43,8 @@ def print_response(statements: List[Statement | AstNode]):
         if isinstance(statement, Assistant):
             # todo, this is a hack, Assistant not a Statement
             pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
+        if isinstance(statement, StackNode):
+            continue
         elif isinstance(statement, Content):
             pprint('', str(statement).strip())
         elif isinstance(statement, System):
@@ -56,7 +58,8 @@ def print_response(statements: List[Statement | AstNode]):
                 print_response([cast(Statement, statement.result())])
             else:
                 rich.print('[bold green]Assistant[/bold green]:')
-                print_response(statement.conversation)
+                # print_response(statement.conversation)
+                pprint('', str(statement.result()))
         elif isinstance(statement, FunctionCall):
             logging.debug('FunctionCall: {}({})'.format(statement.name, str(statement.args)))
             if 'search_internet' in statement.name:
@@ -100,7 +103,7 @@ class Repl():
             cache=PersistentCache('cache/cache.db')
         )
 
-        messages: List[Message] = []
+        user_queries: List[Message] = []
 
         commands = {
             'exit': 'exit the repl',
@@ -126,12 +129,16 @@ class Repl():
                     sys.exit(0)
 
                 elif '/clear' in query:
-                    messages = []
+                    user_queries = []
                     continue
 
                 elif '/messages' in query or '/conversations' in query:
-                    print_response(messages)  # type: ignore
+                    print_response(user_queries)  # type: ignore
                     continue
+
+                elif '/last' in query:
+                    rich.print('Clearning conversation except last message: {}'.format(user_queries[-1]))
+                    user_queries = user_queries[:-1]
 
                 elif '/context' in query:
                     context = Helpers.in_between(query, '/context', '\n').strip()
@@ -172,15 +179,18 @@ class Repl():
                 results = execution_controller.execute(
                     LLMCall(
                         message=User(Content(query)),
-                        supporting_messages=messages
+                        supporting_messages=user_queries,
                     )
                 )
 
+                rich.print()
+                rich.print('[bold green]User:[/bold green] {}'.format(query))
+                rich.print()
                 print_response(results)  # type: ignore
+                rich.print()
 
                 # add the user message to the conversation
-                messages.append(User(Content(query)))
-                rich.print()
+                user_queries.append(User(Content(query)))
 
             except KeyboardInterrupt:
                 print("\nKeyboardInterrupt")

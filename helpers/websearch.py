@@ -131,7 +131,7 @@ class WebHelpers():
         Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
         """
         searcher = SerpAPISearcher(link_limit=1)
-        links: List[Dict] = searcher.search_internet('{} {} {} LinkedIn profile'.format(first_name, last_name, company_name))
+        links: List[Dict] = searcher.search_internet('{} {} {} site:linkedin.com/in/'.format(first_name, last_name, company_name))
         if len(links) > 0:
             # search for linkedin urls
             for link in links:
