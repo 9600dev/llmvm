@@ -8,10 +8,10 @@ Query:
 
 {{original_query}}
 
-And I have your response: 
+And I have your original response: 
 
 {{answer}}
 
 If you have not answered/responded correctly to the original query then rewrite the answer using your own knowledge, or the context, data, information in the previous messages provided above. If you think your response satisfies the original query, then respond with exactly the same text in the response. Sometimes, in order to satisfy the original query, you may need to rewrite the answer so that it has consistent formatting and consistent flow. 
 
-In your next response, do not apologize, do not explain yourself. Just respond directly with either the rewritten response, or the exact original response. Think hard, and make sure the Query above is satisfied by the response.
+In your output do not apologize, do not explain yourself. Just respond directly with either the rewritten response, or the exact original response mentioned above. 

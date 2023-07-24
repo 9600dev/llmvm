@@ -43,7 +43,7 @@ def print_response(statements: List[Statement | AstNode]):
         if isinstance(statement, Assistant):
             # todo, this is a hack, Assistant not a Statement
             pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
-        if isinstance(statement, StackNode):
+        elif isinstance(statement, StackNode):
             continue
         elif isinstance(statement, Content):
             pprint('', str(statement).strip())
@@ -51,8 +51,6 @@ def print_response(statements: List[Statement | AstNode]):
             pprint('[bold red]System[/bold red]: ', str(statement.message))
         elif isinstance(statement, User):
             pprint('[bold blue]User[/bold blue]: ', str(statement.message))
-        elif isinstance(statement, Assistant):
-            pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
         elif isinstance(statement, Answer):
             if isinstance(statement.result(), Statement):
                 print_response([cast(Statement, statement.result())])
@@ -128,11 +126,11 @@ class Repl():
                 elif 'exit' in query:
                     sys.exit(0)
 
-                elif '/clear' in query:
+                elif '/clear' in query or '/cls' in query:
                     user_queries = []
                     continue
 
-                elif '/messages' in query or '/conversations' in query:
+                elif '/messages' in query or '/conversations' in query or '/m ' in query:
                     print_response(user_queries)  # type: ignore
                     continue
 
@@ -164,14 +162,15 @@ class Repl():
                     executor_contexts = self.executors
                     continue
 
-                elif query.startswith('/direct'):
+                elif query.startswith('/direct') or query.startswith('/d '):
+                    if query.startswith('/d '): query = query.replace('/d ', '/direct')
                     query = Helpers.in_between(query, '/direct', '\n').strip()
                     statement = execution_controller.execute_statement(
                         statement=LLMCall(message=User(Content(query))),
                         executor=executor_contexts[0],
                         program=Program(executor_contexts[0]),
                     )
-                    print_response([statement])
+                    print_response([cast(Statement, statement.result())])
                     rich.print()
                     continue
 

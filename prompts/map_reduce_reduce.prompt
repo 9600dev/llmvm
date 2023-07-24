@@ -1,0 +1,15 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+You are helping me achieve a task over large amounts of data. I am calling you in a "map reduce" style of computation. We are in the "reduce" phase of the computation. I will give you the original "map" task under "Map Task", and the results of your "map" computations under "Map Results" separated by the "====" token. 
+
+Please perform the "reduce" computation how you see fit, by using the "Map Task" and the "Map Results". 
+
+Map Task: 
+
+{{query}}
+
+Map Results:
+
+{{map_results}}

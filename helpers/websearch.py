@@ -24,6 +24,36 @@ class IgnoringScriptConverter(MarkdownConverter):
 
 
 class WebHelpers():
+
+    @staticmethod
+    def clean_markdown(markdown_text: str) -> str:
+        lines = []
+        blank_counter = 0
+        for line in markdown_text.splitlines():
+            if line == '' and blank_counter == 0:
+                blank_counter += 1
+                lines.append(line)
+
+            elif line == '' and blank_counter >= 1:
+                continue
+
+            elif line == '<div>' or line == '</div>':
+                continue
+
+            elif line == '[]' or line == '[[]]':
+                continue
+
+            elif line == '*' or line == '* ' or line == ' *':
+                continue
+
+            elif line == '&starf;' or line == '&star;' or line == '&nbsp;':
+                continue
+
+            else:
+                lines.append(line)
+                blank_counter = 0
+        return '\n'.join(lines)
+
     @staticmethod
     def convert_html_to_markdown_soup(html: str) -> str:
         logging.debug('convert_html_to_markdown_soup')
@@ -32,7 +62,8 @@ class WebHelpers():
         for data in soup(['style', 'script']):
             data.decompose()
 
-        return IgnoringScriptConverter().convert_soup(soup)
+        result = IgnoringScriptConverter().convert_soup(soup)
+        return WebHelpers.clean_markdown(result)
 
     @staticmethod
     def convert_html_to_markdown(html: str) -> str:
@@ -170,9 +201,12 @@ class WebHelpers():
             if '.pdf' in result.path:
                 return PdfHelpers.parse_pdf(url)
             if '.htm' in result.path or '.html' in result.path:
-                return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
+                return WebHelpers.convert_html_to_markdown_soup(open(result.path, 'r').read())
 
-        if result.scheme == 'http' or result.scheme == 'https':
+        elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
+            return PdfHelpers.parse_pdf(url)
+
+        elif result.scheme == 'http' or result.scheme == 'https':
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # type: ignore
             }

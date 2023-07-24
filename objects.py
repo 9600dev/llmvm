@@ -3,12 +3,6 @@ from enum import Enum
 from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
 
-from helpers.helpers import Helpers
-from helpers.logging_helpers import setup_logging
-
-logging = setup_logging()
-
-
 T = TypeVar('T')
 
 class Visitor(ABC):
@@ -23,6 +17,7 @@ class Executor(ABC):
         self,
         messages: List['Message'],
         temperature: float = 1.0,
+        max_completion_tokens: int = 2048,
     ) -> 'Assistant':
         pass
 
@@ -41,7 +36,7 @@ class Executor(ABC):
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
         model: str = 'gpt-3.5-turbo-16k',
-        max_completion_tokens: int = 256,
+        max_completion_tokens: int = 2048,
         temperature: float = 1.0,
         chat_format: bool = True,
     ) -> Dict:
@@ -53,6 +48,18 @@ class Executor(ABC):
 
     @abstractmethod
     def max_tokens(self) -> int:
+        pass
+
+    @abstractmethod
+    def max_prompt_tokens(self, completion_token_count: int = 2048) -> int:
+        pass
+
+    @abstractmethod
+    def calculate_tokens(
+        self,
+        messages: List['Message'],
+        extra_str: str = '',
+    ) -> int:
         pass
 
 
@@ -570,9 +577,23 @@ def tree_map(node: AstNode, call: Callable[[AstNode], Any]) -> List[Any]:
 
 
 def tree_traverse(node, visitor: Visitor):
+    def flatten(lst):
+        def __has_list(lst):
+            for item in lst:
+                if isinstance(item, list):
+                    return True
+            return False
+
+        def __inner_flatten(lst):
+            return [item for sublist in lst for item in sublist]
+
+        while __has_list(lst):
+            lst = __inner_flatten(lst)
+        return lst
+
     if isinstance(node, Content):
         if isinstance(node.sequence, list):
-            node.sequence = Helpers.flatten(
+            node.sequence = flatten(
                 [cast(AstNode, tree_traverse(child, visitor)) for child in node.sequence if isinstance(child, AstNode)]
             )
         elif isinstance(node, AstNode):

@@ -14,6 +14,8 @@ import tiktoken
 from docstring_parser import parse
 from guidance.llms import LLM
 
+from objects import Content, Message, User
+
 
 class PersistentCache:
     def __init__(self, filename: Optional[str] = None):
@@ -557,3 +559,17 @@ class Helpers():
 
         prompt['prompt_filename'] = prompt_filename
         return prompt
+
+    @staticmethod
+    def load_and_populate_message(
+        prompt_filename: str,
+        template: Dict[str, str],
+    ) -> Message:
+        prompt: Dict[str, Any] = Helpers.load_prompt(prompt_filename)
+
+        for key, value in template.items():
+            prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
+            prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
+
+        prompt['prompt_filename'] = prompt_filename
+        return User(Content(prompt['user_message']))

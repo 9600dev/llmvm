@@ -4,6 +4,7 @@ from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
 
 import openai
+import tiktoken
 
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import response_writer, setup_logging
@@ -35,6 +36,14 @@ class OpenAIExecutor(Executor):
             case _:
                 return 4096
 
+    def max_prompt_tokens(self, completion_token_count: int = 2048) -> int:
+        return self.max_tokens() - completion_token_count - 256
+
+    def calculate_tokens(self, messages: List[Message], extra_str: str = '') -> int:
+        content = '\n'.join([str(message.message) for message in messages])
+        content += extra_str
+        return len(tiktoken.encoding_for_model(self.model).encode(content))
+
     def name(self) -> str:
         return 'openai'
 
@@ -43,16 +52,17 @@ class OpenAIExecutor(Executor):
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
         model: str = 'gpt-3.5-turbo-16k',
-        max_completion_tokens: int = 256,
+        max_completion_tokens: int = 1024,
         temperature: float = 1.0,
         chat_format: bool = True,
     ) -> Dict:
-        total_tokens = Helpers.calculate_tokens(messages)
-        if total_tokens + max_completion_tokens > self.max_tokens():
-            raise Exception(
-                'Prompt too long, calculated user tokens: {}, completion tokens: {} total model tokens: {}'
-                .format(total_tokens, max_completion_tokens, self.max_tokens())
-            )
+        message_tokens = Helpers.calculate_tokens(messages)
+        if message_tokens > self.max_prompt_tokens(max_completion_tokens):
+            raise Exception('Prompt too long, calculated message tokens: {}, max completion tokens: {} total tokens: {}, available model tokens: {}'
+                            .format(message_tokens,
+                                    max_completion_tokens,
+                                    message_tokens + max_completion_tokens,
+                                    self.max_tokens()))
 
         if not chat_format and len(functions) > 0:
             raise Exception('Functions are not supported in non-chat format')
@@ -93,7 +103,8 @@ class OpenAIExecutor(Executor):
         if self.cache and self.cache.has_key((call.message, call.supporting_messages)):
             return cast(Assistant, self.cache.get((call.message, call.supporting_messages)))
 
-        logging.debug('OpenAIExecutor.execute_with_agents: {}'.format(call.message))
+        encoded_m = str(call.message).encode('utf-8', errors='ignore')[:100]
+        logging.debug('OpenAIExecutor.execute_with_agents: {}'.format(encoded_m))
 
         user_message: User = cast(User, call.message)
         messages = []
@@ -128,7 +139,8 @@ class OpenAIExecutor(Executor):
         if len(chat_response) == 0:
             return Assistant(Content('The model could not execute the query.'), error=True)
         else:
-            logging.debug('OpenAI Assistant Response: {}'.format(chat_response['content']))
+            encoded_m = str(chat_response['content']).encode('utf-8', errors='ignore')[:100]
+            logging.debug('OpenAI Assistant Response: {}'.format(encoded_m))
 
             assistant = Assistant(
                 message=Content(chat_response['content']),
@@ -145,7 +157,9 @@ class OpenAIExecutor(Executor):
         self,
         messages: List[Message],
         temperature: float = 1.0,
+        max_completion_tokens: int = 2048,
     ) -> Assistant:
+
         if self.cache and self.cache.has_key(messages):
             return cast(Assistant, self.cache.get(messages))
 
@@ -157,7 +171,7 @@ class OpenAIExecutor(Executor):
             system_message = System(Content('You are a helpful assistant.'))
 
         logging.debug('OpenAIExecutor.execute system_message={} user_messages={}'
-                      .format(system_message, user_messages))
+                      .format(system_message, str(user_messages).encode('utf-8', errors='ignore')[:100]))
 
         messages_list: List[Dict[str, str]] = []
 
@@ -167,7 +181,7 @@ class OpenAIExecutor(Executor):
 
         chat_response = self.execute_direct(
             messages_list,
-            max_completion_tokens=2048,  # tood: calculate this properly
+            max_completion_tokens=max_completion_tokens,
             chat_format=True,
             temperature=temperature,
         )

@@ -3,6 +3,7 @@ import datetime as dt
 import inspect
 import math
 import os
+import random
 import time
 from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
@@ -376,6 +377,49 @@ class ExecutionController():
         self.vector_store: VectorStore = vector_store
         self.cache = cache
 
+    def __statement_to_message_no_chunk(
+        self,
+        statement: Statement,
+    ) -> User:
+        statement_result_prompts = {
+            'answer': 'prompts/answer_result.prompt',
+            'function_call': 'prompts/function_call_result.prompt',
+            'llm_call': 'prompts/llm_call_result.prompt',
+            'uncertain_or_error': 'prompts/uncertain_or_error_result.prompt',
+            'foreach': 'prompts/foreach_result.prompt',
+        }
+
+        if isinstance(statement, FunctionCall):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_filename=statement_result_prompts[statement.token()],
+                template={
+                    'function_call': statement.to_code_call(),
+                    'function_signature': statement.to_definition(),
+                    'function_result': str(statement.result()),
+                }
+            )
+            return (User(Content(result_prompt['user_message'])))
+
+        elif isinstance(statement, LLMCall) or isinstance(statement, ForEach):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_filename=statement_result_prompts[statement.token()],
+                template={
+                    f'{statement.token()}_result': str(statement.result()),
+                }
+            )
+            return (User(Content(result_prompt['user_message'])))
+
+        elif isinstance(statement, UncertainOrError):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_filename=statement_result_prompts[statement.token()],
+                template={
+                    'error_message': str(statement.error_message),
+                    'supporting_context': str(statement.supporting_error) if statement.supporting_error else '',
+                }
+            )
+
+        return User(Content(''))
+
     def __statement_to_message(
         self,
         context: Statement,
@@ -599,6 +643,149 @@ class ExecutionController():
             return {'tool': 1.0}
         return parse_result(str(assistant.message))
 
+    def __llm_call(
+        self,
+        executor: Executor,
+        context_messages: List[Message],
+        prompt_filename: str,
+        template: Dict[str, Any],
+    ) -> Assistant:
+        prompt = Helpers.load_and_populate_prompt(
+            prompt_filename=prompt_filename,
+            template=template,
+        )
+        messages = copy.deepcopy(context_messages)
+        # execute the call to check to see if the Answer satisfies the original query
+        messages.append(User(Content(prompt['user_message'])))
+        assistant: Assistant = executor.execute(messages)
+
+        response_writer(prompt['prompt_filename'], assistant)
+        return assistant
+
+    def execute_llm_call(
+        self,
+        prompt_message: Message,
+        executor: Executor,
+        program: Program,
+        messages: List[Message],
+        vector_search_query: Optional[str] = None,
+    ) -> Assistant:
+        """
+        Executes an LLM call on a prompt_message with a context of messages.
+        Performs either a chunk_and_rank, or a map/reduce depending on the
+        context relavence to the prompt_message.
+        """
+        assistant_result: Assistant
+        if not vector_search_query:
+            vector_search_query = str(prompt_message)
+
+        # I have either a message, or a list of messages. They might need to be map/reduced.
+        if executor.calculate_tokens(messages + [prompt_message]) > executor.max_prompt_tokens():
+            message = User(Content('\n\n'.join([str(m.message) for m in messages])))
+
+            # see if we can do a similarity search or not.
+            similarity_chunks = self.vector_store.chunk_and_rank(
+                query=vector_search_query,
+                content=str(message.message),
+                chunk_token_count=1024,
+                chunk_overlap=10,
+                max_tokens=executor.max_prompt_tokens() - executor.calculate_tokens([prompt_message])
+            )
+
+            # randomize and sample from the similarity_chunks
+            twenty_percent = math.floor(len(similarity_chunks) * 0.2)
+            similarity_chunks = random.sample(similarity_chunks, min(len(similarity_chunks), twenty_percent))
+
+            decision_criteria: List[str] = []
+            for chunk, rank in similarity_chunks:
+                assistant_similarity = self.__llm_call(
+                    executor,
+                    [],
+                    'prompts/document_chunk.prompt',
+                    {
+                        'query': str(prompt_message),
+                        'document_chunk': chunk,
+                    })
+                decision_criteria.append(str(assistant_similarity.message))
+
+            map_reduce_required = all(['Yes' in d for d in decision_criteria])
+
+            # either similarity search, or map reduce required
+            # here, we're not doing a map_reduce, we're simply populating the context window
+            # with the highest ranked chunks from each message.
+            if not map_reduce_required:
+                tokens_per_message = math.floor((executor.max_prompt_tokens() - executor.calculate_tokens([prompt_message])) / len(messages))
+
+                # for all messages, do a similarity search
+                similarity_messages = []
+                for i in range(len(messages)):
+                    message = messages[i]
+
+                    similarity_chunks = self.vector_store.chunk_and_rank(
+                        query=vector_search_query,
+                        content=str(message),
+                        chunk_token_count=256,
+                        chunk_overlap=0,
+                        max_tokens=tokens_per_message - 32,
+                    )
+                    similarity_message = '\n\n'.join([content for content, rank in similarity_chunks])
+                    similarity_messages.append(User(Content(similarity_message)))
+
+                assistant_result = self.__llm_call(
+                    executor,
+                    similarity_messages,
+                    'prompts/llm_call.prompt',
+                    {
+                        'llm_call_message': str(prompt_message),
+                    })
+
+            # do the map reduce instead of similarity
+            else:
+                # collapse the message
+                context_message = User(Content('\n\n'.join([str(m.message) for m in messages])))
+                chunk_results = []
+
+                # iterate over the data.
+                chunks = self.vector_store.chunk(
+                    content=str(context_message.message),
+                    chunk_size=executor.max_prompt_tokens() - executor.calculate_tokens([prompt_message]) - 32,
+                    overlap=0
+                )
+
+                for chunk in chunks:
+                    chunk_assistant = self.__llm_call(
+                        executor,
+                        [],
+                        'prompts/map_reduce_map.prompt',
+                        {
+                            'original_query': str(program.original_query),
+                            'query': str(prompt_message),
+                            'data': chunk,
+                        })
+                    chunk_results.append(str(chunk_assistant.message))
+
+                # perform the reduce
+                map_results = '\n\n====\n\n' + '\n\n====\n\n'.join(chunk_results)
+
+                assistant_result = self.__llm_call(
+                    executor,
+                    [],
+                    'prompts/map_reduce_reduce.prompt',
+                    {
+                        'original_query': str(program.original_query),
+                        'query': str(prompt_message),
+                        'map_results': map_results
+                    })
+        else:
+            assistant_result = self.__llm_call(
+                executor,
+                messages,
+                'prompts/llm_call.prompt',
+                {
+                    'llm_call_message': str(prompt_message),
+                })
+        return assistant_result
+
     def execute_statement(
         self,
         statement: Statement,
@@ -610,18 +797,6 @@ class ExecutionController():
         if isinstance(statement, Answer):
             messages: List[Message] = []
 
-            # if statement.result() and isinstance(statement.result(), StackNode):
-            #     # dataframe or stack context peek
-            #     stack_statements = self.__stacknode_to_statement(program, cast(StackNode, statement.result()))
-            #     context = [
-            #         self.__context_to_message(
-            #             context=s,
-            #             query=User(Content(program.original_query)),
-            #             max_tokens=executor.max_tokens()
-            #         ) for s in stack_statements
-            #     ]
-            #     messages.extend(context)
-
             answer = str(statement.result())
             if statement.result() and isinstance(statement.result(), StackNode):
                 answer = '\n'.join(
@@ -630,20 +805,14 @@ class ExecutionController():
                         for s in self.__stacknode_to_statement(program, cast(StackNode, statement.result()))
                     ])
 
-            prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=f'prompts/{statement.token()}_result.prompt',
-                template={
+            statement._result = self.__llm_call(
+                executor,
+                [],
+                'prompts/answer_result.prompt',
+                {
                     'original_query': str(program.original_query),
                     'answer': answer,
-                }
-            )
-
-            # execute the call to check to see if the Answer satisfies the original query
-            messages.append(User(Content(prompt['user_message'])))
-            assistant: Assistant = executor.execute(messages)
-
-            response_writer(prompt['prompt_filename'], assistant)
-            statement._result = assistant
+                })
 
             # pop off any consumed elements on the stack
             if statement.result() and isinstance(statement.result(), StackNode):
@@ -725,36 +894,24 @@ class ExecutionController():
             isinstance(statement, LLMCall)
             and not statement.result()
         ):
-            messages: List[Message] = []
-            if statement.supporting_system: messages.append(statement.supporting_system)
-            if statement.supporting_messages: messages.extend(statement.supporting_messages)
-
+            context_messages: List[Message] = []
+            if statement.supporting_system: context_messages.append(statement.supporting_system)
+            if statement.supporting_messages: context_messages.extend(statement.supporting_messages)
             if statement.context and isinstance(statement.context, StackNode):
                 # dataframe or stack context peek
                 stack_statements = self.__stacknode_to_statement(program, statement.context)
                 context = [
-                    self.__statement_to_message(
-                        context=s,
-                        query=User(Content(program.original_query)),
-                        max_tokens=executor.max_tokens()
-                    ) for s in stack_statements
+                    self.__statement_to_message_no_chunk(statement=s) for s in stack_statements
                 ]
-                messages.extend(context)
+                context_messages.extend(context)
 
-            prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=f'prompts/{statement.token()}.prompt',
-                template={
-                    'llm_call_message': str(statement.message),
-                }
+            # updates
+            statement._result = self.execute_llm_call(
+                prompt_message=statement.message,
+                executor=executor,
+                program=program,
+                messages=context_messages,
             )
-
-            # execute the llm_call
-            messages.append(User(Content(prompt['user_message'])))
-            assistant: Assistant = executor.execute(messages)
-
-            response_writer(prompt['prompt_filename'], assistant)
-            statement._result = assistant
-
             # todo: do a check to see if looks valid
 
             # pop off any consumed elements on the stack
@@ -771,23 +928,12 @@ class ExecutionController():
         ):
             # deal with the first argument (lhs), which is the list context for the foreach loop
             # we will need to shape that into a dataframe that the foreach can execute
-            context: List[Message] = []
             stack_statements: List[Statement] = []
-            foreach_results: List[Statement] = []
             assistant: Assistant
 
             # deal with the left hand side
             if isinstance(statement.lhs, StackNode):
-                # dataframe or stack context peek
                 stack_statements = self.__stacknode_to_statement(program, statement.lhs)
-                context_messages = [
-                    self.__statement_to_message(
-                        context=s,
-                        query=User(Content(program.original_query)),
-                        max_tokens=executor.max_tokens()
-                    ) for s in stack_statements
-                ]
-                context.extend(context_messages)
             else:
                 stack_statements = [statement.lhs]
 
@@ -798,48 +944,54 @@ class ExecutionController():
             # do the actual foreach
             for stack_statement in stack_statements:
                 if isinstance(statement.rhs, FunctionCall):
-                    prompt = Helpers.load_and_populate_prompt(
-                        prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
-                        template={
-                            'function_call': statement.rhs.to_definition(),
-                        }
-                    )
-
-                    messages = [
+                    context_messages: List[Message] = [
                         self.__statement_to_message(
                             stack_statement,
                             User(Content(program.original_query)),
-                            executor.max_tokens()
+                            executor.max_prompt_tokens()
                         ),
-                        User(Content(prompt['user_message']))
                     ]
 
-                    assistant = executor.execute(messages=messages)
-                    response_writer(prompt['prompt_filename'], assistant)
+                    assistant = self.execute_llm_call(
+                        prompt_message=Helpers.load_and_populate_message(
+                            prompt_filename='prompts/foreach_function_call.prompt',
+                            template={
+                                'function_call': statement.rhs.to_definition(),
+                            }),
+                        executor=executor,
+                        program=program,
+                        messages=[
+                            self.__statement_to_message_no_chunk(stack_statement)
+                        ],
+                        # todo: I think this is wrong, but this is what the previous code did
+                        vector_search_query=program.original_query,
+                    )
+
                     foreach_function_response = str(assistant.message)
 
+                    # check to see if the function call had any "missing" parameters
+                    # try pushing the LLM to re-write the correct function calls
+                    # todo: I think this is wrong, context should be enough.
                     if '"missing"' in str(assistant.message):
-                        # try pushing the LLM to re-write the correct function call
-                        # todo: I think this is wrong, context should be enough.
                         previous_messages = [str(s.result()) for s in program.runtime_stack.peek(0)]
 
-                        function_call_rewrite = Helpers.load_and_populate_prompt(
-                            f'prompts/{statement.token()}_error_correction.prompt',
-                            template={
-                                'function_calls_missing': str(assistant.message),
-                                'function_call_signatures': '\n'.join(
-                                    [Helpers.get_function_description_flat_extra(f) for f in self.agents]
-                                ),
-
-                                'previous_messages': '\n'.join(previous_messages)
-                            }
+                        assistant_function_call_rewrite = self.execute_llm_call(
+                            prompt_message=Helpers.load_and_populate_message(
+                                prompt_filename=f'prompts/{statement.token()}_error_correction.prompt',
+                                template={
+                                    'function_calls_missing': str(assistant.message),
+                                    'function_call_signatures': '\n'.join(
+                                        [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+                                    ),
+                                    'previous_messages': '\n'.join(previous_messages)
+                                }),
+                            executor=executor,
+                            program=program,
+                            messages=[],
                         )
-                        assistant = executor.execute(messages=[User(Content(function_call_rewrite['user_message']))])
-                        response_writer(function_call_rewrite['prompt_filename'], assistant)
-                        # statement._result = assistant.message
-                        foreach_function_response = str(assistant.message)
+                        foreach_function_response = str(assistant_function_call_rewrite.message)
 
-                    # if this is a program, we need to compile and interpret
+                    # if the assistant result is a program, we need to compile and interpret
                     foreach_program = Parser().parse_program(
                         message=foreach_function_response,
                         agents=self.agents,
@@ -853,50 +1005,37 @@ class ExecutionController():
                             for s in foreach_program.statements
                         ])
                     else:
+                        # todo: why is this string, and not assistant?
                         statement._result.append(foreach_function_response)  # type: ignore
 
                 elif isinstance(statement.rhs, LLMCall):
-                    prompt = Helpers.load_and_populate_prompt(
-                        prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
-                        template={
-                            'message': str(statement.rhs.message),
-                        }
+                    assistant_llm_call = self.execute_llm_call(
+                        prompt_message=Helpers.load_and_populate_message(
+                            prompt_filename='prompts/foreach_llm_call.prompt',
+                            template={
+                                'message': str(statement.rhs.message),
+                            }),
+                        executor=executor,
+                        program=program,
+                        messages=[self.__statement_to_message_no_chunk(stack_statement)],
+                        vector_search_query=program.original_query,
                     )
-
-                    messages = [
-                        self.__statement_to_message(
-                            stack_statement,
-                            User(Content(program.original_query)),
-                            executor.max_tokens()
-                        ),
-                        User(Content(prompt['user_message']))
-                    ]
-                    assistant = executor.execute(messages=messages)
-                    statement.rhs._result = assistant
-
-                    response_writer(prompt['prompt_filename'], assistant)
+                    statement.rhs._result = assistant_llm_call
                     statement._result.append(copy.deepcopy(statement.rhs))  # type: ignore
 
                 elif isinstance(statement.rhs, Answer):
-                    prompt = Helpers.load_and_populate_prompt(
-                        prompt_filename=f'prompts/{statement.token()}_{statement.rhs.token()}.prompt',
-                        template={
-                            'message': str(statement.rhs._result),
-                        }
+                    assistant_llm_call = self.execute_llm_call(
+                        prompt_message=Helpers.load_and_populate_message(
+                            prompt_filename='prompts/foreach_answer.prompt',
+                            template={
+                                'message': str(statement.rhs.result()),
+                            }),
+                        executor=executor,
+                        program=program,
+                        messages=[self.__statement_to_message_no_chunk(stack_statement)],
+                        vector_search_query=program.original_query,
                     )
-
-                    messages = [
-                        self.__statement_to_message(
-                            stack_statement,
-                            User(Content(program.original_query)),
-                            executor.max_tokens()
-                        ),
-                        User(Content(prompt['user_message']))
-                    ]
-                    assistant = executor.execute(messages=messages)
-
-                    response_writer(prompt['prompt_filename'], assistant)
-                    statement._result.append(copy.deepcopy(assistant))  # type: ignore
+                    statement._result.append(copy.deepcopy(assistant_llm_call))  # type: ignore
 
             # end of foreach tests
             # pop off any consumed elements on the stack
@@ -994,7 +1133,10 @@ class ExecutionController():
             results.extend(program.answers)
         else:
             assistant_reply: Assistant = self.execute_chat(call.supporting_messages + [call.message])
-            results.append(Answer(conversation=[Content(str(assistant_reply.message))]))
+            results.append(Answer(
+                conversation=[Content(str(assistant_reply.message))],
+                result=assistant_reply.message
+            ))
 
         return results
 

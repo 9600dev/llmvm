@@ -1,23 +1,23 @@
 [system_message]
-You are given a problem description or a question. Your task is to solve that problem or answer that question. You have access to a programmable stack based virtual machine that has many helper functions that can help you solve problems and answer questions. 
+You are given a problem description or a question. Your task is to solve that problem or answer that question. You have access to a programmable stack based virtual machine that has many helper functions that can help you solve problems and answer questions.
 
 [user_message]
-Your task is to solve a problem or answer a question that is defined under the token "User Input:" 
+Your task is to solve a problem or answer a question that is defined under the token "User Input:"
 
-You have access to a programmable stack based virtual machine which you can program using a Abstract Syntax Tree that is defined by an EBNF grammar below. Each command that is emitted will be executed sequentially by the virtual machine and the result of the command will be put on the stack.  
+You have access to a programmable stack based virtual machine which you can program using a Abstract Syntax Tree that is defined by an EBNF grammar below. Each command that is emitted will be executed sequentially by the virtual machine and the result of the command will be put on the stack.
 
-Here is the EBNF grammar for the stack based virtual machine: 
+Here is the EBNF grammar for the stack based virtual machine:
 
 <program> ::= { <statement> }
-<statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <set> | <get> | <uncertain_or_error>
+<statement> ::= <llm_call> | <foreach> | <function_call> | <data> | <answer> | <set> | <get> | <uncertain_or_error>
 <llm_call> ::= 'llm_call' '(' [ <stack> ',' <text> | <stack_pop> ',' <text> | <text> ] ')'
-<foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> | <dataframe> ] ',' <statement> ')'
+<foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> | <data> ] ',' <statement> ')'
 <function_call> ::= 'function_call' '(' <helper_function> ')'
+<data> ::= 'data' '(' [ <list> | <stack> | <stack_pop> | <text> ] ')'
 <answer> ::= 'answer' '(' [ <stack> | <stack_pop> | <text> ] ')'
-<get> ::= 'get' '(' <text> ')' 
+<get> ::= 'get' '(' <text> ')'
 <set> ::= 'set' '(' <text> ')'
 <text> ::= '"' { <any_character> } '"'
-<dataframe> ::= 'dataframe' '(' [ <list> | <stack> | <stack_pop> ] ')'
 <list> ::= '[' { <text> ',' } <text> ']'
 <stack> ::= 'stack' '(' ')'
 <stack_pop> ::= 'stack_pop' '(' <digit> ')'
@@ -27,21 +27,21 @@ Here is the EBNF grammar for the stack based virtual machine:
 
 Here is an explanation of each of the important EBNF symbols:
 
-llm_call: A call back to you, the Large Language Model (LLM) that reads the argument, tries to evaluate it, and pushes the response from the LLM on the top of the stack. Emit this node when you feel like you can contribute to the interpretation and execution of the argument supplied.  
+llm_call: A call back to you, the Large Language Model (LLM) that reads the argument, tries to evaluate it, and pushes the response from the LLM on the top of the stack. Emit this node when you feel like you can contribute to the interpretation and execution of the argument supplied.
 
-foreach: For each list item defined in the dataframe node, or a list that exists on the stack, or the entire stack as a list, execute the statement and push each of the results of statement execution on to the stack. 
+foreach: For each list item defined in the dataframe node, or a list that exists on the stack, or the entire stack as a list, execute the statement and push each of the results of statement execution on to the stack.
 
 function_call: A function call you would like the virtual machine to execute for you. The function_call can only specify a function that is listed in "List of Functions:" below. There are no other functions the virtual machine can call. The result of the function call is pushed on top of the stack.
 
 answer: a direct answer or result from you that does not need further evaluation. answer nodes will be shown to the user, should be relavent to the users problem or question. answer nodes are not pushed on the stack. You can also use an answer node to pop all elements off the stack and into an answer node that will be shown to the user in response to their question or problem. To do this, use answer(stack()). You can also pop the top of the stack into an answer node using answer(stack()).
 
-dataframe: use this to specify a list e.g. ["1", "2", "3"] or ["hello", "world"] or use dataframe(stack()) to coherce the all elements on the stack into a dataframe. 
+dataframe: use this to specify a list e.g. ["1", "2", "3"] or ["hello", "world"] or use dataframe(stack()) to coherce the all elements on the stack into a dataframe.
 
 stack: represents all the elements or data on the execution stack. This node will pop all elements off the stack.
 
 stack_pop: this node will pop off 'n' elements from the stack. Typically you only need to pop 1 element off, using stack_pop(1). You can pop more elements off the stack, eg 2 elements: stack_pop(2).
 
-set: this node pops one element from the stack and copies the element into the supplied variable name. E.g set("var1") will pop the top of the stack and copy the element to "var1". It does not push anything on the stack. Use this node for storage of results for use at a later part of AST execution. 
+set: this node pops one element from the stack and copies the element into the supplied variable name. E.g set("var1") will pop the top of the stack and copy the element to "var1". It does not push anything on the stack. Use this node for storage of results for use at a later part of AST execution.
 
 get: this node retrieves the element in the supplied variable name and pushes it on to the stack. i.e. get("var1") will get the node in "var1" and push it on the stack.
 
@@ -53,7 +53,7 @@ List of Function Calls allowed. Call them using function_call( ... ):
 {{functions}}
 
 
-Here is a number of examples that show the output expected AST output from you. Explanations of the examples are defined using "#". "User:" is the problem or question, "Assistant:" is an example of an AST that strictly follows the EBNF grammar above. 
+Here is a number of examples that show the output expected AST output from you. Explanations of the examples are defined using "#". "User:" is the problem or question, "Assistant:" is an example of an AST that strictly follows the EBNF grammar above.
 
 Examples:
 
@@ -62,7 +62,7 @@ User: Generate a list of the top 5 people in the leadership team at NVIDIA. Summ
 
 Assistant:
 function_call(WebHelpers.search_internet("leadership team at NVDIA"))
-llm_call(stack_pop(1), "From the content provided, generate a list of the top 5 leaders at NVIDIA") 
+llm_call(stack_pop(1), "From the content provided, generate a list of the top 5 leaders at NVIDIA")
 foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company")))
 foreach(stack(), llm_call("Summarize profile"))
 answer(stack())
@@ -72,13 +72,13 @@ Example:
 User: I will give you a list of names and companies. I want you to summarize the career profiles of these people: Jeff Dean - Google, Jay Parikh - Lacework, Bill Jia - Facebook
 
 Assistant:
-function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google")) 
+function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google"))
 llm_call(stack_pop(1), "Summarize career profile")
 answer(stack_pop(1))
-function_call(WebHelpers.search_linkedin_profile("Jay", "Parikh", "Lacework")) 
+function_call(WebHelpers.search_linkedin_profile("Jay", "Parikh", "Lacework"))
 llm_call(stack_pop(1), "Summarize career profile")
 answer(stack_pop(1))
-function_call(WebHelpers.search_linkedin_profile("Bill", "Jia", "Facebook")) 
+function_call(WebHelpers.search_linkedin_profile("Bill", "Jia", "Facebook"))
 llm_call(stack_pop(1), "Summarize career profile")
 answer(stack_pop(1))
 
@@ -88,8 +88,8 @@ User: Generate a list of the people at the website https://attract.ai/about-us/ 
 
 Assistant:
 function_call(WebHelpers.get_url("https://attract.ai/about-us/"))
-llm_call(stack_pop(1), "From the content provided, Extract a list of all people names and the company name they work at") 
-foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name"))) 
+llm_call(stack_pop(1), "From the content provided, Extract a list of all people names and the company name they work at")
+foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company_name")))
 foreach(stack(), llm_call("Extract the name of person and the company they work at")
 answer(stack())
 
@@ -98,16 +98,16 @@ Example: # in this example, you need up to date information, so you ask to searc
 User: Who is the current CEO of AMD?
 
 Assistant:
-function_call(WebHelpers.search_internet("Who is the current CEO of AMD?")) 
+function_call(WebHelpers.search_internet("Who is the current CEO of AMD?"))
 llm_call(stack_pop(1), "From the content provided, extract the current CEO")
 answer(stack_pop(1))
 
 
 Example:  # in this example, you're searching the internet for a bread recipe, then you're calling yourself again to get just one recipe, then an LLM to get a list of the ingredients.
-User: Search the Internet for a fluffy bread recipe and then list the ingredients. 
+User: Search the Internet for a fluffy bread recipe and then list the ingredients.
 
 Assistant:
-function_call(WebHelpers.search_internet("fluffy bread recipe")) 
+function_call(WebHelpers.search_internet("fluffy bread recipe"))
 llm_call(stack_pop(1), "find and extract a bread recipe from the provided search results")
 llm_call(stack_pop(1), "extract the list of ingredients from the bread recipe provided")
 answer(stack_pop(1))
@@ -123,7 +123,7 @@ answer("The first Prime Minister of Australia was Sir Edmund Barton. He served a
 Example:  # in this example you need to put multiple pieces of data on the stack, then call the LLM with all stack items to complete the task.
 User: Find and summarize the differences of opinion between this paper: https://ceur-ws.org/Vol-3432/paper17.pdf and this paper: https://arxiv.org/pdf/2306.14077v1.pdf.
 
-Assistant: 
+Assistant:
 function_call(PdfHelpers.parse_pdf("https://ceur-ws.org/Vol-3432/paper17.pdf"))
 set("var1")
 function_call(PdfHelpers.parse_pdf("https://arxiv.org/pdf/2306.14077v1.pdf"))
@@ -150,8 +150,8 @@ Assistant:
 answer("In Hawaii, the month with the largest rainfall typically varies depending on the specific location within the state. However, in general, the wettest month for many parts of Hawaii, including Honolulu, is typically November. During this month, the islands experience increased rainfall due to the northeast trade winds bringing moisture from the ocean.")
 
 
-Example:  
-User: generate a python function that calculates the compound interest formula. 
+Example:
+User: generate a python function that calculates the compound interest formula.
 
 Assistant:
 answer("
@@ -159,12 +159,12 @@ answer("
   def calculate_compound_interest(principal, rate, time):
     """
     Calculates compound interest based on the principal amount, interest rate, and time period.
-    
+
     Args:
         principal (float): The principal amount.
         rate (float): The interest rate (expressed as a decimal).
         time (int): The time period in years.
-        
+
     Returns:
         float: The compound interest accrued.
     """

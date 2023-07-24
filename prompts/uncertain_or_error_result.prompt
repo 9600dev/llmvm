@@ -1,0 +1,11 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+We tried to perform a task here, but we errored out. Here is the context of that task and error for use in future messages: 
+
+Error Message:
+{{error_message}}
+
+Supporting Context:
+{{supporting_context}}

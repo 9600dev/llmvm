@@ -77,10 +77,21 @@ class VectorStore():
         result = self.load_store().similarity_search(query, k=max_results)
         return result
 
+    def chunk(
+        self,
+        content: str,
+        chunk_size: Optional[int] = None,
+        overlap: Optional[int] = None
+    ) -> List[str]:
+        _chunk_size = chunk_size if chunk_size else self.chunk_size
+        _overlap = overlap if overlap else self.chunk_overlap
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=_chunk_size, chunk_overlap=_overlap)
+        return text_splitter.split_text(content)
+
     def chunk_and_rank(
         self,
         query: str,
-        s: str,
+        content: str,
         chunk_token_count: int = 256,
         chunk_overlap: int = 0,
         max_tokens: int = 8196,
@@ -96,24 +107,24 @@ class VectorStore():
         else:
             html_tokens = ['<html>', '<body>', '<div>', '<script>', '<style>']
             markdown_tokens = ['###', '* ', '](', '```']
-            if contains_token(s, html_tokens):
+            if contains_token(content, html_tokens):
                 text_splitter = RecursiveCharacterTextSplitter.from_language(
                     language=Language.HTML,
                     chunk_size=chunk_token_count,
                     chunk_overlap=chunk_overlap
                 )
-            elif contains_token(s, markdown_tokens):
+            elif contains_token(content, markdown_tokens):
                 text_splitter = MarkdownTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
             else:
                 text_splitter = SpacyTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
 
         logging.debug('VectorStore.chunk_and_rank splitting documents')
 
-        split_texts = text_splitter.split_text(s)
+        split_texts = text_splitter.split_text(content)
 
         token_chunk_cost = Helpers.calculate_tokens(split_texts[0])
 
-        logging.debug('VectorStore.chunk_and_rank document length: {} split_texts: {}'.format(len(s), len(split_texts)))
+        logging.debug('VectorStore.chunk_and_rank document length: {} split_texts: {}'.format(len(content), len(split_texts)))
         chunk_faiss = FAISS.from_texts(split_texts, self.embeddings)
 
         chunk_k = math.floor(max_tokens / token_chunk_cost)
@@ -130,10 +141,9 @@ class VectorStore():
             if total_tokens + Helpers.calculate_tokens(doc.page_content) < max_tokens:
                 return_results.append((doc.page_content, rank))
                 total_tokens += Helpers.calculate_tokens(doc.page_content)
-            elif total_tokens + Helpers.calculate_tokens(half_str(doc.page_content)):
+            elif half_str(doc.page_content) and total_tokens + Helpers.calculate_tokens(half_str(doc.page_content)) < max_tokens:
                 return_results.append((half_str(doc.page_content)[0], rank))
                 total_tokens += Helpers.calculate_tokens(half_str(doc.page_content))
             else:
                 break
-
         return return_results

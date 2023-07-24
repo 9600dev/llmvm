@@ -1,0 +1,17 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+I have some text from a document, and a query from a user. I want you to tell me if the query and text meet any of the following criteria:
+
+* query is a language task that can be performed on the text and might produce results
+* match
+* partially match
+* related to
+
+Simply say "Yes", or "No", then append a " #" token, then explain your answer all on the same line.
+
+Query: "{{query}}" 
+
+Text: {{document_chunk}}} 
+
