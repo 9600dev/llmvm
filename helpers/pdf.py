@@ -39,11 +39,15 @@ class PdfHelpers():
             str: text from pdf
         """
         url_result = urlparse(url_or_file)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # type: ignore
+        }
         stream = None
         text = ''
 
         if url_result.scheme == 'http' or url_result.scheme == 'https':
-            stream = BytesIO(requests.get(url_or_file).content)
+            content = requests.get(url_or_file, headers=headers, allow_redirects=True, timeout=10).content
+            stream = BytesIO(content)
         else:
             try:
                 with open(url_or_file, 'rb') as file:

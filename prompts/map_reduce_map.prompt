@@ -2,7 +2,7 @@
 You are a helpful assistant.
 
 [user_message]
-You are helping me achieve a task over large amounts of data. I am calling you in a "map reduce" style of computation. We are in the "map" phase of the computation. I have given you a partial chunk of the data under "Data", and I want you to perform the "Map Task" on the "Data" and provide the result. The result of this "Map Task" will be the input into a "reduce" phase of computation that I will ask you to perform at a later step. 
+You are helping me achieve a task over large amounts of data. I am calling you in a "map reduce" style of computation. We are in the "map" phase of the computation. I have given you a partial chunk of the data under "Data", and I want you to perform the "Map Task" on the "Data" and provide the result. Your result will be the input into a "reduce" phase of computation that I will ask you to perform at a later step. Be expressive with your result of this task. 
 
 You are performing this "Map Task" as part of a larger goal which I have put under "Larger Goal". Consider this "Larger Goal" when thinking about the formatting of your result, as the "reduce" phase will need to achieve this "Larger Goal". 
 
