@@ -53,7 +53,7 @@ class OpenAIExecutor(Executor):
         functions: List[Dict[str, str]] = [],
         model: str = 'gpt-3.5-turbo-16k',
         max_completion_tokens: int = 1024,
-        temperature: float = 1.0,
+        temperature: float = 0.2,
         chat_format: bool = True,
     ) -> Dict:
         message_tokens = Helpers.calculate_tokens(messages)
@@ -98,7 +98,7 @@ class OpenAIExecutor(Executor):
         self,
         call: LLMCall,
         agents: List[Callable],
-        temperature: float = 1.0,
+        temperature: float = 0.2,
     ) -> Assistant:
         if self.cache and self.cache.has_key((call.message, call.supporting_messages)):
             return cast(Assistant, self.cache.get((call.message, call.supporting_messages)))
@@ -156,7 +156,7 @@ class OpenAIExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        temperature: float = 1.0,
+        temperature: float = 0.2,
         max_completion_tokens: int = 2048,
     ) -> Assistant:
 

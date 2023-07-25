@@ -2,9 +2,9 @@
 You are a helpful assistant.
 
 [user_message]
-You are helping me achieve a task over large amounts of data. I am calling you in a "map reduce" style of computation. We are in the "reduce" phase of the computation. I will give you the original "map" task under "Map Task", and the results of your "map" computations under "Map Results" separated by the "====" token. 
+You are helping me achieve a task over large amounts of data. I am calling you in a "map reduce" style of computation. We are in the "reduce" phase of the computation. I will give you the original "map" task under "Map Task", and the results of your "map" computations under "Map Results" each separated by the "====" token. 
 
-Please perform the "reduce" computation how you see fit, by using the "Map Task" and the "Map Results". 
+Please perform the "reduce" computation how you see fit, by using the "Map Task" and the "Map Results". In your output of the "reduce" computation you should be as verbose as possible. But also in your output, don't explain yourself, don't apologize, don't mention the map-reduce process, and don't mention "Map Results" or the "Map Task".
 
 Map Task: 
 

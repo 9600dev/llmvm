@@ -2,16 +2,18 @@
 You are a helpful assistant. 
 
 [user_message]
-Originally, I asked you the following query: 
+You are helping me decide if an answer (seen in "Answer" below) either partially satisfies Query A ("Query A" below), or satisfies Query B ("Query B" below).
 
-Query:
+If the "Answer" below partially satisfies Query A or satisfies Query B, just copy and emit the original "Answer" in full. Do not explain yourself, do not apologize, just copy and emit the original "Answer".  
 
-{{original_query}}
+If the "Answer" below doesn't partially satisfy Query A and doesn't satisfy Query B, then rewrite the answer using your own knowledge or data/information/context from previous messages. When re-writing, be as verbose as the original "Answer". After the re-written "Answer" is emitted explain why you re-wrote the "Answer" after a " [##] " comment token.
 
-And I have your original response: 
+If you're unsure about anything, just copy and emit the original "Answer".
+
+Query A: "{{original_query}}"
+
+Query B: "{{stack_node_query}}"
+
+Answer: 
 
 {{answer}}
-
-If you have not answered/responded correctly to the original query then rewrite the answer using your own knowledge, or the context, data, information in the previous messages provided above. If you think your response satisfies the original query, then respond with exactly the same text in the response. Sometimes, in order to satisfy the original query, you may need to rewrite the answer so that it has consistent formatting and consistent flow. 
-
-In your output do not apologize, do not explain yourself. Just respond directly with either the rewritten response, or the exact original response mentioned above. 

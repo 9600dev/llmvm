@@ -16,10 +16,11 @@ from helpers.pdf import PdfHelpers
 from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
 from objects import (Agent, Answer, Assistant, AstNode, Content, ExecutionFlow,
-                     Executor, FunctionCall, LLMCall, Message, Program,
-                     StackNode, Statement, System, User)
+                     Executor, FunctionCall, LambdaVisitor, LLMCall, Message,
+                     Program, StackNode, Statement, System, User,
+                     tree_traverse)
 from openai_executor import OpenAIExecutor
-from runtime import ExecutionController
+from runtime import ExecutionController, Parser
 
 logging = setup_logging()
 
@@ -156,6 +157,28 @@ class Repl():
                     for agent in self.agents:
                         rich.print('  [bold]{}[/bold]'.format(agent.__class__.__name__))
                         rich.print('    {}'.format(agent.instruction()))
+                    continue
+
+                elif '/compile' in query:
+                    rich.print()
+                    rich.print('LLM execute_with_agents result:')
+                    rich.print()
+                    compilation_query = Helpers.in_between(query, '/context', '\n').strip()
+
+                    response = executor_contexts[0].execute_with_agents(
+                        call=LLMCall(message=User(Content(compilation_query))),
+                        agents=agents,
+                        temperature=0.0,
+                    )
+                    rich.print(str(response.message))
+                    rich.print()
+                    rich.print('Parser() output:')
+                    program = Parser().parse_program(str(response.message), agents, executor_contexts[0])
+                    tree_traverse(
+                        program,
+                        LambdaVisitor(lambda node: print('{}: {}'.format(type(node), node))),
+                        post_order=False,
+                    )
                     continue
 
                 elif '/any' in query:

@@ -645,26 +645,40 @@ class ExecutionController():
 
     def __llm_call(
         self,
-        executor: Executor,
+        user_message: Message,
         context_messages: List[Message],
+        executor: Executor,
+        prompt_filename: str = '',
+    ) -> Assistant:
+        # execute the call to check to see if the Answer satisfies the original query
+        messages: List[Message] = copy.deepcopy(context_messages)
+        messages.append(user_message)
+        assistant: Assistant = executor.execute(messages)
+        response_writer(prompt_filename, assistant)
+        return assistant
+
+    def __llm_call_prompt(
+        self,
         prompt_filename: str,
+        context_messages: List[Message],
+        executor: Executor,
         template: Dict[str, Any],
     ) -> Assistant:
         prompt = Helpers.load_and_populate_prompt(
             prompt_filename=prompt_filename,
             template=template,
         )
-        messages = copy.deepcopy(context_messages)
-        # execute the call to check to see if the Answer satisfies the original query
-        messages.append(User(Content(prompt['user_message'])))
-        assistant: Assistant = executor.execute(messages)
-
-        response_writer(prompt['prompt_filename'], assistant)
-        return assistant
+        return self.__llm_call(
+            User(Content(prompt['user_message'])),
+            context_messages,
+            executor,
+            prompt_filename=prompt_filename
+        )
 
     def execute_llm_call(
         self,
-        prompt_message: Message,
+        query_or_task: str,
+        load_execute_message: Message,
         executor: Executor,
         program: Program,
         messages: List[Message],
@@ -677,10 +691,11 @@ class ExecutionController():
         """
         assistant_result: Assistant
         if not vector_search_query:
-            vector_search_query = str(prompt_message)
+            logging.debug('todo this almost certainly doesnt work properly')
+            vector_search_query = str(query_or_task)
 
         # I have either a message, or a list of messages. They might need to be map/reduced.
-        if executor.calculate_tokens(messages + [prompt_message]) > executor.max_prompt_tokens():
+        if executor.calculate_tokens(messages + [load_execute_message]) > executor.max_prompt_tokens():
             message = User(Content('\n\n'.join([str(m.message) for m in messages])))
 
             # see if we can do a similarity search or not.
@@ -689,7 +704,7 @@ class ExecutionController():
                 content=str(message.message),
                 chunk_token_count=1024,
                 chunk_overlap=10,
-                max_tokens=executor.max_prompt_tokens() - executor.calculate_tokens([prompt_message])
+                max_tokens=executor.max_prompt_tokens() - executor.calculate_tokens([load_execute_message])
             )
 
             # randomize and sample from the similarity_chunks
@@ -698,15 +713,22 @@ class ExecutionController():
 
             decision_criteria: List[str] = []
             for chunk, rank in similarity_chunks:
-                assistant_similarity = self.__llm_call(
-                    executor,
-                    [],
-                    'prompts/document_chunk.prompt',
-                    {
-                        'query': str(prompt_message),
+                assistant_similarity = self.__llm_call_prompt(
+                    prompt_filename='prompts/document_chunk.prompt',
+                    context_messages=[],
+                    executor=executor,
+                    template={
+                        'query': str(query_or_task),
                         'document_chunk': chunk,
                     })
                 decision_criteria.append(str(assistant_similarity.message))
+                logging.debug('map_reduce_required, query_or_task: {}, response: {}'.format(
+                    query_or_task,
+                    assistant_similarity.message,
+                ))
+                if 'No' in str(assistant_similarity.message):
+                    # we can break early, as the 'map_reduced_required' flag will not be set below
+                    break
 
             map_reduce_required = all(['Yes' in d for d in decision_criteria])
 
@@ -714,7 +736,7 @@ class ExecutionController():
             # here, we're not doing a map_reduce, we're simply populating the context window
             # with the highest ranked chunks from each message.
             if not map_reduce_required:
-                tokens_per_message = math.floor((executor.max_prompt_tokens() - executor.calculate_tokens([prompt_message])) / len(messages))
+                tokens_per_message = math.floor((executor.max_prompt_tokens() - executor.calculate_tokens([load_execute_message])) / len(messages))
 
                 # for all messages, do a similarity search
                 similarity_messages = []
@@ -724,7 +746,7 @@ class ExecutionController():
                     similarity_chunks = self.vector_store.chunk_and_rank(
                         query=vector_search_query,
                         content=str(message),
-                        chunk_token_count=256,
+                        chunk_token_count=512,
                         chunk_overlap=0,
                         max_tokens=tokens_per_message - 32,
                     )
@@ -732,12 +754,10 @@ class ExecutionController():
                     similarity_messages.append(User(Content(similarity_message)))
 
                 assistant_result = self.__llm_call(
-                    executor,
-                    similarity_messages,
-                    'prompts/llm_call.prompt',
-                    {
-                        'llm_call_message': str(prompt_message),
-                    })
+                    user_message=load_execute_message,
+                    context_messages=similarity_messages,
+                    executor=executor,
+                    prompt_filename='')
 
             # do the map reduce instead of similarity
             else:
@@ -748,18 +768,18 @@ class ExecutionController():
                 # iterate over the data.
                 chunks = self.vector_store.chunk(
                     content=str(context_message.message),
-                    chunk_size=executor.max_prompt_tokens() - executor.calculate_tokens([prompt_message]) - 32,
+                    chunk_size=executor.max_prompt_tokens() - executor.calculate_tokens([load_execute_message]) - 32,
                     overlap=0
                 )
 
                 for chunk in chunks:
-                    chunk_assistant = self.__llm_call(
-                        executor,
-                        [],
-                        'prompts/map_reduce_map.prompt',
-                        {
+                    chunk_assistant = self.__llm_call_prompt(
+                        prompt_filename='prompts/map_reduce_map.prompt',
+                        context_messages=[],
+                        executor=executor,
+                        template={
                             'original_query': str(program.original_query),
-                            'query': str(prompt_message),
+                            'query': query_or_task,
                             'data': chunk,
                         })
                     chunk_results.append(str(chunk_assistant.message))
@@ -767,23 +787,22 @@ class ExecutionController():
                 # perform the reduce
                 map_results = '\n\n====\n\n' + '\n\n====\n\n'.join(chunk_results)
 
-                assistant_result = self.__llm_call(
-                    executor,
-                    [],
-                    'prompts/map_reduce_reduce.prompt',
-                    {
+                assistant_result = self.__llm_call_prompt(
+                    prompt_filename='prompts/map_reduce_reduce.prompt',
+                    context_messages=[],
+                    executor=executor,
+                    template={
                         'original_query': str(program.original_query),
-                        'query': str(prompt_message),
+                        'query': query_or_task,
                         'map_results': map_results
                     })
         else:
             assistant_result = self.__llm_call(
-                executor,
-                messages,
-                'prompts/llm_call.prompt',
-                {
-                    'llm_call_message': str(prompt_message),
-                })
+                user_message=cast(User, load_execute_message),
+                context_messages=messages,
+                executor=executor,
+                prompt_filename=''
+            )
         return assistant_result
 
     def execute_statement(
@@ -797,27 +816,61 @@ class ExecutionController():
         if isinstance(statement, Answer):
             messages: List[Message] = []
 
+            original_query = program.original_query
+            stack_node_query = program.original_query
             answer = str(statement.result())
+
             if statement.result() and isinstance(statement.result(), StackNode):
-                answer = '\n'.join(
+                answer = '\n\n====\n\n'.join(
                     [
                         str(s.result())
                         for s in self.__stacknode_to_statement(program, cast(StackNode, statement.result()))
                     ])
 
-            statement._result = self.__llm_call(
-                executor,
-                [],
-                'prompts/answer_result.prompt',
-                {
-                    'original_query': str(program.original_query),
-                    'answer': answer,
-                })
+                stack_node_query = '\n or '.join(
+                    [
+                        str(s.message)
+                        for s in self.__stacknode_to_statement(program, cast(StackNode, statement.result()))
+                        if isinstance(s, LLMCall)
+                    ])
 
-            # pop off any consumed elements on the stack
-            if statement.result() and isinstance(statement.result(), StackNode):
+            # if it's a stack() based answer, we treat this case differently
+            # as it's an aggregation of possibly many different calls prior.
+            # we ask the LLM to summarize and keep consistent formatting.
+            if (
+                statement.result()
+                and isinstance(statement.result(), StackNode)
+                and cast(StackNode, statement.result()).value == 0
+                and program.runtime_stack.count() > 1
+            ):
+                answer_assistant: Assistant = self.__llm_call_prompt(
+                    prompt_filename='prompts/answer_result_stack.prompt',
+                    context_messages=[],
+                    executor=executor,
+                    template={
+                        'original_query': original_query,
+                        'answer': '====\n\n' + answer,
+                    })
+            else:
+                answer_assistant: Assistant = self.__llm_call_prompt(
+                    prompt_filename='prompts/answer_result.prompt',
+                    context_messages=[],
+                    executor=executor,
+                    template={
+                        'original_query': original_query,
+                        'stack_node_query': stack_node_query,
+                        'answer': answer,
+                    })
+
+                # pop off any consumed elements on the stack
+            if answer_assistant and isinstance(statement.result(), StackNode):
                 self.__stacknode_to_runtime_pop(program, cast(StackNode, statement.result()))
 
+            # check for comments
+            if "[##]" in str(answer_assistant.message):
+                answer_assistant.message = Content(str(answer_assistant.message).split("[##]")[0].strip())
+
+            statement._result = answer_assistant
             program.answers.append(statement)
             return statement
 
@@ -907,10 +960,17 @@ class ExecutionController():
 
             # updates
             statement._result = self.execute_llm_call(
-                prompt_message=statement.message,
+                query_or_task=str(statement.message),
+                load_execute_message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/llm_call.prompt',
+                    template={
+                        'llm_call_message': str(statement.message),
+                    }),
+                # prompt_message=statement.message,
                 executor=executor,
                 program=program,
                 messages=context_messages,
+                vector_search_query=str(statement.message),
             )
             # todo: do a check to see if looks valid
 
@@ -943,6 +1003,7 @@ class ExecutionController():
 
             # do the actual foreach
             for stack_statement in stack_statements:
+                # foreach FunctionCall
                 if isinstance(statement.rhs, FunctionCall):
                     context_messages: List[Message] = [
                         self.__statement_to_message(
@@ -953,7 +1014,8 @@ class ExecutionController():
                     ]
 
                     assistant = self.execute_llm_call(
-                        prompt_message=Helpers.load_and_populate_message(
+                        query_or_task=statement.rhs.to_definition(),
+                        load_execute_message=Helpers.load_and_populate_message(
                             prompt_filename='prompts/foreach_function_call.prompt',
                             template={
                                 'function_call': statement.rhs.to_definition(),
@@ -964,7 +1026,7 @@ class ExecutionController():
                             self.__statement_to_message_no_chunk(stack_statement)
                         ],
                         # todo: I think this is wrong, but this is what the previous code did
-                        vector_search_query=program.original_query,
+                        vector_search_query=program.original_query + str(statement.rhs.to_definition()),
                     )
 
                     foreach_function_response = str(assistant.message)
@@ -976,7 +1038,8 @@ class ExecutionController():
                         previous_messages = [str(s.result()) for s in program.runtime_stack.peek(0)]
 
                         assistant_function_call_rewrite = self.execute_llm_call(
-                            prompt_message=Helpers.load_and_populate_message(
+                            query_or_task=statement.rhs.to_definition(),
+                            load_execute_message=Helpers.load_and_populate_message(
                                 prompt_filename=f'prompts/{statement.token()}_error_correction.prompt',
                                 template={
                                     'function_calls_missing': str(assistant.message),
@@ -988,6 +1051,7 @@ class ExecutionController():
                             executor=executor,
                             program=program,
                             messages=[],
+                            vector_search_query=''
                         )
                         foreach_function_response = str(assistant_function_call_rewrite.message)
 
@@ -1008,24 +1072,51 @@ class ExecutionController():
                         # todo: why is this string, and not assistant?
                         statement._result.append(foreach_function_response)  # type: ignore
 
+                # foreach llm call
                 elif isinstance(statement.rhs, LLMCall):
-                    assistant_llm_call = self.execute_llm_call(
-                        prompt_message=Helpers.load_and_populate_message(
-                            prompt_filename='prompts/foreach_llm_call.prompt',
-                            template={
-                                'message': str(statement.rhs.message),
-                            }),
-                        executor=executor,
-                        program=program,
-                        messages=[self.__statement_to_message_no_chunk(stack_statement)],
-                        vector_search_query=program.original_query,
-                    )
-                    statement.rhs._result = assistant_llm_call
-                    statement._result.append(copy.deepcopy(statement.rhs))  # type: ignore
+                    # if I have a stack of elements, then I need to be specific about
+                    # how the llm should extract the task list.
+                    if (
+                        isinstance(statement.lhs, StackNode)
+                        and cast(StackNode, statement.lhs).value == 0
+                        and program.runtime_stack.count() > 1
+                    ):
+                        assistant_llm_call = self.execute_llm_call(
+                            query_or_task=str(statement.rhs.message),
+                            load_execute_message=Helpers.load_and_populate_message(
+                                prompt_filename='prompts/foreach_llm_call_stack.prompt',
+                                template={
+                                    'message': str(statement.rhs.message),
+                                }),
+                            executor=executor,
+                            program=program,
+                            messages=[self.__statement_to_message_no_chunk(stack_statement)],
+                            vector_search_query=program.original_query + ' ' + str(statement.rhs.message),
+                        )
+                        statement.rhs._result = assistant_llm_call
+                        statement._result.append(copy.deepcopy(statement.rhs))  # type: ignore
+                    else:
+                        assistant_llm_call = self.execute_llm_call(
+                            query_or_task=str(statement.rhs.message),
+                            load_execute_message=Helpers.load_and_populate_message(
+                                prompt_filename='prompts/foreach_llm_call.prompt',
+                                template={
+                                    'message': str(statement.rhs.message),
+                                }),
+                            executor=executor,
+                            program=program,
+                            messages=[self.__statement_to_message_no_chunk(stack_statement)],
+                            vector_search_query=program.original_query + ' ' + str(statement.rhs.message),
+                        )
+                        statement.rhs._result = assistant_llm_call
+                        statement._result.append(copy.deepcopy(statement.rhs))  # type: ignore
 
+                # foreach Answer
                 elif isinstance(statement.rhs, Answer):
+                    logging.error('todo: this should never happen')
                     assistant_llm_call = self.execute_llm_call(
-                        prompt_message=Helpers.load_and_populate_message(
+                        query_or_task=str(statement.rhs.result()),
+                        load_execute_message=Helpers.load_and_populate_message(
                             prompt_filename='prompts/foreach_answer.prompt',
                             template={
                                 'message': str(statement.rhs.result()),
@@ -1033,7 +1124,7 @@ class ExecutionController():
                         executor=executor,
                         program=program,
                         messages=[self.__statement_to_message_no_chunk(stack_statement)],
-                        vector_search_query=program.original_query,
+                        vector_search_query='',
                     )
                     statement._result.append(copy.deepcopy(assistant_llm_call))  # type: ignore
 
@@ -1119,6 +1210,11 @@ class ExecutionController():
                 temperature=0.0,
             )
             assistant_response = str(response.message)
+            logging.debug('Abstract Syntax Tree:')
+            # debug out AST
+            lines = str(assistant_response).split('\n')
+            for line in lines:
+                logging.debug(f'  {str(line)}')
 
             # debug output
             response_writer('llm_call', assistant_response)

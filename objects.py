@@ -517,9 +517,6 @@ class ExecutionFlow(Generic[T]):
         if len(self.flow) == 0:
             return None
 
-        if index > 0:
-            logging.warning('ExecutionFlow.peek index must be zero or negative')
-
         if self.order == Order.QUEUE:
             if len(self.flow) <= abs(index):
                 return None
@@ -576,7 +573,7 @@ def tree_map(node: AstNode, call: Callable[[AstNode], Any]) -> List[Any]:
     return visited
 
 
-def tree_traverse(node, visitor: Visitor):
+def tree_traverse(node, visitor: Visitor, post_order: bool = True):
     def flatten(lst):
         def __has_list(lst):
             for item in lst:
@@ -591,7 +588,13 @@ def tree_traverse(node, visitor: Visitor):
             lst = __inner_flatten(lst)
         return lst
 
-    if isinstance(node, Content):
+    accept_result = None
+    if not post_order:
+        accept_result = node.accept(visitor)
+
+    if node is None:
+        return node
+    elif isinstance(node, Content):
         if isinstance(node.sequence, list):
             node.sequence = flatten(
                 [cast(AstNode, tree_traverse(child, visitor)) for child in node.sequence if isinstance(child, AstNode)]
@@ -617,7 +620,11 @@ def tree_traverse(node, visitor: Visitor):
         node.context = cast(Content, tree_traverse(node.context, visitor))
     elif isinstance(node, Program):
         node.statements = [cast(Statement, tree_traverse(child, visitor)) for child in node.statements]
-    return node.accept(visitor)
+
+    if post_order:
+        return node.accept(visitor)
+    else:
+        return accept_result
 
 
 class ReplacementVisitor(Visitor):
@@ -634,3 +641,18 @@ class ReplacementVisitor(Visitor):
             return self.replacement(node)
         else:
             return node
+
+class LambdaVisitor(Visitor):
+    def __init__(
+        self,
+        node_lambda: Callable[[AstNode], Any],
+    ):
+        self.node_lambda = node_lambda
+
+    def visit(self, node: AstNode) -> AstNode:
+        if self.node_lambda(node):
+            self.node_lambda(node)
+            return node
+        else:
+            return node
+

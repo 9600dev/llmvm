@@ -2,8 +2,8 @@
 You are a helpful assistant.
 
 [user_message]
-Here is extra context to solve the problem or answer the question in a future message:
+Here is context to solve problems or answer questions in future messages:
 
-Extra context:
+Context:
 
 {{llm_call_result}}

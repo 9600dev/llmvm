@@ -1,6 +1,8 @@
-# LLM Agent
+# LLM Agents
 
 Prototype experiement to translate natural language questions and tasks into an abstract syntax tree which will be *cooperatively* interpreted by a stack based virtual machine, and an LLM like ChatGPT or Llama 1/2.
+
+Arbitrary function execution in GPT and equivalent is limited (typically zero shot, and limited to one function execution selected from a list of functions). This experiment shows that LLM's are capable of arbitrary helper execution by a) understanding that they're able to request help from an externally specified "virtual machine" b) providing the correct AST to that VM c) understanding the result returned by the VM, d) re-writing that AST if necessary to solve errors.
 
 ## Examples:
 
@@ -19,7 +21,13 @@ answer(stack_pop(1))
 function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google"))
 llm_call("Summarize career profile and contact details")
 answer(stack_pop(1))
-``````
+```
+
+Result:
+
+
+
+
 
 Input:
 

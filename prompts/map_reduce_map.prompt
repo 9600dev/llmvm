@@ -2,15 +2,15 @@
 You are a helpful assistant.
 
 [user_message]
-You are helping me achieve a task over large amounts of data. I am calling you in a "map reduce" style of computation. Right now, we are performing the "map" over the data. I will call you again later asking you to "reduce" the results. We are doing this computation as part of a larger goal - if the task is confusing, you can think about the task in the context of the larger goal. Do not explain yourself. Just emit the results of applying the task to the data in natural language format and nothing else. Don't emit JSON.  
+You are helping me achieve a task over large amounts of data. I am calling you in a "map reduce" style of computation. We are in the "map" phase of the computation. I have given you a partial chunk of the data under "Data", and I want you to perform the "Map Task" on the "Data" and provide the result. The result of this "Map Task" will be the input into a "reduce" phase of computation that I will ask you to perform at a later step. 
 
-Larger Goal: 
+You are performing this "Map Task" as part of a larger goal which I have put under "Larger Goal". Consider this "Larger Goal" when thinking about the formatting of your result, as the "reduce" phase will need to achieve this "Larger Goal". 
 
-{{original_query}}
+Remember, your result of this "Map Task" will be the input into a "reduce" phase later so format the result output appropriately. However, in your output, don't explain yourself, don't emit JSON, don't apologize.
 
-Task: 
+Larger Goal: "{{original_query}}"
 
-{{query}}
+Map Task: "{{query}}"
 
 Data: 
 

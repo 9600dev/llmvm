@@ -2,16 +2,19 @@
 You are a helpful assistant.
 
 [user_message]
-I have some text from a document, and a query from a user. I want you to tell me if the query and text meet any of the following criteria:
+I have some "Text" from a document and a "Query" from a user below. I want you to tell me if they meet any of the following criteria: 
 
-* query is a language task that can be performed on the text and might produce results
-* match
-* partially match
-* related to
+* "Query" contains any words like 'summarize', 'sum up', 'extract', or 'transform' etc.
+* "Query" is a language task that can be performed on the "Text" and might produce results
+* "Query" can match content in "Text"
+* "Query" can partially match content in "Text"
+* "Query" is related to content in "Text"
 
-Simply say "Yes", or "No", then append a " #" token, then explain your answer all on the same line.
+"Query" and "Text" are below. Check all the criteria against the "Query" and "Text" and then emit "Yes" if any of them apply, or "No" if none of them apply, then append a " #" token, then explain your answer all on the same line.
 
 Query: "{{query}}" 
 
-Text: {{document_chunk}}} 
+Text: 
+
+{{document_chunk}}} 
 

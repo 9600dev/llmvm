@@ -8,7 +8,8 @@ from langchain.document_loaders import TextLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import (Language, MarkdownTextSplitter,
                                      RecursiveCharacterTextSplitter,
-                                     SpacyTextSplitter, TextSplitter)
+                                     SpacyTextSplitter, TextSplitter,
+                                     TokenTextSplitter)
 
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
@@ -85,7 +86,7 @@ class VectorStore():
     ) -> List[str]:
         _chunk_size = chunk_size if chunk_size else self.chunk_size
         _overlap = overlap if overlap else self.chunk_overlap
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=_chunk_size, chunk_overlap=_overlap)
+        text_splitter = TokenTextSplitter(chunk_size=_chunk_size, chunk_overlap=_overlap)
         return text_splitter.split_text(content)
 
     def chunk_and_rank(
@@ -105,18 +106,19 @@ class VectorStore():
         if splitter:
             text_splitter = splitter
         else:
-            html_tokens = ['<html>', '<body>', '<div>', '<script>', '<style>']
-            markdown_tokens = ['###', '* ', '](', '```']
-            if contains_token(content, html_tokens):
-                text_splitter = RecursiveCharacterTextSplitter.from_language(
-                    language=Language.HTML,
-                    chunk_size=chunk_token_count,
-                    chunk_overlap=chunk_overlap
-                )
-            elif contains_token(content, markdown_tokens):
-                text_splitter = MarkdownTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
-            else:
-                text_splitter = SpacyTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
+            # html_tokens = ['<html>', '<body>', '<div>', '<script>', '<style>']
+            # markdown_tokens = ['###', '* ', '](', '```']
+            # if contains_token(content, html_tokens):
+            #     text_splitter = RecursiveCharacterTextSplitter.from_language(
+            #         language=Language.HTML,
+            #         chunk_size=chunk_token_count,
+            #         chunk_overlap=chunk_overlap
+            #     )
+            # elif contains_token(content, markdown_tokens):
+            #     text_splitter = MarkdownTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
+            # else:
+            #     text_splitter = SpacyTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
+            text_splitter = TokenTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
 
         logging.debug('VectorStore.chunk_and_rank splitting documents')
 
