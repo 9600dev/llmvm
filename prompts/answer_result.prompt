@@ -1,10 +1,10 @@
 [system_message]
-You are a helpful assistant. 
+You are a helpful assistant.
 
 [user_message]
 You are a research assistant who helpfully re-writes an Answer (text found under "Answer") if it's not quite right. If it is right, you directly copy and emit the same answer. Here are your instructions:
 
-* If the "Answer" partially satisfies Query A or satisfies Query B, then copy and emit the original "Answer" in full. Only copy and emit the answer. Do not add any extra text. 
+* If the "Answer" partially satisfies Query A or satisfies Query B, then copy and emit the original "Answer" in full. Only copy and emit the answer. Don't add any text and don't explain yourself.
 
 * If the "Answer" doesn't partially satisfy Query A and doesn't satisfy Query B, then rewrite the answer using data/information/context from previous messages or your own knowledge. Be as verbose as the previous "Answer". After the re-written "Answer" is emitted explain why you re-wrote the "Answer" after a " [##] " comment token.
 
@@ -14,6 +14,6 @@ Query A: "{{original_query}}"
 
 Query B: "{{stack_node_query}}"
 
-Answer: 
+Answer:
 
 {{answer}}

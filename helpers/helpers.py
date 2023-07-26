@@ -509,17 +509,16 @@ class Helpers():
             elif c == '"' and is_str:
                 is_str = False
                 token += c
-                function_args.append(token.strip())
             elif not is_str and c == ',':
                 function_args.append(token.strip())
                 token = ''
             elif not is_str and c == ' ':  # ignore spaces
                 continue
-            elif not is_str and c == ')':
-                function_args.append(token.strip())
-                break
             else:
                 token += c
+
+        if token:
+            function_args.append(token.strip())
 
         # function_args = [p.strip() for p in Helpers.in_between(call, '(', ')').split(',')]
         func = functions[0]
