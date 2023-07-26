@@ -1,8 +1,16 @@
-# LLM Agents
+# LLM Stack Based VM 
 
-Prototype experiement to translate natural language questions and tasks into an abstract syntax tree which will be *cooperatively* interpreted by a stack based virtual machine, and an LLM like ChatGPT or Llama 1/2.
+A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack based Virtual Machine execution, where ChatGPT/Llama2 is cooperatively running VM instructions and helping plan xecution flow. 
 
-Arbitrary function execution in GPT and equivalent is limited (typically zero shot, and limited to one function execution selected from a list of functions). This experiment shows that LLM's are capable of arbitrary helper execution by a) understanding that they're able to request help from an externally specified "virtual machine" b) providing the correct AST to that VM c) understanding the result returned by the VM, d) re-writing that AST if necessary to solve errors.
+## The Problem
+
+ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a). 
+
+However, this interation is usually Task -> LLM decides what helper function to call -> Call helper function -> Work with result. And does not allow for arbitrary decontruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution. 
+
+This prototype shows that LLM's are capable of taking a user task, reasoning about how to decontruct the task into sub-tasks, understanding how to schedule and execute those sub-tasks on its own or with via a virtual machine, and working with the VM to resolve error cases. 
+
+The LLM is able to build a mental-model of the Stack Based Virtual Machine through a natural language definition alone; emit an AST that runs on that VM through an EBNF grammar definition and many-shot examples; and then work with the VM to progress through sub-task execution through User Message -> Assistant Message -> User Message Chat interactions.  
 
 ## Examples:
 
@@ -15,19 +23,13 @@ Transformation to AST:
 function_call(WebHelpers.search_linkedin_profile("Bill", "Jia", "Meta"))
 llm_call("Summarize career profile and contact details")
 answer(stack_pop(1))
-function_call(WebHelpers.search_linkedin_profile("Elise", "McKay", "Pendal Group"))
+function_call(WebHelpers.search_linkedin_profile("Erik", "Meijer", "Microsoft"))
 llm_call("Summarize career profile and contact details")
 answer(stack_pop(1))
 function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google"))
 llm_call("Summarize career profile and contact details")
 answer(stack_pop(1))
 ```
-
-Result:
-
-
-
-
 
 Input:
 
@@ -45,8 +47,6 @@ function_call(emailhelpers.send_calendar_invite("your name", "your_email@example
 ```
 
 ## EBNF Grammar
-
-
 
 ```
 <program> ::= { <statement> }

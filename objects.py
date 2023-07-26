@@ -661,4 +661,3 @@ class LambdaVisitor(Visitor):
             return node
         else:
             return node
-

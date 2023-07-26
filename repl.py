@@ -1,11 +1,15 @@
 import os
+import subprocess
 import sys
+import tempfile
 from typing import Dict, List, Optional, cast
 
 import click
 import rich
 from prompt_toolkit import prompt
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
@@ -84,11 +88,36 @@ class Repl():
         self.executors: List[Executor] = executors
         self.agents: List[Agent] = []
 
+    def open_editor(self, editor: str, initial_text: str):
+        with tempfile.NamedTemporaryFile(mode='w+') as temp_file:
+            temp_file.write(initial_text)
+            temp_file.flush()
+
+            if editor == 'vim' or editor == 'nvim':
+                cmd = '{} -c "normal G" -c "normal A" {}'.format(editor, temp_file.name)
+                subprocess.run(cmd, text=True, shell=True, env=os.environ)
+            else:
+                pass
+                subprocess.run([editor, temp_file.name], env=os.environ)
+
+            temp_file.seek(0)
+            edited_text = temp_file.read()
+        return edited_text
+
     def repl(self):
         console = rich.console.Console()
         history = FileHistory(".repl_history")
+        kb = KeyBindings()
+
+        @kb.add('c-e')
+        def _(event):
+            editor = os.environ.get('EDITOR', 'vim')
+            text = self.open_editor(editor, event.app.current_buffer.text)
+            event.app.current_buffer.text = text
+            event.app.current_buffer.cursor_position = len(text) - 1
 
         rich.print()
+        rich.print('[white](Ctrl-c or "exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')
         rich.print('[bold]I am a helpful assistant.[/bold]')
         rich.print()
 
@@ -105,15 +134,25 @@ class Repl():
         message_history: List[Message] = []
 
         commands = {
-            'exit': 'exit the repl',
+            '/exit': 'exit the repl',
             '/context': 'change the current context',
             '/agents': 'list the available agents',
             '/any': 'execute the query in all contexts',
+            '/clear': 'clear the message history',
+            '/messages': 'show message history',
+            '/compile': 'ask LLM to compile query into AST and print to screen',
+            '/last': 'clear the conversation except for the last Assistant message',
         }
 
         while True:
             try:
-                query = prompt('prompt>> ', history=history, enable_history_search=True, vi_mode=True)
+                query = prompt(
+                    'prompt>> ',
+                    history=history,
+                    enable_history_search=True,
+                    vi_mode=True,
+                    key_bindings=kb,
+                )
 
                 if query is None or query == '':
                     continue
@@ -124,11 +163,11 @@ class Repl():
                         rich.print('  [bold]{}[/bold] - {}'.format(command, description))
                     continue
 
-                elif 'exit' in query:
+                elif '/exit' in query:
                     sys.exit(0)
 
                 elif '/clear' in query or '/cls' in query:
-                    user_queries = []
+                    message_history = []
                     continue
 
                 elif '/messages' in query or '/conversations' in query or '/m ' in query:

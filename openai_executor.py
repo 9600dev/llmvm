@@ -58,7 +58,7 @@ class OpenAIExecutor(Executor):
     ) -> Dict:
         message_tokens = Helpers.calculate_tokens(messages)
         if message_tokens > self.max_prompt_tokens(max_completion_tokens):
-            raise Exception('Prompt too long, calculated message tokens: {}, max completion tokens: {} total tokens: {}, available model tokens: {}'
+            raise Exception('Prompt too long, message tokens: {}, completion tokens: {} total tokens: {}, available tokens: {}'
                             .format(message_tokens,
                                     max_completion_tokens,
                                     message_tokens + max_completion_tokens,

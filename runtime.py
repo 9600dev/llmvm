@@ -10,6 +10,7 @@ from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
 
 from openai import InvalidRequestError
 
+from ast_parser import Parser
 from eightbitvicuna import VicunaEightBit
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import console_debug, setup_logging
@@ -32,7 +33,6 @@ def response_writer(callee, message):
 
 def vector_store():
     from helpers.vector_store import VectorStore
-
     return VectorStore(openai_key=os.environ.get('OPENAI_API_KEY'), store_filename='faiss_index')  # type: ignore
 
 def load_vicuna():
@@ -47,332 +47,6 @@ def invokeable(func):
         logging.debug(f"{func.__name__} ran in {end_time - start_time} seconds")
         return result
     return wrapper
-
-
-# <program> ::= { <statement> }
-# <statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <set> | <get> | <uncertain_or_error>
-# <llm_call> ::= 'llm_call' '(' [ <stack> ',' <text> | <stack_pop> ',' <text> | <text> ] ')'
-# <foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> | <dataframe> ] ',' <statement> ')'
-# <function_call> ::= 'function_call' '(' <helper_function> ')'
-# <answer> ::= 'answer' '(' [ <stack> | <stack_pop> | <text> ] ')'
-# <get> ::= 'get' '(' <text> ')'
-# <set> ::= 'set' '(' <text> ')'
-# <text> ::= '"' { <any_character> } '"'
-# <dataframe> ::= 'dataframe' '(' [ <list> | <stack> | <stack_pop> ] ')'
-# <list> ::= '[' { <text> ',' } <text> ']'
-# <stack> ::= 'stack' '(' ')'
-# <stack_pop> ::= 'stack_pop' '(' <digit> ')'
-# <digit> ::= '0'..'9'
-# <any_character> ::= <all_printable_characters_except_double_quotes>
-# <helper_function> ::= <function_call_from_available_helper_functions>
-
-
-class Parser():
-    def __init__(
-        self,
-        message_type=User,
-    ):
-        self.message: str = ''
-        self.remainder: str = ''
-        self.index = 0
-        self.agents: List[Callable] = []
-        self.message_type: type = message_type
-        self.errors: List[UncertainOrError] = []
-
-    def consume(self, token: str):
-        if token in self.remainder:
-            self.remainder = self.remainder[self.remainder.index(token) + len(token):]
-            self.remainder = self.remainder.strip()
-
-    def to_function_call(self, call_str: str) -> Optional[FunctionCall]:
-        parsed_function = Helpers.parse_function_call(call_str, self.agents)
-        if parsed_function:
-            func, function_description = parsed_function
-            name = function_description['name']
-            arguments = []
-            types = []
-            for arg_name, metadata in function_description['parameters']['properties'].items():
-                # todo if we don't have an argument here, we should ensure that
-                # the function has a default value for the parameter
-                if 'argument' in metadata:
-                    arguments.append({arg_name: metadata['argument']})
-                    types.append({arg_name: metadata['type']})
-
-            return FunctionCall(
-                name=name,
-                args=arguments,
-                types=types,
-                func=func,
-            )
-        return None
-
-    def parse_function_call(
-        self,
-    ) -> Optional[FunctionCall]:
-        text = self.remainder
-        if (
-                ('(' not in text and '))' not in text)
-        ):
-            return None
-
-        while (
-            ('(' in text and '))' in text)
-        ):
-            start_token = ''
-            end_token = ''
-
-            match text:
-                case _ if '(' and ')' in text:
-                    start_token = '('
-                    end_token = '))'
-
-            function_call_str = Helpers.in_between(text, start_token, end_token) + ')'
-            function_call: Optional[FunctionCall] = self.to_function_call(function_call_str)
-            if function_call:
-                function_call.context = Content(text)
-                function_call._ast_text = f'function_call({start_token}{function_call_str})'
-
-            # remainder is the stuff after the end_token
-            self.remainder = text[text.index(end_token) + len(end_token):]
-            return function_call
-        return None
-
-    def parse_string(
-        self,
-    ) -> Optional[str]:
-        if self.remainder.startswith('"') and '"' in self.remainder:
-            string_result = Helpers.in_between(self.remainder, '"', '"')
-            self.consume('"')
-            self.consume('"')
-            return string_result
-        elif self.remainder.startswith("'") and "'" in self.remainder:
-            string_result = Helpers.in_between(self.remainder, "'", "'")
-            self.consume("'")
-            self.consume("'")
-            return string_result
-        return None
-
-    def __strip_string(self, s):
-        if s.startswith('"') and s.endswith('"'):
-            s = s[1:-1]
-        if s.startswith('\'') and s.endswith('\''):
-            s = s[1:-1]
-        return s
-
-    def parse_dataframe(self) -> Optional[DataFrame]:
-        if self.remainder.startswith('dataframe('):
-            self.consume('dataframe(')
-            elements = []
-            while self.remainder.strip() != '' and not self.remainder.startswith(')'):
-                # todo this is probably broken
-                element = self.parse_string() or self.parse_stack()
-                if element:
-                    elements.append(element)
-                self.consume(',')
-            self.consume(')')
-            return DataFrame(elements)
-        else:
-            return None
-
-    def parse_stack(self) -> Optional[StackNode]:
-        re = self.remainder.strip()
-
-        if re.startswith('stack_pop(') and ')' in re:
-            num = Helpers.in_between(re, 'stack_pop(', ')')
-            self.consume(')')
-            return StackNode(int(num))
-        elif re.startswith('stack(') and ')' in re:
-            num = 0
-            self.consume(')')
-            return StackNode(0)
-        else:
-            return None
-
-    def parse_get(self) -> Optional[Get]:
-        re = self.remainder.strip()
-
-        if re.startswith('get(') and ')' in re:
-            self.consume('get(')
-            variable = cast(str, self.parse_string())
-            self.consume(')')
-            return Get(variable)
-        else:
-            return None
-
-    def parse_set(self) -> Optional[Set]:
-        re = self.remainder.strip()
-
-        if re.startswith('set(') and ')' in re:
-            self.consume('set(')
-            variable = cast(str, self.parse_string())
-            name = ''
-            if self.remainder.startswith(','):
-                self.consume(',')
-                name = cast(str, self.parse_string())
-            self.consume(')')
-            return Set(variable, name)
-        else:
-            return None
-
-    def parse_statement(
-        self,
-        stack: List[Statement],
-    ) -> Statement:
-
-        re = self.remainder.strip()
-
-        while re != '':
-            # get rid of any prepend stuff that the LLM might throw up
-            if re.startswith('Assistant:'):
-                self.consume('Assistant:')
-                re = self.remainder.strip()
-
-            if re.startswith('answer(') and ')' in re:
-                # todo: sort out these '\n' things.
-                self.consume('answer(')
-                result = ''
-                if self.remainder.startswith('stack'):
-                    result = self.parse_stack()
-                else:
-                    result = self.parse_string()
-
-                self.consume(')')
-
-                return Answer(
-                    conversation=[Content(result)],
-                    ast_text=f'answer({result}))',
-                    result=result,
-                )
-
-            if re.startswith('set(') and ')' in re:
-                set_node = self.parse_set()
-                if set_node: return set_node
-
-            if re.startswith('get(') and ')' in re:
-                get_node = self.parse_get()
-                if get_node: return get_node
-
-            if re.startswith('function_call(') and '))' in re:
-                function_call = self.parse_function_call()
-                if not function_call:
-                    # push past the function call and keep parsing
-                    function_call_text = Helpers.in_between(re, 'function_call(', '))')
-                    self.consume('))')
-                    re = self.remainder
-
-                    error = UncertainOrError(
-                        error_message=Content(f'The helper function {function_call_text} could not be found.')
-                    )
-                    self.errors.append(error)
-                else:
-                    # end token was consumed in parse_function_call()
-                    return function_call
-
-            if re.startswith('llm_call(') and ')' in re:
-                self.consume('llm_call(')
-                llm_call = LLMCall()
-                llm_call.context = self.parse_stack()
-                if self.remainder.startswith(','):
-                    self.consume(',')
-                string_message = Content(self.parse_string())
-                self.consume(')')
-                llm_call.message = User(string_message)
-                llm_call._ast_text = f'llm_call({str(llm_call.context)}, "{str(llm_call.message)}")'
-                return llm_call
-
-            if re.startswith('uncertain_or_error(') and ')' in re:
-                language = Helpers.in_between(re, 'uncertain_or_error(', ')')
-                self.consume(')')
-                error = UncertainOrError(
-                    error_message=Content(language),
-                )
-                self.errors.append(error)
-                return error
-
-            if re.startswith('foreach(') and ')' in re:
-                # <foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> ] ',' <statement> ')'
-                self.consume('foreach(')
-                context = self.parse_stack() or self.parse_dataframe()
-                if not context:
-                    raise ValueError('no foreach context')
-                else:
-                    fe = ForEach(
-                        lhs=context,
-                        rhs=Statement()
-                    )
-                    self.consume(',')
-
-                    fe.rhs = self.parse_statement(stack)
-                    fe._ast_text = f'foreach({str(fe.lhs)}, {str(fe.rhs)})'.format()
-                    self.consume(')')
-                    return fe
-
-            if re.startswith('dataframe(') and ')' in re:
-                result = self.parse_dataframe()
-                if not result: raise ValueError()
-                return result
-
-            # might be a string
-            if re.startswith('"'):
-                # message = self.message_type(self.parse_string())
-                # result = LLMCall(messages=[message])
-                # result._ast_text = f'"{message}"'
-                # return result
-                raise ValueError('we should probably figure out how to deal with random strings')
-
-            # we have no idea, so start packaging tokens into a Natural Language call until we see something we know
-            known_tokens = [
-                'function_call',
-                'foreach',
-                'uncertain_or_error',
-                'natural_language',
-                'answer',
-                'continuation',
-                'get',
-                'set',
-            ]
-            tokens = re.split(' ')
-            consumed_tokens = []
-            while len(tokens) > 0:
-                if tokens[0] in known_tokens:
-                    self.remainder = ' '.join(tokens)
-                    return LLMCall(message=self.message_type(Content(' '.join(consumed_tokens))))
-
-                consumed_tokens.append(tokens[0])
-                self.remainder = self.remainder[len(tokens[0]) + 1:]
-                tokens = tokens[1:]
-
-            self.remainder = ''
-            return LLMCall(
-                message=self.message_type(Content(' '.join(consumed_tokens))),
-                ast_text=' '.join(consumed_tokens)
-            )
-        return Statement()
-
-    def parse_program(
-        self,
-        message: str,
-        agents: List[Callable],
-        executor: Executor,
-    ) -> Program:
-        self.original_message = message
-        self.message = message
-        self.agents = agents
-        self.remainder = message
-
-        program = Program(executor)
-        stack: List[Statement] = []
-
-        while self.remainder.strip() != '':
-            statement = self.parse_statement(stack)
-            program.statements.append(statement)
-            stack.append(statement)
-
-        self.message = ''
-        self.agents = []
-        program.errors = copy.deepcopy(self.errors)
-
-        return program
 
 
 class ExecutionController():
@@ -757,7 +431,9 @@ class ExecutionController():
             # here, we're not doing a map_reduce, we're simply populating the context window
             # with the highest ranked chunks from each message.
             if not map_reduce_required:
-                tokens_per_message = math.floor((executor.max_prompt_tokens() - executor.calculate_tokens([load_execute_message])) / len(messages))
+                tokens_per_message = (
+                    math.floor((executor.max_prompt_tokens() - executor.calculate_tokens([load_execute_message])) / len(messages))
+                )
 
                 # for all messages, do a similarity search
                 similarity_messages = []
@@ -927,7 +603,8 @@ class ExecutionController():
                 elif name and temp_statement._result and isinstance(temp_statement._result, Content):
                     temp_statement._result = Content(f'The data below is named: {name}' + '\n\n' + str(temp_statement._result))
                 elif name and temp_statement._result and isinstance(temp_statement._result, Assistant):
-                    temp_statement._result.message = Content(f'The data below is named: {name}' + '\n\n' + str(temp_statement._result.message))
+                    temp_statement._result.message = \
+                        Content(f'The data below is named: {name}' + '\n\n' + str(temp_statement._result.message))
 
                 # outer loop pushes this on to the runtime stack
                 return temp_statement
@@ -1321,5 +998,4 @@ class ExecutionController():
             message=User(Content(user_message)),
             supporting_system=System(Content(system_message)),
         )
-
         return self.execute(call)

@@ -489,62 +489,6 @@ class Helpers():
         return (f'{description["invoked_by"]}({", ".join(parameter_type_list)})  # {description["description"]}')
 
     @staticmethod
-    def parse_function_call(
-        call: str,
-        functions: List[Callable]
-    ) -> Optional[Tuple[Callable, Dict[str, Any]]]:
-        function_description: Dict[str, Any] = {}
-
-        function_name = Helpers.in_between(call, '', '(')
-        function_arg_str = Helpers.in_between(call, '(', ')')
-        function_args = []
-
-        is_str = False
-        token = ''
-        for i in range(0, len(function_arg_str)):
-            c = function_arg_str[i]
-            if c == '"' and not is_str:
-                is_str = True
-                token += c
-            elif c == '"' and is_str:
-                is_str = False
-                token += c
-            elif not is_str and c == ',':
-                function_args.append(token.strip())
-                token = ''
-            elif not is_str and c == ' ':  # ignore spaces
-                continue
-            else:
-                token += c
-
-        if token:
-            function_args.append(token.strip())
-
-        # function_args = [p.strip() for p in Helpers.in_between(call, '(', ')').split(',')]
-        func = functions[0]
-
-        for f in functions:
-            if f.__name__.lower() in function_name.lower():
-                function_description = Helpers.get_function_description(
-                    f,
-                    openai_format=True
-                )
-                func = f
-                break
-
-        if not function_description:
-            return None
-
-        argument_count = 0
-
-        for name, parameter in function_description['parameters']['properties'].items():
-            if argument_count < len(function_args):
-                parameter.update({'argument': function_args[argument_count]})
-            argument_count += 1
-
-        return func, function_description
-
-    @staticmethod
     def load_prompt(prompt_filename: str) -> Dict[str, Any]:
         with open(prompt_filename, 'r') as f:
             prompt = f.read()
