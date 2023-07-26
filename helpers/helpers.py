@@ -496,7 +496,32 @@ class Helpers():
         function_description: Dict[str, Any] = {}
 
         function_name = Helpers.in_between(call, '', '(')
-        function_args = [p.strip() for p in Helpers.in_between(call, '(', ')').split(',')]
+        function_arg_str = Helpers.in_between(call, '(', ')')
+        function_args = []
+
+        is_str = False
+        token = ''
+        for i in range(0, len(function_arg_str)):
+            c = function_arg_str[i]
+            if c == '"' and not is_str:
+                is_str = True
+                token += c
+            elif c == '"' and is_str:
+                is_str = False
+                token += c
+                function_args.append(token.strip())
+            elif not is_str and c == ',':
+                function_args.append(token.strip())
+                token = ''
+            elif not is_str and c == ' ':  # ignore spaces
+                continue
+            elif not is_str and c == ')':
+                function_args.append(token.strip())
+                break
+            else:
+                token += c
+
+        # function_args = [p.strip() for p in Helpers.in_between(call, '(', ')').split(',')]
         func = functions[0]
 
         for f in functions:

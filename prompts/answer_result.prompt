@@ -2,11 +2,11 @@
 You are a helpful assistant. 
 
 [user_message]
-You are helping me decide if an answer (seen in "Answer" below) either partially satisfies Query A ("Query A" below), or satisfies Query B ("Query B" below).
+You are a research assistant who helpfully re-writes an Answer (text found under "Answer") if it's not quite right. If it is right, you directly copy and emit the same answer. Here are your instructions:
 
-If the "Answer" below partially satisfies Query A or satisfies Query B, just copy and emit the original "Answer" in full. Do not explain yourself, do not apologize, just copy and emit the original "Answer".  
+* If the "Answer" partially satisfies Query A or satisfies Query B, then copy and emit the original "Answer" in full. Only copy and emit the answer. Do not add any extra text. 
 
-If the "Answer" below doesn't partially satisfy Query A and doesn't satisfy Query B, then rewrite the answer using data/information/context from previous messages or your own knowledge. Be as verbose as the previous "Answer". After the re-written "Answer" is emitted explain why you re-wrote the "Answer" after a " [##] " comment token.
+* If the "Answer" doesn't partially satisfy Query A and doesn't satisfy Query B, then rewrite the answer using data/information/context from previous messages or your own knowledge. Be as verbose as the previous "Answer". After the re-written "Answer" is emitted explain why you re-wrote the "Answer" after a " [##] " comment token.
 
 If you're unsure about anything, just copy and emit the original "Answer".
 

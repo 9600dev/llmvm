@@ -102,7 +102,7 @@ class Repl():
             cache=PersistentCache('cache/cache.db')
         )
 
-        user_queries: List[Message] = []
+        message_history: List[Message] = []
 
         commands = {
             'exit': 'exit the repl',
@@ -132,12 +132,12 @@ class Repl():
                     continue
 
                 elif '/messages' in query or '/conversations' in query or '/m ' in query:
-                    print_response(user_queries)  # type: ignore
+                    print_response(message_history)  # type: ignore
                     continue
 
                 elif '/last' in query:
-                    rich.print('Clearning conversation except last message: {}'.format(user_queries[-1]))
-                    user_queries = user_queries[:-1]
+                    rich.print('Clearning conversation except last message: {}'.format(message_history[-1]))
+                    message_history = message_history[:-1]
 
                 elif '/context' in query:
                     context = Helpers.in_between(query, '/context', '\n').strip()
@@ -195,6 +195,8 @@ class Repl():
                         program=Program(executor_contexts[0]),
                     )
                     print_response([cast(Statement, statement.result())])
+                    message_history.append(User(Content(query)))
+                    message_history.append(cast(Assistant, statement.result()))
                     rich.print()
                     continue
 
@@ -202,9 +204,11 @@ class Repl():
                 results = execution_controller.execute(
                     LLMCall(
                         message=User(Content(query)),
-                        supporting_messages=user_queries,
+                        supporting_messages=message_history,
                     )
                 )
+                message_history.append(User(Content(query)))
+                message_history.append(Assistant(Content(str(results[-1].result()))))
 
                 rich.print()
                 rich.print('[bold green]User:[/bold green] {}'.format(query))
@@ -213,7 +217,6 @@ class Repl():
                 rich.print()
 
                 # add the user message to the conversation
-                user_queries.append(User(Content(query)))
 
             except KeyboardInterrupt:
                 print("\nKeyboardInterrupt")

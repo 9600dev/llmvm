@@ -947,6 +947,10 @@ class ExecutionController():
             isinstance(statement, FunctionCall)
             and not statement.result()
         ):
+            # todo:
+            # if there is something on the stack (say an llm_call) then it's likely
+            # that we need to extract args for the function call.
+
             # unpack the args, call the function
             function_call = statement
             function_args_desc = statement.args
