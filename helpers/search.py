@@ -45,6 +45,40 @@ class SerpAPISearcher(Searcher):
     ) -> List[Dict]:
         logging.debug('SerpAPISearcher.search() type={} link_limit={} query={}'.format(str(type), str(self.link_limit), query))
         search_results = []
+        location = 'San Jose, California, United States'
+
+        params = {
+            'q': query,
+            'location': location,
+            'hl': 'en',
+            'gl': 'us',
+            'api_key': self.api_key,
+            'engine': 'google',
+        }
+
+        search = GoogleSearch(params)
+        results = search.get_dict()
+
+        if results.get('error'):
+            rich.print_json(json.dumps(results, default=str))
+            return []
+
+        page_count = 0
+        self.search_count += 1
+
+        while 'error' not in results and self.page_limit > page_count:
+            page_count += 1
+            results = search.get_dict()
+            search_results.extend(results.get('organic_results', []))
+
+        return search_results[:self.link_limit]
+
+    def search_internet_bing(
+        self,
+        query: str,
+    ) -> List[Dict]:
+        logging.debug('SerpAPISearcher.search() type={} link_limit={} query={}'.format(str(type), str(self.link_limit), query))
+        search_results = []
 
         params = {
             'api_key': self.api_key,

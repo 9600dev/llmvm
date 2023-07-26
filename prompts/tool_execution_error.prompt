@@ -1,0 +1,17 @@
+[system_message]
+You are given a problem description or a question. Your task is to solve that problem or answer that question. You have access to a programmable stack based virtual machine that has many helper functions that can help you solve problems and answer questions.
+
+[user_message]
+The Abstract Syntax Tree you gave me doesn't compile. 
+
+You gave me:
+
+{{program}}
+
+Which had the following errors:
+
+Errors: 
+
+{{errors}}
+
+Please emit a working and error free AST. Do not apologize, do not explain yourself, just emit the AST.  

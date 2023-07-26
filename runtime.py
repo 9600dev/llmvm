@@ -8,9 +8,11 @@ import time
 from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
 
+from openai import InvalidRequestError
+
 from eightbitvicuna import VicunaEightBit
 from helpers.helpers import Helpers, PersistentCache
-from helpers.logging_helpers import setup_logging
+from helpers.logging_helpers import console_debug, setup_logging
 from helpers.vector_store import VectorStore
 from objects import (Agent, Answer, Assistant, AstNode, Content, DataFrame,
                      ExecutionFlow, Executor, ForEach, FunctionCall, Get,
@@ -75,6 +77,7 @@ class Parser():
         self.index = 0
         self.agents: List[Callable] = []
         self.message_type: type = message_type
+        self.errors: List[UncertainOrError] = []
 
     def consume(self, token: str):
         if token in self.remainder:
@@ -202,8 +205,12 @@ class Parser():
         if re.startswith('set(') and ')' in re:
             self.consume('set(')
             variable = cast(str, self.parse_string())
+            name = ''
+            if self.remainder.startswith(','):
+                self.consume(',')
+                name = cast(str, self.parse_string())
             self.consume(')')
-            return Set(variable)
+            return Set(variable, name)
         else:
             return None
 
@@ -252,9 +259,11 @@ class Parser():
                     function_call_text = Helpers.in_between(re, 'function_call(', '))')
                     self.consume('))')
                     re = self.remainder
-                    return UncertainOrError(
+
+                    error = UncertainOrError(
                         error_message=Content(f'The helper function {function_call_text} could not be found.')
                     )
+                    self.errors.append(error)
                 else:
                     # end token was consumed in parse_function_call()
                     return function_call
@@ -274,9 +283,11 @@ class Parser():
             if re.startswith('uncertain_or_error(') and ')' in re:
                 language = Helpers.in_between(re, 'uncertain_or_error(', ')')
                 self.consume(')')
-                return UncertainOrError(
+                error = UncertainOrError(
                     error_message=Content(language),
                 )
+                self.errors.append(error)
+                return error
 
             if re.startswith('foreach(') and ')' in re:
                 # <foreach> ::= 'foreach' '(' [ <stack> | <stack_pop> ] ',' <statement> ')'
@@ -359,6 +370,7 @@ class Parser():
 
         self.message = ''
         self.agents = []
+        program.errors = copy.deepcopy(self.errors)
 
         return program
 
@@ -648,12 +660,20 @@ class ExecutionController():
         user_message: Message,
         context_messages: List[Message],
         executor: Executor,
-        prompt_filename: str = '',
+        prompt_filename: Optional[str] = None,
     ) -> Assistant:
+        if not prompt_filename:
+            prompt_filename = ''
         # execute the call to check to see if the Answer satisfies the original query
         messages: List[Message] = copy.deepcopy(context_messages)
         messages.append(user_message)
-        assistant: Assistant = executor.execute(messages)
+        try:
+            assistant: Assistant = executor.execute(messages)
+            console_debug(prompt_filename, 'User', str(user_message.message))
+            console_debug(prompt_filename, 'Assistant', str(assistant.message))
+        except InvalidRequestError as ex:
+            console_debug(prompt_filename, 'User', str(user_message.message))
+            raise ex
         response_writer(prompt_filename, assistant)
         return assistant
 
@@ -683,6 +703,7 @@ class ExecutionController():
         program: Program,
         messages: List[Message],
         vector_search_query: Optional[str] = None,
+        prompt_filename: Optional[str] = None,
     ) -> Assistant:
         """
         Executes an LLM call on a prompt_message with a context of messages.
@@ -757,7 +778,8 @@ class ExecutionController():
                     user_message=load_execute_message,
                     context_messages=similarity_messages,
                     executor=executor,
-                    prompt_filename='')
+                    prompt_filename=prompt_filename
+                )
 
             # do the map reduce instead of similarity
             else:
@@ -766,9 +788,16 @@ class ExecutionController():
                 chunk_results = []
 
                 # iterate over the data.
+                map_reduce_prompt_tokens = executor.calculate_tokens(
+                    [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))]
+                )
+                chunk_size = (executor.max_prompt_tokens() - map_reduce_prompt_tokens) - (
+                    executor.calculate_tokens([load_execute_message]) - 32
+                )
+
                 chunks = self.vector_store.chunk(
                     content=str(context_message.message),
-                    chunk_size=executor.max_prompt_tokens() - executor.calculate_tokens([load_execute_message]) - 32,
+                    chunk_size=chunk_size,
                     overlap=0
                 )
 
@@ -801,7 +830,7 @@ class ExecutionController():
                 user_message=cast(User, load_execute_message),
                 context_messages=messages,
                 executor=executor,
-                prompt_filename=''
+                prompt_filename=prompt_filename,
             )
         return assistant_result
 
@@ -819,6 +848,14 @@ class ExecutionController():
             original_query = program.original_query
             stack_node_query = program.original_query
             answer = str(statement.result())
+
+            context_messages: List[Message] = [
+                self.__statement_to_message(
+                    context=s,
+                    query=User(Content(program.original_query)),
+                    max_tokens=executor.max_prompt_tokens() // 2,
+                ) for s in program.executed_stack.stack
+            ]
 
             if statement.result() and isinstance(statement.result(), StackNode):
                 answer = '\n\n====\n\n'.join(
@@ -843,9 +880,12 @@ class ExecutionController():
                 and cast(StackNode, statement.result()).value == 0
                 and program.runtime_stack.count() > 1
             ):
+                # sometimes we have a massive stack of function_calls with no
+                # llm map reduce. In this case, answer(stack()) should probably kick this up
+
                 answer_assistant: Assistant = self.__llm_call_prompt(
                     prompt_filename='prompts/answer_result_stack.prompt',
-                    context_messages=[],
+                    context_messages=context_messages,
                     executor=executor,
                     template={
                         'original_query': original_query,
@@ -854,7 +894,7 @@ class ExecutionController():
             else:
                 answer_assistant: Assistant = self.__llm_call_prompt(
                     prompt_filename='prompts/answer_result.prompt',
-                    context_messages=[],
+                    context_messages=context_messages,
                     executor=executor,
                     template={
                         'original_query': original_query,
@@ -879,9 +919,16 @@ class ExecutionController():
             isinstance(statement, Get)
             and not statement.result()
         ):
-            temp_statement = program.runtime_registers.get(statement.variable)
+            name, temp_statement = program.runtime_registers.get(statement.variable)  # type: ignore
             if temp_statement:
                 statement._result = temp_statement
+                if name and temp_statement._result and isinstance(temp_statement._result, str):
+                    temp_statement._result = f'The data below is named: {name}' + '\n\n' + str(temp_statement._result)
+                elif name and temp_statement._result and isinstance(temp_statement._result, Content):
+                    temp_statement._result = Content(f'The data below is named: {name}' + '\n\n' + str(temp_statement._result))
+                elif name and temp_statement._result and isinstance(temp_statement._result, Assistant):
+                    temp_statement._result.message = Content(f'The data below is named: {name}' + '\n\n' + str(temp_statement._result.message))
+
                 # outer loop pushes this on to the runtime stack
                 return temp_statement
 
@@ -891,7 +938,7 @@ class ExecutionController():
         ):
             temp_statement = program.runtime_stack.pop()
             if temp_statement:
-                program.runtime_registers[statement.variable] = temp_statement
+                program.runtime_registers[statement.variable] = (statement.name, temp_statement)
             # outer loop ignores Set and Answer
             return statement
 
@@ -971,6 +1018,7 @@ class ExecutionController():
                 program=program,
                 messages=context_messages,
                 vector_search_query=str(statement.message),
+                prompt_filename='prompts/llm_call.prompt'
             )
             # todo: do a check to see if looks valid
 
@@ -1018,7 +1066,9 @@ class ExecutionController():
                         load_execute_message=Helpers.load_and_populate_message(
                             prompt_filename='prompts/foreach_function_call.prompt',
                             template={
-                                'function_call': statement.rhs.to_definition(),
+                                'function_definition': statement.rhs.to_definition(),
+                                'function_call': statement.rhs.to_code_call(),
+                                'goal': program.original_query,
                             }),
                         executor=executor,
                         program=program,
@@ -1027,6 +1077,7 @@ class ExecutionController():
                         ],
                         # todo: I think this is wrong, but this is what the previous code did
                         vector_search_query=program.original_query + str(statement.rhs.to_definition()),
+                        prompt_filename='prompts/foreach_function_call.prompt',
                     )
 
                     foreach_function_response = str(assistant.message)
@@ -1040,7 +1091,7 @@ class ExecutionController():
                         assistant_function_call_rewrite = self.execute_llm_call(
                             query_or_task=statement.rhs.to_definition(),
                             load_execute_message=Helpers.load_and_populate_message(
-                                prompt_filename=f'prompts/{statement.token()}_error_correction.prompt',
+                                prompt_filename='prompts/function_call_error_correction.prompt',
                                 template={
                                     'function_calls_missing': str(assistant.message),
                                     'function_call_signatures': '\n'.join(
@@ -1051,7 +1102,8 @@ class ExecutionController():
                             executor=executor,
                             program=program,
                             messages=[],
-                            vector_search_query=''
+                            vector_search_query='',
+                            prompt_filename='prompts/function_call_error_correction.prompt',
                         )
                         foreach_function_response = str(assistant_function_call_rewrite.message)
 
@@ -1092,6 +1144,7 @@ class ExecutionController():
                             program=program,
                             messages=[self.__statement_to_message_no_chunk(stack_statement)],
                             vector_search_query=program.original_query + ' ' + str(statement.rhs.message),
+                            prompt_filename='prompts/foreach_llm_call_stack.prompt',
                         )
                         statement.rhs._result = assistant_llm_call
                         statement._result.append(copy.deepcopy(statement.rhs))  # type: ignore
@@ -1107,6 +1160,7 @@ class ExecutionController():
                             program=program,
                             messages=[self.__statement_to_message_no_chunk(stack_statement)],
                             vector_search_query=program.original_query + ' ' + str(statement.rhs.message),
+                            prompt_filename='prompts/foreach_llm_call.prompt',
                         )
                         statement.rhs._result = assistant_llm_call
                         statement._result.append(copy.deepcopy(statement.rhs))  # type: ignore
@@ -1125,6 +1179,7 @@ class ExecutionController():
                         program=program,
                         messages=[self.__statement_to_message_no_chunk(stack_statement)],
                         vector_search_query='',
+                        prompt_filename='prompts/foreach_answer.prompt',
                     )
                     statement._result.append(copy.deepcopy(assistant_llm_call))  # type: ignore
 
@@ -1179,7 +1234,7 @@ class ExecutionController():
                 and not isinstance(result, Set)
                 and not isinstance(result, Get)
             ):
-                program.executed_stack.push(result)
+                program.executed_stack.push(copy.deepcopy(result))
 
         return program
 
@@ -1223,6 +1278,22 @@ class ExecutionController():
             program = Parser().parse_program(assistant_response, self.agents, executor)
             program.conversation.append(response)
             program.original_query = str(call.message)
+
+            # deal with errors
+            if program.errors:
+                logging.debug('Abstract Syntax Tree had errors: {}'.format(program.errors))
+                error_reply = self.__llm_call_prompt(
+                    prompt_filename='prompts/tool_execution_error.prompt',
+                    context_messages=response._messages_context + [Assistant(response.message)],
+                    executor=executor,
+                    template={
+                        'program': assistant_response,
+                        'errors': '\n\n'.join([str(e.error_message) for e in program.errors])
+                    }
+                )
+                program = Parser().parse_program(str(error_reply.message), self.agents, executor)
+                program.conversation.append(response)
+                program.original_query = str(call.message)
 
             # execute the program
             program = self.execute_program(program)

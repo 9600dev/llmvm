@@ -159,9 +159,7 @@ class Repl():
                         rich.print('    {}'.format(agent.instruction()))
                     continue
 
-                elif '/compile' in query:
-                    rich.print()
-                    rich.print('LLM execute_with_agents result:')
+                elif '/compile' in query or '/c' in query:
                     rich.print()
                     compilation_query = Helpers.in_between(query, '/context', '\n').strip()
 
@@ -170,6 +168,9 @@ class Repl():
                         agents=agents,
                         temperature=0.0,
                     )
+                    rich.print()
+                    rich.print()
+                    rich.print('LLM execute_with_agents result:')
                     rich.print(str(response.message))
                     rich.print()
                     rich.print('Parser() output:')

@@ -273,13 +273,18 @@ class Set(Statement):
     def __init__(
         self,
         variable: str,
+        name: str = '',
         ast_text: Optional[str] = None,
     ):
         super().__init__(ast_text)
         self.variable = variable
+        self.name = name
 
     def __str__(self):
-        return f'set("{self.variable}")'
+        if self.name:
+            return f'set("{self.variable}, {self.name}")'
+        else:
+            return f'set("{self.variable}")'
 
     def token(self):
         return 'set'
@@ -440,11 +445,12 @@ class Program(AstNode):
         self.statements: List[Statement] = []
         self.conversation: List[Message] = []
         self.runtime_stack: Stack[Statement] = Stack[Statement]()
-        self.runtime_registers: Dict[str, Statement] = {}
+        self.runtime_registers: Dict[str, Tuple[str, Statement]] = {}
         self.answers: List[Answer] = []
 
         self.executed_stack: Stack[Statement] = Stack[Statement]()
         self.original_query: str = ''
+        self.errors: List[UncertainOrError] = []
 
 
 class PromptStrategy(Enum):

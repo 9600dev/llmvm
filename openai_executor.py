@@ -104,7 +104,7 @@ class OpenAIExecutor(Executor):
             return cast(Assistant, self.cache.get((call.message, call.supporting_messages)))
 
         encoded_m = str(call.message).encode('utf-8', errors='ignore')[:100]
-        logging.debug('OpenAIExecutor.execute_with_agents: {}'.format(encoded_m))
+        logging.debug('OpenAIExecutor.execute_with_agents()')
 
         user_message: User = cast(User, call.message)
         messages = []
@@ -140,7 +140,6 @@ class OpenAIExecutor(Executor):
             return Assistant(Content('The model could not execute the query.'), error=True)
         else:
             encoded_m = str(chat_response['content']).encode('utf-8', errors='ignore')[:100]
-            logging.debug('OpenAI Assistant Response: {}'.format(encoded_m))
 
             assistant = Assistant(
                 message=Content(chat_response['content']),
@@ -170,8 +169,7 @@ class OpenAIExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
-        logging.debug('OpenAIExecutor.execute system_message={} user_messages={}'
-                      .format(system_message, str(user_messages).encode('utf-8', errors='ignore')[:100]))
+        logging.debug('OpenAIExecutor.execute() system_message={}'.format(system_message[0:25]))
 
         messages_list: List[Dict[str, str]] = []
 

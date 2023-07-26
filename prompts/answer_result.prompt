@@ -6,7 +6,7 @@ You are helping me decide if an answer (seen in "Answer" below) either partially
 
 If the "Answer" below partially satisfies Query A or satisfies Query B, just copy and emit the original "Answer" in full. Do not explain yourself, do not apologize, just copy and emit the original "Answer".  
 
-If the "Answer" below doesn't partially satisfy Query A and doesn't satisfy Query B, then rewrite the answer using your own knowledge or data/information/context from previous messages. When re-writing, be as verbose as the original "Answer". After the re-written "Answer" is emitted explain why you re-wrote the "Answer" after a " [##] " comment token.
+If the "Answer" below doesn't partially satisfy Query A and doesn't satisfy Query B, then rewrite the answer using data/information/context from previous messages or your own knowledge. Be as verbose as the previous "Answer". After the re-written "Answer" is emitted explain why you re-wrote the "Answer" after a " [##] " comment token.
 
 If you're unsure about anything, just copy and emit the original "Answer".
 

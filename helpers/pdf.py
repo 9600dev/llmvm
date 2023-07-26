@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import pdf2image
 import pytesseract
 import requests
+from pdfminer.high_level import extract_text
 from pypdf import PdfReader
 from pytesseract import Output
 
@@ -29,6 +30,37 @@ class PdfHelpers():
 
     @staticmethod
     def parse_pdf(url_or_file: str) -> str:
+        """
+        Downloads a pdf file from the url_or_file argument and returns the text.
+        You can only use either a url or a path to a pdf file.
+
+        Args:
+            url_or_file (str): url or path to pdf file
+        Returns:
+            str: text from pdf
+        """
+
+        url_result = urlparse(url_or_file)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # type: ignore
+        }
+        stream = None
+
+        if url_result.scheme == 'http' or url_result.scheme == 'https':
+            content = requests.get(url_or_file, headers=headers, allow_redirects=True, timeout=10).content
+            stream = BytesIO(content)
+        else:
+            try:
+                with open(url_or_file, 'rb') as file:
+                    stream = BytesIO(file.read())
+            except FileNotFoundError:
+                raise ValueError('The supplied argument url_or_file: {} is not a correct filename or url.'.format(url_or_file))
+
+        logging.debug('parse_pdf: extracting text from pdf')
+        return extract_text(stream)
+
+    @staticmethod
+    def parse_pdf_deprecated(url_or_file: str) -> str:
         """
         Downloads a pdf file from the url_or_file argument and returns the text.
         You can only use either a url or a path to a pdf file.
