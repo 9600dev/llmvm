@@ -1,16 +1,16 @@
-# LLM Stack Based VM 
+# LLM Stack Based VM
 
-A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack based Virtual Machine execution, where ChatGPT/Llama2 is cooperatively running VM instructions and helping plan xecution flow. 
+A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack based Virtual Machine execution, where ChatGPT/Llama2 is cooperatively running VM instructions and helping plan xecution flow.
 
 ## The Problem
 
-ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a). 
+ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a).
 
-However, this interation is usually Task -> LLM decides what helper function to call -> Call helper function -> Work with result. And does not allow for arbitrary decontruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution. 
+However, this interation is usually Task -> LLM decides what helper function to call -> Call helper function -> Work with result. And does not allow for arbitrary decontruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
 
-This prototype shows that LLM's are capable of taking a user task, reasoning about how to decontruct the task into sub-tasks, understanding how to schedule and execute those sub-tasks on its own or with via a virtual machine, and working with the VM to resolve error cases. 
+This prototype shows that LLM's are capable of taking a user task, reasoning about how to decontruct the task into sub-tasks, understanding how to schedule and execute those sub-tasks on its own or with via a virtual machine, and working with the VM to resolve error cases.
 
-The LLM is able to build a mental-model of the Stack Based Virtual Machine through a natural language definition alone; emit an AST that runs on that VM through an EBNF grammar definition and many-shot examples; and then work with the VM to progress through sub-task execution through User Message -> Assistant Message -> User Message Chat interactions.  
+The LLM is able to build a mental-model of the Stack Based Virtual Machine through a natural language definition alone; emit an AST that runs on that VM through an EBNF grammar definition and many-shot examples; and then work with the VM to progress through sub-task execution through User Message -> Assistant Message -> User Message Chat interactions.
 
 ## Examples:
 
@@ -93,7 +93,7 @@ Any function can be a helper function, so long as the argument types are simple 
 
 ```
 WebHelpers.get_url(url, force_firefox)  # Url can be a http or https web url or a filename and directory location.
-WebHelpers.get_news(url)  # Extracts the text from a news article
+WebHelpers.get_news_article(url)  # Extracts the text from a news article
 WebHelpers.get_url_firefox(url)  # This is useful for hard to extract text, an exception thrown by the other functions,
 or when searching/extracting from sites that require logins liked LinkedIn, Facebook, Gmail etc.
 WebHelpers.search_news(query, total_links_to_return)  # Searches the current and historical news for a query and returns the text of the top results

@@ -1,5 +1,6 @@
 import os
 import tempfile
+import unicodedata
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -24,7 +25,6 @@ class IgnoringScriptConverter(MarkdownConverter):
 
 
 class WebHelpers():
-
     @staticmethod
     def clean_markdown(markdown_text: str) -> str:
         lines = []
@@ -55,7 +55,7 @@ class WebHelpers():
         return '\n'.join(lines)
 
     @staticmethod
-    def convert_html_to_markdown_soup(html: str) -> str:
+    def convert_html_to_markdown(html: str) -> str:
         logging.debug('convert_html_to_markdown_soup')
         soup = BeautifulSoup(html, features='lxml')
 
@@ -63,47 +63,48 @@ class WebHelpers():
             data.decompose()
 
         result = IgnoringScriptConverter().convert_soup(soup)
-        return WebHelpers.clean_markdown(result)
+        cleaned_result = WebHelpers.clean_markdown(result)
+        return unicodedata.normalize('NFKD', cleaned_result)
 
-    @staticmethod
-    def convert_html_to_markdown(html: str) -> str:
-        """Converts html to markdown using pandoc"""
-        logging.debug('convert_html_to_markdown')
-        with tempfile.NamedTemporaryFile(suffix='.html', mode='w', delete=True) as temp_file:
-            temp_file.write(html)
+    # @staticmethod
+    # def convert_html_to_markdown_old(html: str) -> str:
+    #     """Converts html to markdown using pandoc"""
+    #     logging.debug('convert_html_to_markdown')
+    #     with tempfile.NamedTemporaryFile(suffix='.html', mode='w', delete=True) as temp_file:
+    #         temp_file.write(html)
 
-            command = "pandoc -s -i "
-            command += temp_file.name
-            command += " -t markdown | grep -v '^:' | grep -v '^```' | grep -v '<!-- --->' | sed -e ':again' -e N -e '$!b again' -e 's/{[^}]*}//g' | grep -v 'data:image'"
-            result = (os.popen(command).read())
+    #         command = "pandoc -s -i "
+    #         command += temp_file.name
+    #         command += " -t markdown | grep -v '^:' | grep -v '^```' | grep -v '<!-- --->' | sed -e ':again' -e N -e '$!b again' -e 's/{[^}]*}//g' | grep -v 'data:image'"
+    #         result = (os.popen(command).read())
 
-            lines = []
-            for line in result.splitlines():
-                stripped = line.strip()
-                if stripped != '':
-                    if stripped == '<div>' or stripped == '</div>':
-                        continue
+    #         lines = []
+    #         for line in result.splitlines():
+    #             stripped = line.strip()
+    #             if stripped != '':
+    #                 if stripped == '<div>' or stripped == '</div>':
+    #                     continue
 
-                    if stripped == '[]' or stripped == '[[]]':
-                        continue
+    #                 if stripped == '[]' or stripped == '[[]]':
+    #                     continue
 
-                    if stripped.startswith('![]('):
-                        continue
+    #                 if stripped.startswith('![]('):
+    #                     continue
 
-                    if stripped.startswith('[]') and stripped.replace('[]', '').strip() == '':
-                        continue
+    #                 if stripped.startswith('[]') and stripped.replace('[]', '').strip() == '':
+    #                     continue
 
-                    if stripped.startswith('[\\') and stripped.replace('[\\', '').strip() == '':
-                        continue
+    #                 if stripped.startswith('[\\') and stripped.replace('[\\', '').strip() == '':
+    #                     continue
 
-                    if stripped.startswith(']') and stripped.replace(']', '').strip() == '':
-                        continue
+    #                 if stripped.startswith(']') and stripped.replace(']', '').strip() == '':
+    #                     continue
 
-                    if stripped.startswith('[') and stripped.replace('[', '').strip() == '':
-                        continue
+    #                 if stripped.startswith('[') and stripped.replace('[', '').strip() == '':
+    #                     continue
 
-                    lines.append(stripped)
-            return '\n'.join(lines)
+    #                 lines.append(stripped)
+    #         return '\n'.join(lines)
 
     @staticmethod
     def __search_helper(
@@ -118,6 +119,7 @@ class WebHelpers():
             try:
                 return_results.append(parser(result['link']))
             except Exception as e:
+                logging.error(e)
                 pass
 
         return ' '.join(return_results)
@@ -132,7 +134,7 @@ class WebHelpers():
     def search_news(query: str, total_links_to_return: int = 3) -> str:
         '''Searches the current and historical news for a query and returns the text of the top results'''
         searcher = SerpAPISearcher(link_limit=total_links_to_return)
-        return WebHelpers.__search_helper(query, searcher.search_news, WebHelpers.get_news)
+        return WebHelpers.__search_helper(query, searcher.search_news, WebHelpers.get_news_article)
 
     @staticmethod
     def get_url_firefox(url: str) -> str:
@@ -174,17 +176,17 @@ class WebHelpers():
             return ''
 
     @staticmethod
-    def get_news(url: str) -> str:
-        """Extracts the text from a news article"""
-        logging.debug('WebHelpers.get_news: {}'.format(url))
-        nltk.download('punkt')
+    def get_news_article(url: str) -> str:
+        """Extracts the news text from a given url"""
+        logging.debug('WebHelpers.get_news_article: {}'.format(url))
+        nltk.download('punkt', quiet=True)
 
         config = Configuration()
         config.browser_user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'
         article = Article(url=url, config=config)
         article.download()
         article.parse()
-        return article.text
+        return unicodedata.normalize('NFKD', article.text)
 
     @staticmethod
     def get_url(url: str, force_firefox: bool = False) -> str:
@@ -201,7 +203,7 @@ class WebHelpers():
             if '.pdf' in result.path:
                 return PdfHelpers.parse_pdf(url)
             if '.htm' in result.path or '.html' in result.path:
-                return WebHelpers.convert_html_to_markdown_soup(open(result.path, 'r').read())
+                return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
 
         elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
             return PdfHelpers.parse_pdf(url)
@@ -212,12 +214,12 @@ class WebHelpers():
             }
 
             if force_firefox:
-                return WebHelpers.convert_html_to_markdown_soup(WebHelpers.get_url_firefox(url))
+                return WebHelpers.convert_html_to_markdown(WebHelpers.get_url_firefox(url))
 
             text = requests.get(url, headers=headers, timeout=10, allow_redirects=True).text
             if text:
-                return WebHelpers.convert_html_to_markdown_soup(text)
+                return WebHelpers.convert_html_to_markdown(text)
             else:
-                return WebHelpers.convert_html_to_markdown_soup(WebHelpers.get_url_firefox(url))
+                return WebHelpers.convert_html_to_markdown(WebHelpers.get_url_firefox(url))
 
         return ''

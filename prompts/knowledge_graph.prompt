@@ -1,0 +1,30 @@
+Given the entire text below under the section "Text:", extract a "narrative graph" for each topic I care about which I will list below under "Topic:".
+
+A "narrative graph" is a graphical representation or visual depiction of the structure and flow of a narrative. This representation might involve nodes representing different story elements, events, or characters, and edges indicating the relationships or temporal order between them.
+
+
+A narrative graph follows this syntactic structure:
+
+"topic" [[=>]] a fact or detail about topic [[=>]] more detailed fact or description [[=>]] more detailed ... 
+
+Where each sub-node in the graph tends to either a) give a deeper level of detail, or b) expresses a timeline about a topic from earliest to latest. Topic's can have multiple narratives, so feel free to generate multiple narrative graphs for each narrative you see about a given topic. 
+
+If describing the narrative for a given topic requires expressing a timeline, you can follow this format:
+
+"topic" [[=>]] earliest time fact 1 [[=>]] second earliest time fact 2 [[=>]] ... [[=>]] most recent timeline fact about topic
+
+Each node in the graph should be as succinct as possible. If you can't find a narrative about a given topic, just emit "topic" [[=>]] None.
+
+Okay, for each of these topics, generate narrative graphs for any narratives you read related to the topic. Only emit the narrative graph format.
+
+Topics: 
+
+name and personal details
+career
+problems and issues
+opportunities
+relationships
+actions
+
+Text:
+

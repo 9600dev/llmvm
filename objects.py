@@ -35,7 +35,7 @@ class Executor(ABC):
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
-        model: str = 'gpt-3.5-turbo-16k',
+        model: str = 'gpt-3.5-turbo-16k-0613',
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
         chat_format: bool = True,

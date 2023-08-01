@@ -19,7 +19,7 @@ class OpenAIExecutor(Executor):
         self,
         openai_key: str,
         max_function_calls: int = 5,
-        model: str = 'gpt-3.5-turbo-16k',
+        model: str = 'gpt-3.5-turbo-16k-0613',
         verbose: bool = True,
         cache: PersistentCache = PersistentCache(),
     ):
@@ -31,6 +31,8 @@ class OpenAIExecutor(Executor):
 
     def max_tokens(self) -> int:
         match self.model:
+            case 'gpt-3.5-turbo-16k-0613':
+                return 16385
             case 'gpt-3.5-turbo-16k':
                 return 16385
             case _:
@@ -51,7 +53,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
-        model: str = 'gpt-3.5-turbo-16k',
+        model: str = 'gpt-3.5-turbo-16k-0613',
         max_completion_tokens: int = 1024,
         temperature: float = 0.2,
         chat_format: bool = True,
@@ -98,6 +100,7 @@ class OpenAIExecutor(Executor):
         self,
         call: LLMCall,
         agents: List[Callable],
+
         temperature: float = 0.2,
     ) -> Assistant:
         if self.cache and self.cache.has_key((call.message, call.supporting_messages)):

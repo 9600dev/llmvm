@@ -198,7 +198,7 @@ class Repl():
                         rich.print('    {}'.format(agent.instruction()))
                     continue
 
-                elif '/compile' in query or '/c' in query:
+                elif '/compile' in query or query.startswith('/c'):
                     rich.print()
                     compilation_query = Helpers.in_between(query, '/context', '\n').strip()
 
@@ -266,7 +266,7 @@ class Repl():
 
 agents = [
     WebHelpers.get_url,
-    WebHelpers.get_news,
+    WebHelpers.get_news_article,
     WebHelpers.get_url_firefox,
     WebHelpers.search_news,
     WebHelpers.search_internet,

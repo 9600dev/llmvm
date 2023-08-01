@@ -301,7 +301,7 @@ class Helpers():
             return len(content.split()) / 0.75
 
     @staticmethod
-    def calculate_tokens(content: str | List[Dict[str, str]], model: str = 'gpt-3.5-turbo-16k') -> int:
+    def calculate_tokens(content: str | List[Dict[str, str]], model: str = 'gpt-3.5-turbo-16k-0613') -> int:
         if isinstance(content, list):
             content = Helpers.messages_to_str(content)
 
