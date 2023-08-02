@@ -8,17 +8,19 @@ A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack b
 * ```pyenv install 3.11.4```
 * ```pyenv virtualenv 3.11.4 llmvm```
 * Install poetry: ```curl -sSL https://install.python-poetry.org | python3 -```
-* ```poetry config virtualenvs.prefer-active-python true``
+* ```poetry config virtualenvs.prefer-active-python true```
 * ```poetry install```
 * Build and install FAISS
-  * git submodule update --init --recursive
-  * cd faiss
-  * cmake -DFAISS_ENABLE_GPU=ON -DCUDAToolkit_INCLUDE_DIR=/usr/include -DCUDAToolkit_ROOT=/usr/lib/cuda -DCMAKE_CXX_STANDARD=11 -DCMAKE_CXX_STANDARD_REQUIRED=ON -B build .
-  * make -C faiss -j faiss
-  * make -C build -j swigfaiss
-  * cd build/faiss/python
-  * python setup.py install
-* python repl.py
+  * ```git submodule update --init --recursive```
+  * ```cd faiss```
+  * ```cmake -DFAISS_ENABLE_GPU=ON -DCUDAToolkit_INCLUDE_DIR=/usr/include -DCUDAToolkit_ROOT=/usr/lib/cuda -DCMAKE_CXX_STANDARD=11 -DCMAKE_CXX_STANDARD_REQUIRED=ON -B build .```
+  * ```make -C faiss -j faiss```
+  * ```make -C build -j swigfaiss```
+  * ```cd build/faiss/python```
+  * ```python setup.py install```
+* Run the llmvm repl:
+  * ```python repl.py```
+  * ```/help```
 
 ## The Problem
 
@@ -77,6 +79,8 @@ The example above requires that each PDF be "map reduced" over "Extract and summ
 The reduce phase generates a summary of each paper, which are both then loaded into the final llm_call context window to "find and summarize differences in opinions between the two papers...".
 
 There is one other strategy (common in other implementations of LLM agent/chains/thought reasoning) used to fit content into the context window: chunking of the document into ~512 token chunks, then using the prompt to select and rank these chunks using a vector search database. We use faiss in this case.
+
+More details on this at the end.
 
 
 ## EBNF Grammar
