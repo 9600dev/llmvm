@@ -2,20 +2,38 @@
 
 A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack based Virtual Machine execution, where ChatGPT/Llama2 is cooperatively running VM instructions and helping plan xecution flow.
 
+# Install
+
+* Install pyenv: ```curl https://pyenv.run | bash```
+* ```pyenv install 3.11.4```
+* ```pyenv virtualenv 3.11.4 llmvm```
+* Install poetry: ```curl -sSL https://install.python-poetry.org | python3 -```
+* ```poetry config virtualenvs.prefer-active-python true``
+* ```poetry install```
+* Build and install FAISS
+  * git submodule update --init --recursive
+  * cd faiss
+  * cmake -DFAISS_ENABLE_GPU=ON -DCUDAToolkit_INCLUDE_DIR=/usr/include -DCUDAToolkit_ROOT=/usr/lib/cuda -DCMAKE_CXX_STANDARD=11 -DCMAKE_CXX_STANDARD_REQUIRED=ON -B build .
+  * make -C faiss -j faiss
+  * make -C build -j swigfaiss
+  * cd build/faiss/python
+  * python setup.py install
+* python repl.py
+
 ## The Problem
 
 ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a).
 
-However, this interation is usually Task -> LLM decides what helper function to call -> Call helper function -> Work with result. And does not allow for arbitrary decontruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
+However, this interation is usually Task -> LLM decides what helper function to call -> Call helper function -> Work with result. And does not allow for arbitrary deconstruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
 
-This prototype shows that LLM's are capable of taking a user task, reasoning about how to decontruct the task into sub-tasks, understanding how to schedule and execute those sub-tasks on its own or with via a virtual machine, and working with the VM to resolve error cases.
+This prototype shows that LLM's are capable of taking a user task, reasoning about how to deconstruct the task into sub-tasks, understanding how to schedule and execute those sub-tasks on its own or with via a virtual machine, and working with the VM to resolve error cases.
 
-The LLM is able to build a mental-model of the Stack Based Virtual Machine through a natural language definition alone; emit an AST that runs on that VM through an EBNF grammar definition and many-shot examples; and then work with the VM to progress through sub-task execution through User Message -> Assistant Message -> User Message Chat interactions.
+The LLM is able to build a mental-model of the Stack Based Virtual Machine through a natural language definition alone; emit an AST that runs on that VM through an [EBNF](https://tomassetti.me/ebnf/) grammar definition and many-shot examples; and then work with the VM to progress through sub-task execution through User Message -> Assistant Message -> User Message Chat interactions.
 
 ## Examples:
 
 Input:
-> "I'll give you a list of names and companies. I want you to summarize their careers and contact details: Bill Jia - Meta, Elise McKay - Pendal Group, Jeff Dean - Google."
+> "I'll give you a list of names and companies. I want you to summarize their careers and contact details: Bill Jia - Meta, Aparna Ramani - Facebook, Jeff Dean - Google."
 
 Transformation to AST:
 
@@ -23,7 +41,7 @@ Transformation to AST:
 function_call(WebHelpers.search_linkedin_profile("Bill", "Jia", "Meta"))
 llm_call("Summarize career profile and contact details")
 answer(stack_pop(1))
-function_call(WebHelpers.search_linkedin_profile("Erik", "Meijer", "Microsoft"))
+function_call(WebHelpers.search_linkedin_profile("Aparna", "Ramani", "Facebook"))
 llm_call("Summarize career profile and contact details")
 answer(stack_pop(1))
 function_call(WebHelpers.search_linkedin_profile("Jeff", "Dean", "Google"))
@@ -33,18 +51,33 @@ answer(stack_pop(1))
 
 Input:
 
-> "Open my contacts, find Leo Huang, Jeff Dean and Micheal Jones and set up a meeting with them for tomorrow at 1pm"
+> "Explain the differences between these two papers that talk about BERT: https://arxiv.org/pdf/2004.09984.pdf and https://arxiv.org/pdf/1903.10676.pdf"
 
-Transformation:
-
-```
-function_call(webhelpers.search_linkedin_profile("leo", "huang", ""))
-function_call(webhelpers.search_linkedin_profile("jeff", "dean", ""))
-function_call(webhelpers.search_linkedin_profile("micheal", "jones", ""))
-llm_call(stack_pop(3), "extract the email addresses of leo huang, jeff dean, and micheal jones")
-function_call(emailhelpers.send_calendar_invite("your name", "your_email@example.com", ["leo_huang@example.com", "jeff_dean@example.com", "micheal_jones@example.com"], "meeting", "meeting details", "tomorrow at 1pm", "tomorrow at 2pm"))
+Transformation to AST:
 
 ```
+function_call(PdfHelpers.parse_pdf("https://arxiv.org/pdf/2004.09984.pdf"))
+set("var1", "Paper 1: https://arxiv.org/pdf/2004.09984.pdf")
+function_call(PdfHelpers.parse_pdf("https://arxiv.org/pdf/1903.10676.pdf"))
+set("var2", "Paper 2: https://arxiv.org/pdf/1903.10676.pdf")
+get("var1")
+llm_call(stack_pop(1), "Extract and summarize facts and opinions in the content.")
+set("var3", "Summary of Paper 1: https://arxiv.org/pdf/2004.09984.pdf")
+get("var2")
+llm_call(stack_pop(1), "Extract and summarize facts and opinions in the content.")
+set("var4", "Summary of Paper 2: https://arxiv.org/pdf/1903.10676.pdf")
+get("var3")
+get("var4")
+llm_call(stack(), "Find and summarize differences in opinions between the two papers that are supplied in previous messages.")
+answer(stack_pop(1))
+```
+
+The example above requires that each PDF be "map reduced" over "Extract and summarize facts and opinions in the content." because each PDF is too big to fit in a 16k context window.
+
+The reduce phase generates a summary of each paper, which are both then loaded into the final llm_call context window to "find and summarize differences in opinions between the two papers...".
+
+There is one other strategy (common in other implementations of LLM agent/chains/thought reasoning) used to fit content into the context window: chunking of the document into ~512 token chunks, then using the prompt to select and rank these chunks using a vector search database. We use faiss in this case.
+
 
 ## EBNF Grammar
 
@@ -136,12 +169,3 @@ where the HTML returned from https://attract.ai/about-us/ is larger than the con
   * add extra context to interpretation (current stack is used for most context, but previous results from prior execution could be used.)
   * ask LLM to re-write AST from parent to try and improve probability of successful execution.
 
-# Install
-
-* Install pyenv: ```curl https://pyenv.run | bash```
-* ```pyenv install 3.11.4```
-* ```pyenv virtualenv 3.11.4 llmasm```
-* Install poetry: ```curl -sSL https://install.python-poetry.org | python3 -```
-* ```poetry config virtualenvs.prefer-active-python true``
-* ```poetry install```
-* python repl.py
