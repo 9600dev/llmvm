@@ -1,6 +1,6 @@
 # LLM Stack Based VM
 
-A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack based Virtual Machine execution, where ChatGPT/Llama2 is cooperatively running VM instructions and helping plan xecution flow.
+A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack based Virtual Machine execution, where ChatGPT/Llama2 is cooperatively running VM instructions and helping plan execution flow.
 
 # Install
 
@@ -152,7 +152,7 @@ Given:
 
 ```
 function_call(WebHelpers.get_url("https://attract.ai/about-us/"))
-llm_call(stack_pop(1), "From the content provided, Extract a list of all people names and the company name they work at")
+llm_call(stack_pop(0), "From the content provided, Extract a list of all people names and the company name they work at")
 ```
 
 where the HTML returned from https://attract.ai/about-us/ is larger than the context window, the interpreter will:
