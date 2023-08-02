@@ -1,5 +1,3 @@
-I'll give you a list of names and companies. I want you to summarize them: Andrew Mironenko - First Sentier Investors, Elise McKay - Pendal Group, Jeff Dean - Google.
-
 I want you to get the biggest price movers in the stock market today, and then summarize why their prices moved.
 
 Search Twitter for the latest sentiment on NVDA. Summarize the positive narrative, and then summarize the negative narrative.
