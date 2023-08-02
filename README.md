@@ -136,3 +136,12 @@ where the HTML returned from https://attract.ai/about-us/ is larger than the con
   * add extra context to interpretation (current stack is used for most context, but previous results from prior execution could be used.)
   * ask LLM to re-write AST from parent to try and improve probability of successful execution.
 
+# Install
+
+* Install pyenv: ```curl https://pyenv.run | bash```
+* ```pyenv install 3.11.4```
+* ```pyenv virtualenv 3.11.4 llmasm```
+* Install poetry: ```curl -sSL https://install.python-poetry.org | python3 -```
+* ```poetry config virtualenvs.prefer-active-python true``
+* ```poetry install```
+* python repl.py

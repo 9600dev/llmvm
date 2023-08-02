@@ -88,7 +88,7 @@ class Repl():
         self.executors: List[Executor] = executors
         self.agents: List[Agent] = []
 
-    def open_editor(self, editor: str, initial_text: str):
+    def open_editor(self, editor: str, initial_text: str) -> str:
         with tempfile.NamedTemporaryFile(mode='w+') as temp_file:
             temp_file.write(initial_text)
             temp_file.flush()
@@ -104,10 +104,14 @@ class Repl():
             edited_text = temp_file.read()
         return edited_text
 
+    def open_default_editor(self, initial_text: str) -> str:
+        return self.open_editor(os.environ.get('EDITOR', 'vim'), initial_text)  # type: ignore
+
     def repl(self):
         console = rich.console.Console()
         history = FileHistory(".repl_history")
         kb = KeyBindings()
+        edit = False
 
         @kb.add('c-e')
         def _(event):
@@ -140,6 +144,7 @@ class Repl():
             '/any': 'execute the query in all contexts',
             '/clear': 'clear the message history',
             '/messages': 'show message history',
+            '/edit': 'edit any tool AST result in $EDITOR',
             '/compile': 'ask LLM to compile query into AST and print to screen',
             '/last': 'clear the conversation except for the last Assistant message',
         }
@@ -157,28 +162,28 @@ class Repl():
                 if query is None or query == '':
                     continue
 
-                elif '/help' in query:
+                elif query.startswith('/help'):
                     rich.print('Commands:')
                     for command, description in commands.items():
                         rich.print('  [bold]{}[/bold] - {}'.format(command, description))
                     continue
 
-                elif '/exit' in query:
+                elif query.startswith('/exit'):
                     sys.exit(0)
 
-                elif '/clear' in query or '/cls' in query:
+                elif query.startswith('/clear') or query.startswith('/cls'):
                     message_history = []
                     continue
 
-                elif '/messages' in query or '/conversations' in query or '/m ' in query:
+                elif query.startswith('/messages') or query.startswith('/conversations') or query.startswith('/m '):
                     print_response(message_history)  # type: ignore
                     continue
 
-                elif '/last' in query:
+                elif query.startswith('/last'):
                     rich.print('Clearning conversation except last message: {}'.format(message_history[-1]))
                     message_history = message_history[:-1]
 
-                elif '/context' in query:
+                elif query.startswith('/context'):
                     context = Helpers.in_between(query, '/context', '\n').strip()
 
                     if context in executor_names:
@@ -191,14 +196,25 @@ class Repl():
                         rich.print('Invalid context: {}'.format(current_context))
                     continue
 
-                elif '/agents' in query:
+                elif query.startswith('/edit'):
+                    if not edit:
+                        rich.print('Enabling AST edit mode')
+                        edit = True
+                        execution_controller.edit_hook = self.open_default_editor
+                    else:
+                        rich.print('Disabling AST edit mode')
+                        edit = False
+                        execution_controller.edit_hook = None
+                    continue
+
+                elif query.startswith('/agents'):
                     rich.print('Agents:')
                     for agent in self.agents:
                         rich.print('  [bold]{}[/bold]'.format(agent.__class__.__name__))
                         rich.print('    {}'.format(agent.instruction()))
                     continue
 
-                elif '/compile' in query or query.startswith('/c'):
+                elif query.startswith('/compile') or query.startswith('/c'):
                     rich.print()
                     compilation_query = Helpers.in_between(query, '/context', '\n').strip()
 
@@ -221,7 +237,7 @@ class Repl():
                     )
                     continue
 
-                elif '/any' in query:
+                elif query.startswith('/any'):
                     executor_contexts = self.executors
                     continue
 

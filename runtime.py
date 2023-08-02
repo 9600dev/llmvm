@@ -56,12 +56,14 @@ class ExecutionController():
         agents: List[Callable] = [],
         vector_store: VectorStore = VectorStore(),
         cache: PersistentCache = PersistentCache(),
+        edit_hook: Optional[Callable[[str], str]] = None,
     ):
         self.execution_contexts: List[Executor] = execution_contexts
         self.agents = agents
         self.parser = Parser()
         self.vector_store: VectorStore = vector_store
         self.cache = cache
+        self.edit_hook = edit_hook
 
     def __statement_to_message_no_chunk(
         self,
@@ -570,7 +572,7 @@ class ExecutionController():
             else:
                 answer_assistant: Assistant = self.__llm_call_prompt(
                     prompt_filename='prompts/answer_result.prompt',
-                    context_messages=context_messages,
+                    context_messages=context_messages[:-2],
                     executor=executor,
                     template={
                         'original_query': original_query,
@@ -599,12 +601,12 @@ class ExecutionController():
             if temp_statement:
                 statement._result = temp_statement
                 if name and temp_statement._result and isinstance(temp_statement._result, str):
-                    temp_statement._result = f'The data below is named: {name}' + '\n\n' + str(temp_statement._result)
+                    temp_statement._result = f'The data below is named: "{name}"' + '\n\n' + str(temp_statement._result)
                 elif name and temp_statement._result and isinstance(temp_statement._result, Content):
-                    temp_statement._result = Content(f'The data below is named: {name}' + '\n\n' + str(temp_statement._result))
+                    temp_statement._result = Content(f'The data below is named: "{name}"' + '\n\n' + str(temp_statement._result))
                 elif name and temp_statement._result and isinstance(temp_statement._result, Assistant):
                     temp_statement._result.message = \
-                        Content(f'The data below is named: {name}' + '\n\n' + str(temp_statement._result.message))
+                        Content(f'The data below is named: "{name}"' + '\n\n' + str(temp_statement._result.message))
 
                 # outer loop pushes this on to the runtime stack
                 return temp_statement
@@ -914,8 +916,12 @@ class ExecutionController():
                 not isinstance(result, Answer)
                 and not isinstance(result, Set)
                 and not isinstance(result, Get)
+                and not isinstance(statement, Get)
+                and not isinstance(statement, Set)
             ):
-                program.executed_stack.push(copy.deepcopy(result))
+                # get and set modify the _result to name the text.
+                # program.executed_stack.push(copy.deepcopy(result)
+                program.executed_stack.push(result)
 
         return program
 
@@ -954,6 +960,14 @@ class ExecutionController():
 
             # debug output
             response_writer('llm_call', assistant_response)
+
+            if self.edit_hook:
+                assistant_response = self.edit_hook(assistant_response)
+                response_writer('llm_call edit_hook', assistant_response)
+                logging.debug('Re-written Abstract Syntax Tree:')
+                lines = str(assistant_response).split('\n')
+                for line in lines:
+                    logging.debug(f'  {str(line)}')
 
             # parse the response
             program = Parser().parse_program(assistant_response, self.agents, executor)
