@@ -15,7 +15,7 @@ A prototype to demonstrate a natural language -> Abstract Syntax Tree -> Stack b
   * ```cd faiss```
   * ```cmake -DFAISS_ENABLE_GPU=ON -DCUDAToolkit_INCLUDE_DIR=/usr/include -DCUDAToolkit_ROOT=/usr/lib/cuda -DCMAKE_CXX_STANDARD=11 -DCMAKE_CXX_STANDARD_REQUIRED=ON -B build .```
   * ```make -C faiss -j faiss```
-  * ```make -C build -j swigfaiss```
+  * ```make -C faiss -j swigfaiss```
   * ```cd build/faiss/python```
   * ```python setup.py install```
 * Run the llmvm repl:
