@@ -2,7 +2,7 @@
 import json
 import os
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import Dict, Generator, List
 
 import rich
 from serpapi import BingSearch, GoogleSearch
@@ -13,11 +13,11 @@ logging = setup_logging()
 
 class Searcher(ABC):
     @abstractmethod
-    def search_internet(self, query: str):
+    def search_internet(self, query: str) -> Generator[Dict, None, None]:
         pass
 
     @abstractmethod
-    def search_news(self, query: str):
+    def search_news(self, query: str) -> Generator[str, None, None]:
         pass
 
 
@@ -29,7 +29,6 @@ class SerpAPISearcher(Searcher):
         location: str = 'United States',
         interval: int = 7,
         page_limit: int = 1,
-        link_limit: int = 4,
     ):
         self.api_key = api_key
         self.country_code = country_code
@@ -37,14 +36,15 @@ class SerpAPISearcher(Searcher):
         self.interval = interval
         self.page_limit = page_limit
         self.search_count = 0
-        self.link_limit = link_limit
 
     def search_internet(
         self,
         query: str,
-    ) -> List[Dict]:
-        logging.debug('SerpAPISearcher.search() type={} link_limit={} query={}'.format(str(type), str(self.link_limit), query))
-        search_results = []
+    ) -> Generator[Dict, None, None]:
+        logging.debug('SerpAPISearcher.search() type={} query={}'.format(
+            str(type),
+            query
+        ))
         location = 'San Jose, California, United States'
 
         params = {
@@ -61,7 +61,7 @@ class SerpAPISearcher(Searcher):
 
         if results.get('error'):
             rich.print_json(json.dumps(results, default=str))
-            return []
+            yield {}
 
         page_count = 0
         self.search_count += 1
@@ -69,16 +69,15 @@ class SerpAPISearcher(Searcher):
         while 'error' not in results and self.page_limit > page_count:
             page_count += 1
             results = search.get_dict()
-            search_results.extend(results.get('organic_results', []))
-
-        return search_results[:self.link_limit]
+            organic_results = results.get('organic_results', [])
+            for result in organic_results:
+                yield result
 
     def search_internet_bing(
         self,
         query: str,
-    ) -> List[Dict]:
-        logging.debug('SerpAPISearcher.search() type={} link_limit={} query={}'.format(str(type), str(self.link_limit), query))
-        search_results = []
+    ) -> Generator[Dict, None, None]:
+        logging.debug('SerpAPISearcher.search() type={} query={}'.format(str(type), query))
 
         params = {
             'api_key': self.api_key,
@@ -91,7 +90,7 @@ class SerpAPISearcher(Searcher):
 
         if results.get('error'):
             rich.print_json(json.dumps(results, default=str))
-            return []
+            yield {}
 
         page_count = 0
         self.search_count += 1
@@ -99,14 +98,14 @@ class SerpAPISearcher(Searcher):
         while 'error' not in results and self.page_limit > page_count:
             page_count += 1
             results = search.get_dict()
-            search_results.extend(results.get('organic_results', []))
-
-        return search_results[:self.link_limit]
+            organic_results = results.get('organic_results', [])
+            for result in organic_results:
+                yield result
 
     def search_news(
         self,
         query: str,
-    ) -> List[Dict]:
+    ) -> Generator[Dict, None, None]:
         logging.debug('SerpAPISearcher.search_news() query={}'.format(query))
         search_results = []
 
@@ -130,7 +129,7 @@ class SerpAPISearcher(Searcher):
 
         if results.get('error'):
             rich.print_json(json.dumps(results, default=str))
-            return []
+            yield {}
 
         page_count = 0
         self.search_count += 1
@@ -138,6 +137,6 @@ class SerpAPISearcher(Searcher):
         while 'error' not in results and self.page_limit > page_count:
             page_count += 1
             results = search.get_dict()
-            search_results.extend(results.get('organic_results', []))
-
-        return search_results[:self.link_limit]
+            organic_results = results.get('organic_results', [])
+            for result in organic_results:
+                yield result

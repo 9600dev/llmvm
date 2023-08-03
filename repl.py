@@ -168,7 +168,7 @@ class Repl():
                         rich.print('  [bold]{}[/bold] - {}'.format(command, description))
                     continue
 
-                elif query.startswith('/exit'):
+                elif query.startswith('/exit') or query == 'exit':
                     sys.exit(0)
 
                 elif query.startswith('/clear') or query.startswith('/cls'):
@@ -282,10 +282,10 @@ class Repl():
 
 agents = [
     WebHelpers.get_url,
-    WebHelpers.get_news_article,
     WebHelpers.get_url_firefox,
-    WebHelpers.search_news,
-    WebHelpers.search_internet,
+    WebHelpers.get_news_url,
+    WebHelpers.get_content_by_search,
+    WebHelpers.get_news_by_search,
     WebHelpers.search_linkedin_profile,
     WebHelpers.get_linkedin_profile,
     EdgarHelpers.get_latest_form_text,

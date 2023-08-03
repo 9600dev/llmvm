@@ -109,15 +109,22 @@ class WebHelpers():
     @staticmethod
     def __search_helper(
         query: str,
-        searcher: Callable[[str], List[Dict[str, str]]],
+        searcher: Callable[[str], Generator[Dict[str, str], None, None]],
         parser: Callable[[str], str],
+        total_links_to_return: int,
     ) -> str:
         return_results = []
         search_results = searcher(query)
 
         for result in search_results:
             try:
-                return_results.append(parser(result['link']))
+                parser_result = parser(result['link']).strip()
+                if parser_result:
+                    return_results.append(parser_result)
+
+                if len(return_results) >= total_links_to_return:
+                    break
+
             except Exception as e:
                 logging.error(e)
                 pass
@@ -125,16 +132,16 @@ class WebHelpers():
         return ' '.join(return_results)
 
     @staticmethod
-    def search_internet(query: str, total_links_to_return: int = 3) -> str:
-        '''Searches the internet for a query and returns the text of the top results'''
-        searcher = SerpAPISearcher(link_limit=total_links_to_return)
-        return WebHelpers.__search_helper(query, searcher.search_internet, WebHelpers.get_url)
+    def get_content_by_search(query: str, pages_to_include: int = 4) -> str:
+        '''Searches the internet for a query and returns a string with the entire text of all the top results'''
+        searcher = SerpAPISearcher()
+        return WebHelpers.__search_helper(query, searcher.search_internet, WebHelpers.get_url, pages_to_include)
 
     @staticmethod
-    def search_news(query: str, total_links_to_return: int = 3) -> str:
-        '''Searches the current and historical news for a query and returns the text of the top results'''
-        searcher = SerpAPISearcher(link_limit=total_links_to_return)
-        return WebHelpers.__search_helper(query, searcher.search_news, WebHelpers.get_news_article)
+    def get_news_by_search(query: str, pages_to_include: int = 4) -> str:
+        '''Searches the current and historical news for a query and returns the entire text of the top results'''
+        searcher = SerpAPISearcher()
+        return WebHelpers.__search_helper(query, searcher.search_news, WebHelpers.get_news_url, pages_to_include)
 
     @staticmethod
     def get_url_firefox(url: str) -> str:
@@ -163,20 +170,23 @@ class WebHelpers():
         """
         Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
         """
-        searcher = SerpAPISearcher(link_limit=5)
-        links: List[Dict] = searcher.search_internet('{} {}, {} linkedin profile site:linkedin.com/in/'.format(first_name, last_name, company_name))
-        if len(links) > 0:
-            # search for linkedin urls
-            for link in links:
-                if 'linkedin.com' in link['link']:
-                    return WebHelpers.get_linkedin_profile(link['link'])
+        searcher = SerpAPISearcher()
+        links = searcher.search_internet('{} {}, {} linkedin profile site:linkedin.com/in/'.format(
+            first_name, last_name, company_name
+        ))
 
-            return WebHelpers.get_url(links[0]['link'])
-        else:
-            return ''
+        link_counter = 0
+        # search for linkedin urls
+        for link in links:
+            if link_counter > 5:
+                break
+            if 'linkedin.com' in link['link']:
+                return WebHelpers.get_linkedin_profile(link['link'])
+            link_counter += 1
+        return ''
 
     @staticmethod
-    def get_news_article(url: str) -> str:
+    def get_news_url(url: str) -> str:
         """Extracts the news text from a given url"""
         logging.debug('WebHelpers.get_news_article: {}'.format(url))
         nltk.download('punkt', quiet=True)
@@ -186,7 +196,8 @@ class WebHelpers():
         article = Article(url=url, config=config)
         article.download()
         article.parse()
-        return unicodedata.normalize('NFKD', article.text)
+        normalized_return = unicodedata.normalize('NFKD', article.text)
+        return normalized_return
 
     @staticmethod
     def get_url(url: str, force_firefox: bool = False) -> str:

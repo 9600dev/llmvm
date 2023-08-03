@@ -187,7 +187,7 @@ class ExecutionController():
             return [User(Content('\n'.join([str(s.result()) for s in node.elements])))]
         return []
 
-    def __marshal(self, value: object, type: str) -> Any:
+    def __marshal(self, value: object, cls_type: type) -> Any:
         def strip_quotes(value: str) -> str:
             if value.startswith('\'') or value.startswith('"'):
                 value = value[1:]
@@ -195,15 +195,25 @@ class ExecutionController():
                 value = value[:-1]
             return value
 
-        if type == 'str':
+        if cls_type is str:
             result = str(value)
             return strip_quotes(result)
-        elif type == 'int':
+        elif cls_type is int:
             return int(strip_quotes(str(value)))
-        elif type == 'float':
+        elif cls_type is float:
             return float(strip_quotes(str(value)))
         else:
-            return value
+            if isinstance(value, str):
+                value = strip_quotes(value)
+            # try and instantiate the type, as it's likely an enum
+            result = value
+
+            try:
+                result = cls_type(value)
+                return result
+            except Exception as ex:
+                logging.debug(ex)
+            return result
 
     def __chunk_messages(
         self,
@@ -572,7 +582,7 @@ class ExecutionController():
             else:
                 answer_assistant: Assistant = self.__llm_call_prompt(
                     prompt_filename='prompts/answer_result.prompt',
-                    context_messages=context_messages[:-2],
+                    context_messages=context_messages[-2:],
                     executor=executor,
                     template={
                         'original_query': original_query,
@@ -647,10 +657,10 @@ class ExecutionController():
             # check for enum types and marshal from string to enum
             counter = 0
             for p in inspect.signature(func).parameters.values():
-                if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumMeta':
-                    function_args[p.name] = p.annotation(self.__marshal(function_args_desc[counter][p.name], 'str'))
-                elif counter < len(function_args_desc):
-                    function_args[p.name] = self.__marshal(function_args_desc[counter][p.name], p.annotation.__name__)
+                # if p.annotation != inspect.Parameter.empty and p.annotation.__class__.__name__ == 'EnumType':
+                # function_args[p.name] = p.annotation(self.__marshal(function_args_desc[counter][p.name], 'str'))
+                if counter < len(function_args_desc):
+                    function_args[p.name] = self.__marshal(function_args_desc[counter][p.name], p.annotation)
                 else:
                     function_args[p.name] = p.default
                 counter += 1
