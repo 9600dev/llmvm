@@ -56,11 +56,11 @@ Here is a number of examples that show the output expected AST output from you. 
 
 Examples:
 
-Example: # In this example, you need to get up to date information, so you ask me to call a helper function Helpers.search_internet(query).
+Example: # In this example, you need to get up to date information, so you ask me to call a helper function Helpers.get_content_by_search(query).
 User: Generate a list of the top 5 people in the leadership team at NVIDIA. Summarize each of their profiles.
 
 Assistant:
-function_call(WebHelpers.search_internet("leadership team at NVDIA"))
+function_call(WebHelpers.get_content_by_search("leadership team at NVDIA"))
 llm_call(stack_pop(1), "From the content provided, generate a list of the top 5 leaders at NVIDIA")
 foreach(stack(), function_call(WebHelpers.search_linkedin_profile("first_name", "last_name", "company")))
 foreach(stack(), llm_call("Summarize profile"))
@@ -97,7 +97,7 @@ Example: # in this example, you need up to date information, so you ask to searc
 User: Who is the current CEO of AMD?
 
 Assistant:
-function_call(WebHelpers.search_internet("Who is the current CEO of AMD?"))
+function_call(WebHelpers.get_content_by_search("Who is the current CEO of AMD?"))
 llm_call(stack_pop(1), "From the content provided, extract the current CEO")
 answer(stack_pop(1))
 
@@ -106,7 +106,7 @@ Example:  # in this example, you're searching the internet for a bread recipe, t
 User: Search the Internet for a fluffy bread recipe and then list the ingredients.
 
 Assistant:
-function_call(WebHelpers.search_internet("fluffy bread recipe"))
+function_call(WebHelpers.get_content_by_search("fluffy bread recipe"))
 llm_call(stack_pop(1), "find and extract a bread recipe from the provided search results")
 llm_call(stack_pop(1), "extract the list of ingredients from the bread recipe provided")
 answer(stack_pop(1))
@@ -205,7 +205,7 @@ Example:  # in this example, you generate multiple calls to helpers to make sure
 User: What is the latest stock price for the company called NVIDIA
 
 Assistant:
-function_call(WebHelpers.search_internet("NVIDIA symbol"))
+function_call(WebHelpers.get_content_by_search("NVIDIA symbol"))
 llm_call(stack_pop(1), "Get the stock market symbol for NVIDIA")
 function_call(MarketHelpers.get_stock_price(symbol))
 answer(stack_pop(1))
@@ -215,10 +215,10 @@ Example:
 User: Who is running the company Ten13 right now? Feel free to try multiple strategies to find out the answer to the question.
 
 Assistant:
-function_call(WebHelpers.search_internet("Who is running the company Ten13?"))
+function_call(WebHelpers.get_content_by_search("Who is running the company Ten13?"))
 llm_call(stack_pop(1), "Extract the current CEO")
 answer(stack_pop(1))
-function_call(WebHelpers.search_internet("Ten13 website"))
+function_call(WebHelpers.get_content_by_search("Ten13 website"))
 llm_call(stack_pop(1), "Find the best person in this text who looks like they are running the company")
 answer(stack_pop(1))
 

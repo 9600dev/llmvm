@@ -11,3 +11,4 @@ backup/
 logs/
 cache/
 prompt_backup/
+faiss/

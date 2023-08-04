@@ -1,10 +1,11 @@
 import os
 import time
-from typing import Dict, List
+from typing import Any, Callable, Dict, List
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.firefox.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
@@ -36,26 +37,30 @@ class FirefoxHelpers(metaclass=Singleton):
     def driver(self):
         return self.web_driver
 
-    @staticmethod
-    def __wait() -> None:
-        driver = FirefoxHelpers().driver()
+    def wait(self) -> None:
+        driver = self.driver()
         driver.implicitly_wait(5)
         wait = WebDriverWait(driver, 5)
         wait.until(EC.presence_of_element_located((By.TAG_NAME, 'div')))
         driver.execute_script('setTimeout(function() { return; }, 0);')
 
-    @staticmethod
-    def __goto(url: str):
-        driver = FirefoxHelpers().driver()
+    def wait_until_func(self, func: Callable[[WebDriver], Any]) -> None:
+        driver = self.driver()
+        driver.implicitly_wait(5)
+        wait = WebDriverWait(driver, 5)
+        func(driver)
+        driver.execute_script('setTimeout(function() { return; }, 0);')
+
+    def goto(self, url: str):
+        driver = self.driver()
         if driver.current_url != url:
             driver.get(url)
-            FirefoxHelpers.__wait()
+            self.wait()
         return driver
 
-    @staticmethod
-    def __get_download_file(wait_time_seconds: int = 5) -> str:
+    def get_download_file(self, wait_time_seconds: int = 5) -> str:
         import time
-        driver = FirefoxHelpers().driver()
+        driver = self.driver()
         driver.get('about:downloads')
 
         end_time = time.time() + wait_time_seconds
@@ -74,11 +79,22 @@ class FirefoxHelpers(metaclass=Singleton):
         else:
             return ''
 
-    @staticmethod
-    def pdf_url(url: str) -> str:
-        driver = FirefoxHelpers().__goto(url)
+    def pdf_url(self, url: str) -> str:
+        driver = self.goto(url)
         driver.execute_script('window.print();')
         driver.execute_script('setTimeout(function() { return; }, 0);')
+
+        time.sleep(5)
+
+        if os.path.exists('mozilla.pdf'):
+            return os.path.abspath('mozilla.pdf')
+        else:
+            logging.debug('WebHelpers.get_url_firefox: pdf not found')
+            return ''
+
+    def print_pdf(self) -> str:
+        self.driver().execute_script('window.print();')
+        self.driver().execute_script('setTimeout(function() { return; }, 0);')
 
         time.sleep(5)
 
@@ -96,30 +112,28 @@ class FirefoxHelpers(metaclass=Singleton):
         or when searching/extracting from sites that require logins liked LinkedIn, Facebook, Gmail etc.
         """
         try:
-            driver = FirefoxHelpers().__goto(url)
+            driver = FirefoxHelpers().goto(url)
             return driver.page_source
         except Exception as e:
             logging.debug(e)
             return str(e)
 
-    @staticmethod
-    def __clickable() -> List[WebElement]:
-        driver = FirefoxHelpers().driver()
+    def __clickable(self) -> List[WebElement]:
+        driver = self.driver()
         a = driver.find_elements(By.TAG_NAME, 'a')
         buttons = driver.find_elements(By.TAG_NAME, 'button')
         inputs = driver.find_elements(By.TAG_NAME, 'input')
 
         return a + buttons + inputs
 
-    @staticmethod
-    def get_clickable(url: str) -> List[str]:
+    def get_clickable(self, url: str) -> List[str]:
         """
         Extracts and returns the text for all links, buttons and inputs on a given page url.
         You can pass the text of any of these clickable elements to the click(url, link_or_button_text) function to click on it.
         """
         try:
-            driver = FirefoxHelpers().__goto(url)
-            clickable = FirefoxHelpers.__clickable()
+            driver = self.goto(url)
+            clickable = self.__clickable()
             links = set([item.text for item in clickable])
             return list(links)
         except Exception as e:
@@ -139,16 +153,17 @@ class FirefoxHelpers(metaclass=Singleton):
             except StopIteration as ex:
                 return None
 
-        driver = FirefoxHelpers().driver()
+        firefox = FirefoxHelpers()
+        driver = firefox.driver()
         try:
-            driver = FirefoxHelpers().__goto(url)
-            FirefoxHelpers().wait_until(url, link_or_button_text)
-            clickable = FirefoxHelpers.__clickable()
+            driver = firefox.goto(url)
+            firefox.wait_until(url, link_or_button_text)
+            clickable = firefox.__clickable()
 
             if first(lambda n: n.text == link_or_button_text, clickable):
                 node = first(lambda n: n.text == link_or_button_text, clickable)
                 node.click()  # type: ignore
-                FirefoxHelpers().__wait()
+                firefox.wait()
                 return driver.page_source
             else:
                 return ''
@@ -156,8 +171,7 @@ class FirefoxHelpers(metaclass=Singleton):
             logging.debug(e)
             return ''
 
-    @staticmethod
-    def wait_until(url: str, link_or_button_text: str, duration: int = 10) -> bool:
+    def wait_until(self, url: str, link_or_button_text: str, duration: int = 10) -> bool:
         """
         Goes to the url and waits until the link or button with the specified text is clickable and returns
         the page source of the resulting page.
@@ -170,22 +184,20 @@ class FirefoxHelpers(metaclass=Singleton):
             return condition
 
         try:
-            driver = FirefoxHelpers().__goto(url)
+            driver = self.goto(url)
             wait = WebDriverWait(driver, duration)
             return wait.until(wait_for_text(link_or_button_text))
         except Exception as ex:
             logging.debug(ex)
             return False
 
-    @staticmethod
-    def get_downloaded_file_text() -> str:
-        filename = FirefoxHelpers().__get_download_file()
+    def get_downloaded_file_text(self) -> str:
+        filename = self.get_download_file()
         if os.path.exists(filename):
             with open(filename, 'r') as f:
                 return f.read()
         else:
             return ''
 
-    @staticmethod
-    def get_downloaded_filename() -> str:
-        return FirefoxHelpers().__get_download_file()
+    def get_downloaded_filename(self) -> str:
+        return self.get_download_file()

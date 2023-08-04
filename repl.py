@@ -47,6 +47,7 @@ def print_response(statements: List[Statement | AstNode]):
     for statement in statements:
         if isinstance(statement, Assistant):
             # todo, this is a hack, Assistant not a Statement
+            rich.print()
             pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
         elif isinstance(statement, StackNode):
             continue
@@ -147,6 +148,9 @@ class Repl():
             '/edit': 'edit any tool AST result in $EDITOR',
             '/compile': 'ask LLM to compile query into AST and print to screen',
             '/last': 'clear the conversation except for the last Assistant message',
+            '/direct': 'execute the query in the current context',
+            '/save': 'serialize the current stack and message history to disk',
+            '/load': 'load the current stack and message history from disk',
         }
 
         while True:
@@ -173,6 +177,8 @@ class Repl():
 
                 elif query.startswith('/clear') or query.startswith('/cls'):
                     message_history = []
+                    cache = PersistentCache('cache/session.db')
+                    cache.set('message_history', [])
                     continue
 
                 elif query.startswith('/messages') or query.startswith('/conversations') or query.startswith('/m '):
@@ -237,15 +243,33 @@ class Repl():
                     )
                     continue
 
+                elif query.startswith('/save'):
+                    cache = PersistentCache('cache/session.db')
+                    cached_history = []
+                    if cache.get('message_history'):
+                        cached_history = cast(List[Message], cache.get('message_history'))
+                    cache.set('message_history', cached_history + message_history)
+                    continue
+
+                elif query.startswith('/load'):
+                    cache = PersistentCache('cache/session.db')
+                    if cache.get('message_history'):
+                        cached_history = cast(List[Message], cache.get('message_history'))
+                        message_history = cached_history
+                    continue
+
                 elif query.startswith('/any'):
                     executor_contexts = self.executors
                     continue
 
                 elif query.startswith('/direct') or query.startswith('/d '):
-                    if query.startswith('/d '): query = query.replace('/d ', '/direct')
-                    query = Helpers.in_between(query, '/direct', '\n').strip()
+                    if query.startswith('/d '): query = query.replace('/d ', '/direct ')
+                    query = query[8:].strip()
                     statement = execution_controller.execute_statement(
-                        statement=LLMCall(message=User(Content(query))),
+                        statement=LLMCall(
+                            message=User(Content(query)),
+                            supporting_messages=message_history
+                        ),
                         executor=executor_contexts[0],
                         program=Program(executor_contexts[0]),
                     )
@@ -262,8 +286,12 @@ class Repl():
                         supporting_messages=message_history,
                     )
                 )
-                message_history.append(User(Content(query)))
-                message_history.append(Assistant(Content(str(results[-1].result()))))
+
+                if results:
+                    message_history.append(User(Content(query)))
+                    message_history.append(Assistant(Content(str(results[-1].result()))))
+                else:
+                    rich.print('Something went wrong in the execution controller')
 
                 rich.print()
                 rich.print('[bold green]User:[/bold green] {}'.format(query))

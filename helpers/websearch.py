@@ -161,7 +161,12 @@ class WebHelpers():
     def get_linkedin_profile(linkedin_url: str) -> str:
         """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
-        pdf_file = WebHelpers.pdf_url_firefox(linkedin_url)
+        from selenium.webdriver.common.by import By
+
+        firefox = FirefoxHelpers()
+        firefox.goto(linkedin_url)
+        firefox.wait_until_func(lambda driver: driver.find_elements(By.XPATH, "//*[contains(text(), 'Experience')]"))
+        pdf_file = firefox.print_pdf()
         data = PdfHelpers.parse_pdf(pdf_file)
         return data
 
