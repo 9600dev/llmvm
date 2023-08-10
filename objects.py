@@ -62,25 +62,6 @@ class Executor(ABC):
     ) -> int:
         pass
 
-
-class Agent(ABC):
-    @abstractmethod
-    def is_task(self, query: str) -> bool:
-        pass
-
-    @abstractmethod
-    def perform_task(self, task: str, **kwargs) -> str:
-        pass
-
-    @abstractmethod
-    def invoked_by(self) -> str:
-        pass
-
-    @abstractmethod
-    def instruction(self) -> str:
-        pass
-
-
 class AstNode(ABC):
     def __init__(
         self
@@ -348,6 +329,30 @@ class ForEach(Statement):
 
     def token(self):
         return 'foreach'
+
+
+class FunctionCallMeta(Call):
+    def __init__(
+        self,
+        callsite: str,
+        func: Callable,
+        result: object,
+        lineno: Optional[int],
+    ):
+        self.callsite = callsite
+        self.func = func
+        self._result = result
+        self.lineno = lineno
+
+    def result(self) -> object:
+        return self._result
+
+    def token(self):
+        return 'functioncallmeta'
+
+    def __str__(self):
+        return str(self._result)
+
 
 class FunctionCall(Call):
     def __init__(

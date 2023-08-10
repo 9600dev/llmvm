@@ -1,0 +1,15 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+I have a Starlark function callsite that has a parameter "None". I'd like you to look at the function signature and previous messages and see if you can figure out what data could be used to replace "None" in the callsite. 
+
+Here is the callsite: 
+
+{{function_callsite}}
+
+Here is the function signature: 
+
+{{function_definition}}
+
+Check previous messages for data that can be used to replace "None". You can only data to rebind None's and you cannot use local or global variables. Perform the job succinctly, don't explain yourself, don't offer suggestions, only respond with the re-written callsite. A Starlark parser will be used to parse your response, so no natural language only Starlark. 

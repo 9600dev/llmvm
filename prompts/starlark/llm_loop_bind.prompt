@@ -1,0 +1,11 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+I have a goal of "{{goal}}".
+
+As part of that goal, I need you to extract an appropriate list from the text below under "Context:" and emit a python list as output. Do not assign the python list to anything, just emit the list: ["...", "...", "..."]. Make sure you escape any strings that have the " character in them so they parse properly. You may use what's under "Context:" and any previous messages as context for figuring out what should be in the list.
+
+Context:
+
+{{context}}

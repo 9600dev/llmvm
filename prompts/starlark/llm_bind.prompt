@@ -1,0 +1,15 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+I have a high level goal of "{{goal}}". 
+
+I need you to late-bind data arguments to a python callsite. 
+
+I have the Python function definition defined under "Definition:" and the data you can use to bind arguments is found in the previous messages. I want you to reply with just the bound function call, binding appropriate values in the data to the arguments of the function. You should bind all arguments, and any arguments you can't bind, just bind with "None". You should not use any of the text found in the high level goal as it is just there for guidance on what data to choose from the previous messages. You should only emit the callsite, nothing else. The function definitions are almost always calls to static methods, so make sure you emit the correct static method dispatch: SomeClass.static_method("bound argument 1", "bound argument 2" ...)
+
+You can also use past messages (if any) as helpful context to figure out what to bind and how. 
+
+Definition: 
+
+{{function_definition}}

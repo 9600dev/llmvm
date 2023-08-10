@@ -15,7 +15,7 @@ from eightbitvicuna import VicunaEightBit
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import console_debug, setup_logging
 from helpers.vector_store import VectorStore
-from objects import (Agent, Answer, Assistant, AstNode, Content, DataFrame,
+from objects import (Answer, Assistant, AstNode, Content, DataFrame,
                      ExecutionFlow, Executor, ForEach, FunctionCall, Get,
                      LLMCall, Message, Order, Program, Set, StackNode,
                      Statement, System, UncertainOrError, User, tree_map)

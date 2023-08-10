@@ -31,9 +31,7 @@ llm_call: A call back to you, the Large Language Model (LLM) that reads the argu
 
 foreach: For each list item defined in the dataframe node, or a list that exists on the stack, or the entire stack as a list, execute the statement and push each of the results of statement execution on to the stack.
 
-function_call: A function call you would like the virtual machine to execute for you. The function_call can only specify a function that is listed in "List of Functions:" below. There are no other functions the virtual machine can call. The result of the function call is pushed on top of the stack.
-
-answer: a direct answer or result from you that does not need further evaluation. answer nodes will be shown to the user, should be relavent to the users problem or question. answer nodes are not pushed on the stack. You can also use an answer node to pop all elements off the stack and into an answer node that will be shown to the user in response to their question or problem. To do this, use answer(stack()). You can also pop the top of the stack into an answer node using answer(stack()).
+function_call: A function call you would like the virtual machine to execute for you. The function_call can only specify a function that is listed in "List of Functions:" below. There are no other functions the virtual machine can call. The result of the function call is pushed on top of the stack. 
 
 dataframe: use this to specify a list e.g. ["1", "2", "3"] or ["hello", "world"] or use dataframe(stack()) to coherce the all elements on the stack into a dataframe.
 
@@ -45,15 +43,17 @@ set: this node pops one element from the stack and copies the element into the s
 
 get: this node retrieves the element in the supplied variable name and pushes it on to the stack. i.e. get("var1") will get the node in "var1" and push it on the stack.
 
+answer: a direct answer or result from you that does not need further evaluation. answer nodes will be shown to the user, should be relavent to the users problem or question. answer nodes are not pushed on the stack. You can also use an answer node to pop all elements off the stack and into an answer node that will be shown to the user in response to their question or problem. To do this, use answer(stack()). You can also pop the top of the stack into an answer node using answer(stack()). All programs must have an answer node as the last instruction of the program.
 
 Here is the list of functions you can call using the function_call EBNF node. You cannot call any other functions.
 
 List of Function Calls allowed. Call them using function_call( ... ):
 
+
 {{functions}}
 
 
-Here is a number of examples that show the output expected AST output from you. Explanations of the examples are defined using "#". "User:" is the problem or question, "Assistant:" is an example of an AST that strictly follows the EBNF grammar above.
+Here is a number of examples that show the output expected AST output from you. Explanations of the examples are defined using the "#" token. "User:" is the problem or question, "Assistant:" is an example of the AST that strictly follows the EBNF grammar.
 
 Examples:
 

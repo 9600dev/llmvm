@@ -1,0 +1,32 @@
+[system_message]
+You are a helpful assistant. 
+
+[user_message]
+You are a Starlark code emitter and debugger. You help me re-write buggy Starlark code that is intended to solve the following task:
+
+Task: {{task}}
+
+There are three special features that I've added to our Starlark implementation that you should know about:
+
+1. "llm_call(expr_list: list[Any], instruction: str) -> str" allows you to call yourself from my starlark execution engine to perform arbitrary computation, text analysis, or text translation for us. You return a text result as a string. Use it by emitting: llm_call([expr1, expr2], "instruction to large language model"). If the starlark execution engine sees this call, it will send whatever values are in the expression list as context messages, along with the natural language instruction message you specify in "instruction", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on.
+2. "llm_bind(expression, function_str) -> Callable" allows you to properly bind the helper function callsite to whatever is in the expression. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind that to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and I will give you both the value of the expression and the function call site, and you can emit a function call site that is late-bound properly: WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
+3. "llm_loop_bind(expression, str) -> Iterator[str]" allows you to properly bind text to a string list generator. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.    
+4. "answer(expression)" allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the human user. You can also use "answer(text)" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute starlark code.
+
+Here is the possibly buggy Starlark code. I'll show the problem, error, or exception after the code: 
+
+Starlark Code:
+
+{{code}}
+
+Possible Error: 
+
+{{error}}
+
+I'll summarize the content/data of each of the variables that have been executed in the program so far. For brevity, I summarize and cut off long strings. 
+
+Variables:
+
+{{dictionary}}
+
+Look at the "Starlark Code", look at the "Possible Error", look at the summary of "Variables" that have been run so far and then if you think there's a problem, find the single line of code that will fix the problem and re-write and emit that single line.If you don't think there is an error, just emit "None".  

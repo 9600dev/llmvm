@@ -1,0 +1,18 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+
+I have a high level goal of "{{goal}}". 
+
+I need you to help me late-bind some text to a python call-site. I will give you the text under "Text:", the python function definition under "Definition:" and I want you to reply with just the bound function call, binding the appropriate elements in the text to the arguments of the function. You should bind all possible arguments, and any arguments you can't bind, just bind with "None". Only emit the callsite, nothing else. The function definitions are almost always calls to static methods, so make sure you emit the correct static method dispatch: SomeClass.static_method("arg1", "arg2" ...)
+
+You can also use previous messages (if any) as helpful context to figure out what to bind and how. 
+
+Text: 
+
+{{expr}}
+
+Definition: 
+
+{{function_definition}}

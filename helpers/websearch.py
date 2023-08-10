@@ -153,6 +153,19 @@ class WebHelpers():
         return FirefoxHelpers.get_url(url)
 
     @staticmethod
+    def get_url_firefox_via_pdf(url: str) -> str:
+        """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
+        logging.debug('WebHelpers.get_url_firefox_via_pdf: {}'.format(url))
+        from selenium.webdriver.common.by import By
+
+        firefox = FirefoxHelpers()
+        firefox.goto(url)
+        firefox.wait()
+        pdf_file = firefox.print_pdf()
+        data = PdfHelpers.parse_pdf(pdf_file)
+        return data
+
+    @staticmethod
     def pdf_url_firefox(url: str) -> str:
         """Gets a pdf version of the url using the Firefox browser."""
         return FirefoxHelpers().pdf_url(url)
@@ -173,7 +186,8 @@ class WebHelpers():
     @staticmethod
     def search_linkedin_profile(first_name: str, last_name: str, company_name: str) -> str:
         """
-        Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
+        Searches for the LinkedIn profile of a given first name and last name and optional company name and returns the
+        LinkedIn profile. If you use this method you do not need to call get_linkedin_profile.
         """
         searcher = SerpAPISearcher()
         links = searcher.search_internet('{} {}, {} linkedin profile site:linkedin.com/in/'.format(
@@ -183,8 +197,12 @@ class WebHelpers():
         link_counter = 0
         # search for linkedin urls
         for link in links:
+            if 'link' not in link:
+                break
+
             if link_counter > 5:
                 break
+
             if 'linkedin.com' in link['link']:
                 return WebHelpers.get_linkedin_profile(link['link'])
             link_counter += 1

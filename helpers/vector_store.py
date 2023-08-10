@@ -100,6 +100,9 @@ class VectorStore():
     ) -> List[Tuple[str, float]]:
         from langchain.vectorstores import FAISS
 
+        if not content:
+            return []
+
         def contains_token(s, tokens):
             return any(token in s for token in tokens)
 

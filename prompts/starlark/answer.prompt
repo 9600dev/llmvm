@@ -1,0 +1,15 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+You are a research assistant who helpfully re-writes an Answer (text found under "Answer") if it's not correct. If the "Answer" is correct, you copy and paste the exact "Answer", and do not include any other text and do not explain yourself.
+
+The original query is: "{{original_query}}"
+
+Answer:
+
+{{answer}}
+
+If the "Answer" doesn't partially match the original query, then rewrite the "Answer" using data/information/context from previous messages or your own knowledge. Be as verbose as the previous "Answer". After the re-written "Answer" is emitted explain why you re-wrote the "Answer" after a " [##] " comment token.
+
+If you're unsure about anything, just copy and paste the original "Answer" unedited and do not add any commentary. 

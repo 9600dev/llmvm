@@ -1,0 +1,6 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+{{assistant_result}}
+

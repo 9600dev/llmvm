@@ -11,6 +11,7 @@ from rich.traceback import install
 
 global_loggers: Dict[str, Logger] = {}
 debug_log = True
+handler = RichHandler()
 
 def setup_logging(
     module_name='root',

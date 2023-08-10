@@ -468,6 +468,7 @@ class Helpers():
                 parameters = [p.arg_name for p in parse(func.__doc__).params]
 
             types = [p.__name__ for p in typing.get_type_hints(func).values()]
+            return_type = typing.get_type_hints(func).get('return')
 
             return {
                 # todo: refactor this to be name
@@ -475,6 +476,7 @@ class Helpers():
                 'description': description,
                 'parameters': parameters,
                 'types': types,
+                'return_type': return_type,
             }
 
     @staticmethod
@@ -486,7 +488,8 @@ class Helpers():
     def get_function_description_flat_extra(function: Callable) -> str:
         description = Helpers.get_function_description(function, openai_format=False)
         parameter_type_list = [f"{param}: {typ}" for param, typ in zip(description['parameters'], description['types'])]
-        return (f'{description["invoked_by"]}({", ".join(parameter_type_list)})  # {description["description"]}')
+        return_type = description['return_type'].__name__ if description['return_type'] else ''
+        return (f'{description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"]}')
 
     @staticmethod
     def load_prompt(prompt_filename: str) -> Dict[str, Any]:

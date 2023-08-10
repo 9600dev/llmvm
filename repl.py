@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, Optional, cast
+from typing import Callable, Dict, List, Optional, cast
 
 import click
 import rich
@@ -19,12 +19,13 @@ from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
-from objects import (Agent, Answer, Assistant, AstNode, Content, ExecutionFlow,
+from objects import (Answer, Assistant, AstNode, Content, ExecutionFlow,
                      Executor, FunctionCall, LambdaVisitor, LLMCall, Message,
                      Program, StackNode, Statement, System, User,
                      tree_traverse)
 from openai_executor import OpenAIExecutor
 from runtime import ExecutionController, Parser
+from starlark_runtime import StarlarkExecutionController
 
 logging = setup_logging()
 
@@ -84,10 +85,11 @@ def print_response(statements: List[Statement | AstNode]):
 class Repl():
     def __init__(
         self,
-        executors: List[Executor]
+        executors: List[Executor],
+        agents: List[Callable]
     ):
         self.executors: List[Executor] = executors
-        self.agents: List[Agent] = []
+        self.agents: List[Callable] = agents
 
     def open_editor(self, editor: str, initial_text: str) -> str:
         with tempfile.NamedTemporaryFile(mode='w+') as temp_file:
@@ -130,10 +132,13 @@ class Repl():
         executor_names = [executor.name() for executor in executor_contexts]
 
         current_context = 'openai'
-        execution_controller = ExecutionController(
+
+        # todo: this is a hack, we need to refactor the execution controller
+        execution_controller = StarlarkExecutionController(
             execution_contexts=executor_contexts,
             agents=agents,
-            cache=PersistentCache('cache/cache.db')
+            cache=PersistentCache('cache/cache.db'),
+            edit_hook=None,
         )
 
         message_history: List[Message] = []
@@ -144,6 +149,7 @@ class Repl():
             '/agents': 'list the available agents',
             '/any': 'execute the query in all contexts',
             '/clear': 'clear the message history',
+            '/delcache': 'delete the persistence cache',
             '/messages': 'show message history',
             '/edit': 'edit any tool AST result in $EDITOR',
             '/compile': 'ask LLM to compile query into AST and print to screen',
@@ -177,6 +183,9 @@ class Repl():
 
                 elif query.startswith('/clear') or query.startswith('/cls'):
                     message_history = []
+                    continue
+
+                elif query.startswith('/delcache'):
                     cache = PersistentCache('cache/session.db')
                     cache.set('message_history', [])
                     continue
@@ -216,8 +225,7 @@ class Repl():
                 elif query.startswith('/agents'):
                     rich.print('Agents:')
                     for agent in self.agents:
-                        rich.print('  [bold]{}[/bold]'.format(agent.__class__.__name__))
-                        rich.print('    {}'.format(agent.instruction()))
+                        rich.print('  [bold]{}[/bold]'.format(agent))
                     continue
 
                 elif query.startswith('/compile') or query.startswith('/c'):
@@ -265,17 +273,12 @@ class Repl():
                 elif query.startswith('/direct') or query.startswith('/d '):
                     if query.startswith('/d '): query = query.replace('/d ', '/direct ')
                     query = query[8:].strip()
-                    statement = execution_controller.execute_statement(
-                        statement=LLMCall(
-                            message=User(Content(query)),
-                            supporting_messages=message_history
-                        ),
-                        executor=executor_contexts[0],
-                        program=Program(executor_contexts[0]),
+                    assistant = execution_controller.execute_chat(
+                        messages=message_history + [User(Content(query))],
                     )
-                    print_response([cast(Statement, statement.result())])
+                    print_response([assistant])
                     message_history.append(User(Content(query)))
-                    message_history.append(cast(Assistant, statement.result()))
+                    message_history.append(assistant)
                     rich.print()
                     continue
 
@@ -351,7 +354,7 @@ def start(
         execution_environments.append(list(executors.values()))
 
     if not prompt:
-        repl = Repl(execution_environments)
+        repl = Repl(execution_environments, agents=agents)
         repl.repl()
     else:
         controller = ExecutionController(

@@ -104,6 +104,10 @@ class EdgarHelpers():
         url: str,
         form_type: FormType,
     ):
+        if isinstance(form_type, str):
+            # marshal to enum
+            form_type = EdgarHelpers.FormType(form_type)
+
         sections_10q = [
             'part1item1', 'part1item2', 'part1item3', 'part1item4',
             'part2item1', 'part2item1a', 'part2item2', 'part2item3', 'part2item4',

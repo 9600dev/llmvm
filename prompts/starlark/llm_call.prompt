@@ -1,0 +1,13 @@
+[system_message]
+You are a helpful assistant. 
+
+[user_message]
+Perform the task or answer the question below under "Task:". You can use data found under "Context:" or data found in previous messages to help perform the task. Don't ask for more context or apologize for not knowing, just try your best to respond and remember to use the "Context" below or previous messages for data, information and context to help. The task or question below may refer to previous "documents" or "PDFs" or "website" - you don't need to download these as they will be supplied in the "Context:" section, or in previous messages.  
+
+Context: 
+
+{{context}}
+
+Task:
+
+{{llm_call_message}}

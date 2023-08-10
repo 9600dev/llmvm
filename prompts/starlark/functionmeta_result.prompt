@@ -1,0 +1,12 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+You asked me to invoke a helper function {{function_call}}, which had the signature {{function_signature}}. 
+
+Here is the result of that helper function call. This result should can be used to solve problems or answer questions in future messages: 
+
+Result: 
+
+{{function_result}}
+
