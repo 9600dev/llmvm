@@ -9,7 +9,10 @@ import sys
 import time
 from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
+from urllib.parse import urlparse
 
+import pandas as pd
+import pandas_gpt
 from openai import InvalidRequestError
 
 from ast_parser import Parser
@@ -24,9 +27,9 @@ from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
 from objects import (Answer, Assistant, AstNode, Content, DataFrame,
                      ExecutionFlow, Executor, ForEach, FunctionCall,
-                     FunctionCallMeta, Get, LLMCall, Message, Order, Program,
-                     Set, StackNode, Statement, System, UncertainOrError, User,
-                     tree_map)
+                     FunctionCallMeta, Get, LLMCall, Message, Order,
+                     PandasMeta, Program, Set, StackNode, Statement, System,
+                     UncertainOrError, User, tree_map)
 from openai_executor import OpenAIExecutor
 
 logging = setup_logging()
@@ -312,6 +315,7 @@ class StarlarkRuntime:
         self.locals_dict['llm_bind'] = self.llm_bind
         self.locals_dict['llm_call'] = self.llm_call
         self.locals_dict['llm_loop_bind'] = self.llm_loop_bind
+        self.locals_dict['pandas_bind'] = self.pandas_bind
         for agent in self.agents:
             self.locals_dict[agent.__name__] = agent
         self.locals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
@@ -431,6 +435,10 @@ class StarlarkRuntime:
                 }
             )
             return User(Content(result_prompt['user_message']))
+
+        elif isinstance(context, PandasMeta):
+            return User(Content(context.df.to_csv()))
+
         raise ValueError(f"{str(context)} not supported")
 
     def execute_llm_call(
@@ -731,6 +739,39 @@ class StarlarkRuntime:
         logging.debug('uncertain_or_error()')
         pass
 
+    def pandas_bind(self, expr) -> PandasMeta:
+        logging.debug('pandas_bind()')
+
+        def bind_with_llm(expr_str: str) -> PandasMeta:
+            assistant = self.execute_llm_call(
+                executor=self.executor,
+                message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/pandas_bind.prompt',
+                    template={}),
+                context_messages=[self.statement_to_message(expr)],  # type: ignore
+                query=self.original_query,
+                original_query=self.original_query,
+                prompt_filename='prompts/starlark/pandas_bind.prompt',
+            )
+            return PandasMeta(expr_str=expr_str, pandas_df=pd.DataFrame(str(assistant.message)))
+
+        if isinstance(expr, str) and '.csv' in expr:
+            try:
+                result = urlparse(expr)
+
+                if result.scheme == '' or result.scheme == 'file' or result.scheme == 'https' or result.scheme == 'http':
+                    df = pd.read_csv(expr)
+                    return PandasMeta(expr_str=expr, pandas_df=df)
+                else:
+                    raise ValueError()
+            except Exception:
+                return bind_with_llm(expr)
+        elif isinstance(expr, list) or isinstance(expr, dict):
+            df = pd.DataFrame(expr)
+            return PandasMeta(expr_str=str(expr), pandas_df=df)
+        else:
+            return bind_with_llm(expr)
+
     def llm_bind(self, expr, func: str) -> FunctionCall:
         def find_string_instantiation(target_string, source_code):
             parsed_ast = ast.parse(source_code)
@@ -754,7 +795,8 @@ class StarlarkRuntime:
         context_message = self.statement_to_message(expr)
         if isinstance(expr, str) and find_string_instantiation(expr, self.original_code):
             lineno = find_string_instantiation(expr, self.original_code)
-            context_message += '\n\n' + self.original_code.split('\n')[lineno - 1]
+            if lineno:
+                context_message.message = Content(str(context_message.message) + '\n\n' + self.original_code.split('\n')[lineno - 1])
 
         assistant = self.execute_llm_call(
             executor=self.executor,

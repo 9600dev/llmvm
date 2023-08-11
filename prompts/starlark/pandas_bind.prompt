@@ -1,0 +1,7 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+I have data in a previous message that I need you to parse and bind to a Starlark dictionary. It will be passed to a Pandas DataFrame constructor to instantiate a pd.DataFrame.
+
+Check the previous message, extract the data, create a Starlark dictionary that contains the column names and values, and emit the dictionary in the Starlark dictionary format that can be parsed by the Starlark compiler. Don't emit any natural language, just the dictionary. If you don't know what data to use, then just emit an empty dictionary: "{}"

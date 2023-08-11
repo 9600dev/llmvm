@@ -3,6 +3,9 @@ from enum import Enum
 from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
 
+import pandas as pd
+import pandas_gpt
+
 T = TypeVar('T')
 
 class Visitor(ABC):
@@ -352,6 +355,29 @@ class FunctionCallMeta(Call):
 
     def __str__(self):
         return str(self._result)
+
+
+class PandasMeta(Call):
+    def __init__(
+        self,
+        expr_str: str,
+        pandas_df: pd.DataFrame,
+    ):
+        self.expr_str = expr_str
+        self.df = pandas_df
+
+    def result(self) -> object:
+        return self._result
+
+    def token(self):
+        return 'pandasmeta'
+
+    def __str__(self):
+        return str(self.df)
+
+    def ask(self, *args, **kwargs) -> object:
+        self._result = self.df.ask(*args, **kwargs)
+        return self._result
 
 
 class FunctionCall(Call):

@@ -133,7 +133,10 @@ class WebHelpers():
 
     @staticmethod
     def get_content_by_search(query: str, pages_to_include: int = 4) -> str:
-        '''Searches the internet for a query and returns a string with the entire text of all the top results'''
+        '''
+        Searches the internet for a query and returns a string with the markdown text results.
+        Returns the top 'pages_to_include' results.
+        '''
         searcher = SerpAPISearcher()
         return WebHelpers.__search_helper(query, searcher.search_internet, WebHelpers.get_url, pages_to_include)
 

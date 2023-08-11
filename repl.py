@@ -124,7 +124,7 @@ class Repl():
             event.app.current_buffer.cursor_position = len(text) - 1
 
         rich.print()
-        rich.print('[white](Ctrl-c or "exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')
+        rich.print('[white](Ctrl-c or "/exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')
         rich.print('[bold]I am a helpful assistant.[/bold]')
         rich.print()
 

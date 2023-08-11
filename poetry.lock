@@ -614,6 +614,19 @@ files = [
 ]
 
 [[package]]
+name = "currency-converter"
+version = "0.5.5"
+description = "Currency Converter"
+optional = false
+python-versions = "*"
+files = [
+    {file = "currency.converter-0.5.5.tar.gz", hash = "sha256:2bb06b9b9aee8ab5ec10b4ab7dec2fd4b32456365f4735f93468824eef01b034"},
+]
+
+[package.dependencies]
+setuptools = "*"
+
+[[package]]
 name = "cycler"
 version = "0.11.0"
 description = "Composable style cycles"
@@ -2232,6 +2245,21 @@ spss = ["pyreadstat (>=1.1.2)"]
 sql-other = ["SQLAlchemy (>=1.4.16)"]
 test = ["hypothesis (>=6.34.2)", "pytest (>=7.3.2)", "pytest-asyncio (>=0.17.0)", "pytest-xdist (>=2.2.0)"]
 xml = ["lxml (>=4.6.3)"]
+
+[[package]]
+name = "pandas-gpt"
+version = "0.5.0"
+description = "Power up your data science workflow with ChatGPT"
+optional = false
+python-versions = "*"
+files = [
+    {file = "pandas-gpt-0.5.0.tar.gz", hash = "sha256:f55644252c1af17bc1046c1499763b5653eb7ad53596a007cfafec5989066b6c"},
+    {file = "pandas_gpt-0.5.0-py3-none-any.whl", hash = "sha256:8f375f3a22de15700b0d4651e40da579b3497dea5777636388fb6c82b137666f"},
+]
+
+[package.dependencies]
+openai = "*"
+pandas = "*"
 
 [[package]]
 name = "pathy"
@@ -4181,4 +4209,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "5b1f2c82db86da53c9acdb7406d09a424a0d322332793cead521c19f531fd31e"
+content-hash = "a9e9b1efaea1febc3ed49c01b64b8c823a2748cefbfc7981773f34c5f2d9dadf"

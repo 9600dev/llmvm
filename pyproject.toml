@@ -29,11 +29,13 @@ swig = "^4.1.1"
 newspaper3k = "^0.2.8"
 google-search-results = "^2.4.2"
 markdownify = "^0.11.6"
-matplotlib = "^3.7.2"
+matplotlib = "^3.5.2"
 coloredlogs = "^15.0.1"
 dill = "^0.3.6"
 spacy = "^3.6.0"
 pdfminer-six = "^20221105"
+pandas-gpt = "^0.5.0"
+currency-converter = "^0.5.5"
 
 
 [[tool.poetry.source]]
