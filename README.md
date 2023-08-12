@@ -173,3 +173,7 @@ where the HTML returned from https://attract.ai/about-us/ is larger than the con
   * add extra context to interpretation (current stack is used for most context, but previous results from prior execution could be used.)
   * ask LLM to re-write AST from parent to try and improve probability of successful execution.
 
+## TODO:
+
+* We should tag the content that's been "map/reduced" so that it doesn't end up in future messatges.
+* Check the result of openai chat response to see if we maxed out the tokens or not.

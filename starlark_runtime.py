@@ -111,9 +111,10 @@ class StarlarkExecutionController:
         if self.cache and self.cache.has_key((call.message, call.supporting_messages)):
             return cast(Assistant, self.cache.get((call.message, call.supporting_messages)))
 
-        logging.debug('OpenAIExecutor.execute_with_agents()')
+        logging.debug('StarlarkRuntime.execute_with_agents()')
 
         user_message: User = cast(User, call.message)
+        # todo: we should figure out if we should pass context messages in here or not
         messages = []
         message_results = []
 
@@ -133,7 +134,7 @@ class StarlarkExecutionController:
         chat_response = executor.execute_direct(
             model=executor.model,
             temperature=temperature,
-            max_completion_tokens=512,  # todo: calculate this properly
+            max_completion_tokens=1024,  # todo: calculate this properly
             messages=messages,
             chat_format=True,
         )
@@ -167,7 +168,7 @@ class StarlarkExecutionController:
         messages: List[Message],
     ) -> Assistant:
         executor = self.execution_contexts[0]
-        return executor.execute(messages)
+        return executor.execute(messages, temperature=1.0, max_completion_tokens=1024)
 
     def execute(
         self,
@@ -394,7 +395,7 @@ class StarlarkRuntime:
             result_prompt = Helpers.load_and_populate_prompt(
                 prompt_filename=statement_result_prompts['function_meta'],
                 template={
-                    'function_callsite': context.callsite,
+                    'function_call': context.callsite,
                     'function_result': str(context.result()),
                 }
             )
@@ -797,6 +798,12 @@ class StarlarkRuntime:
             lineno = find_string_instantiation(expr, self.original_code)
             if lineno:
                 context_message.message = Content(str(context_message.message) + '\n\n' + self.original_code.split('\n')[lineno - 1])
+
+
+        # todo: we basically need to make several calls here.
+        # start with the context of the expr first (as it might be an llm_bind in a for loop)
+        # if failed, expand context to original query
+        # if failed, expand context to the entire code block
 
         assistant = self.execute_llm_call(
             executor=self.executor,

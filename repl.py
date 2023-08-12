@@ -1,15 +1,20 @@
 import os
+import pickle
 import subprocess
 import sys
 import tempfile
 from typing import Callable, Dict, List, Optional, cast
 
 import click
+import pandas as pd
+import pandas_gpt
 import rich
+import spacy
 from prompt_toolkit import prompt
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
+from scipy.spatial.distance import cosine
 
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
@@ -110,11 +115,22 @@ class Repl():
     def open_default_editor(self, initial_text: str) -> str:
         return self.open_editor(os.environ.get('EDITOR', 'vim'), initial_text)  # type: ignore
 
+    def help(self, commands):
+        rich.print()
+        rich.print('[white](Ctrl-c or "/exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')
+        rich.print('[bold]I am a helpful assistant.[/bold]')
+        rich.print()
+
+        rich.print('Commands:')
+        for command, description in commands.items():
+            rich.print('  [bold]{}[/bold] - {}'.format(command, description))
+
     def repl(self):
         console = rich.console.Console()
         history = FileHistory(".repl_history")
         kb = KeyBindings()
         edit = False
+        mode = 'tool'
 
         @kb.add('c-e')
         def _(event):
@@ -122,11 +138,6 @@ class Repl():
             text = self.open_editor(editor, event.app.current_buffer.text)
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text) - 1
-
-        rich.print()
-        rich.print('[white](Ctrl-c or "/exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')
-        rich.print('[bold]I am a helpful assistant.[/bold]')
-        rich.print()
 
         executor_contexts = self.executors
         executor_names = [executor.name() for executor in executor_contexts]
@@ -147,17 +158,24 @@ class Repl():
             '/exit': 'exit the repl',
             '/context': 'change the current context',
             '/agents': 'list the available agents',
+            '/act': 'load an acting prompt and set to Actor mode. This will similarity search on awesome_prompts.',
+            '/sysprompt': 'set the System prompt mode to the supplied prompt.',
+            '/tool': 'set back to tool mode [default]',
             '/any': 'execute the query in all contexts',
             '/clear': 'clear the message history',
             '/delcache': 'delete the persistence cache',
             '/messages': 'show message history',
             '/edit': 'edit any tool AST result in $EDITOR',
+            '/edit_message': 'edit the last Assitant message in $EDITOR',
             '/compile': 'ask LLM to compile query into AST and print to screen',
             '/last': 'clear the conversation except for the last Assistant message',
+            '/y': 'yank the last Assistant message to the clipboard using xclip',
             '/direct': 'execute the query in the current context',
             '/save': 'serialize the current stack and message history to disk',
             '/load': 'load the current stack and message history from disk',
         }
+
+        self.help(commands)
 
         while True:
             try:
@@ -173,9 +191,7 @@ class Repl():
                     continue
 
                 elif query.startswith('/help'):
-                    rich.print('Commands:')
-                    for command, description in commands.items():
-                        rich.print('  [bold]{}[/bold] - {}'.format(command, description))
+                    self.help(commands)
                     continue
 
                 elif query.startswith('/exit') or query == 'exit':
@@ -209,6 +225,11 @@ class Repl():
                         rich.print([e.name() for e in self.executors])
                     else:
                         rich.print('Invalid context: {}'.format(current_context))
+                    continue
+
+                elif query.startswith('/edit_message'):
+                    if len(message_history) > 0:
+                        message_history[-1].message = Content(self.open_default_editor(str(message_history[-1].message)))
                     continue
 
                 elif query.startswith('/edit'):
@@ -270,9 +291,71 @@ class Repl():
                     executor_contexts = self.executors
                     continue
 
-                elif query.startswith('/direct') or query.startswith('/d '):
+                elif query.startswith('/y'):
+                    process = subprocess.Popen(['xclip', '-selection', 'clipboard'], stdin=subprocess.PIPE)
+                    process.communicate(str(message_history[-1].message).encode('utf-8'))
+                    continue
+
+                elif query.startswith('/act'):
+                    df = pd.read_csv('prompts/awesome_prompts.csv')
+
+                    actor = Helpers.in_between(query, '/act', '\n').strip()
+                    if actor == '':
+                        from rich.console import Console
+                        from rich.table import Table
+                        console = Console()
+                        table = Table(show_header=True, header_style="bold magenta")
+                        for column in df.columns:
+                            table.add_column(column)
+                        for _, row in df.iterrows():  # type: ignore
+                            table.add_row(*row)
+
+                        console.print(table)
+                        continue
+
+                    prompt_result = Helpers.tfidf_similarity(actor, (df.act + ' ' + df.processed_prompt).to_list())
+
+                    rich.print('Setting actor mode.')
+                    rich.print('Prompt: {}'.format(prompt_result))
+                    rich.print()
+                    assistant = execution_controller.execute_chat(
+                        messages=message_history + [System(Content(prompt_result)), User(Content(prompt_result))],
+                    )
+                    print_response([assistant])
+                    message_history.append(System(Content(prompt_result)))
+                    message_history.append(User(Content(prompt_result)))
+                    message_history.append(assistant)
+                    rich.print()
+                    mode = 'actor'
+                    continue
+
+                elif query.startswith('/sysprompt'):
+                    mode = 'actor'
+                    sys_prompt = Helpers.in_between(query, '/sysprompt', '\n').strip()
+                    if sys_prompt == '':
+                        rich.print('No System prompt specified.')
+                        continue
+
+                    rich.print('Setting sysprompt mode.')
+                    rich.print('Prompt: {}'.format(sys_prompt))
+                    rich.print()
+                    assistant = execution_controller.execute_chat(
+                        messages=message_history + [System(Content(sys_prompt))],
+                    )
+                    print_response([assistant])
+                    message_history.append(System(Content(sys_prompt)))
+                    message_history.append(assistant)
+                    rich.print()
+                    continue
+
+                elif query.startswith('/tool'):
+                    rich.print('Setting tool mode.')
+                    mode = 'tool'
+                    continue
+
+                elif query.startswith('/direct') or query.startswith('/d ') or mode == 'actor':
                     if query.startswith('/d '): query = query.replace('/d ', '/direct ')
-                    query = query[8:].strip()
+                    if not mode == 'actor': query = query[8:].strip()
                     assistant = execution_controller.execute_chat(
                         messages=message_history + [User(Content(query))],
                     )

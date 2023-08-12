@@ -2,7 +2,7 @@
 You are a helpful assistant.
 
 [user_message]
-You asked me to invoke a helper function {{function_call}}, which had the signature {{function_signature}}. 
+You asked me to invoke a helper function at this line of code: {{function_callsite}}.
 
 Here is the result of that helper function call. This result should can be used to solve problems or answer questions in future messages: 
 

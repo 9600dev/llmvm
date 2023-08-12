@@ -100,7 +100,6 @@ class OpenAIExecutor(Executor):
         self,
         call: LLMCall,
         agents: List[Callable],
-
         temperature: float = 0.2,
     ) -> Assistant:
         if self.cache and self.cache.has_key((call.message, call.supporting_messages)):
@@ -165,9 +164,8 @@ class OpenAIExecutor(Executor):
         if self.cache and self.cache.has_key(messages):
             return cast(Assistant, self.cache.get(messages))
 
-        # find the system message
-        system_message = Helpers.first(lambda x: x.role() == 'system', messages)
-        user_messages = Helpers.filter(lambda x: x.role() == 'user', messages)
+        # find the system message and append to the front
+        system_message = Helpers.last(lambda x: x.role() == 'system', messages)
 
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
@@ -177,7 +175,7 @@ class OpenAIExecutor(Executor):
         messages_list: List[Dict[str, str]] = []
 
         messages_list.append(Message.to_dict(system_message))
-        for message in user_messages:
+        for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
         chat_response = self.execute_direct(
@@ -205,5 +203,4 @@ class OpenAIExecutor(Executor):
         )
 
         if self.cache: self.cache.set(messages, assistant)
-
         return assistant

@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import os
 import re
+import subprocess
 import typing
 from enum import Enum, IntEnum
 from itertools import cycle, islice
@@ -10,9 +11,13 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import dill
 import guidance
 import nest_asyncio
+import pandas as pd
+import spacy
 import tiktoken
 from docstring_parser import parse
 from guidance.llms import LLM
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 from objects import Content, Message, User
 
@@ -69,6 +74,35 @@ class PersistentCache:
 
 
 class Helpers():
+    @staticmethod
+    def similarity(query: str, text: str):
+        try:
+            nlp = spacy.load('en_core_web_sm')
+        except Exception:
+            subprocess.call('python -m spacy download en_core_web_sm', shell=True)
+            nlp = spacy.load('en_core_web_sm')
+        doc1 = nlp(query)
+        doc2 = nlp(text)
+        similarity = doc1.similarity(doc2)
+        print(similarity)
+        return similarity
+
+    @staticmethod
+    def tfidf_similarity(query: str, text_list: list[str]):
+        lowered_list = []
+        for item in text_list:
+            lowered_list.append(re.sub('[^a-zA-Z0-9\s]', '', item.lower()))
+
+        tfidf_vectorizer = TfidfVectorizer()
+        tfidf_matrix = tfidf_vectorizer.fit_transform(lowered_list)
+
+        user_query_tfidf = tfidf_vectorizer.transform([query])
+        similarities = cosine_similarity(user_query_tfidf, tfidf_matrix)
+        most_similar_index = similarities.argmax()
+        # Get the most likely prompt match
+        most_likely = text_list[most_similar_index]
+        return most_likely
+
     @staticmethod
     def flatten(lst):
         def __has_list(lst):
@@ -149,6 +183,13 @@ class Helpers():
     @staticmethod
     def filter(predicate, iterable):
         return [x for x in iterable if predicate(x)]
+
+    @staticmethod
+    def last(predicate, iterable):
+        result = [x for x in iterable if predicate(x)]
+        if result:
+            return result[-1]
+        return None
 
     @staticmethod
     def find_string_between_tokens(text, start_token, end_token):
