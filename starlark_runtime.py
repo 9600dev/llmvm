@@ -781,7 +781,7 @@ class StarlarkRuntime:
                     for target in node.targets:
                         if isinstance(target, ast.Name) and isinstance(node.value, ast.Str):
                             if node.value.s == target_string:
-                                line_number = inspect.getsourcelines(node)[1]
+                                line_number = inspect.getsourcelines(node)[1]  # type: ignore
                                 return line_number
             return None
 
@@ -798,7 +798,6 @@ class StarlarkRuntime:
             lineno = find_string_instantiation(expr, self.original_code)
             if lineno:
                 context_message.message = Content(str(context_message.message) + '\n\n' + self.original_code.split('\n')[lineno - 1])
-
 
         # todo: we basically need to make several calls here.
         # start with the context of the expr first (as it might be an llm_bind in a for loop)
