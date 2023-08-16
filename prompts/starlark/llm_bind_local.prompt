@@ -1,0 +1,11 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+I need you to late-bind data arguments to a python callsite. 
+
+I have the Python function definition defined under "Definition:" and the data you can use to bind arguments is found in the previous messages. I want you to reply with just the bound function call, binding appropriate values in the data to the arguments of the function. You should bind all arguments, and any arguments you can't bind, just bind with "None". You should only emit a single callsite, nothing else. The function definitions are almost always a call to static methods, so make sure you emit the correct syntax for static method dispatch: SomeClass.static_method("bound argument 1", "bound argument 2" ...)
+
+Definition: 
+
+{{function_definition}}

@@ -11,6 +11,7 @@ from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
                     Sequence, Tuple, TypeVar, Union, cast)
 from urllib.parse import urlparse
 
+import astunparse
 import pandas as pd
 import pandas_gpt
 from openai import InvalidRequestError
@@ -23,6 +24,7 @@ from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import console_debug, setup_logging
 from helpers.pdf import PdfHelpers
+from helpers.search import SerpAPISearcher
 from helpers.vector_store import VectorStore
 from helpers.websearch import WebHelpers
 from objects import (Answer, Assistant, AstNode, Content, DataFrame,
@@ -218,27 +220,11 @@ class StarlarkExecutionController:
                 # check to see if there is natural language in there or not
                 try:
                     _ = ast.parse(str(assistant_response))
-                except SyntaxError:
-                    messages = []
-                    function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
-                    code_prompt = 'Re-write the following code. If there is natural language guidance, follow it.\n\n' + str(assistant_response)
-
-                    prompt = Helpers.load_and_populate_prompt(
-                        prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
-                        template={
-                            'functions': '\n'.join(function_list),
-                            'user_input': code_prompt,
-                        }
+                except SyntaxError as ex:
+                    assistant_response = self.starlark_runtime.rewrite(
+                        starlark_code=str(assistant_response),
+                        error=str(ex),
                     )
-                    messages.append(System(prompt['system_message']))
-                    messages.append(User(prompt['user_message']))
-                    assistant_response = str(self.execute_chat(messages=messages).message)
-
-                response_writer('llm_call edit_hook', assistant_response)
-                logging.debug('Re-written Abstract Syntax Tree:')
-                lines = str(assistant_response).split('\n')
-                for line in lines:
-                    logging.debug(f'  {str(line)}')
 
             _ = self.starlark_runtime.run(
                 starlark_code=assistant_response,
@@ -254,6 +240,7 @@ class StarlarkExecutionController:
             ))
 
         return results
+
 
 class StarlarkRuntime:
     def __init__(
@@ -316,6 +303,7 @@ class StarlarkRuntime:
         self.locals_dict['llm_bind'] = self.llm_bind
         self.locals_dict['llm_call'] = self.llm_call
         self.locals_dict['llm_loop_bind'] = self.llm_loop_bind
+        self.locals_dict['search'] = self.search
         self.locals_dict['pandas_bind'] = self.pandas_bind
         for agent in self.agents:
             self.locals_dict[agent.__name__] = agent
@@ -374,7 +362,7 @@ class StarlarkRuntime:
             'function_call': 'prompts/function_call_result.prompt',
             'function_meta': 'prompts/starlark/functionmeta_result.prompt',
             'llm_call': 'prompts/llm_call_result.prompt',
-            'str': 'prompts/llm_call_result.prompt',
+            'str': 'prompts/starlark/str_result.prompt',
             'uncertain_or_error': 'prompts/uncertain_or_error_result.prompt',
             'foreach': 'prompts/foreach_result.prompt',
             'list': 'prompts/starlark/list_result.prompt',
@@ -414,7 +402,7 @@ class StarlarkRuntime:
             result_prompt = Helpers.load_and_populate_prompt(
                 prompt_filename=statement_result_prompts['str'],
                 template={
-                    'llm_call_result': context,
+                    'str_result': context,
                 }
             )
             return User(Content(result_prompt['user_message']))
@@ -439,6 +427,10 @@ class StarlarkRuntime:
 
         elif isinstance(context, PandasMeta):
             return User(Content(context.df.to_csv()))
+
+        elif isinstance(context, FunctionBindable):
+            # todo
+            return User(Content(context._result.result()))  # type: ignore
 
         raise ValueError(f"{str(context)} not supported")
 
@@ -663,15 +655,17 @@ class StarlarkRuntime:
         if line not in self.original_code and ' = ' in line:
             var_binding = line.split(' = ')[0].strip()
             # example:
-            # var3 = Assistant(To find the differences and similarities between the two papers, I would need the text or content of the two papers. Please provide the text or relevant information from the papers, and I will be able to analyze and compare them for you. False)
+            # var3 = Assistant(To find the differences and similarities between the two papers, I would need the text or
+            # content of the two papers. Please provide the text or relevant information from the papers, and I will be
+            # able to analyze and compare them for you. False)
             rhs: Optional[Tuple[ast.expr, ast.expr]] = self.__get_assignment(var_binding, starlark_code)
             if (
                 rhs
                 and isinstance(rhs[1], ast.Call)
                 and hasattr(cast(ast.Call, rhs[1]).func, 'value')
                 and hasattr(cast(ast.Call, rhs[1]), 'attr')
-                and cast(ast.Call, rhs[1]).func.value.id == 'WebHelpers'
-                and cast(ast.Call, rhs[1]).func.attr == 'get_url'
+                and cast(ast.Call, rhs[1]).func.value.id == 'WebHelpers'  # type: ignore
+                and cast(ast.Call, rhs[1]).func.attr == 'get_url'  # type: ignore
             ):
                 # we have a WebHelpers.get_url() call that looks like it failed,
                 # let's try with Firefox
@@ -682,7 +676,7 @@ class StarlarkRuntime:
                 and isinstance(rhs[1], ast.Call)
                 and hasattr(cast(ast.Call, rhs[1]).func, 'value')
                 and hasattr(cast(ast.Call, rhs[1]), 'attr')
-                and cast(ast.Call, rhs[1]).func.attr == 'llm_call'
+                and cast(ast.Call, rhs[1]).func.attr == 'llm_call'  # type: ignore
             ):
                 starlark_code = line
                 return starlark_code
@@ -773,122 +767,38 @@ class StarlarkRuntime:
         else:
             return bind_with_llm(expr)
 
-    def llm_bind(self, expr, func: str) -> FunctionCall:
-        def find_string_instantiation(target_string, source_code):
-            parsed_ast = ast.parse(source_code)
-            for node in ast.walk(parsed_ast):
-                if isinstance(node, ast.Assign):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name) and isinstance(node.value, ast.Str):
-                            if node.value.s == target_string:
-                                line_number = inspect.getsourcelines(node)[1]  # type: ignore
-                                return line_number
-            return None
-
-        func = func.replace('"', '')
-
-        prompt_filename = 'prompts/starlark/llm_bind.prompt'
-        # if we have a list, we need to use a different prompt
-        if isinstance(expr, list):
-            # prompt_filename = 'prompts/starlark/llm_bind_list.prompt'
-            raise ValueError('llm_bind() does not support lists. You should rewrite the code to use a for loop instead.')
-
-        context_message = self.statement_to_message(expr)
-        if isinstance(expr, str) and find_string_instantiation(expr, self.original_code):
-            lineno = find_string_instantiation(expr, self.original_code)
-            if lineno:
-                context_message.message = Content(str(context_message.message) + '\n\n' + self.original_code.split('\n')[lineno - 1])
-
-        # todo: we basically need to make several calls here.
-        # start with the context of the expr first (as it might be an llm_bind in a for loop)
-        # if failed, expand context to original query
-        # if failed, expand context to the entire code block
-
-        assistant = self.execute_llm_call(
+    def llm_bind(self, expr, func: str) -> 'FunctionBindable':
+        bindable = FunctionBindable(
             executor=self.executor,
-            message=Helpers.load_and_populate_message(
-                prompt_filename=prompt_filename,
-                template={
-                    'goal': self.original_query,
-                    'function_definition': func,
-                }),
-            context_messages=[self.statement_to_message(expr)],  # type: ignore
-            query=self.original_query,
+            expr=expr,
+            func=func,
+            agents=self.agents,
+            messages=[],
+            lineno=inspect.currentframe().f_back.f_lineno,  # type: ignore
+            expr_instantiation=inspect.currentframe().f_back.f_locals,  # type: ignore
+            scope_dict=self.globals_dict,
+            original_code=self.original_code,
             original_query=self.original_query,
-            prompt_filename=prompt_filename,
+            starlark_runtime=self,
         )
+        bindable.bind(expr, func)
+        return bindable
 
-        # get function definition
-        parser = Parser()
-        parser.agents = self.agents
-        function_call = parser.get_callsite(str(assistant.message))
-
-        if 'None' in str(assistant.message) and function_call:
-            context_messages: List[Message] = []
-            # we should double check if we need to bind that parameter or not
-            # todo: get the function signature and check to see if the parameter is optional
-            # todo: usually this is a failure of a loop_bind or something, so we should
-            # probably figure out a way to roll up to the loop_bind and redo that so we're
-            # not wasting tokens rebinding with large amounts of data each time.
-            for var_binding, rhs in self.globals_dict.items():
-                if var_binding.startswith('var'):
-                    context_messages.append(User(Content('{}'.format(str(rhs)))))
-
-            error_check = self.execute_llm_call(
-                executor=self.executor,
-                message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/llm_bind_error_correction.prompt',
-                    template={
-                        'function_callsite': str(assistant.message),
-                        'function_definition': Helpers.get_function_description_flat_extra(cast(Callable, function_call.func))
-                    }),
-                context_messages=context_messages,
-                query=self.original_query,
-                original_query=self.original_query,
-            )
-            assistant.message = error_check.message
-
-        # todo need to properly parse this.
-        if ' = ' not in str(assistant.message):
-            # no identifier, so we'll create one to capture the result
-            identifier = 'result_{}'.format(str(time.time()).replace('.', ''))
-            assistant.message = Content('{} = {}'.format(identifier, str(assistant.message)))
-        else:
-            identifier = str(assistant.message).split(' = ')[0].strip()
-
-        # execute the function
-        # todo: figure out what to do when you get back None, or ''
-        counter = 0
-        starlark_code = str(assistant.message)
-        globals_dict = self.globals_dict.copy()
-        globals_result = {}
-        while counter < 3:
-            try:
-                globals_result = StarlarkRuntime(
-                    self.executor,
-                    self.agents,
-                    self.vector_store
-                ).run(starlark_code, self.original_query)
-
-                break
-            except Exception as ex:
-                logging.debug('Error executing function call: {}'.format(ex))
-                counter += 1
-                starlark_code = self.rewrite_starlark_error_correction(
-                    query=self.original_query,
-                    starlark_code=starlark_code,
-                    error=str(ex),
-                    globals_dictionary=globals_dict,
-                )
-
-        # bind the result to a FunctionCall
-        if function_call:
-            function_call._result = globals_result[identifier]
-            return function_call
-        else:
-            fake = FunctionCall('', [], [])
-            fake._result = globals_result[identifier]
-            return fake
+    def search(
+        self,
+        expr: str,
+    ) -> str:
+        logging.debug(f'search({expr})')
+        searcher = Search(
+            executor=self.executor,
+            expr=expr,
+            agents=self.agents,
+            messages=[],
+            starlark_runtime=self,
+            original_code=self.original_code,
+            original_query=self.original_query,
+        )
+        return searcher.search()
 
     def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
         if not isinstance(expr_list, list):
@@ -954,15 +864,22 @@ class StarlarkRuntime:
                     prompt_filename='prompts/starlark/answer_nocontext.prompt',
                     template={
                         'original_query': self.original_query,
-                        'answer': str(self.statement_to_message(expr).message),
                     }),
-                context_messages=[],
+                context_messages=[self.statement_to_message(expr)],
                 query=self.original_query,
                 original_query=self.original_query,
                 prompt_filename='prompts/starlark/answer_nocontext.prompt',
             )
 
-            if 'None' in str(answer_assistant.message) and "[##]" in str(answer_assistant.message):
+            if 'None' not in str(answer_assistant.message) and "[##]" not in str(answer_assistant.message):
+                answer = Answer(
+                    conversation=[],
+                    result=str(answer_assistant.message)
+                )
+                self.answers.append(answer)
+                return answer
+
+            elif 'None' in str(answer_assistant.message) and "[##]" in str(answer_assistant.message):
                 logging.debug("Found comment in answer_nocontext: {}".format(answer_assistant.message))
 
                 self.answer_error_correcting = True
@@ -990,6 +907,7 @@ class StarlarkRuntime:
                 context=value,
             ) for key, value in self.globals_dict.items() if key.startswith('var')
         ]
+        context_messages.append(self.statement_to_message(expr))
 
         answer_assistant = self.execute_llm_call(
             executor=self.executor,
@@ -997,7 +915,6 @@ class StarlarkRuntime:
                 prompt_filename='prompts/starlark/answer.prompt',
                 template={
                     'original_query': self.original_query,
-                    'answer': str(self.statement_to_message(expr).message),
                 }),
             context_messages=context_messages,
             query=self.original_query,
@@ -1013,9 +930,48 @@ class StarlarkRuntime:
             conversation=[],
             result=str(answer_assistant.message)
         )
-
         self.answers.append(answer)
         return answer
+
+    def rewrite(
+        self,
+        starlark_code: str,
+        error: str,
+    ):
+        # SyntaxError, or other more global error. We should rewrite the entire code.
+        function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+        code_prompt = \
+            f'''The following code either didn't compile, or threw an exception while executing. Re-write the code.
+            If there is natural language guidance in previous messages, follow it.
+
+            Original User Query: {self.original_query}
+
+            Error: {error}
+
+            Original Code:
+
+            {starlark_code}
+            '''
+
+        assistant = self.execute_llm_call(
+            executor=self.executor,
+            message=Helpers.load_and_populate_message(
+                prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+                template={
+                    'functions': '\n'.join(function_list),
+                    'user_input': code_prompt,
+                }
+            ),
+            context_messages=[],
+            query=self.original_query,
+            original_query=self.original_query,
+            prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+        )
+        lines = str(assistant.message).split('\n')
+        logging.debug(f'StarlarkRuntime.rewrite() Re-written Starlark code:')
+        for line in lines:
+            logging.debug(f'  {str(line)}')
+        return str(assistant.message)
 
     def __compile_and_execute(
         self,
@@ -1033,7 +989,18 @@ class StarlarkRuntime:
         self.original_code = starlark_code
         self.original_query = original_query
         self.setup()
-        return self.__compile_and_execute(starlark_code)
+
+        counter = 0
+        last_exception = ''
+        while counter < 3:
+            try:
+                return self.__compile_and_execute(starlark_code)
+            except Exception as ex:
+                starlark_code = self.rewrite(starlark_code, str(ex))
+                last_exception = str(ex)
+            finally:
+                counter += 1
+        raise RuntimeError('StarlarkRuntime.run() failed to execute code. Last exception: {}'.format(last_exception))
 
     def execute_ast(
         self,
@@ -1087,3 +1054,339 @@ class StarlarkRuntime:
             pass
         else:
             raise NotImplementedError(f"Unhandled statement type: {type(statement).__name__}")
+
+
+class Search():
+    def __init__(
+        self,
+        executor: Executor,
+        expr,
+        agents: List[Callable],
+        messages: List[Message],
+        starlark_runtime: StarlarkRuntime,
+        original_code: str,
+        original_query: str,
+        total_links_to_return: int = 4,
+    ):
+        self.executor = executor
+        self.query = expr
+        self.messages: List[Message] = messages
+        self.agents = agents
+        self.original_code = original_code
+        self.original_query = original_query
+        self.starlark_runtime = starlark_runtime
+
+        self.parser = WebHelpers.get_url
+        self.ordered_snippets: List = []
+        self.index = 0
+        self._result = None
+        self.total_links_to_return: int = total_links_to_return
+
+    def search(
+        self,
+    ) -> str:
+        # todo: we should probably return the Search instance, so we can futz with it later on.
+        query_expander = self.starlark_runtime.execute_llm_call(
+            executor=self.executor,
+            message=Helpers.load_and_populate_message(
+                prompt_filename='prompts/starlark/search_expander.prompt',
+                template={
+                    'query': self.query,
+                }),
+            context_messages=[],
+            query=self.query,
+            original_query=self.original_query,
+        )
+
+        queries = eval(str(query_expander.message))[:3]
+
+        engines = {
+            'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
+            'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': WebHelpers.get_news_url, 'description': 'a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
+            'Google Product Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a product search engine that is excellent at finding the prices of products, finding products that match descriptions of products, and finding where to buy a particular product.'},  # noqa:E501
+            'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
+            'Google Local Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine dedicated to finding geographically local establishments, restaurants, stores etc.'},  # noqa:E501
+            'Hacker News Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles.'},  # noqa:E501
+        }  # noqa:E501
+
+        # classify the search engine
+        engine_rank = self.starlark_runtime.execute_llm_call(
+            executor=self.executor,
+            message=Helpers.load_and_populate_message(
+                prompt_filename='prompts/starlark/search_classifier.prompt',
+                template={
+                    'query': '\n'.join(queries),
+                    'engines': '\n'.join([f'* {key}: {value["description"]}' for key, value in engines.items()]),
+                }),
+            context_messages=[],
+            query=self.query,
+            original_query=self.original_query,
+        )
+        engine = str(engine_rank.message).split('\n')[0]
+        searcher = SerpAPISearcher().search_internet
+
+        for key, value in engines.items():
+            if key in engine:
+                self.parser = engines[key]['parser']
+                searcher = engines[key]['searcher']
+
+        # perform the search
+        search_results = []
+
+        for query in queries:
+            search_results.extend(list(searcher(query))[:10])
+
+        import random
+
+        snippets = {
+            str(random.randint(0, 100000)): {'title': result['title'], 'snippet': result['snippet'], 'link': result['link']}
+            for result in search_results
+        }
+
+        result_rank = self.starlark_runtime.execute_llm_call(
+            executor=self.executor,
+            message=Helpers.load_and_populate_message(
+                prompt_filename='prompts/starlark/search_ranker.prompt',
+                template={
+                    'queries': '\n'.join(queries),
+                    'snippets': '\n'.join(
+                        [f'* {str(key)}: {value["title"]} {value["snippet"]}' for key, value in snippets.items()]
+                    ),
+                }),
+            context_messages=[],
+            query=self.query,
+            original_query=self.original_query,
+        )
+
+        ranked_results = eval(str(result_rank.message))
+        self.ordered_snippets = [snippets[key] for key in ranked_results if key in snippets]
+        return self.result()
+
+    def result(self) -> str:
+        return_results = []
+
+        while len(return_results) < self.total_links_to_return and self.index < len(self.ordered_snippets):
+            for result in self.ordered_snippets[self.index:]:
+                self.index += 1
+                try:
+                    parser_result = self.parser(result['link']).strip()
+                    if parser_result:
+                        return_results.append(f"The following content is from: {result['link']} with the title: {result['title']} \n\n{parser_result}")  # noqa:E501
+                    if len(return_results) >= 4:
+                        break
+                except Exception as e:
+                    logging.error(e)
+                    pass
+        return '\n\n\n'.join(return_results)
+
+class FunctionBindable():
+    def __init__(
+        self,
+        executor: Executor,
+        expr,
+        func: str,
+        agents: List[Callable],
+        messages: List[Message],
+        lineno: int,
+        expr_instantiation,
+        scope_dict: Dict[Any, Any],
+        original_code: str,
+        original_query: str,
+        starlark_runtime: StarlarkRuntime,
+    ):
+        self.executor = executor
+        self.expr = expr
+        self.expr_instantiation = expr_instantiation
+        self.messages: List[Message] = messages
+        self.func = func.replace('"', '')
+        self.agents = agents
+        self.lineno = lineno
+        self.scope_dict = scope_dict
+        self.original_code = original_code
+        self.original_query = original_query
+        self.starlark_runtime = starlark_runtime
+        self.bound_function: Optional[Callable] = None
+        self._result = None
+
+    def __call__(self, *args, **kwargs):
+        if self._result:
+            return self._result
+
+    def __bind_helper(
+        self,
+        expr,
+        func: str,
+        context_messages: List[Message] = [],
+    ) -> str:
+        # if we have a list, we need to use a different prompt
+        if isinstance(self.expr, list):
+            raise ValueError('llm_bind() does not support lists. You should rewrite the code to use a for loop instead.')
+
+        # get a function definition fuzzy binding
+        function_str = Helpers.in_between(func, '', '(')
+        function_callable = [f for f in self.agents if function_str in str(f)]
+        if not function_callable:
+            raise ValueError('could not find function: {}'.format(function_str))
+
+        function_callable = function_callable[0]
+        function_definition = Helpers.get_function_description_flat_extra(cast(Callable, function_callable))
+
+        bindable = self.starlark_runtime.execute_llm_call(
+            executor=self.executor,
+            message=Helpers.load_and_populate_message(
+                prompt_filename='prompts/starlark/llm_bind_global.prompt',
+                template={
+                    'function_definition': function_definition,
+                }),
+            context_messages=context_messages,
+            query=self.original_query,
+            original_query=self.original_query,
+            prompt_filename='prompts/starlark/llm_bind_global.prompt',
+        )
+        return str(bindable.message)
+
+    def binder(
+        self,
+        expr,
+        func: str,
+    ) -> Generator['FunctionBindable', None, None]:
+
+        bound = False
+        global_counter = 0
+        messages: List[Message] = []
+        extra: List[str] = []
+        goal = ''
+        bindable = ''
+        function_call: Optional[FunctionCall] = None
+
+        def find_string_instantiation(target_string, source_code):
+            parsed_ast = ast.parse(source_code)
+
+            for node in ast.walk(parsed_ast):
+                # Check for direct assignment
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and isinstance(node.value, ast.Str):
+                            if node.value.s == target_string:
+                                return (node, None)
+                        # Check for string instantiation in a list
+                        elif isinstance(node.value, ast.List):
+                            for element in node.value.elts:
+                                if isinstance(element, ast.Str) and element.s == target_string:
+                                    return (element, node)
+            return None, None
+
+        # the following code determines the progressive scope exposure to the LLM
+        # to help it determine the binding
+        expr_instantiation_message = User(Content())
+        if isinstance(expr, str) and find_string_instantiation(expr, self.original_code):
+            node, parent = find_string_instantiation(expr, self.original_code)
+            if parent:
+                expr_instantiation_message.message = Content(
+                    f"The data in the next message was instantiated via this Starlark code: {astunparse.unparse(parent)}"
+                )
+            elif node:
+                expr_instantiation_message.message = Content(
+                    f"The data in the next message was instantiated via this Starlark code: {astunparse.unparse(node.value)}"
+                )
+
+        # start with just the expression binding
+        messages.append(self.starlark_runtime.statement_to_message(expr))
+        # instantiation
+        messages.append(expr_instantiation_message)
+        # goal
+        messages.append(User(Content(
+            f"""The overall goal of the Starlark program is to: {self.original_query}."""
+        )))
+        messages.append(User(Content(
+            f"""The Starlark code that is currently being executed is: {self.original_code}"""
+        )))
+        # program scope
+        scope = '\n'.join(['{} = {}'.format(key, value) for key, value in self.scope_dict.items() if key.startswith('var')])
+        messages.append(User(Content(
+            f"""The Starlark programs current execution scope for all variables is:
+            {scope}
+            """
+        )))
+
+        counter = 1
+
+        while global_counter < 3:
+            # try and bind the callsite without executing
+            while not bound and counter < 4:
+
+                bindable = self.__bind_helper(
+                    expr=expr,
+                    func=func,
+                    context_messages=messages[:counter][::-1],  # reversing the list using list slicing
+                )
+
+                # get function definition
+                parser = Parser()
+                parser.agents = self.agents
+                function_call = parser.get_callsite(bindable)
+
+                if 'None' in str(bindable):
+                    # move forward a stage
+                    counter += 1
+                    if counter >= len(messages):
+                        # we've run out of messages, so we'll just use the original code
+                        break
+                if 'None' not in str(bindable) and function_call:
+                    break
+
+            if not function_call:
+                raise ValueError('couldn\'t bind function call for func: {}, expr: {}'.format(func, expr))
+
+            # todo need to properly parse this.
+            if ' = ' not in bindable:
+                # no identifier, so we'll create one to capture the result
+                identifier = 'result_{}'.format(str(time.time()).replace('.', ''))
+                bindable = '{} = {}'.format(identifier, bindable)
+            else:
+                identifier = bindable.split(' = ')[0].strip()
+
+            # execute the function
+            # todo: figure out what to do when you get back None, or ''
+            starlark_code = bindable
+            globals_dict = self.scope_dict.copy()
+            globals_result = {}
+
+            try:
+                global_counter += 1
+
+                globals_result = StarlarkRuntime(
+                    self.executor,
+                    self.agents,
+                    self.starlark_runtime.vector_store
+                ).run(starlark_code, self.original_query)
+
+                self._result = globals_result[identifier]
+                yield self
+
+                # if we're here, it's because we've been next'ed() and it was the wrong binding
+                # reset the binding parameters and try again.
+                counter = 0
+                bound = False
+
+            except Exception as ex:
+                logging.debug('Error executing function call: {}'.format(ex))
+                counter += 1
+                starlark_code = self.starlark_runtime.rewrite_starlark_error_correction(
+                    query=self.original_query,
+                    starlark_code=starlark_code,
+                    error=str(ex),
+                    globals_dictionary=globals_dict,
+                )
+
+        raise ValueError('could not bind and or execute the function: {} expr: {}'.format(func, expr))
+
+    def bind(
+        self,
+        expr,
+        func,
+    ) -> 'FunctionBindable':
+        for bindable in self.binder(expr, func):
+            return bindable
+
+        raise ValueError('could not bind and or execute the function: {} expr: {}'.format(func, expr))

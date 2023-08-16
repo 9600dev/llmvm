@@ -66,48 +66,8 @@ class WebHelpers():
         cleaned_result = WebHelpers.clean_markdown(result)
         return unicodedata.normalize('NFKD', cleaned_result)
 
-    # @staticmethod
-    # def convert_html_to_markdown_old(html: str) -> str:
-    #     """Converts html to markdown using pandoc"""
-    #     logging.debug('convert_html_to_markdown')
-    #     with tempfile.NamedTemporaryFile(suffix='.html', mode='w', delete=True) as temp_file:
-    #         temp_file.write(html)
-
-    #         command = "pandoc -s -i "
-    #         command += temp_file.name
-    #         command += " -t markdown | grep -v '^:' | grep -v '^```' | grep -v '<!-- --->' | sed -e ':again' -e N -e '$!b again' -e 's/{[^}]*}//g' | grep -v 'data:image'"
-    #         result = (os.popen(command).read())
-
-    #         lines = []
-    #         for line in result.splitlines():
-    #             stripped = line.strip()
-    #             if stripped != '':
-    #                 if stripped == '<div>' or stripped == '</div>':
-    #                     continue
-
-    #                 if stripped == '[]' or stripped == '[[]]':
-    #                     continue
-
-    #                 if stripped.startswith('![]('):
-    #                     continue
-
-    #                 if stripped.startswith('[]') and stripped.replace('[]', '').strip() == '':
-    #                     continue
-
-    #                 if stripped.startswith('[\\') and stripped.replace('[\\', '').strip() == '':
-    #                     continue
-
-    #                 if stripped.startswith(']') and stripped.replace(']', '').strip() == '':
-    #                     continue
-
-    #                 if stripped.startswith('[') and stripped.replace('[', '').strip() == '':
-    #                     continue
-
-    #                 lines.append(stripped)
-    #         return '\n'.join(lines)
-
     @staticmethod
-    def __search_helper(
+    def search_helper(
         query: str,
         searcher: Callable[[str], Generator[Dict[str, str], None, None]],
         parser: Callable[[str], str],
@@ -138,13 +98,13 @@ class WebHelpers():
         Returns the top 'pages_to_include' results.
         '''
         searcher = SerpAPISearcher()
-        return WebHelpers.__search_helper(query, searcher.search_internet, WebHelpers.get_url, pages_to_include)
+        return WebHelpers.search_helper(query, searcher.search_internet, WebHelpers.get_url, pages_to_include)
 
     @staticmethod
     def get_news_by_search(query: str, pages_to_include: int = 4) -> str:
         '''Searches the current and historical news for a query and returns the entire text of the top results'''
         searcher = SerpAPISearcher()
-        return WebHelpers.__search_helper(query, searcher.search_news, WebHelpers.get_news_url, pages_to_include)
+        return WebHelpers.search_helper(query, searcher.search_news, WebHelpers.get_news_url, pages_to_include)
 
     @staticmethod
     def get_url_firefox(url: str) -> str:
@@ -218,7 +178,7 @@ class WebHelpers():
         nltk.download('punkt', quiet=True)
 
         config = Configuration()
-        config.browser_user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'
+        config.browser_user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'  # noqa:E501
         article = Article(url=url, config=config)
         article.download()
         article.parse()
@@ -247,7 +207,7 @@ class WebHelpers():
 
         elif result.scheme == 'http' or result.scheme == 'https':
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # type: ignore
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # noqa:E501
             }
 
             if force_firefox:

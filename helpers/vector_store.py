@@ -109,18 +109,6 @@ class VectorStore():
         if splitter:
             text_splitter = splitter
         else:
-            # html_tokens = ['<html>', '<body>', '<div>', '<script>', '<style>']
-            # markdown_tokens = ['###', '* ', '](', '```']
-            # if contains_token(content, html_tokens):
-            #     text_splitter = RecursiveCharacterTextSplitter.from_language(
-            #         language=Language.HTML,
-            #         chunk_size=chunk_token_count,
-            #         chunk_overlap=chunk_overlap
-            #     )
-            # elif contains_token(content, markdown_tokens):
-            #     text_splitter = MarkdownTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
-            # else:
-            #     text_splitter = SpacyTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
             text_splitter = TokenTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
 
         logging.debug('VectorStore.chunk_and_rank splitting documents')

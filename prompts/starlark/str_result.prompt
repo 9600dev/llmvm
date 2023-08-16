@@ -1,0 +1,9 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+Here is data to solve problems or answer questions in future messages:
+
+Data:
+
+{{str_result}}

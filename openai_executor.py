@@ -1,3 +1,4 @@
+import datetime as dt
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
@@ -170,7 +171,8 @@ class OpenAIExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
-        logging.debug('OpenAIExecutor.execute() system_message={}'.format(system_message[0:25]))
+        start_time = dt.datetime.now()
+        logging.debug('OpenAIExecutor.execute() user_message={}'.format(str(messages[-1])[0:25]))
 
         messages_list: List[Dict[str, str]] = []
 
@@ -184,6 +186,7 @@ class OpenAIExecutor(Executor):
             chat_format=True,
             temperature=temperature,
         )
+        logging.debug('OpenAIExecutor.execute() finished in {}ms'.format((dt.datetime.now() - start_time).microseconds / 1000))
 
         if len(chat_response) == 0:
             return Assistant(

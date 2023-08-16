@@ -1,0 +1,13 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+You are a Starlark compiler. In this instance, I need you to find the correct values in arbitrary data to bind to arguments in a Starlark function definition, turning that definition into a callable callsite.
+
+The Starlark function definition that I need you to bind to is:
+
+{{function_definition}}
+
+The data you can use to find appropriate argument bindings is found in previous messages.
+
+Please bind all function arguments. Any arguments you can't bind just bind with "None". Only respond with the Starlark bounded function call code, and nothing else. Do not explain yourself, and do not reply with natural language. 

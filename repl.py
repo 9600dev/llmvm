@@ -117,7 +117,7 @@ class Repl():
 
     def help(self, commands):
         rich.print()
-        rich.print('[white](Ctrl-c or "/exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')
+        rich.print('[white](Ctrl-c or "/exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')  # noqa: E501
         rich.print('[bold]I am a helpful assistant.[/bold]')
         rich.print()
 
@@ -397,9 +397,9 @@ class Repl():
 agents = [
     WebHelpers.get_url,
     WebHelpers.get_url_firefox,
-    WebHelpers.get_news_url,
-    WebHelpers.get_content_by_search,
-    WebHelpers.get_news_by_search,
+    # WebHelpers.get_news_url,
+    # WebHelpers.get_content_by_search,
+    # WebHelpers.get_news_by_search,
     WebHelpers.search_linkedin_profile,
     WebHelpers.get_linkedin_profile,
     EdgarHelpers.get_latest_form_text,

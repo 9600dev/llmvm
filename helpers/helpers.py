@@ -448,10 +448,10 @@ class Helpers():
         import inspect
 
         description = ''
-        if func.__doc__ and parse(func.__doc__).long_description:
-            description = parse(func.__doc__).long_description
-        elif func.__doc__ and parse(func.__doc__).short_description:
+        if func.__doc__ and parse(func.__doc__).short_description:
             description = parse(func.__doc__).short_description
+        if func.__doc__ and parse(func.__doc__).long_description:
+            description += ' ' + str(parse(func.__doc__).long_description).replace('\n', ' ')  # type: ignore
 
         func_name = func.__name__
         func_class = Helpers.__get_class_of_func(func)

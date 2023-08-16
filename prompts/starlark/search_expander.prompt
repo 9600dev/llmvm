@@ -1,0 +1,11 @@
+[system_message]
+You are a helpful assistant. 
+
+[user_message]
+You have access to a search API that returns recent news articles. Generate an array of ten search queries that are relevant to the User Query supplied below. Use a variation of related keywords for the queries, trying to be as general as possible. Be creative. Include the original User Query as the first item in the list.
+
+User Query: 
+
+{{query}}
+
+Format: ["query_1", "query_2", "query_3" ...]
