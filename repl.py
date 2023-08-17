@@ -163,10 +163,12 @@ class Repl():
             '/tool': 'set back to tool mode [default]',
             '/any': 'execute the query in all contexts',
             '/clear': 'clear the message history',
+            '/cls': 'clear the screen',
             '/delcache': 'delete the persistence cache',
             '/messages': 'show message history',
-            '/edit': 'edit any tool AST result in $EDITOR',
-            '/edit_message': 'edit the last Assitant message in $EDITOR',
+            '/edit_last': 'edit the last Assitant message in $EDITOR',
+            '/edit': 'edit the message history',
+            '/edit_ast': 'edit any tool AST result in $EDITOR',
             '/compile': 'ask LLM to compile query into AST and print to screen',
             '/last': 'clear the conversation except for the last Assistant message',
             '/y': 'yank the last Assistant message to the clipboard using xclip',
@@ -197,8 +199,12 @@ class Repl():
                 elif query.startswith('/exit') or query == 'exit':
                     sys.exit(0)
 
-                elif query.startswith('/clear') or query.startswith('/cls'):
+                elif query.startswith('/clear'):
                     message_history = []
+                    continue
+
+                elif query.startswith('/cls'):
+                    os.system('cls' if os.name == 'nt' else 'clear')
                     continue
 
                 elif query.startswith('/delcache'):
@@ -227,12 +233,12 @@ class Repl():
                         rich.print('Invalid context: {}'.format(current_context))
                     continue
 
-                elif query.startswith('/edit_message'):
+                elif query.startswith('/edit_last'):
                     if len(message_history) > 0:
                         message_history[-1].message = Content(self.open_default_editor(str(message_history[-1].message)))
                     continue
 
-                elif query.startswith('/edit'):
+                elif query.startswith('/edit_ast'):
                     if not edit:
                         rich.print('Enabling AST edit mode')
                         edit = True
@@ -241,6 +247,14 @@ class Repl():
                         rich.print('Disabling AST edit mode')
                         edit = False
                         execution_controller.edit_hook = None
+                    continue
+
+                elif query.startswith('/edit'):
+                    rich.print('Editing message history')
+                    txt_message_history = '\n\n'.join(
+                        [f"{str(type(message))}: {str(message.message)}" for message in message_history]
+                    )
+                    self.open_default_editor(txt_message_history)
                     continue
 
                 elif query.startswith('/agents'):

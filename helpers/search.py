@@ -102,6 +102,81 @@ class SerpAPISearcher(Searcher):
             for result in organic_results:
                 yield result
 
+    def search_yelp(
+        self,
+        query: str,
+        location: str,
+    ) -> Dict:
+        params = {
+            'find_desc': query,
+            'find_loc': location,
+            'engine': 'yelp',
+            'api_key': self.api_key,
+        }
+
+        search = GoogleSearch(params)
+        results = search.get_dict()
+
+        if results.get('error'):
+            rich.print_json(json.dumps(results, default=str))
+            return {}
+
+        page_count = 0
+        counter = 3
+        self.search_count += 1
+
+        place_id = ''
+        title = ''
+        link = ''
+        neighborhood = ''
+        snippet = ''
+
+        while 'error' not in results and counter > page_count:
+            page_count += 1
+            results = search.get_dict()
+            organic_results = results.get('organic_results', [])
+            for result in organic_results:
+                if result.get('place_ids'):
+                    place_id = result.get('place_ids')[0]
+                    title = result.get('title')
+                    link = result.get('link')
+                    neighborhood = result.get('neighborhoods')
+                    snippet = result.get('snippet')
+                    break
+
+        reviews_text = []
+        page_count = 0
+
+        if place_id:
+            # get the reviews
+            params = {
+                'engine': 'yelp_reviews',
+                'api_key': self.api_key,
+                'place_id': place_id,
+            }
+
+            search = GoogleSearch(params)
+            results = search.get_dict()
+
+            while 'error' not in results and counter > page_count:
+                results = search.get_dict()
+                page_count += 1
+                reviews = results.get('reviews', [])
+                for review in reviews:
+                    if 'comment' in review and 'text' in review['comment']:
+                        name = review['user']['name']
+                        address = review['user']['address']
+                        reviews_text.append(f"{name} from {address} had this review: {review['comment']['text']}")
+
+            return {
+                'title': title,
+                'link': link,
+                'neighborhood': neighborhood,
+                'snippet': snippet,
+                'reviews': '\n\n'.join(reviews_text)
+            }
+        return {}
+
     def search_news(
         self,
         query: str,

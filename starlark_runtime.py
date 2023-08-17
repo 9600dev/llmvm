@@ -23,6 +23,7 @@ from helpers.email_helpers import EmailHelpers
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers, PersistentCache
 from helpers.logging_helpers import console_debug, setup_logging
+from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.search import SerpAPISearcher
 from helpers.vector_store import VectorStore
@@ -312,6 +313,7 @@ class StarlarkRuntime:
         self.locals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
         self.locals_dict['EmailHelpers'] = CallWrapper(self, EmailHelpers)
         self.locals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
+        self.locals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
         self.locals_dict['answer'] = self.answer
 
     def __find_variable_assignment(
@@ -442,12 +444,14 @@ class StarlarkRuntime:
         query: str,
         original_query: str,
         prompt_filename: Optional[str] = None,
+        completion_tokens: int = 1024,
     ) -> Assistant:
         def __llm_call(
             user_message: Message,
             context_messages: List[Message],
             executor: Executor,
             prompt_filename: Optional[str] = None,
+            completion_tokens: int = 1024,
         ) -> Assistant:
             if not prompt_filename:
                 prompt_filename = ''
@@ -455,7 +459,7 @@ class StarlarkRuntime:
             messages: List[Message] = copy.deepcopy(context_messages)
             messages.append(user_message)
             try:
-                assistant: Assistant = executor.execute(messages)
+                assistant: Assistant = executor.execute(messages, max_completion_tokens=completion_tokens)
                 console_debug(prompt_filename, 'User', str(user_message.message))
                 console_debug(prompt_filename, 'Assistant', str(assistant.message))
             except InvalidRequestError as ex:
@@ -469,6 +473,7 @@ class StarlarkRuntime:
             context_messages: List[Message],
             executor: Executor,
             template: Dict[str, Any],
+            completion_tokens: int = 1024,
         ) -> Assistant:
             prompt = Helpers.load_and_populate_prompt(
                 prompt_filename=prompt_filename,
@@ -478,7 +483,9 @@ class StarlarkRuntime:
                 User(Content(prompt['user_message'])),
                 context_messages,
                 executor,
-                prompt_filename=prompt_filename
+                prompt_filename=prompt_filename,
+                completion_tokens=completion_tokens,
+
             )
 
         """
@@ -491,7 +498,10 @@ class StarlarkRuntime:
         # I have either a message, or a list of messages. They might need to be map/reduced.
         # todo: we usually have a prepended message of context to help the LLM figure out
         # what to do with the message at a later stage. This is getting removed right now.
-        if executor.calculate_tokens(context_messages + [message]) > executor.max_prompt_tokens():
+        if (
+            executor.calculate_tokens(context_messages + [message])
+            > executor.max_prompt_tokens(completion_token_count=completion_tokens)
+        ):
             context_message = User(Content('\n\n'.join([str(m.message) for m in context_messages])))
 
             # see if we can do a similarity search or not.
@@ -516,7 +526,8 @@ class StarlarkRuntime:
                     template={
                         'query': str(query),
                         'document_chunk': chunk,
-                    })
+                    },
+                    completion_tokens=completion_tokens)
 
                 decision_criteria.append(str(assistant_similarity.message))
                 logging.debug('map_reduce_required, query_or_task: {}, response: {}'.format(
@@ -562,7 +573,8 @@ class StarlarkRuntime:
                     user_message=message,
                     context_messages=similarity_messages,
                     executor=executor,
-                    prompt_filename=prompt_filename
+                    prompt_filename=prompt_filename,
+                    completion_tokens=completion_tokens,
                 )
 
             # do the map reduce instead of similarity
@@ -594,7 +606,9 @@ class StarlarkRuntime:
                             'original_query': original_query,
                             'query': query,
                             'data': chunk,
-                        })
+                        },
+                        completion_tokens=completion_tokens
+                    )
                     chunk_results.append(str(chunk_assistant.message))
 
                 # perform the reduce
@@ -608,13 +622,16 @@ class StarlarkRuntime:
                         'original_query': original_query,
                         'query': query,
                         'map_results': map_results
-                    })
+                    },
+                    completion_tokens=completion_tokens
+                )
         else:
             assistant_result = __llm_call(
                 user_message=cast(User, message),
                 context_messages=context_messages,
                 executor=executor,
                 prompt_filename=prompt_filename,
+                completion_tokens=completion_tokens,
             )
         return assistant_result
 
@@ -869,6 +886,7 @@ class StarlarkRuntime:
                 query=self.original_query,
                 original_query=self.original_query,
                 prompt_filename='prompts/starlark/answer_nocontext.prompt',
+                completion_tokens=2048,
             )
 
             if 'None' not in str(answer_assistant.message) and "[##]" not in str(answer_assistant.message):
@@ -920,6 +938,7 @@ class StarlarkRuntime:
             query=self.original_query,
             original_query=self.original_query,
             prompt_filename='prompts/starlark/answer.prompt',
+            completion_tokens=2048,
         )
 
         # check for comments
@@ -1100,12 +1119,18 @@ class Search():
 
         queries = eval(str(query_expander.message))[:3]
 
+        def yelp_to_text(reviews: Dict[Any, Any]) -> str:
+            return_str = f"{reviews['title']} in {reviews['neighborhood']}."
+            return_str += '\n\n'
+            return_str += f"{reviews['reviews']}"
+            return return_str
+
         engines = {
             'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
             'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': WebHelpers.get_news_url, 'description': 'a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
             'Google Product Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a product search engine that is excellent at finding the prices of products, finding products that match descriptions of products, and finding where to buy a particular product.'},  # noqa:E501
             'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
-            'Google Local Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine dedicated to finding geographically local establishments, restaurants, stores etc.'},  # noqa:E501
+            'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles.'},  # noqa:E501
         }  # noqa:E501
 
@@ -1132,6 +1157,25 @@ class Search():
 
         # perform the search
         search_results = []
+
+        # deal especially for yelp.
+        if 'Yelp' in engine:
+            # take the first query, and figure out the location
+            location = self.starlark_runtime.execute_llm_call(
+                executor=self.executor,
+                message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/search_location.prompt',
+                    template={
+                        'query': queries[0],
+                    }),
+                context_messages=[],
+                query=self.query,
+                original_query=self.original_query,
+                prompt_filename='prompts/starlark/search_location.prompt',
+            )
+            query_result, location = eval(str(location.message))
+            yelp_result = SerpAPISearcher().search_yelp(query_result, location)
+            return yelp_to_text(yelp_result)
 
         for query in queries:
             search_results.extend(list(searcher(query))[:10])
