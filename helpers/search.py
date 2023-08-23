@@ -182,7 +182,6 @@ class SerpAPISearcher(Searcher):
         query: str,
     ) -> Generator[Dict, None, None]:
         logging.debug('SerpAPISearcher.search_news() query={}'.format(query))
-        search_results = []
 
         params = {
             'api_key': self.api_key,

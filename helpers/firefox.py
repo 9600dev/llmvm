@@ -1,7 +1,10 @@
+import datetime as dt
 import os
 import time
 from typing import Any, Callable, Dict, List
 
+import nest_asyncio
+from playwright.sync_api import sync_playwright
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
@@ -14,190 +17,115 @@ from helpers.container import Container
 from helpers.logging_helpers import setup_logging
 from helpers.singleton import Singleton
 
+nest_asyncio.apply()
 logging = setup_logging()
+
+def read_netscape_cookies(cookies_txt_filename: str):
+    cookies = []
+    with open(cookies_txt_filename, 'r') as file:
+        for line in file.readlines():
+            if not line.startswith('#') and line.strip():  # Ignore comments and empty lines
+                try:
+                    domain, _, path, secure, expires_value, name, value = line.strip().split('\t')
+
+                    if int(expires_value) != -1 and int(expires_value) < 0:
+                        continue  # Skip invalid cookies
+
+                    dt_object = dt.datetime.fromtimestamp(int(expires_value))
+                    if dt_object.date() < dt.datetime.now().date():
+                        continue
+
+                    cookies.append({
+                        "name": name,
+                        "value": value,
+                        "domain": domain,
+                        "path": path,
+                        "expires": int(expires_value),
+                        "httpOnly": False,
+                        "secure": secure == "TRUE"
+                    })
+                except Exception as ex:
+                    pass
+    return cookies
+
 
 class FirefoxHelpers(metaclass=Singleton):
     def __init__(self):
-        logging.debug('FirefoxHelpers()')
-
         profile_directory = Container().get('firefox_profile')
-        profile = webdriver.FirefoxProfile(profile_directory)
-        options = FirefoxOptions()
-        options.headless = False
-        options.set_preference("print.always_print_silent", True)
-        options.set_preference("print.printer_Mozilla_Save_to_PDF.print_to_file", True)
-        options.set_preference("print_printer", "Mozilla Save to PDF")
-        options.set_preference("browser.download.dir", Container().get('firefox_download_dir'))
-        options.set_preference("browser.download.folderList", 2)
-        options.set_preference("browser.helperApps.neverAsk.saveToDisk", "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream")
-        options.profile = profile
-        service_args = ['--marionette-port', str(Container().get('firefox_marionette_port'))]
-        self.web_driver = webdriver.Firefox(options=options)
+        prefs = {
+            "profile": profile_directory,
+            "print.always_print_silent": True,
+            "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
+            "print_printer": "Mozilla Save to PDF",
+            "browser.download.dir": Container().get('firefox_download_dir'),
+            "browser.download.folderList": 2,
+            "browser.helperApps.neverAsk.saveToDisk": "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream",
+        }
 
-    def driver(self):
-        return self.web_driver
+        self.playwright = sync_playwright().start()
+        self.browser = self.playwright.firefox.launch(
+            headless=False,
+            firefox_user_prefs=prefs
+        )
 
-    def wait(self) -> None:
-        driver = self.driver()
-        driver.implicitly_wait(5)
-        wait = WebDriverWait(driver, 5)
-        wait.until(EC.presence_of_element_located((By.TAG_NAME, 'div')))
-        driver.execute_script('setTimeout(function() { return; }, 0);')
+        context = self.browser.new_context()
+        cookie_file = Container().get('firefox_cookies')
+        if cookie_file:
+            result = read_netscape_cookies(cookie_file)
+            context.add_cookies(result)
 
-    def wait_until_func(self, func: Callable[[WebDriver], Any]) -> None:
-        driver = self.driver()
-        driver.implicitly_wait(5)
-        wait = WebDriverWait(driver, 5)
-        func(driver)
-        driver.execute_script('setTimeout(function() { return; }, 0);')
+        self.page = context.new_page()
 
     def goto(self, url: str):
-        driver = self.driver()
-        if driver.current_url != url:
-            driver.get(url)
-            self.wait()
-        return driver
+        if self.page.url != url:
+            self.page.goto(url)
 
-    def get_download_file(self, wait_time_seconds: int = 5) -> str:
-        import time
-        driver = self.driver()
-        driver.get('about:downloads')
+    def wait(self, milliseconds: int) -> None:
+        self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
+        self.page.wait_for_timeout(milliseconds)
 
-        end_time = time.time() + wait_time_seconds
-        filename = ''
-        while True:
-            try:
-                filename = driver.execute_script("return document.querySelector('#contentAreaDownloadsView .downloadMainArea .downloadContainer description:nth-of-type(1)').value")
-            except Exception as ex:
-                pass
-            time.sleep(1)
-            if time.time() > end_time:
-                break
+    def wait_until(self, selector: str) -> None:
+        element = self.page.wait_for_selector(selector)
 
-        if os.path.exists(os.path.join(Container().get('firefox_download_dir'), filename)):
-            return os.path.abspath(os.path.join(Container().get('firefox_download_dir'), filename))
+    def wait_until_text(self, selector: str) -> None:
+        element = self.page.wait_for_selector(f'*:has-text("{selector}")', timeout=5000)
+
+    def get_html(self) -> str:
+        return self.page.content()
+
+    def get_url(self, url: str):
+        self.goto(url)
+        return self.get_html()
+
+    def pdf(self) -> str:
+        self.page.evaluate("() => { window.print(); }")
+        self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
+
+        if os.path.exists('mozilla.pdf'):
+            return os.path.abspath('mozilla.pdf')
         else:
+            logging.debug('pdf: pdf not found')
             return ''
 
     def pdf_url(self, url: str) -> str:
-        driver = self.goto(url)
-        driver.execute_script('window.print();')
-        driver.execute_script('setTimeout(function() { return; }, 0);')
+        self.goto(url)
+        self.wait(1000)
+        return self.pdf()
 
-        time.sleep(5)
+    def clickable(self) -> List[str]:
+        clickable_elements = self.page.query_selector_all(
+            "a, button, input[type='submit'], input[type='button'], input[type='reset']"
+        )
+        unique_ids = set()
 
-        if os.path.exists('mozilla.pdf'):
-            return os.path.abspath('mozilla.pdf')
-        else:
-            logging.debug('WebHelpers.get_url_firefox: pdf not found')
-            return ''
+        for element in clickable_elements:
+            element_id = element.get_attribute("id")
+            if element_id:  # Check if the element has an id attribute
+                unique_ids.add(element_id)
 
-    def print_pdf(self) -> str:
-        self.driver().execute_script('window.print();')
-        self.driver().execute_script('setTimeout(function() { return; }, 0);')
+        return list(unique_ids)
 
-        time.sleep(5)
-
-        if os.path.exists('mozilla.pdf'):
-            return os.path.abspath('mozilla.pdf')
-        else:
-            logging.debug('WebHelpers.get_url_firefox: pdf not found')
-            return ''
-
-    @staticmethod
-    def get_url(url: str) -> str:
-        """
-        Extracts the text from a url using the Firefox browser.
-        This is useful for hard to extract text, an exception thrown by the other functions,
-        or when searching/extracting from sites that require logins liked LinkedIn, Facebook, Gmail etc.
-        """
-        try:
-            driver = FirefoxHelpers().goto(url)
-            return driver.page_source
-        except Exception as e:
-            logging.debug(e)
-            return str(e)
-
-    def __clickable(self) -> List[WebElement]:
-        driver = self.driver()
-        a = driver.find_elements(By.TAG_NAME, 'a')
-        buttons = driver.find_elements(By.TAG_NAME, 'button')
-        inputs = driver.find_elements(By.TAG_NAME, 'input')
-
-        return a + buttons + inputs
-
-    def get_clickable(self, url: str) -> List[str]:
-        """
-        Extracts and returns the text for all links, buttons and inputs on a given page url.
-        You can pass the text of any of these clickable elements to the click(url, link_or_button_text) function to click on it.
-        """
-        try:
-            driver = self.goto(url)
-            clickable = self.__clickable()
-            links = set([item.text for item in clickable])
-            return list(links)
-        except Exception as e:
-            logging.debug(e)
-            return []
-
-    @staticmethod
-    def click(url: str, link_or_button_text: str) -> str:
-        """
-        Goes to the url and clicks on the link or button with the specified text and returns
-        the page source of the resulting page.
-        """
-        def first(predicate, iterable):
-            try:
-                result = next(x for x in iterable if predicate(x))
-                return result
-            except StopIteration as ex:
-                return None
-
-        firefox = FirefoxHelpers()
-        driver = firefox.driver()
-        try:
-            driver = firefox.goto(url)
-            firefox.wait_until(url, link_or_button_text)
-            clickable = firefox.__clickable()
-
-            if first(lambda n: n.text == link_or_button_text, clickable):
-                node = first(lambda n: n.text == link_or_button_text, clickable)
-                node.click()  # type: ignore
-                firefox.wait()
-                return driver.page_source
-            else:
-                return ''
-        except Exception as e:
-            logging.debug(e)
-            return ''
-
-    def wait_until(self, url: str, link_or_button_text: str, duration: int = 10) -> bool:
-        """
-        Goes to the url and waits until the link or button with the specified text is clickable and returns
-        the page source of the resulting page.
-        """
-        def wait_for_text(text: str):
-            # This function will be used as a wait condition
-            def condition(driver):
-                elements = driver.find_elements(By.CSS_SELECTOR, 'a, input, button')
-                return any(element.text == text for element in elements)
-            return condition
-
-        try:
-            driver = self.goto(url)
-            wait = WebDriverWait(driver, duration)
-            return wait.until(wait_for_text(link_or_button_text))
-        except Exception as ex:
-            logging.debug(ex)
-            return False
-
-    def get_downloaded_file_text(self) -> str:
-        filename = self.get_download_file()
-        if os.path.exists(filename):
-            with open(filename, 'r') as f:
-                return f.read()
-        else:
-            return ''
-
-    def get_downloaded_filename(self) -> str:
-        return self.get_download_file()
+    def click(self, selector: str) -> None:
+        element_to_click = self.page.query_selector(selector)
+        if element_to_click:
+            element_to_click.click()

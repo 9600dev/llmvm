@@ -1,4 +1,5 @@
 import asyncio
+import datetime as dt
 import inspect
 import os
 import re
@@ -22,55 +23,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from objects import Content, Message, User
 
 
-class PersistentCache:
-    def __init__(self, filename: Optional[str] = None):
-        self.filename = filename
-
-        if self.filename:
-            if not os.path.isfile(self.filename):
-                with open(self.filename, 'wb') as f:
-                    dill.dump({}, f)
-
-    def _serialize_key(self, key):
-        return dill.dumps(key)
-
-    def _deserialize_key(self, serialized_key):
-        return dill.loads(serialized_key)
-
-    def set(self, key, value):
-        if self.filename:
-            with open(self.filename, 'rb+') as f:
-                cache = dill.load(f)
-                serialized_key = self._serialize_key(key)
-                cache[serialized_key] = value
-                f.seek(0)
-                dill.dump(cache, f)
-
-    def get(self, key):
-        if self.filename:
-            with open(self.filename, 'rb') as f:
-                cache = dill.load(f)
-                serialized_key = self._serialize_key(key)
-                return cache.get(serialized_key)
-        return None
-
-    def delete(self, key):
-        if self.filename:
-            with open(self.filename, 'rb+') as f:
-                cache = dill.load(f)
-                serialized_key = self._serialize_key(key)
-                if serialized_key in cache:
-                    del cache[serialized_key]
-                    f.seek(0)
-                    dill.dump(cache, f)
-
-    def has_key(self, key):
-        if self.filename:
-            with open(self.filename, 'rb') as f:
-                cache = dill.load(f)
-                serialized_key = self._serialize_key(key)
-                return serialized_key in cache
-        return False
+def response_writer(callee, message):
+    with (open('logs/ast.log', 'a')) as f:
+        f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')
 
 
 class Helpers():
@@ -91,7 +46,7 @@ class Helpers():
     def tfidf_similarity(query: str, text_list: list[str]):
         lowered_list = []
         for item in text_list:
-            lowered_list.append(re.sub('[^a-zA-Z0-9\s]', '', item.lower()))
+            lowered_list.append(re.sub('[^a-zA-Z0-9\s]', '', item.lower()))  # noqa: W605 # type: ignore
 
         tfidf_vectorizer = TfidfVectorizer()
         tfidf_matrix = tfidf_vectorizer.fit_transform(lowered_list)
@@ -335,20 +290,6 @@ class Helpers():
         return ' '.join(Helpers.flatten(words))
 
     @staticmethod
-    def calculate_tokens_2(content: str | List[Dict[str, str]]):
-        if isinstance(content, list):
-            return len(Helpers.messages_to_str(content).split()) / 0.75
-        else:
-            return len(content.split()) / 0.75
-
-    @staticmethod
-    def calculate_tokens(content: str | List[Dict[str, str]], model: str = 'gpt-3.5-turbo-16k-0613') -> int:
-        if isinstance(content, list):
-            content = Helpers.messages_to_str(content)
-
-        return len(tiktoken.encoding_for_model(model).encode(content))
-
-    @staticmethod
     async def generator_for_new_tokens(program, *args, **kwargs):
         future = program(*args, **kwargs, silent=True, async_mode=True)
         starting_text = future.text
@@ -530,7 +471,7 @@ class Helpers():
         description = Helpers.get_function_description(function, openai_format=False)
         parameter_type_list = [f"{param}: {typ}" for param, typ in zip(description['parameters'], description['types'])]
         return_type = description['return_type'].__name__ if description['return_type'] else ''
-        return (f'{description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"]}')
+        return (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"]}')  # noqa: E501
 
     @staticmethod
     def load_prompt(prompt_filename: str) -> Dict[str, Any]:

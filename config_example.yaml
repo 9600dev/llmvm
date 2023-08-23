@@ -1,6 +1,7 @@
 firefox_profile: '/home/user/.mozilla/firefox/cp6sgb0s.selenium'
 firefox_marionette_port: 2828
 firefox_download_dir: '/home/user/llmagents/download'
+firefox_cookies: 'cache/cookies.txt'
 smtp_server: 'localhost'
 smtp_port: 1025
 smtp_username: 'blah@blah.net'

@@ -23,6 +23,13 @@ def setup_logging(
     logging.getLogger('requests').setLevel(logging.WARNING)
     logging.getLogger('openai').setLevel(logging.WARNING)
     logging.getLogger('pdfminer').setLevel(logging.WARNING)
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+    logger = logging.getLogger()
+
+    handlers_to_remove = [handler for handler in logger.handlers if isinstance(handler, logging.StreamHandler)]
+    for handler in handlers_to_remove:
+        logger.removeHandler(handler)
 
     if module_name in global_loggers:
         return global_loggers[module_name]
@@ -31,7 +38,6 @@ def setup_logging(
     handler = RichHandler()
     handler.setLevel(default_level)
 
-    logger = logging.getLogger()
     logger.setLevel(default_level)
     logger.addHandler(handler)
     global_loggers[module_name] = logger

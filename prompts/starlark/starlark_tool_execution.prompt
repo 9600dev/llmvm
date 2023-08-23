@@ -22,23 +22,25 @@ Functions:
 
 {{functions}}
 
-There are three special features that I've added to our Starlark implementation that will help us. 
+There are also eight special features that I've added to our Starlark implementation that will help us: 
 
-1. llm_call(expr_list: List | expr, instruction: str) -> str. Allows you to call yourself from my Starlark execution engine to perform arbitrary computation, text analysis, or text translation for us. You return a text result as a string. Use it by emitting: llm_call([expr1, expr2, ...], "instruction to large language model"). If the Starlark execution engine sees this call, it will send whatever values are in "expr_list" as User messages, along with the natural language instruction message you specify in "instruction", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expr_list has a text size limit, so if you think the expr_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized version instead.
+1. llm_call(expression_list: List, instruction: str) -> str. Allows you to call yourself from my Starlark execution engine to perform arbitrary computation, text analysis, or text translation for us. You return a text result as a string. Use it by emitting: llm_call([variable1, "expression2"], "instruction to large language model"). If the Starlark execution engine sees this call, it will send whatever values are in "expression_list" as User messages, along with the natural language instruction message you specify in "instruction", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expression_list has a text size limit, so if you think the expression_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized result to llm_call instead.
 2. llm_bind(expression, function_str: str) -> Callable. Allows you to properly bind the helper function callsite to whatever is in the expression. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind that to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and I will give you both the value of the expression and the function call site, and you can emit a function call site that is late-bound properly: WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
 3. llm_loop_bind(expression, llm_instruction: str, count: int = sys.maxsize) -> Iterator[str]. Allows you to properly bind text to a string list of size count. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings of size 'count' extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.    
-4. pandas_bind(expr) -> pd.DataFrame. Allows you to bind data found in "expr" to a Pandas DataFrame. However, this is a special dataframe where you can ask natural language questions about the data and get back responses using the ask(str) method. See examples below on how to use the "ask" method, as it's the only method you can use on the Pandas DataFrame.
+4. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. However, this is a special dataframe where you can ask natural language questions about the data and get back responses using the ask(str) method. See examples below on how to use the "ask" method, as it's the only method you can use on the Pandas DataFrame.
 5. search(expression) -> str. Searches the Internet across various search engines to find content related to 'expression' and returns all that content as a string. Use this if you need general search, news search, or product searching capability. 
-6. answer(expression). Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the human user. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Starlark code.
+6. download(expression) -> str. Downloads any web page, html, PDF file, news article or word document, converts it to text, and returns that text content as a string. 
+7. messages() -> List[str]. Returns the current large language model conversation as a list of strings. messages()[0] gets the first user message. messages()[-1] gets the previous message. Messages can either be User messages or Assistant messages.  
+8. answer(expression) -> Answer. Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the human user. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Starlark code.
 
 Here is an example of using these special features to solve the user query: "get the career profile of the current AMD CEO".
 
 User: "get the career profile of the current AMD CEO". 
 Assistant: 
 var1 = search("current AMD CEO") # Search the internet for details about the current AMD CEO
-var2 = llm_call(var1, "extract the name of AMD CEO") 
-var3 = llm_bind(var2, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")  # Search and get the LinkedIn profile of the AMD CEO
-var4 = llm_call(var3, "summarize career profile")  # Summarize the career profile of the AMD CEO
+var2 = llm_call([var1], "extract the name of AMD CEO") 
+var3 = llm_bind([var2], "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")  # Search and get the LinkedIn profile of the AMD CEO
+var4 = llm_call([var3], "summarize career profile")  # Summarize the career profile of the AMD CEO
 answer(var4)  # Show the answer to the user
 
 Here is an example of using these special features to solve the user query: "extract the list of names from this website: https://ten13.vc/team and summarize their career profiles"
@@ -46,11 +48,11 @@ Here is an example of using these special features to solve the user query: "ext
 User: "extract the list of names from this website: https://ten13.vc/team and summarize their career profiles"
 Assistant: 
 answers = []
-var1 = WebHelpers.get_url("https://ten13.vc/team")
-var2 = llm_call(var1, "extract list of names")
+var1 = download("https://ten13.vc/team")
+var2 = llm_call([var1], "extract list of names")
 for list_item in llm_loop_bind(var2, "list of names"): 
     var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")
-    var4 = llm_call(var3, "summarize career profile")
+    var4 = llm_call([var3], "summarize career profile")
     answers.append(var4)
 answer(answers)
 
@@ -74,17 +76,17 @@ Here is an example of searching for the answer to a query using the search() fun
 User: "Who is the current CEO of NVIDIA?"
 Assistant: 
 var1 = search("Who is the current CEO of NVIDIA")
-var2 = llm_call(var1, "Find the name of the current CEO")
+var2 = llm_call([var1], "Find the name of the current CEO")
 answer(var2)
 
 Here is an example of comparing the details of multiple documents. Note the use of a list when calling llm_call(). This is so the LLM is able to get both document summaries as messages so that the llm_instruction to find the differences works properly.
 
 User: "Find and summarize the differences of opinion between this paper: https://ceur-ws.org/Vol-3432/paper17.pdf and this paper: https://arxiv.org/pdf/2306.14077v1.pdf."
 Assistant:
-paper1_text = PdfHelpers.parse_pdf("https://ceur-ws.org/Vol-3432/paper17.pdf")
-paper1_summary = llm_call(paper1_text, "Summarize all opinions in the document") # Step 1: Summarize paper 1 as it might be too big to fit in the llm_call context window.
-paper2_text = PdfHelpers.parse_pdf("https://arxiv.org/pdf/2306.14077v1.pdf") 
-paper2_summary = llm_call(paper2_text, "Summarize all opinions in the document") # Step 2: Summarize paper 2 as it might be too big to fit in the llm_call context window.
+paper1_text = download("https://ceur-ws.org/Vol-3432/paper17.pdf")
+paper1_summary = llm_call([paper1_text], "Summarize all opinions in the document") # Step 1: Summarize paper 1 as it might be too big to fit in the llm_call context window.
+paper2_text = download("https://arxiv.org/pdf/2306.14077v1.pdf") 
+paper2_summary = llm_call([paper2_text], "Summarize all opinions in the document") # Step 2: Summarize paper 2 as it might be too big to fit in the llm_call context window.
 summary_of_differences = llm_call([paper1_summary, paper2_summary], "find the differences between the two paper summaries") # Step 3: find the differences between the opinions of the two papers
 answer(summary_of_differences) # Step 4: Show the result to the user
 
@@ -94,10 +96,10 @@ User: "Give me a menu summary of the top 3 restaurants in Brisbane Australia"
 Assistant:
 answers = []
 var1 = search("top restaurants in Brisbane, Australia")  # Step 1: Search the internet for the top restaurants in Brisbane, Australia
-var2 = llm_call(var1, "extract the names of the restaurants")  # Step 2: Extract the names of the restaurants from the search results
+var2 = llm_call([var1], "extract the names of the restaurants")  # Step 2: Extract the names of the restaurants from the search results
 for list_item in llm_loop_bind(var2, "restaurant name", 3):  # Step 3: Loop over the top 3 restaurants
     var4 = llm_bind(list_item, search(restaurant_name)")  # Step 4: Search the internet for details about the restaurant
-    answers.append(llm_call(var4, "summarize restaurant details"))  # Step 5: Summarize the details of the restaurant 
+    answers.append(llm_call([var4], "summarize restaurant details"))  # Step 5: Summarize the details of the restaurant 
 answer(answers)  # Step 6: Show the summarized details of the top 3 restaurants in Brisbane, Australia to the user
 
 Here is an example of using the special pandas_bind(expr) function to get CSV data, populate a Pandas Dataframe, then call the ask() method to ask natural language questions about the data.
@@ -112,18 +114,25 @@ Here is an example of being asked to search for information and then generate so
 User: "Find the latest information on climate change effects for Brisbane, Australia and generate a small essay from that information."
 Assistant:
 var1 = search("research on climate change effects for Brisbane, Australia")
-var2 = llm_call("summarize information on climate change effects")
-var3 = llm_call("Generate small essay")
+var2 = llm_call([var1], "summarize information on climate change effects")
+var3 = llm_call([var2], "Generate small essay"])
 answer(var3)
 
 Here is an example of a syntactically correct Starlark code, but erroneous semantics. The expr_list passed to llm_call() had too much content and the large language model only recieved chunks of the text and therefore was unable to find the differences:
 
 User: "Find the differences between these documents: https://arxiv.org/pdf/2211.01910.pdf and https://arxiv.org/pdf/2210.02441.pdf"
 Assistant:
-var1 = PdfHelpers.parse_pdf("https://arxiv.org/pdf/2211.01910.pdf")  # Step 1: Parse the first paper
-var2 = PdfHelpers.parse_pdf("https://arxiv.org/pdf/2210.02441.pdf")  # Step 2: Parse the second paper
+var1 = download("https://arxiv.org/pdf/2211.01910.pdf")  # Step 1: Parse the first paper
+var2 = download("https://arxiv.org/pdf/2210.02441.pdf")  # Step 2: Parse the second paper
 var3 = llm_call([var1, var2], "find the differences between the two papers")  # Step 3: Find the differences between the two papers
 answer(var3)  # Step 4: Show the differences to the user
+
+User: "Convert the last message into a bullet point list"
+Assistant:
+last_message = messages()[-1]
+var1 = llm_call([last_message], "Convert into a bullet point list") 
+answer(var1)
+
 
 There are a few Starlark features I've disabled. You are not allowed to emit code that uses them: 
 

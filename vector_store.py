@@ -11,8 +11,9 @@ from langchain.text_splitter import (Language, MarkdownTextSplitter,
                                      SpacyTextSplitter, TextSplitter,
                                      TokenTextSplitter)
 
-from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
+from objects import Executor
+from openai_executor import OpenAIExecutor
 
 logging = setup_logging()
 
@@ -20,6 +21,7 @@ logging = setup_logging()
 class VectorStore():
     def __init__(
         self,
+        executor: Executor = OpenAIExecutor(),
         openai_key: str = os.environ.get('OPENAI_API_KEY'),  # type: ignore
         store_filename: str = 'faiss_index',
         chunk_size: int = 500,
@@ -34,6 +36,7 @@ class VectorStore():
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.store_filename: str = store_filename
+        self.executor = executor
 
         if not os.path.exists(self.store_filename):
             from langchain.vectorstores import FAISS
@@ -115,7 +118,7 @@ class VectorStore():
 
         split_texts = text_splitter.split_text(content)
 
-        token_chunk_cost = Helpers.calculate_tokens(split_texts[0])
+        token_chunk_cost = self.executor.calculate_tokens(split_texts[0])
 
         logging.debug('VectorStore.chunk_and_rank document length: {} split_texts: {}'.format(len(content), len(split_texts)))
         chunk_faiss = FAISS.from_texts(split_texts, self.embeddings)
@@ -123,7 +126,7 @@ class VectorStore():
         chunk_k = math.floor(max_tokens / token_chunk_cost)
         result = chunk_faiss.similarity_search_with_relevance_scores(query, k=chunk_k * 5)
 
-        total_tokens = Helpers.calculate_tokens(query)
+        total_tokens = self.executor.calculate_tokens(query)
         return_results = []
 
         def half_str(s):
@@ -131,12 +134,15 @@ class VectorStore():
             return s[:mid]
 
         for doc, rank in result:
-            if total_tokens + Helpers.calculate_tokens(doc.page_content) < max_tokens:
+            if total_tokens + self.executor.calculate_tokens(doc.page_content) < max_tokens:
                 return_results.append((doc.page_content, rank))
-                total_tokens += Helpers.calculate_tokens(doc.page_content)
-            elif half_str(doc.page_content) and total_tokens + Helpers.calculate_tokens(half_str(doc.page_content)) < max_tokens:
+                total_tokens += self.executor.calculate_tokens(doc.page_content)
+            elif (
+                half_str(doc.page_content)
+                and total_tokens + self.executor.calculate_tokens(half_str(doc.page_content)) < max_tokens
+            ):
                 return_results.append((half_str(doc.page_content)[0], rank))
-                total_tokens += Helpers.calculate_tokens(half_str(doc.page_content))
+                total_tokens += self.executor.calculate_tokens(half_str(doc.page_content))
             else:
                 break
         return return_results

@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 from sec_api import ExtractorApi, QueryApi, RenderApi
 
 from helpers.logging_helpers import setup_logging
-from helpers.websearch import WebHelpers
+from helpers.webhelpers import WebHelpers
 
 logging = setup_logging()
 

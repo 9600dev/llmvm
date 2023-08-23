@@ -1,11 +1,8 @@
-import os
-import tempfile
 import unicodedata
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Callable, Dict, Generator
 from urllib.parse import urlparse
 
 import nltk
-import requests
 from bs4 import BeautifulSoup
 from markdownify import MarkdownConverter
 from newspaper import Article
@@ -23,39 +20,39 @@ class IgnoringScriptConverter(MarkdownConverter):
     def convert_script(self, el, text, convert_as_inline):
         return ''
 
+firefox_helpers = FirefoxHelpers()
 
 class WebHelpers():
     @staticmethod
-    def clean_markdown(markdown_text: str) -> str:
-        lines = []
-        blank_counter = 0
-        for line in markdown_text.splitlines():
-            if line == '' and blank_counter == 0:
-                blank_counter += 1
-                lines.append(line)
-
-            elif line == '' and blank_counter >= 1:
-                continue
-
-            elif line == '<div>' or line == '</div>':
-                continue
-
-            elif line == '[]' or line == '[[]]':
-                continue
-
-            elif line == '*' or line == '* ' or line == ' *':
-                continue
-
-            elif line == '&starf;' or line == '&star;' or line == '&nbsp;':
-                continue
-
-            else:
-                lines.append(line)
-                blank_counter = 0
-        return '\n'.join(lines)
-
-    @staticmethod
     def convert_html_to_markdown(html: str) -> str:
+        def clean_markdown(markdown_text: str) -> str:
+            lines = []
+            blank_counter = 0
+            for line in markdown_text.splitlines():
+                if line == '' and blank_counter == 0:
+                    blank_counter += 1
+                    lines.append(line)
+
+                elif line == '' and blank_counter >= 1:
+                    continue
+
+                elif line == '<div>' or line == '</div>':
+                    continue
+
+                elif line == '[]' or line == '[[]]':
+                    continue
+
+                elif line == '*' or line == '* ' or line == ' *':
+                    continue
+
+                elif line == '&starf;' or line == '&star;' or line == '&nbsp;':
+                    continue
+
+                else:
+                    lines.append(line)
+                    blank_counter = 0
+            return '\n'.join(lines)
+
         logging.debug('convert_html_to_markdown_soup')
         soup = BeautifulSoup(html, features='lxml')
 
@@ -63,7 +60,7 @@ class WebHelpers():
             data.decompose()
 
         result = IgnoringScriptConverter().convert_soup(soup)
-        cleaned_result = WebHelpers.clean_markdown(result)
+        cleaned_result = clean_markdown(result)
         return unicodedata.normalize('NFKD', cleaned_result)
 
     @staticmethod
@@ -107,42 +104,18 @@ class WebHelpers():
         return WebHelpers.search_helper(query, searcher.search_news, WebHelpers.get_news_url, pages_to_include)
 
     @staticmethod
-    def get_url_firefox(url: str) -> str:
-        """
-        Extracts the text from a url using the Firefox browser.
-        This is useful for hard to extract text, an exception thrown by the other functions,
-        or when searching/extracting from sites that require logins liked LinkedIn, Facebook, Gmail etc.
-        """
-        return FirefoxHelpers.get_url(url)
-
-    @staticmethod
-    def get_url_firefox_via_pdf(url: str) -> str:
-        """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
-        logging.debug('WebHelpers.get_url_firefox_via_pdf: {}'.format(url))
-        from selenium.webdriver.common.by import By
-
-        firefox = FirefoxHelpers()
-        firefox.goto(url)
-        firefox.wait()
-        pdf_file = firefox.print_pdf()
-        data = PdfHelpers.parse_pdf(pdf_file)
-        return data
-
-    @staticmethod
     def pdf_url_firefox(url: str) -> str:
         """Gets a pdf version of the url using the Firefox browser."""
-        return FirefoxHelpers().pdf_url(url)
+        return firefox_helpers.pdf_url(url)
 
     @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:
         """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
-        from selenium.webdriver.common.by import By
 
-        firefox = FirefoxHelpers()
-        firefox.goto(linkedin_url)
-        firefox.wait_until_func(lambda driver: driver.find_elements(By.XPATH, "//*[contains(text(), 'Experience')]"))
-        pdf_file = firefox.print_pdf()
+        firefox_helpers.goto(linkedin_url)
+        firefox_helpers.wait_until_text('Experience')
+        pdf_file = firefox_helpers.pdf()
         data = PdfHelpers.parse_pdf(pdf_file)
         return data
 
@@ -186,7 +159,7 @@ class WebHelpers():
         return normalized_return
 
     @staticmethod
-    def get_url(url: str, force_firefox: bool = False) -> str:
+    def get_url(url: str) -> str:
         """
         Connects to and downloads the text content from a url and returns the text content.
         Url can be a http or https web url or a filename and directory location.
@@ -206,17 +179,6 @@ class WebHelpers():
             return PdfHelpers.parse_pdf(url)
 
         elif result.scheme == 'http' or result.scheme == 'https':
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # noqa:E501
-            }
-
-            if force_firefox:
-                return WebHelpers.convert_html_to_markdown(WebHelpers.get_url_firefox(url))
-
-            text = requests.get(url, headers=headers, timeout=10, allow_redirects=True).text
-            if text:
-                return WebHelpers.convert_html_to_markdown(text)
-            else:
-                return WebHelpers.convert_html_to_markdown(WebHelpers.get_url_firefox(url))
+            return WebHelpers.convert_html_to_markdown(firefox_helpers.get_url(url))
 
         return ''

@@ -1,3 +1,4 @@
+import ast
 import os
 import pickle
 import subprocess
@@ -16,21 +17,21 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from scipy.spatial.distance import cosine
 
+from ast_parser import Parser
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
-from helpers.helpers import Helpers, PersistentCache
+from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
-from helpers.vector_store import VectorStore
-from helpers.websearch import WebHelpers
-from objects import (Answer, Assistant, AstNode, Content, ExecutionFlow,
-                     Executor, FunctionCall, LambdaVisitor, LLMCall, Message,
-                     Program, StackNode, Statement, System, User,
-                     tree_traverse)
+from helpers.webhelpers import WebHelpers
+from objects import (Answer, Assistant, AstNode, Content, Executor,
+                     FunctionCall, LambdaVisitor, Message, Statement, System,
+                     User)
 from openai_executor import OpenAIExecutor
-from runtime import ExecutionController, Parser
-from starlark_runtime import StarlarkExecutionController
+from persistent_cache import PersistentCache
+from starlark_execution_controller import StarlarkExecutionController
+from vector_store import VectorStore
 
 logging = setup_logging()
 
@@ -55,8 +56,6 @@ def print_response(statements: List[Statement | AstNode]):
             # todo, this is a hack, Assistant not a Statement
             rich.print()
             pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
-        elif isinstance(statement, StackNode):
-            continue
         elif isinstance(statement, Content):
             pprint('', str(statement).strip())
         elif isinstance(statement, System):
@@ -77,12 +76,6 @@ def print_response(statements: List[Statement | AstNode]):
             else:
                 pprint('[bold yellow]FunctionCall[/bold yellow]: ', statement.to_code_call())
                 pprint('', f'  {statement.result()}')
-        elif isinstance(statement, LLMCall):
-            pprint(f'[bold green]{statement.message.role().capitalize()}[/bold green]: ', str(statement.message.message))
-            for message in statement.supporting_messages:
-                pprint(f'[bold green]{message.role().capitalize()}[/bold green]: ', str(message.message))
-            if statement.result():
-                print_response([cast(AstNode, statement.result())])
         else:
             pprint('', str(statement))
 
@@ -90,10 +83,10 @@ def print_response(statements: List[Statement | AstNode]):
 class Repl():
     def __init__(
         self,
-        executors: List[Executor],
+        executor: Executor,
         agents: List[Callable]
     ):
-        self.executors: List[Executor] = executors
+        self.executor = executor
         self.agents: List[Callable] = agents
 
     def open_editor(self, editor: str, initial_text: str) -> str:
@@ -139,14 +132,9 @@ class Repl():
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text) - 1
 
-        executor_contexts = self.executors
-        executor_names = [executor.name() for executor in executor_contexts]
-
-        current_context = 'openai'
-
         # todo: this is a hack, we need to refactor the execution controller
-        execution_controller = StarlarkExecutionController(
-            execution_contexts=executor_contexts,
+        controller = StarlarkExecutionController(
+            executor=self.executor,
             agents=agents,
             cache=PersistentCache('cache/cache.db'),
             edit_hook=None,
@@ -156,12 +144,10 @@ class Repl():
 
         commands = {
             '/exit': 'exit the repl',
-            '/context': 'change the current context',
             '/agents': 'list the available agents',
             '/act': 'load an acting prompt and set to Actor mode. This will similarity search on awesome_prompts.',
             '/sysprompt': 'set the System prompt mode to the supplied prompt.',
             '/tool': 'set back to tool mode [default]',
-            '/any': 'execute the query in all contexts',
             '/clear': 'clear the message history',
             '/cls': 'clear the screen',
             '/delcache': 'delete the persistence cache',
@@ -173,6 +159,7 @@ class Repl():
             '/last': 'clear the conversation except for the last Assistant message',
             '/y': 'yank the last Assistant message to the clipboard using xclip',
             '/direct': 'execute the query in the current context',
+            '/download': 'download content from the specified url into a message and call the LLM',
             '/save': 'serialize the current stack and message history to disk',
             '/load': 'load the current stack and message history from disk',
         }
@@ -220,19 +207,6 @@ class Repl():
                     rich.print('Clearning conversation except last message: {}'.format(message_history[-1]))
                     message_history = message_history[:-1]
 
-                elif query.startswith('/context'):
-                    context = Helpers.in_between(query, '/context', '\n').strip()
-
-                    if context in executor_names:
-                        current_context = context
-                        executor_contexts = [executor for executor in self.executors if executor.name() == current_context]
-                        rich.print('Current context: {}'.format(current_context))
-                    elif context == '':
-                        rich.print([e.name() for e in self.executors])
-                    else:
-                        rich.print('Invalid context: {}'.format(current_context))
-                    continue
-
                 elif query.startswith('/edit_last'):
                     if len(message_history) > 0:
                         message_history[-1].message = Content(self.open_default_editor(str(message_history[-1].message)))
@@ -242,11 +216,11 @@ class Repl():
                     if not edit:
                         rich.print('Enabling AST edit mode')
                         edit = True
-                        execution_controller.edit_hook = self.open_default_editor
+                        controller.edit_hook = self.open_default_editor
                     else:
                         rich.print('Disabling AST edit mode')
                         edit = False
-                        execution_controller.edit_hook = None
+                        controller.edit_hook = None
                     continue
 
                 elif query.startswith('/edit'):
@@ -267,23 +241,25 @@ class Repl():
                     rich.print()
                     compilation_query = Helpers.in_between(query, '/context', '\n').strip()
 
-                    response = executor_contexts[0].execute_with_agents(
-                        call=LLMCall(message=User(Content(compilation_query))),
+                    response = controller.execute_with_agents(
+                        messages=[User(Content(compilation_query))],
                         agents=agents,
                         temperature=0.0,
                     )
                     rich.print()
                     rich.print()
-                    rich.print('LLM execute_with_agents result:')
+                    rich.print('Executor execute_with_agents() result:')
+                    rich.print()
                     rich.print(str(response.message))
                     rich.print()
-                    rich.print('Parser() output:')
-                    program = Parser().parse_program(str(response.message), agents, executor_contexts[0])
-                    tree_traverse(
-                        program,
-                        LambdaVisitor(lambda node: print('{}: {}'.format(type(node), node))),
-                        post_order=False,
-                    )
+                    try:
+                        tree = ast.parse(str(response.message))
+                        rich.print('Python Abstract Syntax Tree:')
+                        rich.print(ast.dump(tree))
+                    except Exception as ex:
+                        rich.print('Failed to compile AST: {}'.format(ex))
+                        rich.print()
+                        rich.print(str(response.message))
                     continue
 
                 elif query.startswith('/save'):
@@ -299,10 +275,6 @@ class Repl():
                     if cache.get('message_history'):
                         cached_history = cast(List[Message], cache.get('message_history'))
                         message_history = cached_history
-                    continue
-
-                elif query.startswith('/any'):
-                    executor_contexts = self.executors
                     continue
 
                 elif query.startswith('/y'):
@@ -329,11 +301,17 @@ class Repl():
 
                     prompt_result = Helpers.tfidf_similarity(actor, (df.act + ' ' + df.processed_prompt).to_list())
 
-                    rich.print('Setting actor mode.')
+                    rich.print()
+                    rich.print('[bold red]Setting actor mode.[/bold red]')
+                    rich.print()
                     rich.print('Prompt: {}'.format(prompt_result))
                     rich.print()
-                    assistant = execution_controller.execute_chat(
-                        messages=message_history + [System(Content(prompt_result)), User(Content(prompt_result))],
+                    assistant = controller.execute_llm_call(
+                        message=User(Content(prompt_result)),
+                        context_messages=[System(Content(prompt_result))] + message_history,
+                        query='',
+                        original_query='',
+                        lifo=True,
                     )
                     print_response([assistant])
                     message_history.append(System(Content(prompt_result)))
@@ -353,8 +331,12 @@ class Repl():
                     rich.print('Setting sysprompt mode.')
                     rich.print('Prompt: {}'.format(sys_prompt))
                     rich.print()
-                    assistant = execution_controller.execute_chat(
-                        messages=message_history + [System(Content(sys_prompt))],
+                    assistant = controller.execute_llm_call(
+                        message=User(Content(sys_prompt)),
+                        context_messages=[System(Content(sys_prompt))] + message_history,
+                        query='',
+                        original_query='',
+                        lifo=True,
                     )
                     print_response([assistant])
                     message_history.append(System(Content(sys_prompt)))
@@ -367,11 +349,33 @@ class Repl():
                     mode = 'tool'
                     continue
 
+                elif query.startswith('/download'):
+                    from bcl import ContentDownloader
+                    url = Helpers.in_between(query, '/download', '\n').strip()
+                    downloader = ContentDownloader(
+                        url,
+                        self.agents,
+                        message_history,
+                        controller.starlark_runtime,
+                        original_code='',
+                        original_query=''
+                    )
+                    content_message = User(Content(downloader.get()))
+                    message_history.append(content_message)
+                    rich.print()
+                    rich.print('Content downloaded into message successfully.')
+                    rich.print()
+                    continue
+
                 elif query.startswith('/direct') or query.startswith('/d ') or mode == 'actor':
-                    if query.startswith('/d '): query = query.replace('/d ', '/direct ')
-                    if not mode == 'actor': query = query[8:].strip()
-                    assistant = execution_controller.execute_chat(
-                        messages=message_history + [User(Content(query))],
+                    if query.startswith('/d '): query = query.replace('/d ', '')
+                    if query.startswith('/direct '): query = query.replace('/direct ', '')
+                    assistant = controller.execute_llm_call(
+                        message=User(Content(query)),
+                        context_messages=message_history,
+                        query='',
+                        original_query='',
+                        lifo=True,
                     )
                     print_response([assistant])
                     message_history.append(User(Content(query)))
@@ -380,18 +384,15 @@ class Repl():
                     continue
 
                 # execute the query
-                results = execution_controller.execute(
-                    LLMCall(
-                        message=User(Content(query)),
-                        supporting_messages=message_history,
-                    )
+                results = controller.execute(
+                    messages=message_history + [User(Content(query))],
                 )
 
                 if results:
                     message_history.append(User(Content(query)))
                     message_history.append(Assistant(Content(str(results[-1].result()))))
                 else:
-                    rich.print('Something went wrong in the execution controller')
+                    rich.print('Something went wrong in the execution controller and no results were returned.')
 
                 rich.print()
                 rich.print('[bold green]User:[/bold green] {}'.format(query))
@@ -409,15 +410,9 @@ class Repl():
                 console.print_exception(max_frames=10)
 
 agents = [
-    WebHelpers.get_url,
-    WebHelpers.get_url_firefox,
-    # WebHelpers.get_news_url,
-    # WebHelpers.get_content_by_search,
-    # WebHelpers.get_news_by_search,
     WebHelpers.search_linkedin_profile,
     WebHelpers.get_linkedin_profile,
     EdgarHelpers.get_latest_form_text,
-    PdfHelpers.parse_pdf,
     MarketHelpers.get_stock_price,
     MarketHelpers.get_market_capitalization,
     EmailHelpers.send_email,
@@ -425,67 +420,49 @@ agents = [
 ]
 
 def start(
-    context: Optional[str],
+    executor: Executor,
     prompt: Optional[str],
-    verbose: bool
+    verbose: bool,
 ):
-    openai_key = str(os.environ.get('OPENAI_API_KEY'))
-    execution_environments = []
-
-    # def langchain_executor():
-    #    openai_executor = LangChainExecutor(openai_key, verbose=verbose)
-    #    return openai_executor
-
-    def openai_executor():
-        openai_executor = OpenAIExecutor(openai_key, verbose=verbose, cache=PersistentCache('cache/cache.db'))
-        return openai_executor
-
-    executors = {
-        'openai': openai_executor(),
-        # 'langchain': langchain_executor(),
-    }
-
-    if context:
-        execution_environments.append(executors[context])
-    else:
-        execution_environments.append(list(executors.values()))
-
     if not prompt:
-        repl = Repl(execution_environments, agents=agents)
+        repl = Repl(executor, agents=agents)
         repl.repl()
     else:
-        controller = ExecutionController(
-            execution_environments,
+        controller = StarlarkExecutionController(
+            executor=executor,
             agents=agents,
             vector_store=VectorStore(),
         )
 
         results = controller.execute(
-            LLMCall(
-                message=User(Content(prompt))
-            ))
-
+            messages=[User(Content(prompt))]
+        )
         print_response(results)  # type: ignore
 
 
 @click.command()
-@click.option('--context', type=click.Choice(['openai', 'langchain', 'local']), required=False, default='openai')
+@click.option('--executor', type=click.Choice(['openai', 'langchain', 'local']), required=False, default='openai')
 @click.option('--prompt', type=str, required=False, default='')
 @click.option('--verbose', type=bool, default=True)
 def main(
-    context: Optional[str],
+    executor: Optional[str],
     prompt: Optional[str],
     verbose: bool,
 ):
     if not os.environ.get('OPENAI_API_KEY'):
         raise Exception('OPENAI_API_KEY environment variable not set')
 
-    if not verbose:
-        import logging as logging_library
-        logging_library.getLogger().setLevel(logging_library.ERROR)
+    openai_key = str(os.environ.get('OPENAI_API_KEY'))
+
+    def openai_executor():
+        openai_executor = OpenAIExecutor(openai_key, verbose=verbose, cache=PersistentCache('cache/cache.db'))
+        return openai_executor
+
+    if executor == 'langchain' or executor == 'local':
+        raise NotImplementedError('not implemented yet')
 
     start(
-        context,
+        openai_executor(),
         prompt,
         verbose)
 
