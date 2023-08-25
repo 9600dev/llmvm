@@ -114,15 +114,20 @@ Downloading web content (html, PDF's etc), and searching the web is done through
 ## Install
 
 * Install pyenv: ```curl https://pyenv.run | bash```
-* ```pyenv install 3.11.4```
-* ```pyenv virtualenv 3.11.4 llmvm```
+  * ```pyenv install 3.11.4```
+  * ```pyenv virtualenv 3.11.4 llmvm```
+  * ```pyenv local llmvm```
 * Install poetry: ```curl -sSL https://install.python-poetry.org | python3 -```
-* ```poetry config virtualenvs.prefer-active-python true```
-* ```poetry install```
+  * ```poetry config virtualenvs.prefer-active-python true```
+  * ```poetry install```
+* Edit config.yaml
+  * cp config_example.yaml config.yaml
+  * vim config.yaml
 * Build and install FAISS
   * ```git submodule update --init --recursive```
   * ```cd faiss```
   * ```cmake -DFAISS_ENABLE_GPU=ON -DCUDAToolkit_INCLUDE_DIR=/usr/include -DCUDAToolkit_ROOT=/usr/lib/cuda -DCMAKE_CXX_STANDARD=11 -DCMAKE_CXX_STANDARD_REQUIRED=ON -B build .```
+  * ```cd build```
   * ```make -C faiss -j faiss```
   * ```make -C faiss -j swigfaiss```
   * ```cd build/faiss/python```
