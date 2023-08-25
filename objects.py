@@ -209,6 +209,17 @@ class Assistant(Message):
     def __str__(self):
         return f'{self.message}'
 
+    def __add__(self, other):
+        other_message = str(other)
+
+        assistant = Assistant(
+            message=Content(str(self.message) + other_message),
+            messages_context=self._messages_context,
+            system_context=self._system_context,
+            llm_call_context=self._llm_call_context,
+        )
+        return assistant
+
     def __repr__(self):
         return f'Assistant({self.message} {self.error})'
 

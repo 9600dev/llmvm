@@ -1,4 +1,5 @@
 import os
+import re
 import unicodedata
 from typing import Callable, Dict, Generator
 from urllib.parse import urlparse
@@ -49,6 +50,9 @@ class WebHelpers():
                 elif line == '&starf;' or line == '&star;' or line == '&nbsp;':
                     continue
 
+                elif '(data:image' in line and ')' in line:
+                    # remove data:image
+                    lines.append(re.sub(r'\(data:image[^\)]+\)', '', line))
                 else:
                     lines.append(line)
                     blank_counter = 0

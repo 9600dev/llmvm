@@ -45,15 +45,59 @@ class OpenAIExecutor(Executor):
 
     def calculate_tokens(
             self,
-            messages: List[Message] | List[Dict[str, str]] | str, extra_str: str = '') -> int:
+            messages: List[Message] | List[Dict[str, str]] | str, extra_str: str = ''
+    ) -> int:
+        # obtained from: https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
+        def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
+            """Return the number of tokens used by a list of messages."""
+            try:
+                encoding = tiktoken.encoding_for_model(model)
+            except KeyError:
+                print("Warning: model not found. Using cl100k_base encoding.")
+                encoding = tiktoken.get_encoding("cl100k_base")
+            if model in {
+                "gpt-3.5-turbo-0613",
+                "gpt-3.5-turbo-16k-0613",
+                "gpt-4-0314",
+                "gpt-4-32k-0314",
+                "gpt-4-0613",
+                "gpt-4-32k-0613",
+                }:
+                tokens_per_message = 3
+                tokens_per_name = 1
+            elif model == "gpt-3.5-turbo-0301":
+                tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
+                tokens_per_name = -1  # if there's a name, the role is omitted
+            elif "gpt-3.5-turbo" in model:
+                print("Warning: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
+                return num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613")
+            elif "gpt-4" in model:
+                print("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
+                return num_tokens_from_messages(messages, model="gpt-4-0613")
+            else:
+                raise NotImplementedError(
+                    f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""
+                )
+            num_tokens = 0
+            for message in messages:
+                num_tokens += tokens_per_message
+                for key, value in message.items():
+                    num_tokens += len(encoding.encode(value))
+                    if key == "name":
+                        num_tokens += tokens_per_name
+            num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
+            return num_tokens
+
         if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
             dict_messages = [Message.to_dict(m) for m in messages]  # type: ignore
             dict_messages.append(Message.to_dict(User(Content(extra_str))))
-            return len(tiktoken.encoding_for_model(self.model).encode(json.dumps(dict_messages)))
+            return num_tokens_from_messages(dict_messages, model=self.model)
         elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
-            return len(tiktoken.encoding_for_model(self.model).encode(json.dumps(messages)))  # type: ignore
+            return num_tokens_from_messages(messages, model=self.model)
+        elif isinstance(messages, str):
+            return num_tokens_from_messages([Message.to_dict(User(Content(messages)))], model=self.model)
         else:
-            return len(tiktoken.encoding_for_model(self.model).encode(str(messages) + extra_str))
+            raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
     def name(self) -> str:
         return 'openai'
