@@ -8,26 +8,24 @@ from typing import Callable, Dict, List, Optional, cast
 
 import click
 import pandas as pd
-import pandas_gpt
 import rich
-import spacy
 from prompt_toolkit import prompt
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
+from rich.console import Console
+from rich.markdown import Markdown
 from scipy.spatial.distance import cosine
 
-from ast_parser import Parser
+from container import Container
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
 from helpers.helpers import Helpers
-from helpers.logging_helpers import setup_logging
+from helpers.logging_helpers import setup_logging, suppress_logging
 from helpers.market import MarketHelpers
-from helpers.pdf import PdfHelpers
 from helpers.webhelpers import WebHelpers
 from objects import (Answer, Assistant, AstNode, Content, Executor,
-                     FunctionCall, LambdaVisitor, Message, Statement, System,
-                     User)
+                     FunctionCall, Message, Statement, System, User)
 from openai_executor import OpenAIExecutor
 from persistent_cache import PersistentCache
 from starlark_execution_controller import StarlarkExecutionController
@@ -80,6 +78,25 @@ def print_response(statements: List[Statement | AstNode]):
             pprint('', str(statement))
 
 
+class StreamPrinter():
+    def __init__(self, role: str):
+        self.buffer = ''
+        self.console = Console()
+        self.markdown_mode = False
+        self.role = role
+        self.started = False
+
+    def contains_token(s, tokens):
+        return any(token in s for token in tokens)
+
+    def write(self, string: str):
+        if not self.started and self.role:
+            self.console.print(f'[bold green]{self.role}[/bold green]: ', end='')
+            self.started = True
+        self.buffer += string
+        self.console.print(f'[bright_black]{string}[/bright_black]', end='')
+
+
 class Repl():
     def __init__(
         self,
@@ -124,6 +141,11 @@ class Repl():
         kb = KeyBindings()
         edit = False
         mode = 'tool'
+        debug = False
+        stream = True
+
+        if os.path.exists(Container().get('firefox_download_dir') + '/mozilla.pdf'):
+            os.remove(Container().get('firefox_download_dir') + '/mozilla.pdf')
 
         @kb.add('c-e')
         def _(event):
@@ -162,6 +184,8 @@ class Repl():
             '/download': 'download content from the specified url into a message and call the LLM',
             '/save': 'serialize the current stack and message history to disk',
             '/load': 'load the current stack and message history from disk',
+            '/debug': 'toggle debug mode',
+            '/stream': 'toggle stream mode',
         }
 
         self.help(commands)
@@ -224,9 +248,18 @@ class Repl():
                     continue
 
                 elif query.startswith('/edit'):
+                    def role(message: Message):
+                        if isinstance(message, User):
+                            return 'User'
+                        elif isinstance(message, Assistant):
+                            return 'Assistant'
+                        elif isinstance(message, System):
+                            return 'System'
+                        else:
+                            return 'Unknown'
                     rich.print('Editing message history')
                     txt_message_history = '\n\n'.join(
-                        [f"{str(type(message))}: {str(message.message)}" for message in message_history]
+                        [f"{role(message)}: {str(message.message)}" for message in message_history]
                     )
                     self.open_default_editor(txt_message_history)
                     continue
@@ -312,6 +345,7 @@ class Repl():
                         query='',
                         original_query='',
                         lifo=True,
+                        stream_handler=StreamPrinter('').write if stream else None,
                     )
                     print_response([assistant])
                     message_history.append(System(Content(prompt_result)))
@@ -349,6 +383,26 @@ class Repl():
                     mode = 'tool'
                     continue
 
+                elif query.startswith('/debug'):
+                    if debug:
+                        debug = False
+                        rich.print('Disabling debug mode.')
+                        suppress_logging()
+                    else:
+                        debug = True
+                        rich.print('Enabling debug mode.')
+                        setup_logging()
+                    continue
+
+                elif query.startswith('/stream'):
+                    if stream:
+                        stream = False
+                        rich.print('Disabling streaming mode.')
+                    else:
+                        stream = True
+                        rich.print('Enabling streaming mode.')
+                    continue
+
                 elif query.startswith('/download'):
                     from bcl import ContentDownloader
                     url = Helpers.in_between(query, '/download', '\n').strip()
@@ -376,7 +430,9 @@ class Repl():
                         query='',
                         original_query='',
                         lifo=True,
+                        stream_handler=StreamPrinter('').write if stream else None,
                     )
+                    rich.print()
                     print_response([assistant])
                     message_history.append(User(Content(query)))
                     message_history.append(assistant)

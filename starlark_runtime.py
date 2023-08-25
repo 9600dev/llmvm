@@ -2,6 +2,7 @@ import ast
 import copy
 import inspect
 import math
+import os
 import random
 import sys
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, cast
@@ -20,7 +21,7 @@ from helpers.logging_helpers import console_debug, setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.webhelpers import WebHelpers
-from objects import (Answer, Assistant, Content, Controller, Executor,
+from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
                      FunctionCall, FunctionCallMeta, Message, PandasMeta,
                      Statement, User)
 from vector_store import VectorStore
@@ -473,8 +474,14 @@ class StarlarkRuntime:
                 return []
             return result[:count]
 
-    def answer(self, expr):
-        messages: List[Message] = []
+    def answer(self, expr) -> Answer:
+        # if we have a list of answers, maybe just return them.
+        if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
+            answer = Answer(
+                conversation=self.messages_list,
+                result='\n\n'.join([str(self.statement_to_message(assistant).message) for assistant in expr])
+            )
+            return answer
 
         if not self.answer_error_correcting:
             # todo: the 'rewriting' logic down below helps with the prettyness of
@@ -485,7 +492,7 @@ class StarlarkRuntime:
                     template={
                         'original_query': self.original_query,
                     }),
-                context_messages=[self.statement_to_message(expr)],
+                context_messages=[self.statement_to_message(expr)],  # type: ignore
                 query=self.original_query,
                 original_query=self.original_query,
                 prompt_filename='prompts/starlark/answer_nocontext.prompt',
@@ -520,7 +527,6 @@ class StarlarkRuntime:
                         self.agents,
                         self.vector_store
                     ).run(error_correction, self.original_query)
-                    return
 
         # finally.
         context_messages: List[Message] = [
@@ -528,7 +534,7 @@ class StarlarkRuntime:
                 context=value,
             ) for key, value in self.globals_dict.items() if key.startswith('var')
         ]
-        context_messages.append(self.statement_to_message(expr))
+        context_messages.append(self.statement_to_message(expr))  # type: ignore
 
         answer_assistant = self.executor.execute_llm_call(
             message=Helpers.load_and_populate_message(

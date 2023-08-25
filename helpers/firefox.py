@@ -52,7 +52,7 @@ def read_netscape_cookies(cookies_txt_filename: str):
 class FirefoxHelpers(metaclass=Singleton):
     def __init__(self):
         profile_directory = Container().get('firefox_profile')
-        prefs = {
+        self.prefs = {
             "profile": profile_directory,
             "print.always_print_silent": True,
             "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
@@ -61,20 +61,25 @@ class FirefoxHelpers(metaclass=Singleton):
             "browser.download.folderList": 2,
             "browser.helperApps.neverAsk.saveToDisk": "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream",
         }
+        self._page = None
 
-        self.playwright = sync_playwright().start()
-        self.browser = self.playwright.firefox.launch(
-            headless=False,
-            firefox_user_prefs=prefs
-        )
+    @property
+    def page(self):
+        if self._page is None:
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.firefox.launch(
+                headless=False,
+                firefox_user_prefs=self.prefs
+            )
 
-        context = self.browser.new_context()
-        cookie_file = Container().get('firefox_cookies')
-        if cookie_file:
-            result = read_netscape_cookies(cookie_file)
-            context.add_cookies(result)
+            context = self.browser.new_context()
+            cookie_file = Container().get('firefox_cookies')
+            if cookie_file:
+                result = read_netscape_cookies(cookie_file)
+                context.add_cookies(result)
+            self._page = context.new_page()
 
-        self.page = context.new_page()
+        return self._page
 
     def goto(self, url: str):
         if self.page.url != url:
@@ -98,8 +103,15 @@ class FirefoxHelpers(metaclass=Singleton):
         return self.get_html()
 
     def pdf(self) -> str:
+        self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
         self.page.evaluate("() => { window.print(); }")
         self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
+
+        # we have to wait for the pdf to be produced
+        counter = 0
+        while not os.path.exists('mozilla.pdf') and counter < 7:
+            time.sleep(1)
+            counter += 1
 
         if os.path.exists('mozilla.pdf'):
             return os.path.abspath('mozilla.pdf')

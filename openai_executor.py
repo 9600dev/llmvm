@@ -66,6 +66,7 @@ class OpenAIExecutor(Executor):
         max_completion_tokens: int = 1024,
         temperature: float = 0.2,
         chat_format: bool = True,
+        stream: bool = False,
     ) -> Dict:
         message_tokens = self.calculate_tokens(messages)
         if message_tokens > self.max_prompt_tokens(max_completion_tokens):
@@ -86,6 +87,7 @@ class OpenAIExecutor(Executor):
                     max_tokens=max_completion_tokens,
                     functions=functions,
                     messages=messages,
+                    stream=stream,
                 )
             else:
                 # for whatever reason, [] functions generates an InvalidRequestError
@@ -94,6 +96,7 @@ class OpenAIExecutor(Executor):
                     temperature=temperature,
                     max_tokens=max_completion_tokens,
                     messages=messages,
+                    stream=stream,
                 )
             return response  # type: ignore
         else:
@@ -110,6 +113,7 @@ class OpenAIExecutor(Executor):
         messages: List[Message],
         temperature: float = 0.2,
         max_completion_tokens: int = 2048,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> Assistant:
         def last(predicate, iterable):
             result = [x for x in iterable if predicate(x)]
@@ -141,8 +145,30 @@ class OpenAIExecutor(Executor):
             max_completion_tokens=max_completion_tokens,
             chat_format=True,
             temperature=temperature,
+            stream=True if stream_handler else False,
         )
         logging.debug('OpenAIExecutor.execute() finished in {}ms'.format((dt.datetime.now() - start_time).microseconds / 1000))
+
+        # handle the stream stuff
+        if stream_handler:
+            text_response = ''
+            for chunk in chat_response:
+                s = chunk.choices[0].delta.get('content', '')
+                stream_handler(s)
+                text_response += s
+
+            stream_handler('\n')
+
+            messages_list.append({'role': 'assistant', 'content': text_response})
+            conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
+
+            assistant = Assistant(
+                message=conversation[-1].message,
+                messages_context=conversation
+            )
+
+            if self.cache: self.cache.set(messages, assistant)
+            return assistant
 
         if len(chat_response) == 0:
             return Assistant(

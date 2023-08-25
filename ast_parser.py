@@ -60,6 +60,9 @@ class Parser():
             call = call[4:]
 
         function_name = Helpers.in_between(call, '', '(')
+        if ' ' in function_name or ',' in function_name:
+            return None
+
         function_arg_str = Helpers.in_between(call, '(', ')')
         function_args = []
 

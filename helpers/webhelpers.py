@@ -1,3 +1,4 @@
+import os
 import unicodedata
 from typing import Callable, Dict, Generator
 from urllib.parse import urlparse
@@ -117,6 +118,7 @@ class WebHelpers():
         firefox_helpers.wait_until_text('Experience')
         pdf_file = firefox_helpers.pdf()
         data = PdfHelpers.parse_pdf(pdf_file)
+        os.remove(pdf_file)
         return data
 
     @staticmethod

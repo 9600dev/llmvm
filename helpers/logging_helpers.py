@@ -53,16 +53,6 @@ def suppress_logging():
 
 def console_debug(callee, role, message):
     def split_string_by_width(input_string, width=20):
-        splits = [input_string[i:i + width] for i in range(0, len(input_string), width)]
-        result = []
-        for r in splits:
-            if '\n' in r:
-                result.extend(r.split('\n'))
-            else:
-                result.append(r)
-        return result
-
-    def split_string_by_width_2(input_string, width=20):
         result = ''
         width_counter = 0
 
@@ -90,7 +80,7 @@ def console_debug(callee, role, message):
         text_column = width - callee_column - role_column - 4
 
         # message_lines = message.split('\n')
-        message_lines = split_string_by_width_2(message, width=text_column)
+        message_lines = split_string_by_width(message, width=text_column)
         header = True
         counter = 1
         max_lines = 20

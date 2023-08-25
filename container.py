@@ -16,6 +16,8 @@ class Singleton (type):
 
 class Container(metaclass=Singleton):
     def __init__(self, config_file: str = 'config.yaml'):
+        self.config_file = config_file
+
         # try finding the filename
         def find_file(filename, search_path='.'):
             for root, dir, files in os.walk(search_path):
@@ -23,10 +25,10 @@ class Container(metaclass=Singleton):
                     return os.path.join(root, filename)
             return None
 
+        self.config_file = find_file(self.config_file) or self.config_file  # type: ignore
+
         if not os.path.exists(self.config_file) and not find_file(self.config_file):  # type: ignore
             raise ValueError('configuration_file is not found {} or TRADER_CONFIG set incorrectly'.format(config_file))
-
-        self.config_file = find_file(self.config_file) or self.config_file  # type: ignore
 
         with open(self.config_file, 'r') as conf_file:
             self.configuration: Dict = yaml.load(conf_file, Loader=yaml.FullLoader)

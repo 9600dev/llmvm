@@ -16,4 +16,4 @@ For arguments you can't bind, bind those arguments with "None" and then use a St
 
 def foo("bound_1", "bound_2", None) # Include a question you want to ask here to figure out the third argument. 
 
-Reply only with the Starlark bounded function call and the question after the comment "#" token if necessary. Do not use natural language to explain yourself, and do not apologize. 
+Reply only with the bounded Starlark function call code and your question after the comment "#" token if you have bounded an argument to None. Do not explain yourself, and do not apologize.  

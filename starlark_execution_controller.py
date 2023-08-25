@@ -93,6 +93,7 @@ class StarlarkExecutionController(Controller):
         completion_tokens: int = 2048,
         temperature: float = 0.0,
         lifo: bool = False,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> Assistant:
         def __llm_call(
             user_message: Message,
@@ -105,12 +106,17 @@ class StarlarkExecutionController(Controller):
                 prompt_filename = ''
             # execute the call to check to see if the Answer satisfies the original query
             messages: List[Message] = copy.deepcopy(context_messages)
-            messages.append(user_message)
+
+            # don't append the user message if it's empty
+            if str(user_message.message).strip() != '':
+                messages.append(user_message)
+
             try:
                 assistant: Assistant = executor.execute(
                     messages,
                     max_completion_tokens=completion_tokens,
                     temperature=temperature,
+                    stream_handler=stream_handler,
                 )
                 console_debug(prompt_filename, 'User', str(user_message.message))
                 console_debug(prompt_filename, 'Assistant', str(assistant.message))
@@ -205,7 +211,8 @@ class StarlarkExecutionController(Controller):
                         'query': str(query),
                         'document_chunk': chunk,
                     },
-                    completion_tokens=completion_tokens)
+                    completion_tokens=completion_tokens
+                )
 
                 decision_criteria.append(str(assistant_similarity.message))
                 logging.debug('map_reduce_required, query_or_task: {}, response: {}'.format(

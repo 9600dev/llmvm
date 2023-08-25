@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import time
 from typing import Any, Callable, Dict, Generator, List, Optional, cast
 from urllib.parse import urlparse
@@ -14,7 +15,8 @@ from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
 from helpers.search import SerpAPISearcher
 from helpers.webhelpers import WebHelpers
-from objects import Assistant, Content, Executor, FunctionCall, Message, User
+from objects import (Assistant, Content, Executor, FunctionCall, Message,
+                     System, User)
 from starlark_runtime import StarlarkRuntime
 
 logging = setup_logging()
@@ -278,7 +280,6 @@ class FunctionBindable():
         expr,
         func: str,
     ) -> Generator['FunctionBindable', None, None]:
-
         bound = False
         global_counter = 0
         messages: List[Message] = []
@@ -318,6 +319,10 @@ class FunctionBindable():
                     f"The data in the next message was instantiated via this Starlark code: {astunparse.unparse(node.value)}"
                 )
 
+        messages.append(System(Content(
+            '''You are a Starlark compiler and code generator. You generate parsable Starlark code.'''
+        )))
+
         # get the binder prompt message
         messages.append(self.__bind_helper(
             func=func,
@@ -346,12 +351,12 @@ class FunctionBindable():
             """
         )))
 
-        counter = 2  # we start at 2 because we've already added the expr and the function definition prompt
+        counter = 3  # we start at 3 because we've already added the system, expr and the function definition prompt
         assistant_counter = 0
 
         while global_counter < 3:
             # try and bind the callsite without executing
-            while not bound and counter < 6:
+            while not bound and counter < 8:
 
                 llm_bind_result = self.starlark_runtime.executor.execute_llm_call(
                     message=User(Content()),  # we can pass an empty message here and the context_messages contain everything
@@ -359,7 +364,23 @@ class FunctionBindable():
                     query=self.original_query,
                     original_query=self.original_query,
                 )
-                bindable = str(llm_bind_result.message).replace('def ', '')
+
+                bindable = str(llm_bind_result.message)
+
+                # the LLM can get confused and generate a function definition instead of a callsite
+                # or enclose the result in ```python ... ``` code blocks.
+                if 'def ' in bindable:
+                    bindable = bindable.replace('def ', '')
+
+                if '```python' in bindable:
+                    match = re.search(r'```python([\s\S]*?)```', bindable)
+                    if match:
+                        bindable = match.group(1).replace('python', '').strip()
+
+                if '```starlark' in bindable:
+                    match = re.search(r'```starlark([\s\S]*?)```', bindable)
+                    if match:
+                        bindable = match.group(1).replace('starlark', '').strip()
 
                 # get function definition
                 parser = Parser()
@@ -386,8 +407,22 @@ class FunctionBindable():
                     if counter > len(messages) - assistant_counter:
                         # we've run out of messages, so we'll just use the original code
                         break
-                if 'None' not in str(bindable) and function_call:
+
+                elif 'None' not in str(bindable) and function_call:
                     break
+                else:
+                    # no function_call result, so bump the counter
+                    messages.insert(0, Assistant(message=Content(bindable)))
+                    messages.insert(0, User(message=Content(
+                        """Please try harder to bind the callsite.
+                        Look thoroughly through the previous messages for data and then reply with your best guess at the bounded
+                        callsite. Reply only with Starlark code that can be parsed by the Starlark compiler.
+                        Do not apologize. Do not explain yourself. If you have previously replied with natural language,
+                        it's likely I could not compile it. Please reply with only Starlark code.
+                        """
+                    )))
+                    assistant_counter += 1
+                    counter += 1
 
             # Using the previous messages, What is the company name associated with Steve Baxter?
             # If you've answered the question above, can you rebind the callsite?
@@ -440,7 +475,10 @@ class FunctionBindable():
                     globals_dictionary=globals_dict,
                 )
 
-        raise ValueError('could not bind and or execute the function: {} expr: {}'.format(func, expr))
+        # we should probably return uncertain_or_error here.
+        # raise ValueError('could not bind and or execute the function: {} expr: {}'.format(func, expr))
+        self._result = 'could not bind and or execute the function: {} expr: {}'.format(func, expr)
+        yield self
 
     def bind(
         self,

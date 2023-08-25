@@ -21,6 +21,7 @@ class Executor(ABC):
         messages: List['Message'],
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ) -> 'Assistant':
         pass
 
@@ -342,13 +343,13 @@ class FunctionCall(Call):
 class Answer(Statement):
     def __init__(
         self,
-        conversation: List[AstNode] = [],
+        conversation: List[Message] = [],
         result: object = None,
         error: object = None,
         ast_text: Optional[str] = None,
     ):
         super().__init__(ast_text)
-        self.conversation: List[AstNode] = conversation
+        self.conversation: List[Message] = conversation
         self._result = result
         self.error = error
 
