@@ -32,11 +32,11 @@ answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the us
 
 Execution of this code proceeds step-by-step until completion, or error. Let's walk through each line:
 
-```var1 = download("https://ten13.vc/team")```
+#### ```var1 = download("https://ten13.vc/team")```
 
 The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/starlark_runtime.py#L392C12-L392C12) function is part of a set of user definable base class libraries that the LLM knows about: download() llm_call() llm_loop_bind(), llm_bind(), answer() and so on. download() fires up an instance of Firefox via [Playwright](https://playwright.dev/) to download web or PDF content and convert them to Markdown.
 
-```var2 = llm_call([var1], "extract list of names")  # Step 2: Extract the list of names```
+#### ```var2 = llm_call([var1], "extract list of names")  # Step 2: Extract the list of names```
 
 llm_call(expression_list, instruction) -> str takes an expression list, packages those expressions up into a stack of LLM User messages, and passes them back to the LLM to perform the instruction. If the stack of Messages is too big to fit in the context window, [faiss](https://github.com/facebookresearch/faiss) is used to chunk and rank message content via the following pseudocode:
 
@@ -49,7 +49,7 @@ llm_call(expression_list, instruction) -> str takes an expression list, packages
 
 The map-reduce is done per-message, allowing for multiple expressions to be chunked and ranked independently, which is useful for queries like "download document 1, and document 2 and compare and contrast".
 
-```for list_item in llm_loop_bind(var2, "list of names"):  # Step 3: Loop over the list of names```
+#### ```for list_item in llm_loop_bind(var2, "list of names"):  # Step 3: Loop over the list of names```
 
 llm_loop_bind(expression, instruction) takes an arbitrary expression, converts it to a string, then has an LLM translate that string into a Starlark list ["one", "two", "three", ...].
 
@@ -70,7 +70,7 @@ In this particular case, ```var2``` has the following string, the response from 
 
 ```llm_loop_bind()``` takes this arbitrary text and converts it into a Starlark parsable list: ["Steve Baxter", "Stew Glynn", "An Vo", "Alexander Cohen", "Margot McQueen", "Sophie Robertson", "Mel Harrison", "Elise Cannell", "Seamus Crawford", "Alexander Barrat"]
 
-```var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")```
+#### ```var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")```
 
 [llm_bind(expression, function_definition_str)](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/bcl.py#L276) is one of the more interesting functions. It takes an expression and a string based function definition and tries to bind arbitrary data to the function arguments (turning the definition into a callsite). It performs these steps:
 
@@ -81,8 +81,7 @@ In this particular case, ```var2``` has the following string, the response from 
   * (in this particular case, the company Steve Baxter works for is defined in the original webpage download() string, and when the LLM is passed the locals() dictionary, is able to self-answer the question of "which company Steve Baxter works for" and thus bind the callsite properly).
   * -> WebHelpers.search_linkedin_profile("Steve", "Baxter", "Transition Level Investments")
 
-
-```answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the user```
+#### ```answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the user```
 
 answer() is a collection of possible answers that either partially solve, or fully solve for the original query. Once code is finished executing, each answer found in answers() is handed to the LLM for guidance on how effective it is at solving/answering the query. The result is then shown to the user, and in this case, it's a career summary of each of the individuals from [TEN13](https://ten13.vc) extracted from LinkedIn.
 
