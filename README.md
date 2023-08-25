@@ -130,7 +130,7 @@ Downloading web content (html, PDF's etc), and searching the web is done through
   * ```cd build```
   * ```make -C faiss -j faiss```
   * ```make -C faiss -j swigfaiss```
-  * ```cd build/faiss/python```
+  * ```cd python```
   * ```python setup.py install```
 * Run the llmvm repl:
   * ```python repl.py```
