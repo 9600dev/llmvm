@@ -39,8 +39,6 @@ def print_response(statements: List[Statement | AstNode]):
 
     def pprint(prepend: str, s: str):
         markdown_tokens = ['###', '* ', '](', '```']
-        from rich.console import Console
-        from rich.markdown import Markdown
         console = Console()
 
         if contains_token(s, markdown_tokens):

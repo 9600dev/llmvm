@@ -155,8 +155,67 @@ EDITOR  # set this to your favorite terminal editor (vim or emacs or whatever) s
 * Write some docs.
 * Integrate better usage of config.yaml.
 
+## Another Example
+
+```python
+prompt>> Get me the latest 10-Q for NVDA and summarize the financial results.
+```
+...
+
+> Financial Results for NVDA Stock:
+>
+> - Revenue: In the first quarter of fiscal year 2024, NVDA reported a total revenue of $7.19 billion, representing a 13% decrease compared to the same quarter in the previous fiscal year. This decline in revenue was
+> primarily driven by lower revenue from the Graphics segment, partially offset by higher revenue from the Compute & Networking segment.
+>
+> - Gross Margin: The gross margin for the first quarter of fiscal year 2024 was 64.6%, slightly lower than the gross margin of 65.6% in the first quarter of fiscal year 2023. This decrease in gross margin was primarily
+> due to a shift in product mix.
+>
+> - Operating Income: NVDA's operating income for the first quarter of fiscal year 2024 was $2.14 billion, reflecting a 14% increase compared to the first quarter of fiscal year 2023. This increase in operating income
+> was primarily driven by lower operating expenses.
+>
+> - Net Income: The net income for the first quarter of fiscal year 2024 was $2.04 billion, representing a 26% increase compared to the first quarter of fiscal year 2023. This increase in net income was primarily due to
+> higher operating income and lower income tax expense.
+>
+> Segment Results:
+>
+> 1. Compute & Networking Segment: The revenue from the Compute & Networking segment in the first quarter of fiscal year 2024 was $4.46 billion, indicating a 22% increase compared to the first quarter of fiscal year
+> 2023. This growth in revenue was primarily driven by higher revenue from the Data Center accelerated computing platform and networking solutions.
+>
+> 2. Graphics Segment: The revenue from the Graphics segment in the first quarter of fiscal year 2024 was $2.73 billion, reflecting a 41% decrease compared to the first quarter of fiscal year 2023. This decline in
+> revenue was primarily due to lower revenue from the GeForce GPUs for gaming.
+>
+> 3. All Other Category: The All Other category had an operating loss of $1.07 billion in the first quarter of fiscal year 2024, compared to an operating loss of $2.21 billion in the first quarter of fiscal year 2023.
+> This decrease in operating loss was primarily due to lower operating expenses.
+>
+> Liquidity and Capital Resources:
+>
+> - As of April 30, 2023, NVDA had cash, cash equivalents, and marketable securities totaling $15.07 billion.
+>
+> - During the first quarter of fiscal year 2024, NVDA paid $99 million in cash dividends to its shareholders.
+>
+> - NVDA has a share repurchase program, and as of April 30, 2023, the company was authorized to repurchase an additional $7.23 billion of shares through December 2023.
+>
+> - NVDA believes that its existing cash, cash equivalents, and marketable securities, along with cash generated from operations, will be sufficient to meet its anticipated cash needs for at least the next 12 months.
+>
+> Key Business Developments:
+>
+> - During the first quarter of fiscal year 2024, NVDA made several key business developments, including the announcement of the NVIDIA Grace CPU designed for giant-scale AI and high-performance computing, the expansion
+> of the partnership with Mercedes-Benz for developing an in-vehicle computing system and AI infrastructure for autonomous driving, the introduction of the NVIDIA Omniverse Enterprise software platform for building and
+> operating metaverse and 3D internet applications, and the launch of the NVIDIA CMP 170HX, a cryptocurrency mining processor.
+>
+> Outlook:
+>
+> Looking ahead, NVDA expects continued growth in its Data Center business driven by demand for AI, high-performance computing, and networking solutions. The company also anticipates a recovery in its Gaming business as
+> supply constraints ease. Additionally, NVDA is excited about the opportunities in autonomous vehicles, robotics, and the metaverse. The company will continue to invest in research and development to drive innovation
+> and expand its addressable market.
+>
+> Please note that this summary is based solely on the provided information and does not include any additional analysis or interpretation.
+>
+>
+
 ---
 ...
+
 
 
 # Deprecated

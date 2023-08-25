@@ -193,16 +193,16 @@ class StarlarkExecutionController(Controller):
                 query=query,
                 content=str(context_message.message),
                 chunk_token_count=256,
-                chunk_overlap=10,
-                max_tokens=self.executor.max_prompt_tokens() - self.executor.calculate_tokens([message])
+                chunk_overlap=0,
+                max_tokens=self.executor.max_prompt_tokens() - self.executor.calculate_tokens([message]) - 32
             )
 
             # randomize and sample from the similarity_chunks
-            twenty_percent = math.floor(len(similarity_chunks) * 0.2)
+            twenty_percent = math.floor(len(similarity_chunks) * 0.15)
             similarity_chunks = random.sample(similarity_chunks, min(len(similarity_chunks), twenty_percent))
 
             decision_criteria: List[str] = []
-            for chunk, _ in similarity_chunks:
+            for chunk, _ in similarity_chunks[:5]:
                 assistant_similarity = __llm_call_prompt(
                     prompt_filename='prompts/document_chunk.prompt',
                     context_messages=[],
@@ -273,9 +273,7 @@ class StarlarkExecutionController(Controller):
                 map_reduce_prompt_tokens = self.executor.calculate_tokens(
                     [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))]
                 )
-                chunk_size = (self.executor.max_prompt_tokens() - map_reduce_prompt_tokens) - (
-                    self.executor.calculate_tokens([message]) - 32
-                )
+                chunk_size = self.executor.max_prompt_tokens() - map_reduce_prompt_tokens - self.executor.calculate_tokens([message]) - 32
 
                 chunks = self.vector_store.chunk(
                     content=str(context_message.message),

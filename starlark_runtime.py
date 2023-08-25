@@ -175,7 +175,7 @@ class StarlarkRuntime:
             result_prompt = Helpers.load_and_populate_prompt(
                 prompt_filename=statement_result_prompts['function_meta'],
                 template={
-                    'function_call': context.callsite,
+                    'function_callsite': context.callsite,
                     'function_result': str(context.result()),
                 }
             )
