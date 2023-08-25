@@ -137,6 +137,7 @@ Ensure you have the following environment variables set:
 OPENAPI_API_KEY  # your openai API key
 SERPAPI_API_KEY  # https://serpapi.com/ API key for web and news searches.
 SEC_API_KEY  # if you want to use SEC's Edgar api to get 10K's and 10Q's etc, get an account at https://sec-api.io/
+EDITOR  # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Starlark code before it gets executed etc.
 ```
 
 ## Things to do
