@@ -269,15 +269,15 @@ Explanation of nodes:
 
 ```function_call```: A function call you would like the virtual machine to execute for you. The function_call can only specify a function that is listed in "List of Functions:" below. There are no other functions the virtual machine can call. The result of the function call is pushed on top of the stack.
 
-```answer```a direct answer or result from you that does not need further evaluation. answer nodes will be shown to the user, should be relavent to the users problem or question. answer nodes are not pushed on the stack. You can also use an answer node to pop all elements off the stack and into an answer node that will be shown to the user in response to their question or problem. To do this, use answer(stack()). You can also pop the top of the stack into an answer node using answer(stack()).
+```answer```a direct answer or result from you that does not need further evaluation. answer nodes will be shown to the user, should be relevant to the users problem or question. answer nodes are not pushed on the stack. You can also use an answer node to pop all elements off the stack and into an answer node that will be shown to the user in response to their question or problem. To do this, use answer(stack()). You can also pop the top of the stack into an answer node using answer(stack()).
 
-```dataframe```: use this to specify a list e.g. ["1", "2", "3"] or ["hello", "world"] or use dataframe(stack()) to coherce the all elements on the stack into a dataframe.
+```dataframe```: use this to specify a list e.g. ["1", "2", "3"] or ["hello", "world"] or use dataframe(stack()) to coerce the all elements on the stack into a dataframe.
 
 ```stack```: represents all the elements or data on the execution stack. This node will pop all elements off the stack.
 
-```stack_pop```: this node will pop off 'n' elements from the stack. Typically you only need to pop 1 element off, using stack_pop(1). You can pop more elements off the stack, eg 2 elements: stack_pop(2).
+```stack_pop```: this node will pop off 'n' elements from the stack. Typically, you only need to pop 1 element off, using stack_pop(1). You can pop more elements off the stack, eg. 2 elements: stack_pop(2).
 
-```set```: this node pops one element from the stack and copies the element into the supplied variable name. E.g set("var1") will pop the top of the stack and copy the element to "var1". It does not push anything on the stack. Use this node for storage of results for use at a later part of AST execution.
+```set```: this node pops one element from the stack and copies the element into the supplied variable name. Eg. set("var1") will pop the top of the stack and copy the element to "var1". It does not push anything on the stack. Use this node for storage of results for use at a later part of AST execution.
 
 ```get```: this node retrieves the element in the supplied variable name and pushes it on to the stack. i.e. get("var1") will get the node in "var1" and push it on the stack.
 
