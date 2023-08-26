@@ -85,6 +85,8 @@ class StarlarkRuntime:
                         return wrapper
                 raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
+        from bcl import BCL
+
         self.answers = []
         self.locals_dict = {}
         self.globals_dict = {}
@@ -99,6 +101,7 @@ class StarlarkRuntime:
             self.locals_dict[agent.__name__] = agent
         self.locals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
         self.locals_dict['PdfHelpers'] = CallWrapper(self, PdfHelpers)
+        self.locals_dict['BCL'] = CallWrapper(self, BCL)
         self.locals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
         self.locals_dict['EmailHelpers'] = CallWrapper(self, EmailHelpers)
         self.locals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
@@ -215,7 +218,8 @@ class StarlarkRuntime:
             # todo
             return User(Content(context._result.result()))  # type: ignore
 
-        raise ValueError(f"{str(context)} not supported")
+        logging.debug('statement_to_message() unusual type, context is: {}'.format(context))
+        return User(Content(str(context)))
 
     def rewrite_answer_error_correction(
         self,
@@ -481,6 +485,39 @@ class StarlarkRuntime:
                 conversation=self.messages_list,
                 result='\n\n'.join([str(self.statement_to_message(assistant).message) for assistant in expr])
             )
+            return answer
+
+        # if we have a FunctionCallMeta object, it's likely we've called a helper function
+        # and we're just keen to return that.
+        # Handing this to the LLM means that call results that are larger than the context window
+        # will end up being lost or transformed into the smaller output context window.
+        # deal with base types
+        if (
+            isinstance(expr, FunctionCallMeta)
+            or isinstance(expr, float)
+            or isinstance(expr, int)
+            or isinstance(expr, str)
+            or isinstance(expr, bool)
+            or expr is None
+        ):
+            answer_assistant = self.executor.execute_llm_call(
+                message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/answer_primitive.prompt',
+                    template={
+                        'function_output': str(expr),
+                        'original_query': self.original_query,
+                    }),
+                context_messages=[],  # type: ignore
+                query=self.original_query,
+                original_query=self.original_query,
+                prompt_filename='prompts/starlark/answer_primitive.prompt',
+                completion_tokens=512,
+            )
+            answer = Answer(
+                conversation=self.messages_list,
+                result=str(answer_assistant.message),
+            )
+            self.answers.append(answer)
             return answer
 
         if not self.answer_error_correcting:

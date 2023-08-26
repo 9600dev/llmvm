@@ -153,7 +153,7 @@ class WebHelpers():
     @staticmethod
     def get_news_url(url: str) -> str:
         """Extracts the news text from a given url"""
-        logging.debug('WebHelpers.get_news_article: {}'.format(url))
+        logging.debug('WebHelpers.get_news_url: {}'.format(url))
         nltk.download('punkt', quiet=True)
 
         config = Configuration()

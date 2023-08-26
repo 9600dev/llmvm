@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from scipy.spatial.distance import cosine
 
+from bcl import BCL
 from container import Container
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
@@ -57,7 +58,7 @@ def print_response(statements: List[Statement | AstNode]):
         elif isinstance(statement, System):
             pprint('[bold red]System[/bold red]: ', str(statement.message))
         elif isinstance(statement, User):
-            pprint('[bold blue]User[/bold blue]: ', str(statement.message))
+            pprint('[bold green]User[/bold green]: ', str(statement.message))
         elif isinstance(statement, Answer):
             if isinstance(statement.result(), Statement):
                 print_response([cast(Statement, statement.result())])
@@ -464,11 +465,12 @@ class Repl():
                 console.print_exception(max_frames=10)
 
 agents = [
+    BCL.datetime,
     WebHelpers.search_linkedin_profile,
     WebHelpers.get_linkedin_profile,
-    EdgarHelpers.get_latest_form_text,
+    EdgarHelpers.get_report,
     MarketHelpers.get_stock_price,
-    MarketHelpers.get_market_capitalization,
+    MarketHelpers.get_current_market_capitalization,
     EmailHelpers.send_email,
     EmailHelpers.send_calendar_invite,
 ]

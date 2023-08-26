@@ -288,6 +288,21 @@ class FunctionCallMeta(Call):
     def __str__(self):
         return str(self._result)
 
+    def __add__(self, other):
+        return self._result + other
+
+    def __sub__(self, other):
+        return self._result - other
+
+    def __mul__(self, other):
+        return self._result * other
+
+    def __div__(self, other):
+        return self._result / other
+
+    def __getattr__(self, name):
+        return getattr(self._result, name)
+
 
 class PandasMeta(Call):
     def __init__(

@@ -1,0 +1,14 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+You helpfully take the result of a Starlark function call and present it nicely to a user. I'll give you a query, and the output of the function, please generate a nice output that responds to the query using the function output.
+
+Function output:
+
+{{function_output}}
+
+Query: 
+
+"{{original_query}}"
+

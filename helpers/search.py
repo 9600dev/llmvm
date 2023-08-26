@@ -1,4 +1,5 @@
 
+import datetime as dt
 import json
 import os
 from abc import ABC, abstractmethod
@@ -8,6 +9,7 @@ import rich
 from serpapi import BingSearch, GoogleSearch
 
 from helpers.logging_helpers import setup_logging
+from helpers.search_hn import SearchHN
 
 logging = setup_logging()
 
@@ -36,6 +38,57 @@ class SerpAPISearcher(Searcher):
         self.interval = interval
         self.page_limit = page_limit
         self.search_count = 0
+
+    def __search_hackernews_helper(
+        self,
+        query: str,
+    ) -> List[Dict]:
+        hn = SearchHN()
+        # clean up the query
+        if 'site:' in query:
+            query = query.split('site:')[0].strip()
+
+        return hn.search(query).created_before(dt.datetime.now() - dt.timedelta(days=365)).stories().get()  # type: ignore
+
+    def search_hackernews(
+        self,
+        query: str,
+    ) -> List[Dict]:
+        stories = self.__search_hackernews_helper(query)
+        results = []
+        for story in stories:
+            results.append({
+                'title': story['title'],
+                'url': story['url'],
+                'author': story['author'],
+                'created_at': story['created_at'],
+            })
+        return results
+
+    def search_hackernews_comments(
+        self,
+        query: str,
+        token_length: int = 8192,
+    ) -> List[Dict]:
+        stories = self.__search_hackernews_helper(query)
+        result = []
+        token_count = 0
+        if stories:
+            # only get the top result.
+            for story in stories:
+                comments = story.get_story_comments()  # type: ignore
+                for comment in comments:
+                    token_count += len(comment.comment_text.split(' '))
+                    result.append({
+                        'title': stories[0].title,  # type: ignore
+                        'url': stories[0].url,  # type: ignore
+                        'author': comment.author,
+                        'comment_text': comment.comment_text,
+                        'created_at': comment.created_at,
+                    })
+                if token_count > token_length:
+                    break
+        return result
 
     def search_internet(
         self,

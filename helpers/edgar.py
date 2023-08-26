@@ -28,7 +28,7 @@ class EdgarHelpers():
     def get_form_urls(
         ticker: str,
         form_type: Optional[str] = None,
-        start_date: dt.datetime = dt.datetime(2023, 1, 1),
+        start_date: dt.datetime = dt.datetime.now() - dt.timedelta(days=180),
         end_date: dt.datetime = dt.datetime.now(),
     ):
         sec_api_key = os.environ.get('SEC_API_KEY')
@@ -135,6 +135,31 @@ class EdgarHelpers():
             return ''
 
     @staticmethod
+    def get_report(
+        symbol: str,
+        form_type: str,
+        date: dt.datetime,
+    ) -> str:
+        """
+        Gets the 10-Q, 10-K or 8-K report text for a given company symbol/ticker for a given date.
+        This is useful to get financial information for a company,
+        their current strategy, investments and risks. Use form_type = '' to
+        get the latest form of any type. form_type can be '10-Q', '10-K' or '8-K'.
+        """
+        logging.debug('get_report: {} {} {}'.format(symbol, form_type, str(date)))
+
+        urls = EdgarHelpers.get_form_urls(
+            symbol,
+            form_type,
+            end_date=date + dt.timedelta(days=1)
+        )
+        if not urls:
+            logging.debug('No urls found for {}'.format(symbol))
+            return ''
+
+        return EdgarHelpers.get_form_text(urls[0][2], form_type)
+
+    @staticmethod
     def get_latest_form_text(
         symbol: str,
         form_type: str,
@@ -162,4 +187,3 @@ class EdgarHelpers():
         latest_form = urls[-1][2]
         form_type = urls[-1][1]
         return EdgarHelpers.get_form_text(latest_form, form_type)
-

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import ast
+import datetime as dt
 import re
 import time
+from datetime import timedelta
 from typing import Any, Callable, Dict, Generator, List, Optional, cast
 from urllib.parse import urlparse
 
 import astunparse
+from dateutil.parser import parse
+from dateutil.relativedelta import relativedelta
 
 from ast_parser import Parser
 from helpers.firefox import FirefoxHelpers
@@ -20,6 +24,55 @@ from objects import (Assistant, Content, Executor, FunctionCall, Message,
 from starlark_runtime import StarlarkRuntime
 
 logging = setup_logging()
+
+class BCL():
+    @staticmethod
+    def __last_day_of_quarter(year, quarter):
+        start_month = 3 * quarter - 2
+        end_month = start_month + 2
+
+        if end_month > 12:
+            end_month = 12
+
+        last_day = (dt.datetime(year, end_month, 1) + timedelta(days=31)).replace(day=1) - timedelta(days=1)
+        return last_day
+
+    @staticmethod
+    def __parse_relative_datetime(relative_expression: str) -> dt.datetime:
+        if relative_expression.startswith('Q'):
+            quarter = int(relative_expression[1:])
+            return BCL.__last_day_of_quarter(dt.datetime.now().year, quarter)
+
+        if 'now' in relative_expression:
+            return dt.datetime.now()
+
+        parts = relative_expression.split()
+
+        if len(parts) != 2:
+            return parse(relative_expression)
+
+        value = int(parts[0])
+        unit = parts[1].lower()
+
+        if unit == "days":
+            return dt.datetime.now() + timedelta(days=value)
+        elif unit == "months":
+            return dt.datetime.now() + relativedelta(months=value)
+        elif unit == "years":
+            return dt.datetime.now() + relativedelta(years=value)
+        elif unit == "hours":
+            return dt.datetime.now() + timedelta(hours=value)
+        else:
+            return parse(relative_expression)
+
+    @staticmethod
+    def datetime(expr) -> dt.datetime:
+        """
+        Returns a datetime object from a string using datetime.strftime().
+        Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days")
+        """
+        return BCL.__parse_relative_datetime(str(expr))
+
 
 class ContentDownloader():
     def __init__(
@@ -93,6 +146,7 @@ class Searcher():
         self.original_code = original_code
         self.original_query = original_query
         self.starlark_runtime = starlark_runtime
+        self.query_expansion = 2
 
         self.parser = WebHelpers.get_url
         self.ordered_snippets: List = []
@@ -115,7 +169,12 @@ class Searcher():
             original_query=self.original_query,
         )
 
-        queries = eval(str(query_expander.message))[:3]
+        queries = eval(str(query_expander.message))[:self.query_expansion]
+
+        # the first query is the original query
+        if self.query not in queries:
+            queries.insert(0, self.query)
+            queries = queries[:self.query_expansion]
 
         def yelp_to_text(reviews: Dict[Any, Any]) -> str:
             return_str = f"{reviews['title']} in {reviews['neighborhood']}."
@@ -123,13 +182,24 @@ class Searcher():
             return_str += f"{reviews['reviews']}"
             return return_str
 
+        def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> str:
+            if not results:
+                return ''
+
+            title = results[0]['title']
+            url = results[0]['url']
+            return_str = f'For the Hacker News article: {title} which has a url of: {url}, the comments are as follows:\n\n'
+            for comment in results[:num_comments]:
+                return_str += f"{comment['author']} said {comment['comment_text']}.\n"
+            return return_str
+
         engines = {
-            'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
-            'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': WebHelpers.get_news_url, 'description': 'a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
-            'Google Product Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a product search engine that is excellent at finding the prices of products, finding products that match descriptions of products, and finding where to buy a particular product.'},  # noqa:E501
-            'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
-            'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
-            'Hacker News Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'a search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles.'},  # noqa:E501
+            'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
+            'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': WebHelpers.get_news_url, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
+            'Google Product Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'Google Product Search is a product search engine that is excellent at finding the prices of products, finding products that match descriptions of products, and finding where to buy a particular product.'},  # noqa:E501
+            'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
+            'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
+            'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
         }  # noqa:E501
 
         # classify the search engine
@@ -173,13 +243,21 @@ class Searcher():
             yelp_result = SerpAPISearcher().search_yelp(query_result, location)
             return yelp_to_text(yelp_result)
 
+        if 'Hacker' in engine:
+            result = SerpAPISearcher().search_hackernews_comments(queries[0])
+            return hackernews_comments_to_text(result)
+
         for query in queries:
             search_results.extend(list(searcher(query))[:10])
 
         import random
 
         snippets = {
-            str(random.randint(0, 100000)): {'title': result['title'], 'snippet': result['snippet'], 'link': result['link']}
+            str(random.randint(0, 100000)): {
+                'title': result['title'],
+                'snippet': result['snippet'] if 'snippet' in result else '',
+                'link': result['link']
+            }
             for result in search_results
         }
 

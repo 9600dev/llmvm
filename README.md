@@ -149,9 +149,10 @@ EDITOR  # set this to your favorite terminal editor (vim or emacs or whatever) s
 
 * Error handling still needs a lot of work.
 * ChatGPT doesn't conform to system prompts specifying how to shape the output of the response. Saying things like "Only reply with Starlark code" and "don't apologize" tends to work randomly, or not at all. Need to fix this.
-* Integration with local LLM's via llama.cpp etc.
+* Integration with local LLM's via [llama.cpp](https://github.com/ggerganov/llama.cpp) etc.
 * More complicated natural language queries tends to make the LLM generate unwieldy code. Need statement by statement execution, passing the LLM the already executed code, asking it if it wishes to re-write the later part of the code (sort of like continuation passing style execution).
-* Lots of bug fixes. The code is pretty hacky.
+* Playwright integration with LLM -- it should be straight forward to have cooperative execution for the task of proceeding through web app flows (login, do stuff, extract info, logout).
+* Fix bugs and refactor. The code is pretty hacky.
 * Write some docs.
 * Integrate better usage of config.yaml.
 
