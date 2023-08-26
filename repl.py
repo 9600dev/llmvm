@@ -48,11 +48,22 @@ def print_response(statements: List[Statement | AstNode]):
         else:
             console.print(f'{prepend}{s}')
 
+    def fire_helper(string: str):
+        if 'digraph' and 'edge' and 'node' in string:
+            # fire up graphvis.
+            graphvis_code = 'digraph' + Helpers.in_between(string, 'digraph', '}') + '}\n\n'
+            temp_file = tempfile.NamedTemporaryFile(mode='w+')
+            temp_file.write(graphvis_code)
+            temp_file.flush()
+            cmd = 'dot -Tx11 {}'.format(temp_file.name)
+            subprocess.run(cmd, text=True, shell=True, env=os.environ)
+
     for statement in statements:
         if isinstance(statement, Assistant):
             # todo, this is a hack, Assistant not a Statement
             rich.print()
             pprint('[bold green]Assistant[/bold green]: ', str(statement.message))
+            fire_helper(str(statement.message))
         elif isinstance(statement, Content):
             pprint('', str(statement).strip())
         elif isinstance(statement, System):
