@@ -547,13 +547,19 @@ class StarlarkRuntime:
             elif 'None' in str(answer_assistant.message) and "[##]" in str(answer_assistant.message):
                 logging.debug("Found comment in answer_nocontext: {}".format(answer_assistant.message))
 
+                # add the message to answers, just in case the user wants to see it.
+                self.answers.append(Answer(
+                    conversation=self.messages_list,
+                    result=str(self.statement_to_message(expr).message)  # type: ignore
+                ))
+
                 self.answer_error_correcting = True
                 error_correction = self.rewrite_answer_error_correction(
                     query=self.original_query,
                     starlark_code=self.original_code,
                     error=str(expr),
                     globals_dictionary=self.globals_dict,
-                )
+                    )
 
                 if error_correction and 'None' not in error_correction:
                     # try and perform the error correction
