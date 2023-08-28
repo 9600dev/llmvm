@@ -175,11 +175,13 @@ class Repl():
         message_history: List[Message] = []
 
         commands = {
+            '/tool': '[default] sets mode to Starlark runtime tool mode, where the LLM is asked to interact with tools',
+            '/direct': 'sets mode to "direct" sending messages stack directly to LLM',
+            '/mode': 'show the current mode',
             '/exit': 'exit the repl',
-            '/agents': 'list the available agents',
-            '/act': 'load an acting prompt and set to Actor mode. This will similarity search on awesome_prompts.',
+            '/agents': 'list the available helper functions',
+            '/act': 'load an acting prompt and set to "actor" mode. This will similarity search on awesome_prompts.',
             '/sysprompt': 'set the System prompt mode to the supplied prompt.',
-            '/tool': 'set back to tool mode [default]',
             '/clear': 'clear the message history',
             '/cls': 'clear the screen',
             '/delcache': 'delete the persistence cache',
@@ -190,8 +192,7 @@ class Repl():
             '/compile': 'ask LLM to compile query into AST and print to screen',
             '/last': 'clear the conversation except for the last Assistant message',
             '/y': 'yank the last Assistant message to the clipboard using xclip',
-            '/direct': 'execute the query in the current context',
-            '/download': 'download content from the specified url into a message and call the LLM',
+            '/download': 'download content from the specified url into the message history',
             '/save': 'serialize the current stack and message history to disk',
             '/load': 'load the current stack and message history from disk',
             '/debug': 'toggle debug mode',
@@ -217,6 +218,37 @@ class Repl():
                     self.help(commands)
                     continue
 
+                elif query.startswith('/tool'):
+                    rich.print('Setting tool mode.')
+                    mode = 'tool'
+                    continue
+
+                elif query.startswith('/direct'):
+                    if query.startswith('/d '): query = query.replace('/d ', '/direct ')
+
+                    if query.startswith('/direct '):
+                        # just execute the query, don't change the mode
+                        direct_query = query.replace('/direct ', '')
+                        assistant = controller.execute_llm_call(
+                            message=User(Content(direct_query)),
+                            context_messages=message_history,
+                            query='',
+                            original_query='',
+                            lifo=True,
+                            stream_handler=StreamPrinter('').write if stream else None,
+                        )
+
+                        rich.print()
+                        print_response([assistant])
+                        message_history.append(User(Content(query)))
+                        message_history.append(assistant)
+                        rich.print()
+                        continue
+                    else:
+                        mode = 'direct'
+                        rich.print('Setting direct to LLM mode')
+                        continue
+
                 elif query.startswith('/exit') or query == 'exit':
                     sys.exit(0)
 
@@ -233,7 +265,7 @@ class Repl():
                     cache.set('message_history', [])
                     continue
 
-                elif query.startswith('/messages') or query.startswith('/conversations') or query.startswith('/m '):
+                elif query.startswith('/messages') or query.startswith('/m '):
                     print_response(message_history)  # type: ignore
                     continue
 
@@ -278,6 +310,10 @@ class Repl():
                     rich.print('Agents:')
                     for agent in self.agents:
                         rich.print('  [bold]{}[/bold]'.format(agent))
+                    continue
+
+                elif query.startswith('/mode'):
+                    rich.print('Mode: {}'.format(mode))
                     continue
 
                 elif query.startswith('/compile') or query.startswith('/c'):
@@ -326,44 +362,47 @@ class Repl():
                     continue
 
                 elif query.startswith('/act'):
-                    df = pd.read_csv('prompts/awesome_prompts.csv')
+                    if query.startswith('/act'):
+                        df = pd.read_csv('prompts/awesome_prompts.csv')
 
-                    actor = Helpers.in_between(query, '/act', '\n').strip()
-                    if actor == '':
-                        from rich.console import Console
-                        from rich.table import Table
-                        console = Console()
-                        table = Table(show_header=True, header_style="bold magenta")
-                        for column in df.columns:
-                            table.add_column(column)
-                        for _, row in df.iterrows():  # type: ignore
-                            table.add_row(*row)
+                        actor = Helpers.in_between(query, '/act', '\n').strip()
+                        if actor == '':
+                            from rich.console import Console
+                            from rich.table import Table
+                            console = Console()
+                            table = Table(show_header=True, header_style="bold magenta")
+                            for column in df.columns:
+                                table.add_column(column)
+                            for _, row in df.iterrows():  # type: ignore
+                                table.add_row(*row)
 
-                        console.print(table)
+                            console.print(table)
+                            continue
+
+                        prompt_result = Helpers.tfidf_similarity(actor, (df.act + ' ' + df.processed_prompt).to_list())
+
+                        rich.print()
+                        rich.print('[bold red]Setting actor mode.[/bold red]')
+                        rich.print()
+                        rich.print('Prompt: {}'.format(prompt_result))
+                        rich.print()
+
+                        assistant = controller.execute_llm_call(
+                            message=User(Content(prompt_result)),
+                            context_messages=[System(Content(prompt_result))] + message_history,
+                            query='',
+                            original_query='',
+                            lifo=True,
+                            stream_handler=StreamPrinter('').write if stream else None,
+                        )
+                        print_response([assistant])
+
+                        message_history.append(System(Content(prompt_result)))
+                        message_history.append(User(Content(prompt_result)))
+                        message_history.append(assistant)
+                        rich.print()
+                        mode = 'actor'
                         continue
-
-                    prompt_result = Helpers.tfidf_similarity(actor, (df.act + ' ' + df.processed_prompt).to_list())
-
-                    rich.print()
-                    rich.print('[bold red]Setting actor mode.[/bold red]')
-                    rich.print()
-                    rich.print('Prompt: {}'.format(prompt_result))
-                    rich.print()
-                    assistant = controller.execute_llm_call(
-                        message=User(Content(prompt_result)),
-                        context_messages=[System(Content(prompt_result))] + message_history,
-                        query='',
-                        original_query='',
-                        lifo=True,
-                        stream_handler=StreamPrinter('').write if stream else None,
-                    )
-                    print_response([assistant])
-                    message_history.append(System(Content(prompt_result)))
-                    message_history.append(User(Content(prompt_result)))
-                    message_history.append(assistant)
-                    rich.print()
-                    mode = 'actor'
-                    continue
 
                 elif query.startswith('/sysprompt'):
                     mode = 'actor'
@@ -386,11 +425,6 @@ class Repl():
                     message_history.append(System(Content(sys_prompt)))
                     message_history.append(assistant)
                     rich.print()
-                    continue
-
-                elif query.startswith('/tool'):
-                    rich.print('Setting tool mode.')
-                    mode = 'tool'
                     continue
 
                 elif query.startswith('/debug'):
@@ -431,10 +465,19 @@ class Repl():
                     rich.print()
                     continue
 
-                elif query.startswith('/direct') or query.startswith('/d ') or mode == 'actor':
-                    if query.startswith('/d '): query = query.replace('/d ', '')
-                    if query.startswith('/direct '): query = query.replace('/direct ', '')
-                    assistant = controller.execute_llm_call(
+                # execute the query in either tool mode (default) or direct/actor mode
+                results = None
+                if mode == 'tool':
+                    results = controller.execute(
+                        messages=message_history + [User(Content(query))],
+                    )
+                    if results:
+                        message_history.append(User(Content(query)))
+                        message_history.append(Assistant(Content(str(results[-1].result()))))
+                    else:
+                        rich.print('Something went wrong in the execution controller and no results were returned.')
+                else:
+                    assistant_result = controller.execute_llm_call(
                         message=User(Content(query)),
                         context_messages=message_history,
                         query='',
@@ -442,31 +485,15 @@ class Repl():
                         lifo=True,
                         stream_handler=StreamPrinter('').write if stream else None,
                     )
-                    rich.print()
-                    print_response([assistant])
                     message_history.append(User(Content(query)))
-                    message_history.append(assistant)
-                    rich.print()
-                    continue
-
-                # execute the query
-                results = controller.execute(
-                    messages=message_history + [User(Content(query))],
-                )
-
-                if results:
-                    message_history.append(User(Content(query)))
-                    message_history.append(Assistant(Content(str(results[-1].result()))))
-                else:
-                    rich.print('Something went wrong in the execution controller and no results were returned.')
+                    message_history.append(assistant_result)
+                    results = [assistant_result]
 
                 rich.print()
                 rich.print('[bold green]User:[/bold green] {}'.format(query))
                 rich.print()
                 print_response(results)  # type: ignore
                 rich.print()
-
-                # add the user message to the conversation
 
             except KeyboardInterrupt:
                 print("\nKeyboardInterrupt")
