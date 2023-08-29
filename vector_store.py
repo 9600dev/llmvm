@@ -6,9 +6,7 @@ from typing import List, Optional, Tuple
 from langchain.docstore.document import Document
 from langchain.document_loaders import TextLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.text_splitter import (Language, MarkdownTextSplitter,
-                                     RecursiveCharacterTextSplitter,
-                                     SpacyTextSplitter, TextSplitter,
+from langchain.text_splitter import (MarkdownTextSplitter, TextSplitter,
                                      TokenTextSplitter)
 
 from helpers.logging_helpers import setup_logging
@@ -65,7 +63,7 @@ class VectorStore():
             data = text_loader.load()
             documents = text_loader.load_and_split()
 
-        text_splitter = SpacyTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
+        text_splitter = TokenTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
         split_texts = text_splitter.split_documents(documents)
         self.load_store().add_documents(split_texts)
         self.load_store().save_local(self.store_filename)

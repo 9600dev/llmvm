@@ -9,12 +9,9 @@ from enum import Enum, IntEnum
 from itertools import cycle, islice
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
-import dill
 import guidance
 import nest_asyncio
 import pandas as pd
-import spacy
-import tiktoken
 from docstring_parser import parse
 from guidance.llms import LLM
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -29,19 +26,6 @@ def response_writer(callee, message):
 
 
 class Helpers():
-    @staticmethod
-    def similarity(query: str, text: str):
-        try:
-            nlp = spacy.load('en_core_web_sm')
-        except Exception:
-            subprocess.call('python -m spacy download en_core_web_sm', shell=True)
-            nlp = spacy.load('en_core_web_sm')
-        doc1 = nlp(query)
-        doc2 = nlp(text)
-        similarity = doc1.similarity(doc2)
-        print(similarity)
-        return similarity
-
     @staticmethod
     def tfidf_similarity(query: str, text_list: list[str]):
         lowered_list = []

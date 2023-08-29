@@ -197,6 +197,9 @@ class Repl():
             '/load': 'load the current stack and message history from disk',
             '/debug': 'toggle debug mode',
             '/stream': 'toggle stream mode',
+            '/local': 'set openai.api_base and openai.api_version to settings in config.yaml',
+            '/openai_api_base': 'set the openai api base url for local LLM (e.g http://127.0.0.1:8000/v1)',
+            '/openai_api_version': 'set the openai api model version for local LLM',
         }
 
         self.help(commands)
@@ -218,12 +221,42 @@ class Repl():
                     self.help(commands)
                     continue
 
+                elif query.startswith('/openai_api_base'):
+                    base_url = Helpers.in_between(query, '/openai_api_base', '\n').strip()
+                    if base_url == '':
+                        rich.print('No base url specified.')
+                        continue
+                    import openai
+                    openai.api_base = base_url
+                    rich.print('Setting openai.api_base to {}'.format(base_url))
+                    continue
+
+                elif query.startswith('/local'):
+                    api_base = Container().get('local_openai_api_base')
+                    api_version = Container().get('local_openai_api_version')
+                    import openai
+                    openai.api_base = api_base
+                    openai.api_version = api_version
+                    rich.print('Setting openai.api_base to {}'.format(api_base))
+                    rich.print('Setting openai.api_version to {}'.format(api_version))
+                    continue
+
+                elif query.startswith('/openai_api_version'):
+                    version = Helpers.in_between(query, '/openai_api_version', '\n').strip()
+                    if version == '':
+                        rich.print('No version specified.')
+                        continue
+                    import openai
+                    openai.api_version = version
+                    rich.print('Setting openai.api_version to {}'.format(version))
+                    continue
+
                 elif query.startswith('/tool'):
                     rich.print('Setting tool mode.')
                     mode = 'tool'
                     continue
 
-                elif query.startswith('/direct'):
+                elif query.startswith('/direct') or query.startswith('/d '):
                     if query.startswith('/d '): query = query.replace('/d ', '/direct ')
 
                     if query.startswith('/direct '):
@@ -535,13 +568,17 @@ def start(
 
 
 @click.command()
-@click.option('--executor', type=click.Choice(['openai', 'langchain', 'local']), required=False, default='openai')
+@click.option('--executor', type=click.Choice(['openai', 'local']), required=False, default='openai')
 @click.option('--prompt', type=str, required=False, default='')
 @click.option('--verbose', type=bool, default=True)
+@click.option('--local_openai_base', type=str, required=False, default='https://127.0.0.1:8000/v1')
+@click.option('--local_openai_version', type=str, required=False, default='')
 def main(
     executor: Optional[str],
     prompt: Optional[str],
     verbose: bool,
+    local_openai_base: Optional[str],
+    local_openai_version: Optional[str],
 ):
     if not os.environ.get('OPENAI_API_KEY'):
         raise Exception('OPENAI_API_KEY environment variable not set')
@@ -552,8 +589,10 @@ def main(
         openai_executor = OpenAIExecutor(openai_key, verbose=verbose, cache=PersistentCache('cache/cache.db'))
         return openai_executor
 
-    if executor == 'langchain' or executor == 'local':
-        raise NotImplementedError('not implemented yet')
+    if executor == 'local':
+        import openai
+        openai.api_base = local_openai_base
+        openai.api_version = local_openai_version
 
     start(
         openai_executor(),
