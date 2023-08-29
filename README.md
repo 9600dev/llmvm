@@ -149,7 +149,7 @@ EDITOR  # set this to your favorite terminal editor (vim or emacs or whatever) s
 
 * Error handling still needs a lot of work.
 * ChatGPT doesn't conform to system prompts specifying how to shape the output of the response. Saying things like "Only reply with Starlark code" and "don't apologize" tends to work randomly, or not at all. Need to fix this.
-* Integration with local LLM's via [llama.cpp](https://github.com/ggerganov/llama.cpp) etc.
+* Integration with local LLM's via [llama.cpp](https://github.com/ggerganov/llama.cpp) etc. [started]
 * More complicated natural language queries tends to make the LLM generate unwieldy code. Need statement by statement execution, passing the LLM the already executed code, asking it if it wishes to re-write the later part of the code (sort of like continuation passing style execution).
 * Playwright integration with LLM -- it should be straight forward to have cooperative execution for the task of proceeding through web app flows (login, do stuff, extract info, logout).
 * Fix bugs and refactor. The code is pretty hacky.
@@ -175,7 +175,40 @@ I haven't had a lot of success getting LLama-2 chat trained models to respond we
   * Assistant: My name is AI Assistant.
 
 
-## Another Example
+### Notes on LLaMA2 testing
+
+I spent a day trying to wire up LLMVM to Llama 2 and a host of fine-tuned derivatives on my RTX 4090. At this point, it doesn't work, and I'm surprised that the local llm community can say hand-on-heart that it's close to, or beats GPT 3.5.
+
+The biggest issue is that Llama 2 and its instruction tuned variants don't follow direction:
+
+![](docs/2023-08-28-16-42-07.png)
+
+The example above fails to generate a parsable Python string expression. This is the same for CodeLlama Instruct, LLongOrca, Vicuna and so on.
+
+The prompt "Generate a Python list that has 10 example strings." gives strange results too:
+
+> "Here is an example of a Python list containing 10 example strings:
+>
+> example_strings = ["hello", "world", "python", "list", "of", "examples"]
+>
+> This list contains six strings: "hello", "world", "python", "list", "of", and "examples". You can modify this list by adding more items separated by commas within the square brackets [].
+
+llama-2-70b-chat can do it eventually, if you coerce it using a very specific prompt:
+
+> You are a search query generator that generates alternative queries to run in a search engine. Generate a Python List declaration with 5 search queries related to "elon musk news".
+
+Result:
+
+```python
+elon_musk_queries = ['Elon Musk latest news', 'Elon Musk SpaceX updates', 'Tesla news Elon Musk', 'Elon Musk Twitter updates', 'Elon Musk interview recent']
+```
+
+The same prompt in Code Llama instruct fails. As does LlongOrca.
+
+Maybe 70B has some promise, but I can't run it on my local RTX 4090. A 4-bit quantized 70B would require 2x 4090 GPU's. Bang-for-buck, GPT 3.5 kills it.
+
+
+# More LLMVM Examples
 
 ```python
 prompt>> Get me the latest 10-Q for NVDA and summarize the financial results.
