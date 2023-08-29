@@ -294,6 +294,7 @@ class Repl():
                     continue
 
                 elif query.startswith('/delcache'):
+                    os.remove('cache/session.db')
                     cache = PersistentCache('cache/session.db')
                     cache.set('message_history', [])
                     continue

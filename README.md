@@ -163,15 +163,16 @@ I haven't had a lot of success getting LLama-2 chat trained models to respond we
 * ```git submodule update --init --recursive```
 * ```cd llama-cpp-python```
 * ```CMAKE_ARGS="-DLLAMA_CUBLAS=on -DCUDAToolkit_INCLUDE_DIR=/usr/include -DCUDAToolkit_ROOT=/usr/lib/cuda" FORCE_CMAKE=1 VERBOSE=1 pip install .[server] -v --force-reinstall```
-* Download vicuna-13b-v1.5-16k (needed for the 16k context window): [https://huggingface.co/TheBloke/vicuna-13B-v1.5-16K-GGML](https://huggingface.co/TheBloke/vicuna-13B-v1.5-16K-GGML)
+* ~~Download vicuna-13b-v1.5-16k (needed for the 16k context window): [https://huggingface.co/TheBloke/vicuna-13B-v1.5-16K-GGML](https://huggingface.co/TheBloke/vicuna-13B-v1.5-16K-GGML)~~
+* Download LlongOrca-13B-16k (it at least works on some of the prompts) [here](https://huggingface.co/TheBloke/LlongOrca-13B-16K-GGML).
   * The latest version of llama.cpp has moved to the [gguf file format](https://github.com/ggerganov/ggml/issues/220), so we need to convert the GGML file to .gguf for now:
-  * ```./convert-llama-ggmlv2-to-gguf.py --input vicuna-13b-v1.5-16k.ggmlv3.q4_1.bin --output vicuna.gguf```
-* ```python -m llama_cpp.server --n_gpu_layers 41 --model ../models/vicuna.gguf --n_ctx 16384 --rope_freq_base 10000 --rope_freq_scale 0.25 --n_threads 10 --verbose True```
+  * ```./convert-llama-ggmlv2-to-gguf.py --input llongorca-13b-16k.ggmlv3.q4_1.bin --output llongorca.gguf```
+* ```python -m llama_cpp.server --n_gpu_layers 41 --model ../models/llongorca.gguf --n_ctx 16384 --rope_freq_base 10000 --rope_freq_scale 0.25 --n_threads 10 --verbose True```
   * This should fire up an OpenAI API compatible web server that we can use with LLMVM
 * ```python repl.py```
 * ```/local```
 * ```/direct What is your name? ```
-  * Assistant: My name is Vicuna, and thank you for asking! How can I assist you today?
+  * Assistant: My name is AI Assistant.
 
 
 ## Another Example
