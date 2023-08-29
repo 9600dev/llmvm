@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "llmasm"
+name = "llmvm"
 version = "0.1.0"
 description = ""
 authors = ["Sonny Bonds <contact@9600dev.com>"]
