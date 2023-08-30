@@ -28,7 +28,7 @@ class StarlarkExecutionController(Controller):
         vector_store: VectorStore = VectorStore(),
         cache: PersistentCache = PersistentCache(),
         edit_hook: Optional[Callable[[str], str]] = None,
-        conversation_hook: Optional[Callable[[str], str]] = None,
+        stream_handler: Optional[Callable[[str], None]] = None,
     ):
         super().__init__()
 
@@ -37,7 +37,7 @@ class StarlarkExecutionController(Controller):
         self.vector_store = vector_store
         self.cache = cache
         self.edit_hook = edit_hook
-        self.conversation_hook = conversation_hook
+        self.stream_handler = stream_handler
         self.tools_model = Container().get('openai_tools_model') \
             if Container().get('openai_tools_model') else 'gpt-3.5-turbo-16k-0613'
         self.model = Container().get('openai_model') \
@@ -102,12 +102,12 @@ class StarlarkExecutionController(Controller):
         lifo: bool = False,
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> Assistant:
+        # internal helper to wrap and execute LLM call to executor.
         def __llm_call(
             user_message: Message,
             context_messages: List[Message],
             executor: Executor,
             prompt_filename: Optional[str] = None,
-            completion_tokens: int = 1024,
         ) -> Assistant:
             if not prompt_filename:
                 prompt_filename = ''
@@ -139,7 +139,6 @@ class StarlarkExecutionController(Controller):
             context_messages: List[Message],
             executor: Executor,
             template: Dict[str, Any],
-            completion_tokens: int = 1024,
         ) -> Assistant:
             prompt = Helpers.load_and_populate_prompt(
                 prompt_filename=prompt_filename,
@@ -150,7 +149,6 @@ class StarlarkExecutionController(Controller):
                 context_messages,
                 executor,
                 prompt_filename=prompt_filename,
-                completion_tokens=completion_tokens,
             )
 
         """
@@ -189,7 +187,6 @@ class StarlarkExecutionController(Controller):
                     context_messages=prompt_context_messages[::-1],  # reversed, because of above
                     executor=self.executor,
                     prompt_filename=prompt_filename,
-                    completion_tokens=completion_tokens,
                 )
                 return assistant_result
 
@@ -219,7 +216,6 @@ class StarlarkExecutionController(Controller):
                         'query': str(query),
                         'document_chunk': chunk,
                     },
-                    completion_tokens=completion_tokens
                 )
 
                 decision_criteria.append(str(assistant_similarity.message))
@@ -268,7 +264,6 @@ class StarlarkExecutionController(Controller):
                     context_messages=similarity_messages,
                     executor=self.executor,
                     prompt_filename=prompt_filename,
-                    completion_tokens=completion_tokens,
                 )
 
             # do the map reduce instead of similarity
@@ -281,7 +276,7 @@ class StarlarkExecutionController(Controller):
                 map_reduce_prompt_tokens = self.executor.calculate_tokens(
                     [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))]
                 )
-                chunk_size = self.executor.max_prompt_tokens() - map_reduce_prompt_tokens - self.executor.calculate_tokens([message]) - 32
+                chunk_size = self.executor.max_prompt_tokens() - map_reduce_prompt_tokens - self.executor.calculate_tokens([message]) - 32  # noqa E501
 
                 chunks = self.vector_store.chunk(
                     content=str(context_message.message),
@@ -299,7 +294,6 @@ class StarlarkExecutionController(Controller):
                             'query': query,
                             'data': chunk,
                         },
-                        completion_tokens=completion_tokens
                     )
                     chunk_results.append(str(chunk_assistant.message))
 
@@ -315,7 +309,6 @@ class StarlarkExecutionController(Controller):
                         'query': query,
                         'map_results': map_results
                     },
-                    completion_tokens=completion_tokens
                 )
         else:
             assistant_result = __llm_call(
@@ -323,7 +316,6 @@ class StarlarkExecutionController(Controller):
                 context_messages=context_messages,
                 executor=self.executor,
                 prompt_filename=prompt_filename,
-                completion_tokens=completion_tokens,
             )
         return assistant_result
 
@@ -361,6 +353,8 @@ class StarlarkExecutionController(Controller):
             completion_tokens=1024,
             temperature=temperature,
             model=self.tools_model,
+            lifo=False,
+            stream_handler=self.stream_handler,
         )
 
         with open('logs/tools_execution.log', 'a') as f:
@@ -376,6 +370,7 @@ class StarlarkExecutionController(Controller):
     def execute(
         self,
         messages: List[Message],
+        temperature: float = 0.0,
     ) -> List[Statement]:
         def find_answers(d: Dict[Any, Any]) -> List[Statement]:
             current_results = []
@@ -396,7 +391,7 @@ class StarlarkExecutionController(Controller):
             response = self.execute_with_agents(
                 messages=messages,
                 agents=self.agents,
-                temperature=0.0,
+                temperature=temperature,
             )
 
             assistant_response = str(response.message).replace('Assistant:', '').strip()
@@ -437,7 +432,9 @@ class StarlarkExecutionController(Controller):
                 message=messages[-1],
                 context_messages=messages[0:-1],
                 query=str(messages[-1].message),
+                temperature=temperature,
                 original_query='',
+                stream_handler=self.stream_handler,
             )
 
             results.append(Answer(

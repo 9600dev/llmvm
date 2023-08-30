@@ -1,9 +1,9 @@
 import ast
 import os
-import pickle
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import Callable, Dict, List, Optional, cast
 
 import click
@@ -12,10 +12,8 @@ import rich
 from prompt_toolkit import prompt
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
 from rich.console import Console
 from rich.markdown import Markdown
-from scipy.spatial.distance import cosine
 
 from bcl import BCL
 from container import Container
@@ -96,9 +94,6 @@ class StreamPrinter():
         self.role = role
         self.started = False
 
-    def contains_token(s, tokens):
-        return any(token in s for token in tokens)
-
     def write(self, string: str):
         if not self.started and self.role:
             self.console.print(f'[bold green]{self.role}[/bold green]: ', end='')
@@ -170,6 +165,7 @@ class Repl():
             agents=agents,
             cache=PersistentCache('cache/cache.db'),
             edit_hook=None,
+            stream_handler=StreamPrinter('').write if stream else None,
         )
 
         message_history: List[Message] = []
@@ -475,10 +471,12 @@ class Repl():
                 elif query.startswith('/stream'):
                     if stream:
                         stream = False
+                        controller.stream_handler = None
                         rich.print('Disabling streaming mode.')
                     else:
                         stream = True
                         rich.print('Enabling streaming mode.')
+                        controller.stream_handler = StreamPrinter('').write
                     continue
 
                 elif query.startswith('/download'):
@@ -560,6 +558,7 @@ def start(
             executor=executor,
             agents=agents,
             vector_store=VectorStore(),
+            stream_handler=StreamPrinter('').write,
         )
 
         results = controller.execute(
