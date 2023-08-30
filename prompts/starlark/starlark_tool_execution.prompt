@@ -22,7 +22,7 @@ Functions:
 
 {{functions}}
 
-There are also eight special features that I've added to our Starlark implementation that will help us: 
+There are also 9 special features that I've added to our Starlark implementation that will help us: 
 
 1. llm_call(expression_list: List, instruction: str) -> str. Allows you to call yourself from my Starlark execution engine to perform arbitrary computation, text analysis, or text translation for us. You return a text result as a string. Use it by emitting: llm_call([variable1, "expression2"], "instruction to large language model"). If the Starlark execution engine sees this call, it will send whatever values are in "expression_list" as User messages, along with the natural language instruction message you specify in "instruction", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expression_list has a text size limit, so if you think the expression_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized result to llm_call instead.
 2. llm_bind(expression, function_str: str) -> Callable. Allows you to properly bind the helper function callsite to whatever is in the expression. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind that to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and I will give you both the value of the expression and the function call site, and you can emit a function call site that is late-bound properly: WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
@@ -31,7 +31,8 @@ There are also eight special features that I've added to our Starlark implementa
 5. search(expression) -> str. Searches the Internet across various search engines to find content related to 'expression' and returns all that content as a string. Use this if you need general search, news search, or product searching capability. 
 6. download(expression) -> str. Downloads any web page, html, PDF file, news article or word document, converts it to text, and returns that text content as a string. 
 7. messages() -> List[str]. Returns the current large language model conversation as a list of strings. messages()[0] gets the first user message. messages()[-1] gets the previous message. Messages can either be User messages or Assistant messages.  
-8. answer(expression) -> Answer. Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the human user. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Starlark code.
+8. coerce(expression, type_name: str) -> Any. Takes any value in expression and coerces it to specified Python type in type_name. Valid type_names are float, int, str, list[float | int | str].
+9. answer(expression) -> Answer. Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the human user. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Starlark code.
 
 Here is an example of using these special features to solve the user query: "get the career profile of the current AMD CEO".
 
@@ -39,7 +40,7 @@ User: "get the career profile of the current AMD CEO".
 Assistant: 
 var1 = search("current AMD CEO") # Search the internet for details about the current AMD CEO
 var2 = llm_call([var1], "extract the name of AMD CEO") 
-var3 = llm_bind([var2], "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")  # Search and get the LinkedIn profile of the AMD CEO
+var3 = llm_bind(var2, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")  # Search and get the LinkedIn profile of the AMD CEO
 var4 = llm_call([var3], "summarize career profile")  # Summarize the career profile of the AMD CEO
 answer(var4)  # Show the answer to the user
 
@@ -111,6 +112,7 @@ var2 = var1.ask("what company has the largest number of employees?")
 answer(var2)
 
 Here is an example of being asked to search for information and then generate something with that information: 
+
 User: "Find the latest information on climate change effects for Brisbane, Australia and generate a small essay from that information."
 Assistant:
 var1 = search("research on climate change effects for Brisbane, Australia")
@@ -118,20 +120,22 @@ var2 = llm_call([var1], "summarize information on climate change effects")
 var3 = llm_call([var2], "Generate small essay"])
 answer(var3)
 
-Here is an example of a syntactically correct Starlark code, but erroneous semantics. The expr_list passed to llm_call() had too much content and the large language model only recieved chunks of the text and therefore was unable to find the differences:
-
-User: "Find the differences between these documents: https://arxiv.org/pdf/2211.01910.pdf and https://arxiv.org/pdf/2210.02441.pdf"
-Assistant:
-var1 = download("https://arxiv.org/pdf/2211.01910.pdf")  # Step 1: Parse the first paper
-var2 = download("https://arxiv.org/pdf/2210.02441.pdf")  # Step 2: Parse the second paper
-var3 = llm_call([var1, var2], "find the differences between the two papers")  # Step 3: Find the differences between the two papers
-answer(var3)  # Step 4: Show the differences to the user
-
 User: "Convert the last message into a bullet point list"
 Assistant:
 last_message = messages()[-1]
 var1 = llm_call([last_message], "Convert into a bullet point list") 
 answer(var1)
+
+User: "What is 5 MSFT stocks worth as grams of gold?"
+Assistant: 
+var1 = MarketHelpers.get_stock_price("MSFT", BCL.datetime("now"))  # Step 1: Get the current stock price
+of MSFT
+var2 = var1 * 5  # Step 2: Calculate the value of 5 MSFT stocks
+var3 = search("gold price per gram")  # Step 3: Get the current price of gold in grams
+var4 = llm_call(var3, "extract the current price of gold per gram")
+var5 = var2 / coerce(var4, "float")  # Step 4: Divide 5 Microsoft Stocks by gold price per gram
+answer(f"5 MSFT stocks is worth {var5} grams of gold")  # Step 5: Show the result to the use
+
 
 
 Rules: 
@@ -144,6 +148,10 @@ There are a few Starlark features I've disabled. You are not allowed to emit cod
 * pass statements
 * break statements
 * import statements
+
+I'm enabling the following features: 
+
+* PEP 498 "Literal String Interpolation". 
 
 You must use the answer() special feature to produce at least one result for the user. 
 

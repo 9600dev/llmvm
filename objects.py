@@ -21,6 +21,7 @@ class Executor(ABC):
         messages: List['Message'],
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
+        model: str = 'gpt-3.5-turbo-16k-0613',
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> 'Assistant':
         pass
@@ -56,6 +57,38 @@ class Executor(ABC):
         extra_str: str = '',
     ) -> int:
         pass
+
+
+def coerce_types(a, b):
+    # Function to check if a string can be converted to an integer or a float
+    def is_number(s):
+        try:
+            float(s)
+            return True
+        except ValueError:
+            return False
+
+    # If either operand is a string and represents a number, convert it
+    if isinstance(a, str) and is_number(a):
+        a = int(a) if '.' not in a else float(a)
+    if isinstance(b, str) and is_number(b):
+        b = int(b) if '.' not in b else float(b)
+
+    # If either operand is a string now, convert both to strings
+    if isinstance(a, str) or isinstance(b, str):
+        return str(a), str(b)
+
+    # If they are of the same type, return them as-is
+    if type(a) == type(b):
+        return a, b
+
+    # If one is a float and the other an int, convert the int to float
+    if isinstance(a, float) and isinstance(b, int):
+        return a, float(b)
+    if isinstance(b, float) and isinstance(a, int):
+        return float(a), b
+
+    raise TypeError(f"Cannot coerce types {type(a)} and {type(b)} to a common type")
 
 
 class Controller():
@@ -285,23 +318,43 @@ class FunctionCallMeta(Call):
     def token(self):
         return 'functioncallmeta'
 
+    def __getattr__(self, name):
+        return getattr(self._result, name)
+
     def __str__(self):
         return str(self._result)
 
     def __add__(self, other):
-        return self._result + other
+        a, b = coerce_types(self._result, other)
+        return a + b  # type: ignore
 
     def __sub__(self, other):
-        return self._result - other
+        a, b = coerce_types(self._result, other)
+        return a - b  # type: ignore
 
     def __mul__(self, other):
-        return self._result * other
+        a, b = coerce_types(self._result, other)
+        return a * b  # type: ignore
 
     def __div__(self, other):
-        return self._result / other
+        a, b = coerce_types(self._result, other)
+        return a / b  # type: ignore
 
-    def __getattr__(self, name):
-        return getattr(self._result, name)
+    def __gt__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a > b  # type: ignore
+
+    def __lt__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a < b  # type: ignore
+
+    def __ge__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a >= b  # type: ignore
+
+    def __le__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a <= b  # type: ignore
 
 
 class PandasMeta(Call):

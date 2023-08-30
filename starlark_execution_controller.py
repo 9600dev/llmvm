@@ -8,6 +8,7 @@ import rich
 from openai import InvalidRequestError
 
 from ast_parser import Parser
+from container import Container
 from helpers.helpers import Helpers, response_writer
 from helpers.logging_helpers import console_debug, setup_logging
 from objects import (Answer, Assistant, Content, Controller, Executor, Message,
@@ -37,6 +38,10 @@ class StarlarkExecutionController(Controller):
         self.cache = cache
         self.edit_hook = edit_hook
         self.conversation_hook = conversation_hook
+        self.tools_model = Container().get('openai_tools_model') \
+            if Container().get('openai_tools_model') else 'gpt-3.5-turbo-16k-0613'
+        self.model = Container().get('openai_model') \
+            if Container().get('openai_model') else 'gpt-3.5-turbo-16k-0613'
         self.starlark_runtime = StarlarkRuntime(self, self.agents)
 
     def __classify_tool_or_direct(
@@ -77,6 +82,7 @@ class StarlarkExecutionController(Controller):
                 User(Content(query_understanding['user_message']))
             ],
             temperature=0.0,
+            model=self.model
         )
 
         if assistant.error or not parse_result(str(assistant.message)):
@@ -92,6 +98,7 @@ class StarlarkExecutionController(Controller):
         prompt_filename: Optional[str] = None,
         completion_tokens: int = 2048,
         temperature: float = 0.0,
+        model: str = 'gpt-3.5-turbo-16k-0613',
         lifo: bool = False,
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> Assistant:
@@ -117,6 +124,7 @@ class StarlarkExecutionController(Controller):
                     max_completion_tokens=completion_tokens,
                     temperature=temperature,
                     stream_handler=stream_handler,
+                    model=model,
                 )
                 console_debug(prompt_filename, 'User', str(user_message.message))
                 console_debug(prompt_filename, 'Assistant', str(assistant.message))
@@ -332,23 +340,30 @@ class StarlarkExecutionController(Controller):
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
 
+        tools_message = Helpers.load_and_populate_message(
+            prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+            template={
+                'functions': '\n'.join(functions),
+                'user_input': str(messages[-1].message),
+            }
+        )
+
+        with open('logs/tools_execution.log', 'w') as f:
+            f.write(str(tools_message['system_message']['content']) + '\n')
+            f.write(str(tools_message['user_message']['content']))
+
         llm_response = self.execute_llm_call(
-            message=Helpers.load_and_populate_message(
-                prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
-                template={
-                    'functions': '\n'.join(functions),
-                    'user_input': str(messages[-1].message),
-                }
-            ),
+            message=tools_message,
             context_messages=messages[0:-1],
             query='',
             original_query='',
             prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
             completion_tokens=1024,
             temperature=temperature,
+            model=self.tools_model,
         )
 
-        with open('logs/tools_execution.log', 'w') as f:
+        with open('logs/tools_execution.log', 'a') as f:
             f.write('\n\n')
             for message in messages:
                 f.write(f'Message:\n{message.message}\n\n')
@@ -426,7 +441,7 @@ class StarlarkExecutionController(Controller):
             )
 
             results.append(Answer(
-                conversation=[Content(str(assistant_reply.message))],
+                conversation=[assistant_reply],
                 result=assistant_reply.message
             ))
 

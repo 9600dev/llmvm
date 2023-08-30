@@ -1,22 +1,16 @@
 # LLMVM
 
-This project is a research prototype that enables a Large Language Model (LLM) to break down user tasks into manageable sub-tasks, and then schedule and oversee their execution on an intepreted virtual machine, collaboratively addressing syntax and semantic errors through a back-and-forth dialogue.
+This project is a research prototype that enables a Large Language Model (LLM) to break down user tasks into manageable locally executable sub-tasks, and then schedule and oversee their execution on an intepreted virtual machine (in this case, Python), collaboratively addressing syntax and semantic errors through a back-and-forth dialogue.
 
-## The Problem
-
-ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a).
-
-However, this interaction is usually User Task -> LLM decides what helper function to call -> local host calls helper function -> work with result, and does not allow for arbitrary deconstruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
-
-This prototype shows that LLM's are capable of taking a user task, reasoning about how to deconstruct the task into sub-tasks, understanding how to program, schedule and execute those sub-tasks on its own or via a virtual machine, and working with the VM to resolve error cases. We ask the LLM to use [Starlark](https://github.com/bazelbuild/starlark) expressed as [A-normal form](https://en.wikipedia.org/wiki/A-normal_form) as the programming language, and execute Starlark statement-by-statement on a local Python interpreter. When errors arise (syntax errors, exceptions, or semantic problems), we pause execution and work with the LLM to understand and resolve the error by exposing the locals dictionary, and allowing the LLM to "debug" the current execution state.
+Let's look at an example of breaking down the user task: ```"Go to the https://ten13.vc/team website, extract the list of names, and then get me a summary of their LinkedIn profiles."```
 
 ## Example Walkthrough
 
-We will walk through what happens when handing LLMVM the query: `"Go to the https://ten13.vc/team website, extract the list of names, and then get me a summary of their LinkedIn profiles."`
+Fire up the tool ```python repl.py``` and submit the user task:
 
 ![](docs/2023-08-23-12-18-41.png)
 
-This is the Starlark code returned from ChatGPT 3.5 when passing the query + [prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt) pair:
+Starlark code is returned from ChatGPT 3.5 when passing the user task query + [prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt) pair:
 
 ```python
 var1 = download("https://ten13.vc/team")  # Step 1: Download the webpage
@@ -30,7 +24,9 @@ answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the us
 
 ```
 
-Execution of this code proceeds step-by-step until completion, or error. Let's walk through each line:
+This Starlark code represents "breaking down a user query into manageable and locally executable sub-tasks". Execution of this code proceeds step-by-step on a Python runtime until completion, or error.
+
+Let's walk through each line:
 
 #### ```var1 = download("https://ten13.vc/team")```
 
@@ -85,6 +81,19 @@ And ```llm_loop_bind()``` takes this arbitrary text and converts it to: ["Steve 
 
 [answer()](https://github.com/9600dev/llmvm/blob/f0caa7268822ec517af4a8b9c3afff6b086008e8/starlark_runtime.py#L477) is a collection of possible answers that either partially solve, or fully solve for the original query. Once code is finished executing, each answer found in answers() is handed to the LLM for guidance on how effective it is at solving/answering the query. The result is then shown to the user, and in this case, it's a career summary of each of the individuals from [TEN13](https://ten13.vc) extracted from LinkedIn.
 
+### Another Quick Example:
+
+> "If I have 5 Microsoft stocks and 10 NVIDIA stocks what is my net worth in grams of gold?
+
+The resulting Starlark AST:
+
+![](docs/2023-08-29-15-46-13.png)
+
+After execution:
+
+![](docs/2023-08-29-15-45-31.png)
+
+
 ## Error Correction
 
 Each step of statement execution is carefully evaluated. Calls to user defined helper functions may throw exceptions, and code may be semantically incorrect (i.e. bindings may be incorrect, leading to the wrong data being returned etc). LLMVM has the ability to back-track up the statement execution list (todo: transactional rollback of variable assignment is probably the right call here but hasn't been implemented yet) and work with the LLM to re-write code, either partially or fully, to try and achieve the desired outcome.
@@ -110,6 +119,14 @@ EmailHelpers.send_calendar_invite(from_name, from_email, attendee_emails, subjec
 ```
 
 Downloading web content (html, PDF's etc), and searching the web is done through special functions: ```download()``` and ```search()``` which are defined in the LLMVM runtimes base class libraries. ```download()``` as mentioned uses Firefox via Microsoft Playwright so that we can avoid web server blocking issues that tend to occur with requests.get(). ```search()``` uses [SerpAPI](https://serpapi.com/), which may require a paid subscription.
+
+## The Problem this prototype solves
+
+ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a).
+
+However, this interaction is usually User Task -> LLM decides what helper function to call -> local host calls helper function -> work with result, and does not allow for arbitrary deconstruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
+
+This prototype shows that LLM's are capable of taking a user task, reasoning about how to deconstruct the task into sub-tasks, understanding how to program, schedule and execute those sub-tasks on its own or via a virtual machine, and working with the VM to resolve error cases. We ask the LLM to use [Starlark](https://github.com/bazelbuild/starlark) expressed as [A-normal form](https://en.wikipedia.org/wiki/A-normal_form) as the programming language, and execute Starlark statement-by-statement on a local Python interpreter. When errors arise (syntax errors, exceptions, or semantic problems), we pause execution and work with the LLM to understand and resolve the error by exposing the locals dictionary, and allowing the LLM to "debug" the current execution state.
 
 ## Install
 
@@ -206,6 +223,41 @@ elon_musk_queries = ['Elon Musk latest news', 'Elon Musk SpaceX updates', 'Tesla
 The same prompt in Code Llama instruct fails. As does LlongOrca.
 
 Maybe 70B has some promise, but I can't run it on my local RTX 4090. A 4-bit quantized 70B would require 2x 4090 GPU's. Bang-for-buck, GPT 3.5 kills it.
+
+
+## Other cute stuff
+
+You can use the ```/act``` command, which will search [awesome prompts](https://github.com/f/awesome-chatgpt-prompts) and set the System Prompt to "act" like the awesome prompt you select.
+
+A fun one is graphing "narrative extraction", which is useful for quickly summarizing news articles:
+
+Download two news articles and put them in the "Messages" stack:
+
+> /download https://www.cnn.com/2023/08/27/football/what-happened-luis-rubiales-kiss-intl/index.html
+> /download https://www.bbc.com/sport/football/66645618
+
+> /act graph
+> "extract the narrative from the documents I sent you in the first two messages"
+
+Gives us a GraphVis visualization (cut off to fit screen):
+
+![](docs/2023-08-29-15-56-32.png)
+
+
+And related narrative extraction + code:
+
+![](docs/2023-08-29-15-55-13.png)
+
+
+# Quick Q&A
+
+* Why Starlark and not something else?
+  * Originally, I had a custom language syntax, abstract syntax tree and a stack based virtual machine (see below, under "Deprecated"). This worked reasonably well, but often ChatGPT 3.5 would get a bit confused when things weren't precisely defined in the grammar or the semantics of stack machine runtime execution. It already knows Starlark, and it already understands the execution semantics from the original training process. Starlark is a subset of Python, so it was a natural way to /constrain/ the LLM's programmatic output into something more simple to execute.
+* Why use the Python runtime and not Starlark?
+  * Python has the [ast](https://docs.python.org/3/library/ast.html) module, and the [astunparse](https://pypi.org/project/astunparse/) module, making program parsing and step-by-step Statement execution super simple. astunparse allows me to go from Statement to code instantly, meaning that the error/debug cycle with the LLM can go from Statement + locals() dictionary -> code and back again very easily.
+* What's up with Local LLM's?
+  * Local LLM's are much harder to direct with instructions than GPT 3.5+. One experiment I want to try is having GPT help with prompt refactoring by taking a given execution prompt, like: ```"Convert list of items seen under 'List' into a Python list definition"``` and when it sees that the Local LLM hasn't outputted the correct format, have GPT regenerate the prompt (with say more aggressive direction) until the local LLM conforms.
+  * Llama 2 70B seems to have promise, but it's far too slow on CPU. I need to buy another RTX 4090.
 
 
 # More LLMVM Examples

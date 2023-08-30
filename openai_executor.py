@@ -33,6 +33,10 @@ class OpenAIExecutor(Executor):
 
     def max_tokens(self) -> int:
         match self.model:
+            case 'gpt-4-0613':
+                return 8191
+            case 'gpt-4':
+                return 8191
             case 'gpt-3.5-turbo-16k-0613':
                 return 16385
             case 'gpt-3.5-turbo-16k':
@@ -41,7 +45,7 @@ class OpenAIExecutor(Executor):
                 return 4096
 
     def max_prompt_tokens(self, completion_token_count: int = 2048) -> int:
-        return self.max_tokens() - completion_token_count - 256
+        return self.max_tokens() - completion_token_count
 
     def calculate_tokens(
             self,
@@ -58,11 +62,12 @@ class OpenAIExecutor(Executor):
             if model in {
                 "gpt-3.5-turbo-0613",
                 "gpt-3.5-turbo-16k-0613",
+                "gpt-4",
                 "gpt-4-0314",
                 "gpt-4-32k-0314",
                 "gpt-4-0613",
                 "gpt-4-32k-0613",
-                }:
+            }:
                 tokens_per_message = 3
                 tokens_per_name = 1
             elif model == "gpt-3.5-turbo-0301":
@@ -155,8 +160,9 @@ class OpenAIExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        temperature: float = 0.2,
         max_completion_tokens: int = 2048,
+        temperature: float = 0.2,
+        model: str = 'gpt-3.5-turbo-16k-0613',
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> Assistant:
         def last(predicate, iterable):
@@ -187,6 +193,7 @@ class OpenAIExecutor(Executor):
         chat_response = self.execute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
+            model=model,
             chat_format=True,
             temperature=temperature,
             stream=True if stream_handler else False,

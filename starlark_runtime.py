@@ -93,6 +93,7 @@ class StarlarkRuntime:
         self.locals_dict['llm_bind'] = self.llm_bind
         self.locals_dict['llm_call'] = self.llm_call
         self.locals_dict['llm_loop_bind'] = self.llm_loop_bind
+        self.locals_dict['coerce'] = self.coerce
         self.locals_dict['messages'] = self.messages
         self.locals_dict['search'] = self.search
         self.locals_dict['download'] = self.download
@@ -428,6 +429,22 @@ class StarlarkRuntime:
         )
         return searcher.search()
 
+    def coerce(self, expr, type_name: str) -> Any:
+        assistant = self.executor.execute_llm_call(
+            message=Helpers.load_and_populate_message(
+                prompt_filename='prompts/starlark/coerce.prompt',
+                template={
+                    'string': str(expr),
+                    'type': type_name,
+                }
+            ),
+            context_messages=[],
+            query='',
+            original_query=self.original_query,
+            prompt_filename='prompts/starlark/coerce.prompt',
+        )
+        return self.__eval_with_error_wrapper(str(assistant.message))
+
     def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
         if not isinstance(expr_list, list):
             expr_list = [expr_list]
@@ -675,6 +692,20 @@ class StarlarkRuntime:
         for line in lines:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)
+
+    def __eval_with_error_wrapper(
+        self,
+        starlark_code: str,
+        retry_count: int = 2,
+    ):
+        counter = 0
+        while counter < retry_count:
+            try:
+                return eval(starlark_code, self.locals_dict, self.globals_dict)
+            except Exception as ex:
+                starlark_code = self.rewrite(starlark_code, str(ex))
+            counter += 1
+        return None
 
     def __compile_and_execute(
         self,
