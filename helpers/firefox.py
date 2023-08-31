@@ -126,18 +126,13 @@ class FirefoxHelpers(metaclass=Singleton):
 
     def clickable(self) -> List[str]:
         clickable_elements = self.page.query_selector_all(
-            "a, button, input[type='submit'], input[type='button'], input[type='reset']"
+            "a, button, input[type='submit'], input[type='button']"
         )
         unique_ids = set()
 
         for element in clickable_elements:
-            element_id = element.get_attribute("id")
-            if element_id:  # Check if the element has an id attribute
-                unique_ids.add(element_id)
-
+            unique_ids.add(element)
         return list(unique_ids)
 
-    def click(self, selector: str) -> None:
-        element_to_click = self.page.query_selector(selector)
-        if element_to_click:
-            element_to_click.click()
+    def click(self, element) -> None:
+        element.click()

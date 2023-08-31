@@ -21,18 +21,19 @@ class OpenAIExecutor(Executor):
         self,
         openai_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
         max_function_calls: int = 5,
-        model: str = 'gpt-3.5-turbo-16k-0613',
+        default_model: str = 'gpt-3.5-turbo-16k-0613',
         verbose: bool = True,
         cache: PersistentCache = PersistentCache(),
     ):
         self.openai_key = openai_key
         self.verbose = verbose
-        self.model = model
+        self.default_model = default_model
         self.max_function_calls = max_function_calls
         self.cache: PersistentCache = cache
 
-    def max_tokens(self) -> int:
-        match self.model:
+    def max_tokens(self, model: Optional[str]) -> int:
+        model = model if model else self.default_model
+        match model:
             case 'gpt-4-0613':
                 return 8191
             case 'gpt-4':
@@ -44,15 +45,26 @@ class OpenAIExecutor(Executor):
             case _:
                 return 4096
 
-    def max_prompt_tokens(self, completion_token_count: int = 2048) -> int:
-        return self.max_tokens() - completion_token_count
+    def set_default_model(self, default_model: str):
+        self.default_model = default_model
+
+    def max_prompt_tokens(
+        self,
+        completion_token_count: int = 2048,
+        model: Optional[str] = None,
+    ) -> int:
+        return self.max_tokens(model) - completion_token_count
 
     def calculate_tokens(
-            self,
-            messages: List[Message] | List[Dict[str, str]] | str, extra_str: str = ''
+        self,
+        messages: List[Message] | List[Dict[str, str]] | str,
+        extra_str: str = '',
+        model: Optional[str] = None,
     ) -> int:
+        model_str = model if model else self.default_model
+
         # obtained from: https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
-        def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
+        def num_tokens_from_messages(messages, model: str):
             """Return the number of tokens used by a list of messages."""
             try:
                 encoding = tiktoken.encoding_for_model(model)
@@ -81,7 +93,7 @@ class OpenAIExecutor(Executor):
                 return num_tokens_from_messages(messages, model="gpt-4-0613")
             else:
                 raise NotImplementedError(
-                    f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""
+                    f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""  # noqa: E501
                 )
             num_tokens = 0
             for message in messages:
@@ -96,11 +108,11 @@ class OpenAIExecutor(Executor):
         if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
             dict_messages = [Message.to_dict(m) for m in messages]  # type: ignore
             dict_messages.append(Message.to_dict(User(Content(extra_str))))
-            return num_tokens_from_messages(dict_messages, model=self.model)
+            return num_tokens_from_messages(dict_messages, model=model_str)
         elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
-            return num_tokens_from_messages(messages, model=self.model)
+            return num_tokens_from_messages(messages, model=model_str)
         elif isinstance(messages, str):
-            return num_tokens_from_messages([Message.to_dict(User(Content(messages)))], model=self.model)
+            return num_tokens_from_messages([Message.to_dict(User(Content(messages)))], model=model_str)
         else:
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
@@ -111,7 +123,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
-        model: str = 'gpt-3.5-turbo-16k-0613',
+        model: Optional[str] = None,
         max_completion_tokens: int = 1024,
         temperature: float = 0.2,
         chat_format: bool = True,
@@ -123,7 +135,7 @@ class OpenAIExecutor(Executor):
                             .format(message_tokens,
                                     max_completion_tokens,
                                     message_tokens + max_completion_tokens,
-                                    self.max_tokens()))
+                                    self.max_tokens(model if model else self.default_model)))
 
         if not chat_format and len(functions) > 0:
             raise Exception('Functions are not supported in non-chat format')
@@ -131,7 +143,7 @@ class OpenAIExecutor(Executor):
         if chat_format:
             if functions:
                 response = openai.ChatCompletion.create(
-                    model=model,
+                    model=model if model else self.default_model,
                     temperature=temperature,
                     max_tokens=max_completion_tokens,
                     functions=functions,
@@ -141,7 +153,7 @@ class OpenAIExecutor(Executor):
             else:
                 # for whatever reason, [] functions generates an InvalidRequestError
                 response = openai.ChatCompletion.create(
-                    model=model,
+                    model=model if model else self.default_model,
                     temperature=temperature,
                     max_tokens=max_completion_tokens,
                     messages=messages,
@@ -150,7 +162,7 @@ class OpenAIExecutor(Executor):
             return response  # type: ignore
         else:
             response = openai.Completion.create(
-                model=model,
+                model=model if model else self.default_model,
                 temperature=temperature,
                 max_tokens=max_completion_tokens,
                 messages=messages,
@@ -162,7 +174,7 @@ class OpenAIExecutor(Executor):
         messages: List[Message],
         max_completion_tokens: int = 2048,
         temperature: float = 0.2,
-        model: str = 'gpt-3.5-turbo-16k-0613',
+        model: Optional[str] = None,
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> Assistant:
         def last(predicate, iterable):
@@ -193,7 +205,7 @@ class OpenAIExecutor(Executor):
         chat_response = self.execute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
-            model=model,
+            model=model if model else self.default_model,
             chat_format=True,
             temperature=temperature,
             stream=True if stream_handler else False,

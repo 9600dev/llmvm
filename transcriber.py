@@ -1,4 +1,4 @@
-
+import time
 import argparse
 import io
 import os
@@ -12,7 +12,6 @@ from time import sleep
 from typing import List
 
 import numpy as np
-import speech_recognition as sr
 import torch
 import whisper
 from scipy.io.wavfile import write as write_wav
@@ -72,6 +71,7 @@ class Transcriber():
                 audio_samples = np.frombuffer(raw_data, dtype=np.int16)
                 self.audio_callback(audio_samples)  # Call the callback function with audio data
         except Exception as ex:
+            print('we are here')
             error = process.stderr.read()  # type: ignore
             print(error)
             print(ex)
@@ -123,8 +123,16 @@ class Transcriber():
                         f.write(last_sample)
 
                     # Read the transcription.
-                    result = audio_model.transcribe(self.wav_output, fp16=torch.cuda.is_available())
-                    text = result['text'].strip()  # type: ignore
+                    time.sleep(0.025)
+                    try: 
+                        result = audio_model.transcribe(self.wav_output, fp16=torch.cuda.is_available())
+                        text = result['text'].strip()  # type: ignore
+                    except Exception as ex:
+                        # start again
+                        os.remove(self.wav_output)
+                        print('.', end='', flush=True)
+                        phrase_complete = True
+                        continue 
 
                     if phrase_complete:
                         self.transcription.append(text)

@@ -29,6 +29,8 @@ class StarlarkExecutionController(Controller):
         cache: PersistentCache = PersistentCache(),
         edit_hook: Optional[Callable[[str], str]] = None,
         stream_handler: Optional[Callable[[str], None]] = None,
+        continuation_passing_style: bool = False,
+        tool_model: Optional[str] = None,
     ):
         super().__init__()
 
@@ -38,11 +40,9 @@ class StarlarkExecutionController(Controller):
         self.cache = cache
         self.edit_hook = edit_hook
         self.stream_handler = stream_handler
-        self.tools_model = Container().get('openai_tools_model') \
-            if Container().get('openai_tools_model') else 'gpt-3.5-turbo-16k-0613'
-        self.model = Container().get('openai_model') \
-            if Container().get('openai_model') else 'gpt-3.5-turbo-16k-0613'
         self.starlark_runtime = StarlarkRuntime(self, self.agents)
+        self.continuation_passing_style = continuation_passing_style
+        self.tools_model = tool_model
 
     def __classify_tool_or_direct(
         self,
@@ -82,7 +82,6 @@ class StarlarkExecutionController(Controller):
                 User(Content(query_understanding['user_message']))
             ],
             temperature=0.0,
-            model=self.model
         )
 
         if assistant.error or not parse_result(str(assistant.message)):
@@ -98,7 +97,7 @@ class StarlarkExecutionController(Controller):
         prompt_filename: Optional[str] = None,
         completion_tokens: int = 2048,
         temperature: float = 0.0,
-        model: str = 'gpt-3.5-turbo-16k-0613',
+        model: Optional[str] = None,
         lifo: bool = False,
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> Assistant:
@@ -123,8 +122,8 @@ class StarlarkExecutionController(Controller):
                     messages,
                     max_completion_tokens=completion_tokens,
                     temperature=temperature,
-                    stream_handler=stream_handler,
                     model=model,
+                    stream_handler=stream_handler,
                 )
                 console_debug(prompt_filename, 'User', str(user_message.message))
                 console_debug(prompt_filename, 'Assistant', str(assistant.message))
@@ -162,23 +161,23 @@ class StarlarkExecutionController(Controller):
         # todo: we usually have a prepended message of context to help the LLM figure out
         # what to do with the message at a later stage. This is getting removed right now.
         if (
-            self.executor.calculate_tokens(context_messages + [message])
-            > self.executor.max_prompt_tokens(completion_token_count=completion_tokens)
+            self.executor.calculate_tokens(context_messages + [message], model=model)
+            > self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model)
         ):
             # check to see if we're simply lifo'ing the context messages (last in first out)
             if lifo:
                 lifo_messages = copy.deepcopy(context_messages)
                 prompt_context_messages = [message]
-                current_tokens = self.executor.calculate_tokens(str(message.message)) + completion_tokens
+                current_tokens = self.executor.calculate_tokens(str(message.message), model=model) + completion_tokens
 
                 # reverse over the messages, last to first
                 for i in range(len(lifo_messages) - 1, -1, -1):
                     if (
-                        current_tokens + self.executor.calculate_tokens(str(lifo_messages[i].message))
-                        < self.executor.max_prompt_tokens(completion_token_count=completion_tokens)
+                        current_tokens + self.executor.calculate_tokens(str(lifo_messages[i].message), model=model)
+                        < self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model)
                     ):
                         prompt_context_messages.append(lifo_messages[i])
-                        current_tokens += self.executor.calculate_tokens(str(lifo_messages[i].message))
+                        current_tokens += self.executor.calculate_tokens(str(lifo_messages[i].message), model=model)
                     else:
                         break
 
@@ -199,7 +198,7 @@ class StarlarkExecutionController(Controller):
                 content=str(context_message.message),
                 chunk_token_count=256,
                 chunk_overlap=0,
-                max_tokens=self.executor.max_prompt_tokens() - self.executor.calculate_tokens([message]) - 32
+                max_tokens=self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model) - self.executor.calculate_tokens([message], model=model) - 32,  # noqa E501
             )
 
             # randomize and sample from the similarity_chunks
@@ -234,7 +233,7 @@ class StarlarkExecutionController(Controller):
             # with the highest ranked chunks from each message.
             if not map_reduce_required:
                 tokens_per_message = (
-                    math.floor((self.executor.max_prompt_tokens() - self.executor.calculate_tokens([message]))
+                    math.floor((self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model) - self.executor.calculate_tokens([message], model=model))  # noqa E501
                                / len(context_messages))
                 )
 
@@ -274,9 +273,10 @@ class StarlarkExecutionController(Controller):
 
                 # iterate over the data.
                 map_reduce_prompt_tokens = self.executor.calculate_tokens(
-                    [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))]
+                    [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))],
+                    model=model,
                 )
-                chunk_size = self.executor.max_prompt_tokens() - map_reduce_prompt_tokens - self.executor.calculate_tokens([message]) - 32  # noqa E501
+                chunk_size = self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model) - map_reduce_prompt_tokens - self.executor.calculate_tokens([message], model=model) - 32  # noqa E501
 
                 chunks = self.vector_store.chunk(
                     content=str(context_message.message),
@@ -350,7 +350,7 @@ class StarlarkExecutionController(Controller):
             query='',
             original_query='',
             prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
-            completion_tokens=1024,
+            completion_tokens=2048,
             temperature=temperature,
             model=self.tools_model,
             lifo=False,
@@ -420,13 +420,22 @@ class StarlarkExecutionController(Controller):
                         error=str(ex),
                     )
 
-            _ = self.starlark_runtime.run(
-                starlark_code=assistant_response,
-                original_query=str(messages[-1].message),
-                messages=messages,
-            )
-            results.extend(self.starlark_runtime.answers)
-            return results
+            if not self.continuation_passing_style:
+                _ = self.starlark_runtime.run(
+                    starlark_code=assistant_response,
+                    original_query=str(messages[-1].message),
+                    messages=messages,
+                )
+                results.extend(self.starlark_runtime.answers)
+                return results
+            else:
+                _ = self.starlark_runtime.run_continuation_passing(
+                    starlark_code=assistant_response,
+                    original_query=str(messages[-1].message),
+                    messages=messages,
+                )
+                results.extend(self.starlark_runtime.answers)
+                return results
         else:
             assistant_reply: Assistant = self.execute_llm_call(
                 message=messages[-1],

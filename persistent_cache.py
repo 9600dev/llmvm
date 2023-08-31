@@ -53,3 +53,10 @@ class PersistentCache:
                 serialized_key = self._serialize_key(key)
                 return serialized_key in cache
         return False
+
+    def keys(self):
+        if self.filename:
+            with open(self.filename, 'rb') as f:
+                cache = dill.load(f)
+                return list(cache.keys())  # type: ignore
+        return []

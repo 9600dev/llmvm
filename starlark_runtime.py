@@ -5,9 +5,11 @@ import math
 import os
 import random
 import sys
+from re import L
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
+import astunparse
 import pandas as pd
 from openai import InvalidRequestError
 
@@ -90,24 +92,25 @@ class StarlarkRuntime:
         self.answers = []
         self.locals_dict = {}
         self.globals_dict = {}
-        self.locals_dict['llm_bind'] = self.llm_bind
-        self.locals_dict['llm_call'] = self.llm_call
-        self.locals_dict['llm_loop_bind'] = self.llm_loop_bind
-        self.locals_dict['coerce'] = self.coerce
-        self.locals_dict['messages'] = self.messages
-        self.locals_dict['search'] = self.search
-        self.locals_dict['download'] = self.download
-        self.locals_dict['pandas_bind'] = self.pandas_bind
+
+        self.globals_dict['llm_bind'] = self.llm_bind
+        self.globals_dict['llm_call'] = self.llm_call
+        self.globals_dict['llm_loop_bind'] = self.llm_loop_bind
+        self.globals_dict['coerce'] = self.coerce
+        self.globals_dict['messages'] = self.messages
+        self.globals_dict['search'] = self.search
+        self.globals_dict['download'] = self.download
+        self.globals_dict['pandas_bind'] = self.pandas_bind
         for agent in self.agents:
-            self.locals_dict[agent.__name__] = agent
-        self.locals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
-        self.locals_dict['PdfHelpers'] = CallWrapper(self, PdfHelpers)
-        self.locals_dict['BCL'] = CallWrapper(self, BCL)
-        self.locals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
-        self.locals_dict['EmailHelpers'] = CallWrapper(self, EmailHelpers)
-        self.locals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
-        self.locals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
-        self.locals_dict['answer'] = self.answer
+            self.globals_dict[agent.__name__] = agent
+        self.globals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
+        self.globals_dict['PdfHelpers'] = CallWrapper(self, PdfHelpers)
+        self.globals_dict['BCL'] = CallWrapper(self, BCL)
+        self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
+        self.globals_dict['EmailHelpers'] = CallWrapper(self, EmailHelpers)
+        self.globals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
+        self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
+        self.globals_dict['answer'] = self.answer
 
     def __find_variable_assignment(
         self,
@@ -701,7 +704,7 @@ class StarlarkRuntime:
         counter = 0
         while counter < retry_count:
             try:
-                return eval(starlark_code, self.locals_dict, self.globals_dict)
+                return eval(starlark_code, self.globals_dict, self.locals_dict)
             except Exception as ex:
                 starlark_code = self.rewrite(starlark_code, str(ex))
             counter += 1
@@ -712,8 +715,8 @@ class StarlarkRuntime:
         starlark_code: str,
     ) -> Dict[Any, Any]:
         parsed_ast = ast.parse(starlark_code)
-        exec(compile(parsed_ast, filename="<ast>", mode="exec"), self.locals_dict, self.globals_dict)
-        return self.globals_dict
+        exec(compile(parsed_ast, filename="<ast>", mode="exec"), self.globals_dict, self.locals_dict)
+        return self.locals_dict
 
     def run(
         self,
@@ -727,3 +730,39 @@ class StarlarkRuntime:
         self.setup()
 
         return self.__compile_and_execute(starlark_code)
+
+    def __interpret(
+        self,
+        starlark_code: str,
+    ) -> Dict[Any, Any]:
+        parsed_ast = ast.parse(starlark_code)
+
+        for node in parsed_ast.body:
+            if isinstance(node, ast.Expr):
+                logging.debug(f'[eval] {astunparse.unparse(node)}')
+                result = eval(
+                    compile(ast.Expression(node.value), '<string>', 'eval'),
+                    {**self.globals_dict, **self.locals_dict}
+                )
+                logging.debug(f'[=>] {result}')
+            else:
+                logging.debug(f'[exec] {astunparse.unparse(node)}')
+                exec(
+                    compile(ast.Module(body=[node], type_ignores=[]), '<string>', 'exec'),
+                    self.globals_dict,
+                    self.locals_dict
+                )
+        return self.locals_dict
+
+    def run_continuation_passing(
+        self,
+        starlark_code: str,
+        original_query: str,
+        messages: List[Message] = [],
+    ) -> Dict[Any, Any]:
+        self.original_code = starlark_code
+        self.original_query = original_query
+        self.messages_list = messages
+        self.setup()
+        return self.__interpret(starlark_code)
+

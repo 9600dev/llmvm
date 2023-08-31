@@ -21,7 +21,7 @@ class Executor(ABC):
         messages: List['Message'],
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
-        model: str = 'gpt-3.5-turbo-16k-0613',
+        model: Optional[str] = None,
         stream_handler: Optional[Callable[[str], None]] = None,
     ) -> 'Assistant':
         pass
@@ -31,7 +31,7 @@ class Executor(ABC):
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
-        model: str = 'gpt-3.5-turbo-16k-0613',
+        model: Optional[str] = None,
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
         chat_format: bool = True,
@@ -39,15 +39,26 @@ class Executor(ABC):
         pass
 
     @abstractmethod
+    def set_default_model(
+        self,
+        default_model: str,
+    ):
+        pass
+
+    @abstractmethod
     def name(self) -> str:
         pass
 
     @abstractmethod
-    def max_tokens(self) -> int:
+    def max_tokens(self, model: Optional[str]) -> int:
         pass
 
     @abstractmethod
-    def max_prompt_tokens(self, completion_token_count: int = 2048) -> int:
+    def max_prompt_tokens(
+        self,
+        completion_token_count: int = 2048,
+        model: Optional[str] = None,
+    ) -> int:
         pass
 
     @abstractmethod
@@ -55,6 +66,7 @@ class Executor(ABC):
         self,
         messages: List['Message'] | str,
         extra_str: str = '',
+        model: Optional[str] = None,
     ) -> int:
         pass
 

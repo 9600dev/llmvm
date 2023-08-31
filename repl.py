@@ -148,6 +148,7 @@ class Repl():
         mode = 'tool'
         debug = False
         stream = True
+        continuation = False
 
         if os.path.exists(Container().get('firefox_download_dir') + '/mozilla.pdf'):
             os.remove(Container().get('firefox_download_dir') + '/mozilla.pdf')
@@ -171,31 +172,32 @@ class Repl():
         message_history: List[Message] = []
 
         commands = {
-            '/tool': '[default] sets mode to Starlark runtime tool mode, where the LLM is asked to interact with tools',
-            '/direct': 'sets mode to "direct" sending messages stack directly to LLM',
-            '/mode': 'show the current mode',
-            '/exit': 'exit the repl',
-            '/agents': 'list the available helper functions',
             '/act': 'load an acting prompt and set to "actor" mode. This will similarity search on awesome_prompts.',
-            '/sysprompt': 'set the System prompt mode to the supplied prompt.',
+            '/agents': 'list the available helper functions',
             '/clear': 'clear the message history',
             '/cls': 'clear the screen',
+            '/compile': 'ask LLM to compile query into AST and print to screen',
+            '/continuation': 'run in interpreted continuation passing style',
+            '/debug': 'toggle debug mode',
             '/delcache': 'delete the persistence cache',
-            '/messages': 'show message history',
-            '/edit_last': 'edit the last Assitant message in $EDITOR',
+            '/direct': 'sets mode to "direct" sending messages stack directly to LLM',
+            '/download': 'download content from the specified url into the message history',
             '/edit': 'edit the message history',
             '/edit_ast': 'edit any tool AST result in $EDITOR',
-            '/compile': 'ask LLM to compile query into AST and print to screen',
+            '/edit_last': 'edit the last Assitant message in $EDITOR',
+            '/exit': 'exit the repl',
             '/last': 'clear the conversation except for the last Assistant message',
-            '/y': 'yank the last Assistant message to the clipboard using xclip',
-            '/download': 'download content from the specified url into the message history',
-            '/save': 'serialize the current stack and message history to disk',
             '/load': 'load the current stack and message history from disk',
-            '/debug': 'toggle debug mode',
+            '/local': 'set openai.api_base and openai.api_version to local settings in config.yaml',
+            '/messages': 'show message history',
+            '/mode': 'show the current mode',
+            '/openai_api_base': 'set the openai api base url (e.g https://api.openai.com/v1 or http://127.0.0.1:8000/v1)',
+            '/openai_api_version': 'set the openai api model version (e.g. gpt-3.5 gpt-4, vicuna)',
+            '/save': 'serialize the current stack and message history to disk',
             '/stream': 'toggle stream mode',
-            '/local': 'set openai.api_base and openai.api_version to settings in config.yaml',
-            '/openai_api_base': 'set the openai api base url for local LLM (e.g http://127.0.0.1:8000/v1)',
-            '/openai_api_version': 'set the openai api model version for local LLM',
+            '/sysprompt': 'set the System prompt mode to the supplied prompt.',
+            '/tool': '[default mode] sets mode to Starlark runtime tool mode, where the LLM is asked to interact with tools',
+            '/y': 'yank the last Assistant message to the clipboard using xclip',
         }
 
         self.help(commands)
@@ -233,8 +235,18 @@ class Repl():
                     import openai
                     openai.api_base = api_base
                     openai.api_version = api_version
+                    self.executor.set_default_model(api_version)
                     rich.print('Setting openai.api_base to {}'.format(api_base))
                     rich.print('Setting openai.api_version to {}'.format(api_version))
+                    continue
+
+                elif query.startswith('/continuation'):
+                    if controller.continuation_passing_style:
+                        controller.continuation_passing_style = False
+                        rich.print('Disabling continuation passing style.')
+                    else:
+                        controller.continuation_passing_style = True
+                        rich.print('Enabling continuation passing style.')
                     continue
 
                 elif query.startswith('/openai_api_version'):
@@ -244,6 +256,7 @@ class Repl():
                         continue
                     import openai
                     openai.api_version = version
+                    self.executor.set_default_model(version)
                     rich.print('Setting openai.api_version to {}'.format(version))
                     continue
 
