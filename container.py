@@ -50,6 +50,9 @@ class Container(metaclass=Singleton):
     def get(self, key: str) -> str:
         return self.configuration[key]
 
+    def has(self, key: str) -> bool:
+        return key in self.configuration
+
     def config(self) -> Dict:
         return self.configuration
 

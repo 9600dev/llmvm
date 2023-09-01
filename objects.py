@@ -46,6 +46,12 @@ class Executor(ABC):
         pass
 
     @abstractmethod
+    def get_default_model(
+        self,
+    ) -> str:
+        pass
+
+    @abstractmethod
     def name(self) -> str:
         pass
 

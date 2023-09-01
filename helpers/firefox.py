@@ -1,9 +1,11 @@
+import asyncio
 import datetime as dt
 import os
 import time
 from typing import Any, Callable, Dict, List
 
 import nest_asyncio
+import requests
 from playwright.sync_api import sync_playwright
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -12,6 +14,7 @@ from selenium.webdriver.firefox.webdriver import WebDriver
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
+from yfinance import download
 
 from helpers.container import Container
 from helpers.logging_helpers import setup_logging
@@ -72,7 +75,7 @@ class FirefoxHelpers(metaclass=Singleton):
                 firefox_user_prefs=self.prefs
             )
 
-            context = self.browser.new_context()
+            context = self.browser.new_context(accept_downloads=True)
             cookie_file = Container().get('firefox_cookies')
             if cookie_file:
                 result = read_netscape_cookies(cookie_file)
@@ -120,9 +123,52 @@ class FirefoxHelpers(metaclass=Singleton):
             return ''
 
     def pdf_url(self, url: str) -> str:
-        self.goto(url)
-        self.wait(1000)
-        return self.pdf()
+        def requests_download(url, filename: str):
+            logging.debug('pdf_url: using requests to download')
+            response = requests.get(url, allow_redirects=True, stream=True)
+            with open(filename, 'wb') as file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    file.write(chunk)
+            return os.path.abspath(filename)
+
+        if '.pdf' in url:
+            if os.path.exists('mozilla.pdf'):
+                os.remove('mozilla.pdf')
+            if os.path.exists('/tmp/mozilla.pdf'):
+                os.remove('/tmp/mozilla.pdf')
+            try:
+                if 'arxiv.org' in url:
+                    return requests_download(url, '/tmp/mozilla.pdf')
+
+                self.page.set_content(f"""
+                        <html>
+                        <body>
+                        <a href="{url}" download id="downloadLink">Download</a>
+                        </body>
+                        </html>
+                        """)
+
+                with self.page.expect_download() as download_info:
+                    self.page.click('#downloadLink')
+                self.page.wait_for_timeout(2000)
+
+                d = download_info.value
+                d.save_as('mozilla.pdf')
+                end_time = time.time() + 8
+                while time.time() < end_time:
+                    if os.path.exists('mozilla.pdf'):
+                        return os.path.abspath('mozilla.pdf')
+                    else:
+                        time.sleep(1)
+
+                logging.debug(f'pdf_url({url}) failed, trying requests')
+                return requests_download(url, '/tmp/mozilla.pdf')
+            except Exception as ex:
+                logging.debug(f'pdf_url({url}) failed with: {ex}, trying requests')
+                return requests_download(url, '/tmp/mozilla.pdf')
+        else:
+            self.goto(url)
+            return self.pdf()
 
     def clickable(self) -> List[str]:
         clickable_elements = self.page.query_selector_all(

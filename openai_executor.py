@@ -20,8 +20,9 @@ class OpenAIExecutor(Executor):
     def __init__(
         self,
         openai_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
-        max_function_calls: int = 5,
         default_model: str = 'gpt-3.5-turbo-16k-0613',
+        api_endpoint: str = 'https://api.openai.com/v1',
+        max_function_calls: int = 5,
         verbose: bool = True,
         cache: PersistentCache = PersistentCache(),
     ):
@@ -30,6 +31,8 @@ class OpenAIExecutor(Executor):
         self.default_model = default_model
         self.max_function_calls = max_function_calls
         self.cache: PersistentCache = cache
+        self.api_endpoint = api_endpoint
+        openai.api_base = self.api_endpoint
 
     def max_tokens(self, model: Optional[str]) -> int:
         model = model if model else self.default_model
@@ -47,6 +50,9 @@ class OpenAIExecutor(Executor):
 
     def set_default_model(self, default_model: str):
         self.default_model = default_model
+
+    def get_default_model(self):
+        return self.default_model
 
     def max_prompt_tokens(
         self,
@@ -66,11 +72,7 @@ class OpenAIExecutor(Executor):
         # obtained from: https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
         def num_tokens_from_messages(messages, model: str):
             """Return the number of tokens used by a list of messages."""
-            try:
-                encoding = tiktoken.encoding_for_model(model)
-            except KeyError:
-                print("Warning: model not found. Using cl100k_base encoding.")
-                encoding = tiktoken.get_encoding("cl100k_base")
+            encoding = tiktoken.get_encoding('cl100k_base')
             if model in {
                 "gpt-3.5-turbo-0613",
                 "gpt-3.5-turbo-16k-0613",

@@ -188,11 +188,12 @@ class Repl():
             '/exit': 'exit the repl',
             '/last': 'clear the conversation except for the last Assistant message',
             '/load': 'load the current stack and message history from disk',
-            '/local': 'set openai.api_base and openai.api_version to local settings in config.yaml',
+            '/local': 'set openai.api_base url and model to local settings in config.yaml',
             '/messages': 'show message history',
             '/mode': 'show the current mode',
+            '/model': 'get/set the default model',
+            '/model_tools': 'get/set the tools model',
             '/openai_api_base': 'set the openai api base url (e.g https://api.openai.com/v1 or http://127.0.0.1:8000/v1)',
-            '/openai_api_version': 'set the openai api model version (e.g. gpt-3.5 gpt-4, vicuna)',
             '/save': 'serialize the current stack and message history to disk',
             '/stream': 'toggle stream mode',
             '/sysprompt': 'set the System prompt mode to the supplied prompt.',
@@ -231,13 +232,35 @@ class Repl():
 
                 elif query.startswith('/local'):
                     api_base = Container().get('local_openai_api_base')
-                    api_version = Container().get('local_openai_api_version')
+                    local_model = Container().get('local_model')
+                    local_tools_model = Container().get('local_tools_model')
+
                     import openai
                     openai.api_base = api_base
-                    openai.api_version = api_version
-                    self.executor.set_default_model(api_version)
+                    self.executor.set_default_model(local_model)
+                    controller.tools_model = local_tools_model
+
                     rich.print('Setting openai.api_base to {}'.format(api_base))
-                    rich.print('Setting openai.api_version to {}'.format(api_version))
+                    rich.print('Setting StarlarkExecutionController model to {}'.format(local_model))
+                    rich.print('Setting StarlarkExecutionController tools model to {}'.format(local_tools_model))
+                    continue
+
+                elif query.startswith('/model_tools'):
+                    model = Helpers.in_between(query, '/model_tools ', '\n').strip()
+                    if model == '':
+                        rich.print(f'Tools model: {controller.tools_model}')
+                        continue
+                    controller.tools_model = model
+                    rich.print('Setting StarlarkExecutionController tools model to {}'.format(model))
+                    continue
+
+                elif query.startswith('/model'):
+                    model = Helpers.in_between(query, '/model ', '\n').strip()
+                    if model == '':
+                        rich.print(f'Default model: {self.executor.get_default_model()}')
+                        continue
+                    self.executor.set_default_model(model)
+                    rich.print('Setting StarlarkExecutionController model to {}'.format(model))
                     continue
 
                 elif query.startswith('/continuation'):
@@ -247,17 +270,6 @@ class Repl():
                     else:
                         controller.continuation_passing_style = True
                         rich.print('Enabling continuation passing style.')
-                    continue
-
-                elif query.startswith('/openai_api_version'):
-                    version = Helpers.in_between(query, '/openai_api_version', '\n').strip()
-                    if version == '':
-                        rich.print('No version specified.')
-                        continue
-                    import openai
-                    openai.api_version = version
-                    self.executor.set_default_model(version)
-                    rich.print('Setting openai.api_version to {}'.format(version))
                     continue
 
                 elif query.startswith('/tool'):
@@ -355,7 +367,7 @@ class Repl():
                         rich.print('  [bold]{}[/bold]'.format(agent))
                     continue
 
-                elif query.startswith('/mode'):
+                elif query == '/mode':
                     rich.print('Mode: {}'.format(mode))
                     continue
 
@@ -561,8 +573,12 @@ agents = [
 def start(
     executor: Executor,
     prompt: Optional[str],
+    tools_model: str,
     verbose: bool,
 ):
+    if not verbose:
+        suppress_logging()
+
     if not prompt:
         repl = Repl(executor, agents=agents)
         repl.repl()
@@ -572,6 +588,7 @@ def start(
             agents=agents,
             vector_store=VectorStore(),
             stream_handler=StreamPrinter('').write,
+            tools_model=tools_model,
         )
 
         results = controller.execute(
@@ -584,33 +601,51 @@ def start(
 @click.option('--executor', type=click.Choice(['openai', 'local']), required=False, default='openai')
 @click.option('--prompt', type=str, required=False, default='')
 @click.option('--verbose', type=bool, default=True)
-@click.option('--local_openai_base', type=str, required=False, default='https://127.0.0.1:8000/v1')
-@click.option('--local_openai_version', type=str, required=False, default='')
+@click.option('--model', type=str, required=False, default='')
+@click.option('--tools_model', type=str, required=False, default='')
+@click.option('--api_endpoint', type=str, required=False, default='')
 def main(
     executor: Optional[str],
     prompt: Optional[str],
     verbose: bool,
-    local_openai_base: Optional[str],
-    local_openai_version: Optional[str],
+    model: str,
+    tools_model: str,
+    api_endpoint: str,
 ):
     if not os.environ.get('OPENAI_API_KEY'):
         raise Exception('OPENAI_API_KEY environment variable not set')
 
     openai_key = str(os.environ.get('OPENAI_API_KEY'))
 
+    if not model:
+        model = Container().get('openai_model')
+
+    if not tools_model:
+        tools_model = Container().get('openai_tools_model')
+
+    if not api_endpoint:
+        api_endpoint = Container().get('openai_api_base')
+
     def openai_executor():
-        openai_executor = OpenAIExecutor(openai_key, verbose=verbose, cache=PersistentCache('cache/cache.db'))
+        openai_executor = OpenAIExecutor(
+            openai_key=openai_key,
+            default_model=model,
+            api_endpoint=api_endpoint,
+            verbose=verbose,
+            cache=PersistentCache('cache/cache.db')
+        )
         return openai_executor
 
     if executor == 'local':
         import openai
-        openai.api_base = local_openai_base
-        openai.api_version = local_openai_version
+        openai.api_base = Container().get('local_openai_api_base') if Container().has('local_openai_api_base') else api_endpoint
 
     start(
         openai_executor(),
         prompt,
-        verbose)
+        tools_model,
+        verbose
+    )
 
 if __name__ == '__main__':
     main()

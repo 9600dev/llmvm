@@ -30,7 +30,7 @@ class StarlarkExecutionController(Controller):
         edit_hook: Optional[Callable[[str], str]] = None,
         stream_handler: Optional[Callable[[str], None]] = None,
         continuation_passing_style: bool = False,
-        tool_model: Optional[str] = None,
+        tools_model: Optional[str] = None,
     ):
         super().__init__()
 
@@ -42,7 +42,7 @@ class StarlarkExecutionController(Controller):
         self.stream_handler = stream_handler
         self.starlark_runtime = StarlarkRuntime(self, self.agents)
         self.continuation_passing_style = continuation_passing_style
-        self.tools_model = tool_model
+        self.tools_model = tools_model
 
     def __classify_tool_or_direct(
         self,
