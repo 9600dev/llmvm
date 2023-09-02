@@ -531,7 +531,7 @@ class Repl():
                     else:
                         rich.print('Something went wrong in the execution controller and no results were returned.')
                 else:
-                    assistant_result = controller.execute_llm_call(
+                    assistant_result = self.controller.execute_llm_call(
                         message=User(Content(query)),
                         context_messages=message_history,
                         query='',
