@@ -42,7 +42,7 @@ class StarlarkExecutionController(Controller):
         self.stream_handler = stream_handler
         self.starlark_runtime = StarlarkRuntime(self, self.agents)
         self.continuation_passing_style = continuation_passing_style
-        self.tools_model = tools_model
+        self.tools_model = tools_model if tools_model else self.executor.get_default_model()
 
     def __classify_tool_or_direct(
         self,

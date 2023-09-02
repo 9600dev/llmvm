@@ -46,6 +46,7 @@ class OpenAIExecutor(Executor):
             case 'gpt-3.5-turbo-16k':
                 return 16385
             case _:
+                logging.warning('max_tokens() is not implemented for model {}. Returning 4096.'.format(model))
                 return 4096
 
     def set_default_model(self, default_model: str):

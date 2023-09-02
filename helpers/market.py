@@ -16,6 +16,7 @@ class MarketHelpers():
         import yfinance as yf
 
         date_only = dt.datetime(date.year, date.month, date.day)
+
         def adjust_weekend(date):
             if date.weekday() == 5:  # Saturday
                 return date - dt.timedelta(days=1)  # Adjust to Friday
@@ -25,7 +26,10 @@ class MarketHelpers():
                 return date
 
         date_only = adjust_weekend(date_only)
-        return yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5)).head(1)['Close'].iloc[0]
+        result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5))
+        if len(result) == 0:
+            raise ValueError(f'either the symbol {symbol} does not exist, or there is no price data for date {date_only}')
+        return result.head(1)['Close'].iloc[0]
 
     @staticmethod
     def get_current_market_capitalization(symbol: str) -> str:

@@ -518,6 +518,7 @@ class StarlarkRuntime:
             or isinstance(expr, int)
             or isinstance(expr, str)
             or isinstance(expr, bool)
+            or isinstance(expr, dict)
             or expr is None
         ):
             answer_assistant = self.executor.execute_llm_call(

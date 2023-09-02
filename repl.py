@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from re import I
 from typing import Callable, Dict, List, Optional, cast
 
 import click
@@ -106,10 +107,12 @@ class Repl():
     def __init__(
         self,
         executor: Executor,
+        controller: StarlarkExecutionController,
         agents: List[Callable]
     ):
         self.executor = executor
         self.agents: List[Callable] = agents
+        self.controller = controller
 
     def open_editor(self, editor: str, initial_text: str) -> str:
         with tempfile.NamedTemporaryFile(mode='w+') as temp_file:
@@ -140,7 +143,9 @@ class Repl():
         for command, description in commands.items():
             rich.print('  [bold]{}[/bold] - {}'.format(command, description))
 
-    def repl(self):
+    def repl(
+        self,
+    ):
         console = rich.console.Console()
         history = FileHistory(".repl_history")
         kb = KeyBindings()
@@ -161,14 +166,6 @@ class Repl():
             event.app.current_buffer.cursor_position = len(text) - 1
 
         # todo: this is a hack, we need to refactor the execution controller
-        controller = StarlarkExecutionController(
-            executor=self.executor,
-            agents=agents,
-            cache=PersistentCache('cache/cache.db'),
-            edit_hook=None,
-            stream_handler=StreamPrinter('').write if stream else None,
-        )
-
         message_history: List[Message] = []
 
         commands = {
@@ -238,7 +235,7 @@ class Repl():
                     import openai
                     openai.api_base = api_base
                     self.executor.set_default_model(local_model)
-                    controller.tools_model = local_tools_model
+                    self.controller.tools_model = local_tools_model
 
                     rich.print('Setting openai.api_base to {}'.format(api_base))
                     rich.print('Setting StarlarkExecutionController model to {}'.format(local_model))
@@ -248,9 +245,9 @@ class Repl():
                 elif query.startswith('/model_tools'):
                     model = Helpers.in_between(query, '/model_tools ', '\n').strip()
                     if model == '':
-                        rich.print(f'Tools model: {controller.tools_model}')
+                        rich.print(f'Tools model: {self.controller.tools_model}')
                         continue
-                    controller.tools_model = model
+                    self.controller.tools_model = model
                     rich.print('Setting StarlarkExecutionController tools model to {}'.format(model))
                     continue
 
@@ -264,11 +261,11 @@ class Repl():
                     continue
 
                 elif query.startswith('/continuation'):
-                    if controller.continuation_passing_style:
-                        controller.continuation_passing_style = False
+                    if self.controller.continuation_passing_style:
+                        self.controller.continuation_passing_style = False
                         rich.print('Disabling continuation passing style.')
                     else:
-                        controller.continuation_passing_style = True
+                        self.controller.continuation_passing_style = True
                         rich.print('Enabling continuation passing style.')
                     continue
 
@@ -283,7 +280,7 @@ class Repl():
                     if query.startswith('/direct '):
                         # just execute the query, don't change the mode
                         direct_query = query.replace('/direct ', '')
-                        assistant = controller.execute_llm_call(
+                        assistant = self.controller.execute_llm_call(
                             message=User(Content(direct_query)),
                             context_messages=message_history,
                             query='',
@@ -337,11 +334,11 @@ class Repl():
                     if not edit:
                         rich.print('Enabling AST edit mode')
                         edit = True
-                        controller.edit_hook = self.open_default_editor
+                        self.controller.edit_hook = self.open_default_editor
                     else:
                         rich.print('Disabling AST edit mode')
                         edit = False
-                        controller.edit_hook = None
+                        self.controller.edit_hook = None
                     continue
 
                 elif query.startswith('/edit'):
@@ -375,7 +372,7 @@ class Repl():
                     rich.print()
                     compilation_query = Helpers.in_between(query, '/context', '\n').strip()
 
-                    response = controller.execute_with_agents(
+                    response = self.controller.execute_with_agents(
                         messages=[User(Content(compilation_query))],
                         agents=agents,
                         temperature=0.0,
@@ -442,7 +439,7 @@ class Repl():
                         rich.print('Prompt: {}'.format(prompt_result))
                         rich.print()
 
-                        assistant = controller.execute_llm_call(
+                        assistant = self.controller.execute_llm_call(
                             message=User(Content(prompt_result)),
                             context_messages=[System(Content(prompt_result))] + message_history,
                             query='',
@@ -469,7 +466,7 @@ class Repl():
                     rich.print('Setting sysprompt mode.')
                     rich.print('Prompt: {}'.format(sys_prompt))
                     rich.print()
-                    assistant = controller.execute_llm_call(
+                    assistant = self.controller.execute_llm_call(
                         message=User(Content(sys_prompt)),
                         context_messages=[System(Content(sys_prompt))] + message_history,
                         query='',
@@ -496,12 +493,12 @@ class Repl():
                 elif query.startswith('/stream'):
                     if stream:
                         stream = False
-                        controller.stream_handler = None
+                        self.controller.stream_handler = None
                         rich.print('Disabling streaming mode.')
                     else:
                         stream = True
                         rich.print('Enabling streaming mode.')
-                        controller.stream_handler = StreamPrinter('').write
+                        self.controller.stream_handler = StreamPrinter('').write
                     continue
 
                 elif query.startswith('/download'):
@@ -511,7 +508,7 @@ class Repl():
                         url,
                         self.agents,
                         message_history,
-                        controller.starlark_runtime,
+                        self.controller.starlark_runtime,
                         original_code='',
                         original_query=''
                     )
@@ -525,7 +522,7 @@ class Repl():
                 # execute the query in either tool mode (default) or direct/actor mode
                 results = None
                 if mode == 'tool':
-                    results = controller.execute(
+                    results = self.controller.execute(
                         messages=message_history + [User(Content(query))],
                     )
                     if results:
@@ -579,18 +576,20 @@ def start(
     if not verbose:
         suppress_logging()
 
+    stream_handler = StreamPrinter('').write
+
+    controller = StarlarkExecutionController(
+        executor=executor,
+        agents=agents,
+        vector_store=VectorStore(),
+        stream_handler=stream_handler,
+        tools_model=tools_model
+    )
+
     if not prompt:
-        repl = Repl(executor, agents=agents)
+        repl = Repl(executor=executor, controller=controller, agents=agents)
         repl.repl()
     else:
-        controller = StarlarkExecutionController(
-            executor=executor,
-            agents=agents,
-            vector_store=VectorStore(),
-            stream_handler=StreamPrinter('').write,
-            tools_model=tools_model,
-        )
-
         results = controller.execute(
             messages=[User(Content(prompt))]
         )
