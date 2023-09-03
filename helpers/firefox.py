@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List
 
 import nest_asyncio
 import requests
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import Error, sync_playwright
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
@@ -64,28 +64,39 @@ class FirefoxHelpers(metaclass=Singleton):
             "browser.download.folderList": 2,
             "browser.helperApps.neverAsk.saveToDisk": "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream",
         }
+        self._context = None
         self._page = None
+        self.playwright = None
+        self.browser = None
 
-    @property
-    def page(self):
-        if self._page is None:
+    def __new_page(self):
+        if self.playwright is None or self.browser is None:
             self.playwright = sync_playwright().start()
             self.browser = self.playwright.firefox.launch(
                 headless=False,
                 firefox_user_prefs=self.prefs
             )
 
-            context = self.browser.new_context(accept_downloads=True)
-            cookie_file = Container().get('firefox_cookies')
-            if cookie_file:
-                result = read_netscape_cookies(cookie_file)
-                context.add_cookies(result)
-            self._page = context.new_page()
+        self._context = self.browser.new_context(accept_downloads=True)
+        cookie_file = Container().get('firefox_cookies')
+        if cookie_file:
+            result = read_netscape_cookies(cookie_file)
+            self._context.add_cookies(result)
+        return self._context.new_page()
 
+    @property
+    def page(self):
+        if self._page is None:
+            self._page = self.__new_page()
         return self._page
 
     def goto(self, url: str):
-        if self.page.url != url:
+        try:
+            if self.page.url != url:
+                self.page.goto(url)
+        except Error as ex:
+            # try new page
+            self._page = self.__new_page()
             self.page.goto(url)
 
     def wait(self, milliseconds: int) -> None:
@@ -103,7 +114,15 @@ class FirefoxHelpers(metaclass=Singleton):
 
     def get_url(self, url: str):
         self.goto(url)
-        return self.get_html()
+        try:
+            html = self.get_html()
+            return html
+        except Error as ex:
+            # try new page
+            self._page = self.__new_page()
+            self.goto(url)
+            html = self.get_html()
+            return html
 
     def pdf(self) -> str:
         self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
