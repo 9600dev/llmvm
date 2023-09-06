@@ -19,7 +19,7 @@ from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers, response_writer
-from helpers.logging_helpers import console_debug, setup_logging
+from helpers.logging_helpers import setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.webhelpers import WebHelpers
@@ -766,4 +766,3 @@ class StarlarkRuntime:
         self.messages_list = messages
         self.setup()
         return self.__interpret(starlark_code)
-

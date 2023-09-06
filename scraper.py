@@ -8,6 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from bs4 import BeautifulSoup
 from numpy import dtype
 
+from container import Container
 from helpers.firefox import FirefoxHelpers
 from helpers.logging_helpers import setup_logging
 from helpers.webhelpers import WebHelpers
@@ -42,7 +43,7 @@ class Scraper():
         self
     ):
         self.browser = FirefoxHelpers()
-        self.cache = PersistentCache('cache/scraper.db')
+        self.cache = PersistentCache(Container().get('cache_directory') + '/scraper.db')
 
     def normalize_url(self, url):
         parsed = urlparse(url)

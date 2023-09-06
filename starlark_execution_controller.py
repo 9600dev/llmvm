@@ -10,7 +10,7 @@ from openai import InvalidRequestError
 from ast_parser import Parser
 from container import Container
 from helpers.helpers import Helpers, response_writer
-from helpers.logging_helpers import console_debug, setup_logging
+from helpers.logging_helpers import role_debug, setup_logging
 from objects import (Answer, Assistant, Content, Controller, Executor, Message,
                      Statement, System, User)
 from openai_executor import OpenAIExecutor
@@ -125,10 +125,10 @@ class StarlarkExecutionController(Controller):
                     model=model,
                     stream_handler=stream_handler,
                 )
-                console_debug(prompt_filename, 'User', str(user_message.message))
-                console_debug(prompt_filename, 'Assistant', str(assistant.message))
+                role_debug(logging, prompt_filename, 'User', str(user_message.message))
+                role_debug(logging, prompt_filename, 'Assistant', str(assistant.message))
             except Exception as ex:
-                console_debug(prompt_filename, 'User', str(user_message.message))
+                role_debug(logging, prompt_filename, 'User', str(user_message.message))
                 raise ex
             response_writer(prompt_filename, assistant)
             return assistant

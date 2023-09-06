@@ -39,6 +39,13 @@ class Executor(ABC):
         pass
 
     @abstractmethod
+    def set_default_max_tokens(
+        self,
+        default_max_tokens: int,
+    ):
+        pass
+
+    @abstractmethod
     def set_default_model(
         self,
         default_model: str,

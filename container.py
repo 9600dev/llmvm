@@ -15,7 +15,7 @@ class Singleton (type):
 
 
 class Container(metaclass=Singleton):
-    def __init__(self, config_file: str = 'config.yaml'):
+    def __init__(self, config_file: str = os.path.expanduser('~/.config/llmvm/config.yaml')):
         self.config_file = config_file
 
         # try finding the filename
@@ -48,7 +48,11 @@ class Container(metaclass=Singleton):
         return t(**args)
 
     def get(self, key: str) -> str:
-        return self.configuration[key]
+        value = self.configuration[key]
+        if isinstance(value, str) and '~' in value and '/' in value:
+            return os.path.expanduser(value)
+        else:
+            return value
 
     def has(self, key: str) -> bool:
         return key in self.configuration

@@ -1,4 +1,5 @@
 import os
+from mimetypes import init
 from typing import Optional
 
 import dill
@@ -19,7 +20,13 @@ class PersistentCache:
     def _deserialize_key(self, serialized_key):
         return dill.loads(serialized_key)
 
+    def setup(self):
+        if self.filename and not os.path.isfile(self.filename):
+            with open(self.filename, 'wb') as f:
+                dill.dump({}, f)
+
     def set(self, key, value):
+        self.setup()
         if self.filename:
             with open(self.filename, 'rb+') as f:
                 cache = dill.load(f)
@@ -29,6 +36,7 @@ class PersistentCache:
                 dill.dump(cache, f)
 
     def get(self, key):
+        self.setup()
         if self.filename:
             with open(self.filename, 'rb') as f:
                 cache = dill.load(f)
@@ -37,6 +45,7 @@ class PersistentCache:
         return None
 
     def delete(self, key):
+        self.setup()
         if self.filename:
             with open(self.filename, 'rb+') as f:
                 cache = dill.load(f)
@@ -47,6 +56,7 @@ class PersistentCache:
                     dill.dump(cache, f)
 
     def has_key(self, key):
+        self.setup()
         if self.filename:
             with open(self.filename, 'rb') as f:
                 cache = dill.load(f)
@@ -55,6 +65,7 @@ class PersistentCache:
         return False
 
     def keys(self):
+        self.setup()
         if self.filename:
             with open(self.filename, 'rb') as f:
                 cache = dill.load(f)

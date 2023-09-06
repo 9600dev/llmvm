@@ -23,15 +23,15 @@ class OpenAIExecutor(Executor):
         default_model: str = 'gpt-3.5-turbo-16k-0613',
         api_endpoint: str = 'https://api.openai.com/v1',
         max_function_calls: int = 5,
-        verbose: bool = True,
         cache: PersistentCache = PersistentCache(),
+        default_max_tokens: int = 4096,
     ):
         self.openai_key = openai_key
-        self.verbose = verbose
         self.default_model = default_model
         self.max_function_calls = max_function_calls
         self.cache: PersistentCache = cache
         self.api_endpoint = api_endpoint
+        self.default_max_tokens = default_max_tokens
         openai.api_base = self.api_endpoint
 
     def max_tokens(self, model: Optional[str]) -> int:
@@ -46,14 +46,17 @@ class OpenAIExecutor(Executor):
             case 'gpt-3.5-turbo-16k':
                 return 16385
             case _:
-                logging.warning('max_tokens() is not implemented for model {}. Returning 4096.'.format(model))
-                return 4096
+                logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_tokens}')
+                return self.default_max_tokens
 
     def set_default_model(self, default_model: str):
         self.default_model = default_model
 
     def get_default_model(self):
         return self.default_model
+
+    def set_default_max_tokens(self, default_max_tokens: int):
+        self.default_max_tokens = default_max_tokens
 
     def max_prompt_tokens(
         self,
@@ -95,9 +98,9 @@ class OpenAIExecutor(Executor):
                 logging.warning("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
                 return num_tokens_from_messages(messages, model="gpt-4-0613")
             else:
-                raise NotImplementedError(
-                    f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""  # noqa: E501
-                )
+                logging.error(f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens.""")  # noqa: E501
+                tokens_per_message = 3
+                tokens_per_name = 1
             num_tokens = 0
             for message in messages:
                 num_tokens += tokens_per_message

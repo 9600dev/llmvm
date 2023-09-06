@@ -13,7 +13,7 @@ import icalevents.icalparser
 import pytz
 from icalendar import Calendar, Event, vCalAddress, vText
 
-from helpers.container import Container
+from container import Container
 
 
 class EmailHelpers():

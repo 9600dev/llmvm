@@ -16,7 +16,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.wait import WebDriverWait
 from yfinance import download
 
-from helpers.container import Container
+from container import Container
 from helpers.logging_helpers import setup_logging
 from helpers.singleton import Singleton
 
