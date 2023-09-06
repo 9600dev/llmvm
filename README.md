@@ -93,7 +93,6 @@ After execution:
 
 ![](docs/2023-08-29-15-45-31.png)
 
-
 ## Error Correction
 
 Each step of statement execution is carefully evaluated. Calls to user defined helper functions may throw exceptions, and code may be semantically incorrect (i.e. bindings may be incorrect, leading to the wrong data being returned etc). LLMVM has the ability to back-track up the statement execution list (todo: transactional rollback of variable assignment is probably the right call here but hasn't been implemented yet) and work with the LLM to re-write code, either partially or fully, to try and achieve the desired outcome.
@@ -127,6 +126,34 @@ ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather
 However, this interaction is usually User Task -> LLM decides what helper function to call -> local host calls helper function -> work with result, and does not allow for arbitrary deconstruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
 
 This prototype shows that LLM's are capable of taking a user task, reasoning about how to deconstruct the task into sub-tasks, understanding how to program, schedule and execute those sub-tasks on its own or via a virtual machine, and working with the VM to resolve error cases. We ask the LLM to use [Starlark](https://github.com/bazelbuild/starlark) expressed as [A-normal form](https://en.wikipedia.org/wiki/A-normal_form) as the programming language, and execute Starlark statement-by-statement on a local Python interpreter. When errors arise (syntax errors, exceptions, or semantic problems), we pause execution and work with the LLM to understand and resolve the error by exposing the locals dictionary, and allowing the LLM to "debug" the current execution state.
+
+## As a Command Line Utility
+
+I bash/fish alias llm:
+
+```alias llm=python3 repl.py```
+
+and then:
+
+```bash
+cat somecode.py | llm -d "rewrite this code; make it cleaner and easier to read"
+```
+
+```bash
+llm "generate cat names" > cat_names.txt
+```
+
+```bash
+cat meeting_nodes.txt | llm "correct spelling mistakes and extract action items" -d
+```
+
+And some really nice Unix pipe foo:
+
+```bash
+llm "download the latest news about Elon Musk as bullet points" | llm "write a small blog post from the bullet points in the previous message" | llm "create a nice html file to display the content" > output.html
+```
+
+
 
 ## Install
 
@@ -223,7 +250,6 @@ elon_musk_queries = ['Elon Musk latest news', 'Elon Musk SpaceX updates', 'Tesla
 The same prompt in Code Llama instruct fails. As does LlongOrca.
 
 Maybe 70B has some promise, but I can't run it on my local RTX 4090. A 4-bit quantized 70B would require 2x 4090 GPU's. Bang-for-buck, GPT 3.5 kills it.
-
 
 ## Other cute stuff
 
