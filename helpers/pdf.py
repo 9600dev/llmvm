@@ -1,4 +1,5 @@
 import tempfile
+from cgitb import text
 from io import BytesIO
 from typing import List
 from urllib.parse import urlparse
@@ -57,7 +58,15 @@ class PdfHelpers():
                 raise ValueError('The supplied argument url_or_file: {} is not a correct filename or url.'.format(url_or_file))
 
         logging.debug('parse_pdf: extracting text from pdf')
-        return extract_text(stream)
+        escape_chars = ['\x0c', '\x0b', '\x0a']
+        text_result = extract_text(stream)
+        for char in escape_chars:
+            text_result = text_result.replace(char, ' ').strip()
+
+        if text_result == '':
+            text_result = PdfHelpers.parse_pdf_image(url_or_file)
+
+        return text_result
 
     @staticmethod
     def parse_pdf_deprecated(url_or_file: str) -> str:

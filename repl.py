@@ -4,17 +4,23 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from gc import enable
 from re import I
 from typing import Callable, Dict, List, Optional, cast
 
 import click
 import pandas as pd
 import rich
-from prompt_toolkit import prompt
+from prompt_toolkit import PromptSession, prompt
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import (Completer, Completion, PathCompleter,
+                                       WordCompleter, merge_completers)
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from rich.console import Console
-from rich.markdown import Markdown
+from prompt_toolkit.styles import Style
+from rich.console import Console, ConsoleOptions, RenderResult
+from rich.markdown import CodeBlock, Markdown
+from rich.syntax import Syntax
 
 from bcl import BCL
 from container import Container
@@ -33,6 +39,21 @@ from vector_store import VectorStore
 
 logging = setup_logging()
 
+
+# we have to monkeypatch this method to remove the 'padding' from the markdown
+# console output, so copy and paste "just works(tm)"
+def markdown__rich_console__(
+    self,
+    console: Console,
+    options: ConsoleOptions,
+) -> RenderResult:
+    code = str(self.text).rstrip()
+    syntax = Syntax(
+        code, self.lexer_name, theme=self.theme, word_wrap=True, padding=0
+    )
+    yield syntax
+
+
 def print_response(statements: List[Statement | AstNode]):
     def contains_token(s, tokens):
         return any(token in s for token in tokens)
@@ -42,6 +63,8 @@ def print_response(statements: List[Statement | AstNode]):
         console = Console()
 
         if contains_token(s, markdown_tokens):
+            CodeBlock.__rich_console__ = markdown__rich_console__
+            markdown = Markdown(s)
             console.print(f'{prepend}', end='')
             console.print(Markdown(s))
         else:
@@ -85,6 +108,14 @@ def print_response(statements: List[Statement | AstNode]):
                 pprint('', f'  {statement.result()}')
         else:
             pprint('', str(statement))
+
+
+def is_binary_file(filepath):
+    """Check if a file is binary or text by reading a chunk of the file."""
+    with open(filepath, 'rb') as file:
+        CHUNKSIZE = 8192  # Read 8KB to see if the file has a null byte.
+        chunk = file.read(CHUNKSIZE)
+    return b'\x00' in chunk
 
 
 class StreamPrinter():
@@ -183,6 +214,7 @@ class Repl():
             '/edit_ast': 'edit any tool AST result in $EDITOR',
             '/edit_last': 'edit the last Assitant message in $EDITOR',
             '/exit': 'exit the repl',
+            '/file': 'load the contents of a file into the message history',
             '/last': 'clear the conversation except for the last Assistant message',
             '/load': 'load the current stack and message history from disk',
             '/local': 'set openai.api_base url and model to local settings in config.yaml',
@@ -200,14 +232,30 @@ class Repl():
 
         self.help(commands)
 
+        custom_style = Style.from_dict({
+            'suggestion': 'bg:#888888 #444444'
+        })
+
+        cmds = [str(command)[1:] for command in commands.keys()]
+        command_completer = WordCompleter(cmds, ignore_case=True, display_dict=commands)
+        path_completer = PathCompleter()
+        combined_completer = merge_completers([command_completer, path_completer])
+
+        session = PromptSession(
+            completer=combined_completer,
+            auto_suggest=AutoSuggestFromHistory(),
+            style=custom_style,
+            history=history,
+            enable_history_search=True,
+            vi_mode=True,
+            key_bindings=kb,
+            complete_while_typing=True,
+        )
+
         while True:
             try:
-                query = prompt(
+                query = session.prompt(
                     'prompt>> ',
-                    history=history,
-                    enable_history_search=True,
-                    vi_mode=True,
-                    key_bindings=kb,
                 )
 
                 if query is None or query == '':
@@ -225,6 +273,26 @@ class Repl():
                     import openai
                     openai.api_base = base_url
                     rich.print('Setting openai.api_base to {}'.format(base_url))
+                    continue
+
+                elif query.startswith('/file'):
+                    filename = Helpers.in_between(query, '/file ', '\n').strip()
+                    if filename == '':
+                        rich.print('No filename specified.')
+                        continue
+                    if not os.path.exists(filename):
+                        rich.print('File does not exist.')
+                        continue
+
+                    contents = ''
+                    if is_binary_file(filename) and 'pdf' in filename:
+                        from helpers.pdf import PdfHelpers
+                        contents = PdfHelpers.parse_pdf(filename)
+                    else:
+                        with open(filename, 'r') as f:
+                            contents = f.read()
+                    message_history.append(User(Content(contents)))
+                    rich.print(f'File {filename} loaded into message history.')
                     continue
 
                 elif query.startswith('/local'):
