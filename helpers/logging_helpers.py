@@ -12,6 +12,11 @@ from rich.traceback import install
 global_loggers: Dict[str, Logger] = {}
 handler = RichHandler()
 
+def no_indent_debug(logger, message) -> None:
+    if logger.level <= logging.DEBUG:
+        console = Console(file=sys.stderr)
+        console.print(message)
+
 def role_debug(logger, callee, role, message) -> None:
     def split_string_by_width(input_string, width=20):
         result = ''

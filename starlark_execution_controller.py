@@ -4,16 +4,10 @@ import math
 import random
 from typing import Any, Callable, Dict, List, Optional, cast
 
-import rich
-from openai import InvalidRequestError
-
-from ast_parser import Parser
-from container import Container
 from helpers.helpers import Helpers, response_writer
-from helpers.logging_helpers import role_debug, setup_logging
+from helpers.logging_helpers import no_indent_debug, role_debug, setup_logging
 from objects import (Answer, Assistant, Content, Controller, Executor, Message,
                      Statement, System, User)
-from openai_executor import OpenAIExecutor
 from persistent_cache import PersistentCache
 from starlark_runtime import StarlarkRuntime
 from vector_store import VectorStore
@@ -396,13 +390,13 @@ class StarlarkExecutionController(Controller):
 
             assistant_response = str(response.message).replace('Assistant:', '').strip()
 
-            rich.print()
-            rich.print('[bold yellow]Abstract Syntax Tree:[/bold yellow]')
+            no_indent_debug(logging, '')
+            no_indent_debug(logging, '[bold yellow]Abstract Syntax Tree:[/bold yellow]')
             # debug out AST
             lines = str(assistant_response).split('\n')
             for line in lines:
-                rich.print('{}'.format(str(line).replace("[", "\\[")))
-            rich.print()
+                no_indent_debug(logging, '{}'.format(str(line).replace("[", "\\[")))
+            no_indent_debug(logging, '')
 
             # debug output
             response_writer('llm_call', assistant_response)
