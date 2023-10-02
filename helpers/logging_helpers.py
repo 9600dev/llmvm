@@ -1,5 +1,7 @@
 import datetime as dt
+import inspect
 import logging
+import os
 import sys
 import types
 from logging import Logger
@@ -9,8 +11,12 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install
 
+from container import Container
+
 global_loggers: Dict[str, Logger] = {}
 handler = RichHandler()
+if not os.path.exists(Container().get('log_directory')):
+    os.makedirs(Container().get('log_directory'))
 
 def no_indent_debug(logger, message) -> None:
     if logger.level <= logging.DEBUG:
@@ -84,6 +90,12 @@ def setup_logging(
     logging.getLogger('openai').setLevel(logging.WARNING)
     logging.getLogger('pdfminer').setLevel(logging.WARNING)
     logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('parso.python.diff').disabled = True
+    logging.getLogger('parso').setLevel(logging.WARNING)
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    logging.getLogger('httpcore').setLevel(logging.WARNING)
+    logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
 
     logger: Logger = logging.getLogger()
 
@@ -111,8 +123,10 @@ def suppress_logging():
     logging.getLogger('markdown_it').setLevel(logging.CRITICAL)
     logging.getLogger('numexpr').setLevel(logging.CRITICAL)
     logging.getLogger('rich').setLevel(logging.CRITICAL)
+    logging.getLogger('httpx').setLevel(logging.CRITICAL)
+    logging.getLogger('httpcore').setLevel(logging.CRITICAL)
 
 
 def response_writer(callee, message):
-    with (open('logs/ast.log', 'a')) as f:
+    with (open(f"{Container().get('log_directory')}/ast.log", 'a')) as f:
         f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')

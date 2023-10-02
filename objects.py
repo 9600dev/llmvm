@@ -1,12 +1,27 @@
+import asyncio
+import datetime as dt
+import inspect
+import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
-                    Sequence, Tuple, TypeVar, Union, cast)
+from typing import (Any, Awaitable, Callable, Dict, Generator, Generic, List,
+                    Optional, Sequence, Tuple, TypeVar, Union, cast)
 
 import pandas as pd
 import pandas_gpt
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 T = TypeVar('T')
+
+
+async def awaitable_none(a: 'AstNode') -> None:
+    pass
+
+
+def none(a: 'AstNode') -> None:
+    pass
+
 
 class Visitor(ABC):
     @abstractmethod
@@ -16,26 +31,25 @@ class Visitor(ABC):
 
 class Executor(ABC):
     @abstractmethod
+    async def aexecute(
+        self,
+        messages: List['Message'],
+        max_completion_tokens: int = 2048,
+        temperature: float = 1.0,
+        model: Optional[str] = None,
+        stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
+    ) -> 'Assistant':
+        pass
+
+    @abstractmethod
     def execute(
         self,
         messages: List['Message'],
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
         model: Optional[str] = None,
-        stream_handler: Optional[Callable[[str], None]] = None,
+        stream_handler: Optional[Callable[['AstNode'], None]] = None,
     ) -> 'Assistant':
-        pass
-
-    @abstractmethod
-    def execute_direct(
-        self,
-        messages: List[Dict[str, str]],
-        functions: List[Dict[str, str]] = [],
-        model: Optional[str] = None,
-        max_completion_tokens: int = 2048,
-        temperature: float = 1.0,
-        chat_format: bool = True,
-    ) -> Dict:
         pass
 
     @abstractmethod
@@ -123,6 +137,21 @@ class Controller():
         pass
 
     @abstractmethod
+    def aexecute_llm_call(
+        self,
+        message: 'Message',
+        context_messages: List['Message'],
+        query: str,
+        original_query: str,
+        prompt_filename: Optional[str] = None,
+        completion_tokens: int = 2048,
+        temperature: float = 0.0,
+        lifo: bool = False,
+        stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = awaitable_none,
+    ) -> 'Assistant':
+        pass
+
+    @abstractmethod
     def execute_llm_call(
         self,
         message: 'Message',
@@ -133,6 +162,7 @@ class Controller():
         completion_tokens: int = 2048,
         temperature: float = 0.0,
         lifo: bool = False,
+        stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = awaitable_none,
     ) -> 'Assistant':
         pass
 
@@ -145,6 +175,66 @@ class AstNode(ABC):
 
     def accept(self, visitor: Visitor) -> 'AstNode':
         return visitor.visit(self)
+
+
+class TokenStopNode(AstNode):
+    def __init__(
+        self,
+    ):
+        super().__init__()
+
+    def __str__(self):
+        return '\n'
+
+    def __repr__(self):
+        return 'TokenStopNode()'
+
+
+class StopNode(AstNode):
+    def __init__(
+        self,
+    ):
+        super().__init__()
+
+    def __str__(self):
+        return 'StopNode'
+
+    def __repr__(self):
+        return 'StopNode()'
+
+
+class StreamNode(AstNode):
+    def __init__(
+        self,
+        obj: object,
+        type: str,
+        metadata: object = None,
+    ):
+        super().__init__()
+        self.obj = obj
+        self.type = type
+        self.metadata = metadata
+
+    def __str__(self):
+        return 'StreamNode'
+
+    def __repr__(self):
+        return 'StreamNode()'
+
+
+class DebugNode(AstNode):
+    def __init__(
+        self,
+        debug_str: str,
+    ):
+        super().__init__()
+        self.debug_str = debug_str
+
+    def __str__(self):
+        return 'DebugNode'
+
+    def __repr__(self):
+        return 'DebugNode()'
 
 
 class Content(AstNode):
@@ -505,3 +595,62 @@ class LambdaVisitor(Visitor):
             return node
         else:
             return node
+
+
+class DownloadItem(BaseModel):
+    id: int
+    url: str
+
+
+class MessageModel(BaseModel):
+    role: str
+    content: str
+
+    def to_message(self) -> Message:
+        return Message.from_dict(self.model_dump())
+
+    @staticmethod
+    def from_message(message: Message) -> 'MessageModel':
+        return MessageModel(**Message.to_dict(message))
+
+
+class SessionThread(BaseModel):
+    id: int = -1
+    current_mode: str = 'tool'
+    temperature: float = 0.0
+    messages: List[MessageModel] = []
+
+
+class Response(BaseModel):
+    def __init__(
+        self,
+        thread: Optional[SessionThread] = None,
+        stream: Optional[StreamingResponse] = None,
+    ):
+        super().__init__()
+        self.thread = thread
+        self.response = stream
+
+
+# class SessionThread():
+#     def __init__(
+#         self,
+#         mode: str,
+#         id: int = -1,
+#     ) -> None:
+#         super().__init__()
+#         self.id = id
+#         self.current_mode = mode
+#         self.started = dt.datetime.now()
+#         self.messages: List[Message] = []
+
+
+# class Response():
+#     def __init__(
+#         self,
+#         thread: Optional[SessionThread] = None,
+#         stream: Optional[StreamingResponse] = None,
+#     ):
+#         super().__init__()
+#         self.thread = thread
+#         self.response = stream

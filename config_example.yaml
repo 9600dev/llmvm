@@ -1,16 +1,33 @@
+server_host: '127.0.0.1'
+server_port: 8000
 firefox_profile: '~/.mozilla/firefox/cp6sgb0s.selenium'
 firefox_marionette_port: 2828
-firefox_download_dir: '~/.local/share/llmvm/download'
+firefox_download_directory: '~/.local/share/llmvm/download'
 firefox_cookies: '~/.local/share/llmvm/cookies.txt'
 smtp_server: 'localhost'
 smtp_port: 1025
-smtp_username: 'user@domain.com'
-smtp_password: ''
+smtp_username: 'blah@blah.net'
+smtp_password: 'blah'
 cache_directory: '~/.local/share/llmvm/cache'
-openai_api_base: 'https://api.openai.com/v1'
-openai_model: 'gpt-3.5-turbo-16k-0613'
-openai_tools_model: 'gpt-4-0613'
-local_openai_api_base: 'http://localhost:8000/v1'
+cdn_directory: '~/.local/share/llmvm/cdn'
+log_directory: '~/.local/share/llmvm/logs'
+api_base: 'https://api.openai.com/v1'
+model: 'gpt-3.5-turbo-16k-0613'
+max_tokens: 16384
+tools_model: 'gpt-4-0613'
+local_api_base: 'http://localhost:8000/v1'
 local_model: 'llongorca.gguf'
 local_tools_model: 'llongorca.gguf'
 local_model_max_tokens: 16385
+vector_store_index_directory: '~/.local/share/llmvm/faiss'
+vector_store_embedding_model: 'BAAI/bge-base-en'
+vector_store_chunk_size: 500
+helper_functions:
+  - helpers.webhelpers.WebHelpers.search_linkedin_profile
+  - helpers.webhelpers.WebHelpers.get_linkedin_profile
+  - helpers.edgar.EdgarHelpers.get_report
+  - helpers.market.MarketHelpers.get_stock_price
+  - helpers.market.MarketHelpers.get_current_market_capitalization
+  - helpers.email_helpers.EmailHelpers.send_email
+  - helpers.email_helpers.EmailHelpers.send_calendar_invite
+  - bcl.BCL.datetime

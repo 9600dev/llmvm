@@ -1,12 +1,17 @@
 import asyncio
+import concurrent
+import concurrent.futures
 import datetime as dt
 import os
+import threading
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Awaitable, Callable, Dict, List, cast
 
+import aiofiles
+import httpx
 import nest_asyncio
-import requests
-from playwright.sync_api import Error, sync_playwright
+from PIL import Image
+from playwright.async_api import Error, Page, async_playwright
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
@@ -17,8 +22,10 @@ from selenium.webdriver.support.wait import WebDriverWait
 from yfinance import download
 
 from container import Container
+from helpers.helpers import Helpers, write_client_stream
 from helpers.logging_helpers import setup_logging
 from helpers.singleton import Singleton
+from objects import StreamNode
 
 nest_asyncio.apply()
 logging = setup_logging()
@@ -54,13 +61,78 @@ def read_netscape_cookies(cookies_txt_filename: str):
 
 class FirefoxHelpers(metaclass=Singleton):
     def __init__(self):
+        self.loop = asyncio.SelectorEventLoop()
+        self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
+        self.thread.start()
+        self.firefox = FirefoxHelpersInternal()
+
+    def _run_event_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
+
+    def run_in_loop(self, coro):
+        future = concurrent.futures.Future()
+
+        async def wrapped():
+            try:
+                result = await coro
+                future.set_result(result)
+            except Exception as e:
+                future.set_exception(e)
+
+        asyncio.run_coroutine_threadsafe(wrapped(), self.loop)
+        return future
+
+    async def goto(self, url: str):
+        return self.run_in_loop(self.firefox.goto(url)).result()
+
+    async def wait(self, milliseconds: int) -> None:
+        return self.run_in_loop(self.firefox.wait(milliseconds)).result()
+
+    async def wait_until(self, selector: str) -> None:
+        return self.run_in_loop(self.firefox.wait_until(selector)).result()
+
+    async def wait_until_text(self, selector: str) -> None:
+        return self.run_in_loop(self.firefox.wait_until_text(selector)).result()
+
+    async def get_html(self) -> str:
+        return self.run_in_loop(self.firefox.get_html()).result()
+
+    async def screenshot(self) -> bytes:
+        return self.run_in_loop(self.firefox.screenshot()).result()
+
+    async def get_url(self, url: str):
+        result = self.run_in_loop(self.firefox.get_url(url)).result()
+        write_client_stream(
+            StreamNode(
+                obj=await self.screenshot(),
+                type='bytes',
+                metadata={'type': 'bytes', 'url': url}
+            ))
+        return result
+
+    async def pdf(self) -> str:
+        return self.run_in_loop(self.firefox.pdf()).result()
+
+    async def pdf_url(self, url: str) -> str:
+        return self.run_in_loop(self.firefox.pdf_url(url)).result()
+
+    async def clickable(self) -> List[str]:
+        return self.run_in_loop(self.firefox.clickable()).result()
+
+    async def click(self, element) -> None:
+        return self.run_in_loop(self.firefox.click(element)).result()
+
+
+class FirefoxHelpersInternal(metaclass=Singleton):
+    def __init__(self):
         profile_directory = Container().get('firefox_profile')
         self.prefs = {
             "profile": profile_directory,
             "print.always_print_silent": True,
             "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
             "print_printer": "Mozilla Save to PDF",
-            "browser.download.dir": Container().get('firefox_download_dir'),
+            "browser.download.dir": Container().get('firefox_download_directory'),
             "browser.download.folderList": 2,
             "browser.helperApps.neverAsk.saveToDisk": "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream",
         }
@@ -69,65 +141,71 @@ class FirefoxHelpers(metaclass=Singleton):
         self.playwright = None
         self.browser = None
 
-    def __new_page(self):
+    async def __new_page(self):
         if self.playwright is None or self.browser is None:
-            self.playwright = sync_playwright().start()
-            self.browser = self.playwright.firefox.launch(
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.firefox.launch(
                 headless=False,
                 firefox_user_prefs=self.prefs
             )
 
-        self._context = self.browser.new_context(accept_downloads=True)
+        self._context = await self.browser.new_context(accept_downloads=True)
         cookie_file = Container().get('firefox_cookies')
         if cookie_file:
             result = read_netscape_cookies(cookie_file)
-            self._context.add_cookies(result)
-        return self._context.new_page()
+            await self._context.add_cookies(result)
+        return await self._context.new_page()
 
-    @property
-    def page(self):
+    async def page(self) -> Page:
         if self._page is None:
-            self._page = self.__new_page()
-        return self._page
+            self._page = await self.__new_page()
+            return self._page
+        else:
+            return cast(Page, self._page)
 
-    def goto(self, url: str):
+    async def goto(self, url: str):
         try:
-            if self.page.url != url:
-                self.page.goto(url)
+            if (await self.page()).url != url:
+                await (await self.page()).goto(url)
         except Error as ex:
             # try new page
-            self._page = self.__new_page()
-            self.page.goto(url)
+            self._page = await self.__new_page()
+            await (await self.page()).goto(url)
 
-    def wait(self, milliseconds: int) -> None:
-        self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
-        self.page.wait_for_timeout(milliseconds)
+    async def wait(self, milliseconds: int) -> None:
+        await (await self.page()).evaluate("() => { setTimeout(function() { return; }, 0); }")
+        await (await self.page()).wait_for_timeout(milliseconds)
 
-    def wait_until(self, selector: str) -> None:
-        element = self.page.wait_for_selector(selector)
+    async def wait_until(self, selector: str) -> None:
+        element = await (await self.page()).wait_for_selector(selector)
 
-    def wait_until_text(self, selector: str) -> None:
-        element = self.page.wait_for_selector(f'*:has-text("{selector}")', timeout=5000)
+    async def wait_until_text(self, selector: str) -> None:
+        element = await (await self.page()).wait_for_selector(f'*:has-text("{selector}")', timeout=5000)
 
-    def get_html(self) -> str:
-        return self.page.content()
+    async def get_html(self) -> str:
+        return await (await self.page()).content()
 
-    def get_url(self, url: str):
-        self.goto(url)
+    async def screenshot(self) -> bytes:
+        screenshot_data = await (await self.page()).screenshot(type='png')
+        return screenshot_data
+
+    async def get_url(self, url: str):
+        await self.goto(url)
+
         try:
-            html = self.get_html()
+            html = await self.get_html()
             return html
         except Error as ex:
             # try new page
-            self._page = self.__new_page()
-            self.goto(url)
-            html = self.get_html()
+            self._page = await self.__new_page()
+            await self.goto(url)
+            html = await self.get_html()
             return html
 
-    def pdf(self) -> str:
-        self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
-        self.page.evaluate("() => { window.print(); }")
-        self.page.evaluate("() => { setTimeout(function() { return; }, 0); }")
+    async def pdf(self) -> str:
+        await (await self.page()).evaluate("() => { setTimeout(function() { return; }, 0); }")
+        await (await self.page()).evaluate("() => { window.print(); }")
+        await (await self.page()).evaluate("() => { setTimeout(function() { return; }, 0); }")
 
         # we have to wait for the pdf to be produced
         counter = 0
@@ -141,13 +219,15 @@ class FirefoxHelpers(metaclass=Singleton):
             logging.debug('pdf: pdf not found')
             return ''
 
-    def pdf_url(self, url: str) -> str:
-        def requests_download(url, filename: str):
+    async def pdf_url(self, url: str) -> str:
+        async def requests_download(url, filename: str):
             logging.debug('pdf_url: using requests to download')
-            response = requests.get(url, allow_redirects=True, stream=True)
-            with open(filename, 'wb') as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    file.write(chunk)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, follow_redirects=True)
+                async with aiofiles.open(filename, 'wb') as file:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        await file.write(chunk)
+
             return os.path.abspath(filename)
 
         if '.pdf' in url:
@@ -157,9 +237,9 @@ class FirefoxHelpers(metaclass=Singleton):
                 os.remove('/tmp/mozilla.pdf')
             try:
                 if 'arxiv.org' in url:
-                    return requests_download(url, '/tmp/mozilla.pdf')
+                    return await requests_download(url, '/tmp/mozilla.pdf')
 
-                self.page.set_content(f"""
+                await (await self.page()).set_content(f"""
                         <html>
                         <body>
                         <a href="{url}" download id="downloadLink">Download</a>
@@ -167,30 +247,30 @@ class FirefoxHelpers(metaclass=Singleton):
                         </html>
                         """)
 
-                with self.page.expect_download() as download_info:
-                    self.page.click('#downloadLink')
-                self.page.wait_for_timeout(2000)
+                async with (await self.page()).expect_download() as download_info:
+                    await (await self.page()).click('#downloadLink')
+                await (await self.page()).wait_for_timeout(2000)
 
-                d = download_info.value
-                d.save_as('mozilla.pdf')
+                d = await download_info.value
+                await d.save_as('mozilla.pdf')
                 end_time = time.time() + 8
                 while time.time() < end_time:
                     if os.path.exists('mozilla.pdf'):
                         return os.path.abspath('mozilla.pdf')
                     else:
-                        time.sleep(1)
+                        await asyncio.sleep(1)
 
                 logging.debug(f'pdf_url({url}) failed, trying requests')
-                return requests_download(url, '/tmp/mozilla.pdf')
+                return await requests_download(url, '/tmp/mozilla.pdf')
             except Exception as ex:
                 logging.debug(f'pdf_url({url}) failed with: {ex}, trying requests')
-                return requests_download(url, '/tmp/mozilla.pdf')
+                return await requests_download(url, '/tmp/mozilla.pdf')
         else:
-            self.goto(url)
-            return self.pdf()
+            await self.goto(url)
+            return await self.pdf()
 
-    def clickable(self) -> List[str]:
-        clickable_elements = self.page.query_selector_all(
+    async def clickable(self) -> List[str]:
+        clickable_elements = await (await self.page()).query_selector_all(
             "a, button, input[type='submit'], input[type='button']"
         )
         unique_ids = set()
@@ -199,5 +279,5 @@ class FirefoxHelpers(metaclass=Singleton):
             unique_ids.add(element)
         return list(unique_ids)
 
-    def click(self, element) -> None:
-        element.click()
+    async def click(self, element) -> None:
+        await element.click()

@@ -28,7 +28,7 @@ There are also 9 special features that I've added to our Starlark implementation
 2. llm_bind(expression, function_str: str) -> Callable. Allows you to properly bind the helper function callsite to whatever is in the expression. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind that to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and I will give you both the value of the expression and the function call site, and you can emit a function call site that is late-bound properly: WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
 3. llm_loop_bind(expression, llm_instruction: str, count: int = sys.maxsize) -> Iterator[str]. Allows you to properly bind text to a string list of size count. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings of size 'count' extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.    
 4. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. However, this is a special dataframe where you can ask natural language questions about the data and get back responses using the ask(str) method. See examples below on how to use the "ask" method, as it's the only method you can use on the Pandas DataFrame.
-5. search(expression) -> str. Searches the Internet across various search engines to find content related to 'expression' and returns all that content as a string. Use this if you need general search, news search, or product searching capability. 
+5. search(expression) -> str. Searches the Internet across various search engines and the users local machine to find content related to 'expression' and returns all that content as a string. Use this if you need general search, news search, product search or local file search capability. 
 6. download(expression) -> str. Downloads any web page, html, PDF file, news article or word document, converts it to text, and returns that text content as a string. 
 7. messages() -> List[str]. Returns the current large language model conversation as a list of strings. messages()[0] gets the first user message. messages()[-1] gets the previous message. Messages can either be User messages or Assistant messages.  
 8. coerce(expression, type_name: str) -> Any. Takes any value in expression and coerces it to specified Python type in type_name. Valid type_names are float, int, str, list[float | int | str].
@@ -119,6 +119,12 @@ var1 = search("research on climate change effects for Brisbane, Australia")
 var2 = llm_call([var1], "summarize information on climate change effects")
 var3 = llm_call([var2], "Generate small essay"])
 answer(var3)
+
+Here is an example of being asked to search local files on the users computer: 
+User: "find files that contain anything related to water pressure, building plans and approval documents"
+Assistant:
+var1 = search("local search: water pressure building plans approval documents")
+answer(var1)
 
 User: "Convert the last message into a bullet point list"
 Assistant:

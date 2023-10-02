@@ -1,14 +1,19 @@
 # LLMVM
 
-This project is a research prototype that enables a Large Language Model (LLM) to break down user tasks into manageable locally executable sub-tasks, and then schedule and oversee their execution on an intepreted virtual machine (in this case, Python), collaboratively addressing syntax and semantic errors through a back-and-forth dialogue.
+This project is a research prototype that enables a Large Language Model (LLM) to break down user tasks into manageable locally executable sub-tasks, and then schedule and oversee their execution on an interpreted virtual machine (in this case, Python), collaboratively addressing syntax and semantic errors through a back-and-forth dialogue.
 
 Let's look at an example of breaking down the user task: ```"Go to the https://ten13.vc/team website, extract the list of names, and then get me a summary of their LinkedIn profiles."```
 
 ## Example Walkthrough
 
-Fire up the tool ```python repl.py``` and submit the user task:
+Fire up the local FastAPI server: ```python server.py```.
 
-![](docs/2023-08-23-12-18-41.png)
+![](docs/2023-10-01-18-02-28.png)
+
+Fire up the client tool ```python client.py``` and submit the user task:
+
+![](docs/2023-10-01-18-04-23.png)
+
 
 Starlark code is returned from ChatGPT 3.5 when passing the user task query + [prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt) pair:
 
@@ -93,6 +98,27 @@ After execution:
 
 ![](docs/2023-08-29-15-45-31.png)
 
+And another example ```get a summary of the front page of https://bbc.com```. This demonstrates inline images of the content that the Starlark Runtime is downloading and searching (this only works for the [kitty terminal](https://sw.kovidgoyal.net/kitty/) as kitty supports image rendering):
+
+![](docs/2023-10-01-18-07-07.png)
+
+
+## Architecture
+
+![](docs/2023-10-02-10-25-55.png)
+
+#### You can:
+
+* Write arbitrary natural language queries that get translated into Starlark code and cooperatively executed
+* Upload .pdf, .txt, .csv etc and have them injested by FAISS and searchable by the LLM.
+* Add arbitrary Python helpers by modifying ~/.config/llmvm/config.yaml and adding your Python based helper. Note: you may need to hook the helper in [starlark_runtime.py](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt). You may also need to show examples of its use in [prompts/starlark/starlark_tool_execution.prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt)
+* Server.py via /v1/chat/completions endpoint, mimics and forwards to OpenAI's /v1/chat/completions API.
+* TODO: build a web frontend for this thing
+* TODO: build real time streaming, so you can wire up pipelines of llmvm execution to arbitrary streams of incoming data.
+* TODO: uploaded code files should be parsed, transformed into graphs, and injested via an LLM transformation first.
+* TODO: search is weak. Make it better.
+* TODO: all the threading stuff is probably pretty broken. Fix it. Might use RxPy.
+
 ## Error Correction
 
 Each step of statement execution is carefully evaluated. Calls to user defined helper functions may throw exceptions, and code may be semantically incorrect (i.e. bindings may be incorrect, leading to the wrong data being returned etc). LLMVM has the ability to back-track up the statement execution list (todo: transactional rollback of variable assignment is probably the right call here but hasn't been implemented yet) and work with the LLM to re-write code, either partially or fully, to try and achieve the desired outcome.
@@ -131,7 +157,7 @@ This prototype shows that LLM's are capable of taking a user task, reasoning abo
 
 I bash/fish alias llm:
 
-```alias llm=python3 repl.py```
+```alias llm=python3 client.py```
 
 and then:
 
@@ -150,7 +176,9 @@ cat meeting_nodes.txt | llm "correct spelling mistakes and extract action items"
 And some really nice Unix pipe foo:
 
 ```bash
-llm "download the latest news about Elon Musk as bullet points" | llm "write a small blog post from the bullet points in the previous message" | llm "create a nice html file to display the content" > output.html
+llm "download the latest news about Elon Musk as bullet points" | \
+llm "write a small blog post from the bullet points in the previous message" | \
+llm "create a nice html file to display the content" > output.html
 ```
 
 
@@ -177,7 +205,8 @@ llm "download the latest news about Elon Musk as bullet points" | llm "write a s
   * ```cd python```
   * ```python setup.py install```
 * Run the llmvm repl:
-  * ```python repl.py```
+  * ```python server.py```
+  * ```python client.py```
   * ```/help```
 
 Ensure you have the following environment variables set:
@@ -213,7 +242,8 @@ I haven't had a lot of success getting LLama-2 chat trained models to respond we
   * ```./convert-llama-ggmlv2-to-gguf.py --input llongorca-13b-16k.ggmlv3.q4_1.bin --output llongorca.gguf```
 * ```python -m llama_cpp.server --n_gpu_layers 41 --model ../models/llongorca.gguf --n_ctx 16384 --rope_freq_base 10000 --rope_freq_scale 0.25 --n_threads 10 --verbose True```
   * This should fire up an OpenAI API compatible web server that we can use with LLMVM
-* ```python repl.py```
+* ```python server.py```
+* ```python client.py```
 * ```/local```
 * ```/direct What is your name? ```
   * Assistant: My name is AI Assistant.

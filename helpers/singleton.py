@@ -10,6 +10,7 @@ def singleton(cls):
 
 class Singleton (type):
     _instances = {}  # type: ignore
+    blah = {}
 
     def __call__(cls, *args, **kwargs):
         if cls not in cls._instances:

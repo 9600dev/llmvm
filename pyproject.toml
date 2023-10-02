@@ -38,6 +38,13 @@ currency-converter = "^0.5.5"
 astunparse = "^1.6.3"
 pytest-playwright = "^0.4.2"
 pydantic-settings = "^2.0.3"
+cloup = "^3.0.2"
+click-repl = "^0.3.0"
+httpx = "^0.25.0"
+aiofiles = "^23.2.1"
+jsonpickle = "^3.0.2"
+pillow = "^10.0.1"
+python-multipart = "^0.0.6"
 
 
 [[tool.poetry.source]]
@@ -54,3 +61,24 @@ priority = "primary"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pyright]
+include = ["."]
+exclude = [
+    "**/__pycache__",
+    "backup",
+    "repl.py",
+    "faiss_index",
+    "scripts",
+    "llama-cpp-python",
+    "cache",
+    "faiss",
+    "logs",
+    "prompts",
+]
+reportMissingImports = true
+reportMissingTypeStubs = false
+typeCheckingMode = "basic"
+executionEnvironments = [
+  { root = "." }
+]

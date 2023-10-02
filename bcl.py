@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import datetime as dt
 import re
 import time
@@ -9,19 +10,21 @@ from typing import Any, Callable, Dict, Generator, List, Optional, cast
 from urllib.parse import urlparse
 
 import astunparse
+import pytz
 from dateutil.parser import parse
 from dateutil.relativedelta import relativedelta
 
 from ast_parser import Parser
 from helpers.firefox import FirefoxHelpers
-from helpers.helpers import Helpers
+from helpers.helpers import Helpers, write_client_stream
 from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
 from helpers.search import SerpAPISearcher
 from helpers.webhelpers import WebHelpers
-from objects import (Assistant, Content, Executor, FunctionCall, Message,
-                     System, User)
+from objects import (Assistant, Content, DebugNode, Executor, FunctionCall,
+                     Message, StreamNode, System, User)
 from starlark_runtime import StarlarkRuntime
+from vector_search import VectorSearch
 
 logging = setup_logging()
 
@@ -38,13 +41,18 @@ class BCL():
         return last_day
 
     @staticmethod
-    def __parse_relative_datetime(relative_expression: str) -> dt.datetime:
+    def __parse_relative_datetime(relative_expression: str, timezone: Optional[str] = None) -> dt.datetime:
         if relative_expression.startswith('Q'):
             quarter = int(relative_expression[1:])
             return BCL.__last_day_of_quarter(dt.datetime.now().year, quarter)
 
+        tz = pytz.timezone(time.tzname[0])
+
+        if timezone:
+            tz = pytz.timezone(timezone)
+
         if 'now' in relative_expression:
-            return dt.datetime.now()
+            return dt.datetime.now(tz)
 
         parts = relative_expression.split()
 
@@ -55,23 +63,23 @@ class BCL():
         unit = parts[1].lower()
 
         if unit == "days":
-            return dt.datetime.now() + timedelta(days=value)
+            return dt.datetime.now(tz) + timedelta(days=value)
         elif unit == "months":
-            return dt.datetime.now() + relativedelta(months=value)
+            return dt.datetime.now(tz) + relativedelta(months=value)
         elif unit == "years":
-            return dt.datetime.now() + relativedelta(years=value)
+            return dt.datetime.now(tz) + relativedelta(years=value)
         elif unit == "hours":
-            return dt.datetime.now() + timedelta(hours=value)
+            return dt.datetime.now(tz) + timedelta(hours=value)
         else:
             return parse(relative_expression)
 
     @staticmethod
-    def datetime(expr) -> dt.datetime:
+    def datetime(expr, timezone: Optional[str] = None) -> dt.datetime:
         """
         Returns a datetime object from a string using datetime.strftime().
-        Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days")
+        Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days"), datetime("now", "Australia/Brisbane")
         """
-        return BCL.__parse_relative_datetime(str(expr))
+        return BCL.__parse_relative_datetime(str(expr), timezone)
 
 
 class ContentDownloader():
@@ -91,6 +99,10 @@ class ContentDownloader():
         self.original_code = original_code
         self.original_query = original_query
         self.firefox_helper = FirefoxHelpers()
+
+        # the client can often send through urls with quotes around them
+        if self.expr.startswith('"') and self.expr.endswith('"'):
+            self.expr = self.expr[1:-1]
 
     def __parse_pdf(self, filename: str) -> str:
         content = PdfHelpers.parse_pdf(filename)
@@ -121,11 +133,18 @@ class ContentDownloader():
                 return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
 
         elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
-            pdf_filename = self.firefox_helper.pdf_url(self.expr)
+            loop = asyncio.get_event_loop()
+            task = loop.create_task(self.firefox_helper.pdf_url(self.expr))
+
+            pdf_filename = loop.run_until_complete(task)
             return self.__parse_pdf(pdf_filename)
 
         elif result.scheme == 'http' or result.scheme == 'https':
-            return WebHelpers.convert_html_to_markdown(self.firefox_helper.get_url(self.expr))
+            loop = asyncio.get_event_loop()
+            task = loop.create_task(self.firefox_helper.get_url(self.expr))
+            result = loop.run_until_complete(task)
+
+            return WebHelpers.convert_html_to_markdown(result)
         return ''
 
 
@@ -138,6 +157,7 @@ class Searcher():
         starlark_runtime: StarlarkRuntime,
         original_code: str,
         original_query: str,
+        vector_search: VectorSearch,
         total_links_to_return: int = 4,
     ):
         self.query = expr
@@ -153,6 +173,10 @@ class Searcher():
         self.index = 0
         self._result = None
         self.total_links_to_return: int = total_links_to_return
+        self.vector_search = vector_search
+
+        if self.query.startswith('"') and self.query.endswith('"'):
+            self.query = self.query[1:-1]
 
     def search(
         self,
@@ -176,10 +200,20 @@ class Searcher():
             queries.insert(0, self.query)
             queries = queries[:self.query_expansion]
 
+        def url_to_text(result: Dict[Any, Any]) -> str:
+            return WebHelpers.get_url(result['link'])
+
         def yelp_to_text(reviews: Dict[Any, Any]) -> str:
             return_str = f"{reviews['title']} in {reviews['neighborhood']}."
             return_str += '\n\n'
-            return_str += f"{reviews['reviews']}"
+            return_str += f"{reviews['reviews']}\n"
+            return return_str
+
+        def local_to_text(document: Dict[Any, Any]) -> str:
+            return_str = f"Title: \"{document['title']}\".\n"
+            return_str += f"Link: {document['link']}\n"
+            return_str += '\n\n'
+            return_str += f"Snippet: \"{document['snippet']}\"\n"
             return return_str
 
         def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> str:
@@ -194,12 +228,13 @@ class Searcher():
             return return_str
 
         engines = {
-            'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
-            'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': WebHelpers.get_news_url, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
-            'Google Product Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'Google Product Search is a product search engine that is excellent at finding the prices of products, finding products that match descriptions of products, and finding where to buy a particular product.'},  # noqa:E501
-            'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': WebHelpers.get_url, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
+            'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
+            'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': url_to_text, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
+            'Google Product Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Product Search is a product search engine that is excellent at finding the prices of products, finding products that match descriptions of products, and finding where to buy a particular product.'},  # noqa:E501
+            'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
+            'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
         }  # noqa:E501
 
         # classify the search engine
@@ -222,6 +257,8 @@ class Searcher():
                 self.parser = engines[key]['parser']
                 searcher = engines[key]['searcher']
 
+        write_client_stream(Content(f"I'm using the {engine} engine to perform search.\n"))
+
         # perform the search
         search_results = []
 
@@ -239,6 +276,7 @@ class Searcher():
                 original_query=self.original_query,
                 prompt_filename='prompts/starlark/search_location.prompt',
             )
+
             query_result, location = eval(str(location.message))
             yelp_result = SerpAPISearcher().search_yelp(query_result, location)
             return yelp_to_text(yelp_result)
@@ -277,6 +315,11 @@ class Searcher():
 
         ranked_results = eval(str(result_rank.message))
         self.ordered_snippets = [snippets[key] for key in ranked_results if key in snippets]
+
+        write_client_stream(Content(f"I found {len(snippets)} results. Using the top 5 ranked:\n\n"))
+        for snippet in self.ordered_snippets[0:5]:
+            write_client_stream(Content(f"{snippet['title']}\n{snippet['link']}\n\n"))
+
         return self.result()
 
     def result(self) -> str:
@@ -286,9 +329,9 @@ class Searcher():
             for result in self.ordered_snippets[self.index:]:
                 self.index += 1
                 try:
-                    parser_result = self.parser(result['link']).strip()
+                    parser_result = self.parser(result).strip()
                     if parser_result:
-                        return_results.append(f"The following content is from: {result['link']} with the title: {result['title']} \n\n{parser_result}")  # noqa:E501
+                        return_results.append(f"The following content is from: {result['link']} and has the title: {result['title']} \n\n{parser_result}")  # noqa:E501
                     if len(return_results) >= 4:
                         break
                 except Exception as e:
@@ -530,9 +573,9 @@ class FunctionBindable():
                 global_counter += 1
 
                 globals_result = StarlarkRuntime(
-                    self.starlark_runtime.executor,
-                    self.agents,
-                    self.starlark_runtime.vector_store
+                    executor=self.starlark_runtime.executor,
+                    agents=self.agents,
+                    vector_search=self.starlark_runtime.vector_search,
                 ).run(starlark_code, '')
 
                 self._result = globals_result[identifier]

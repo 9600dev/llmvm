@@ -1,12 +1,14 @@
 import ast
 import copy
+import datetime as dt
 import inspect
 import math
 import os
 import random
 import sys
 from re import L
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, cast
+from typing import (Any, Awaitable, Callable, Dict, Generator, List, Optional,
+                    Tuple, cast)
 from urllib.parse import urlparse
 
 import astunparse
@@ -18,15 +20,15 @@ from ast_parser import Parser
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
 from helpers.firefox import FirefoxHelpers
-from helpers.helpers import Helpers, response_writer
-from helpers.logging_helpers import setup_logging
+from helpers.helpers import Helpers, write_client_stream
+from helpers.logging_helpers import response_writer, setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.webhelpers import WebHelpers
 from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
                      FunctionCall, FunctionCallMeta, Message, PandasMeta,
-                     Statement, User)
-from vector_store import VectorStore
+                     Statement, User, awaitable_none)
+from vector_search import VectorSearch
 
 logging = setup_logging()
 
@@ -35,14 +37,14 @@ class StarlarkRuntime:
     def __init__(
         self,
         executor: Controller,
+        vector_search: VectorSearch,
         agents: List[Callable] = [],
-        vector_store: VectorStore = VectorStore(),
     ):
         self.original_query = ''
         self.original_code = ''
         self.executor: Controller = executor
+        self.vector_search = vector_search
         self.agents = agents
-        self.vector_store = vector_store
         self.locals_dict = {}
         self.globals_dict = {}
         self.answers: List[Answer] = []
@@ -111,6 +113,10 @@ class StarlarkRuntime:
         self.globals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
         self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
         self.globals_dict['answer'] = self.answer
+        self.globals_dict['sys'] = sys
+        self.globals_dict['os'] = os
+        self.globals_dict['pandas'] = pd
+        self.globals_dict['datetime'] = dt
 
     def __find_variable_assignment(
         self,
@@ -429,6 +435,7 @@ class StarlarkRuntime:
             starlark_runtime=self,
             original_code=self.original_code,
             original_query=self.original_query,
+            vector_search=self.vector_search,
         )
         return searcher.search()
 
@@ -506,6 +513,10 @@ class StarlarkRuntime:
                 result='\n\n'.join([str(self.statement_to_message(assistant).message) for assistant in expr])
             )
             return answer
+
+        snippet = str(expr).replace('\n', ' ')[:75]
+        write_client_stream(Content(f'I think I have an answer, but I am double checking it...\n'))
+        write_client_stream(Content(f'answer("{snippet}...")\n'))
 
         # if we have a FunctionCallMeta object, it's likely we've called a helper function
         # and we're just keen to return that.
@@ -587,9 +598,9 @@ class StarlarkRuntime:
                     self.setup()
                     # results_dict = self.compile_and_execute(error_correction)
                     results_dict = StarlarkRuntime(
-                        self.executor,
-                        self.agents,
-                        self.vector_store
+                        executor=self.executor,
+                        agents=self.agents,
+                        vector_search=self.vector_search,
                     ).run(error_correction, self.original_query)
 
         # finally.

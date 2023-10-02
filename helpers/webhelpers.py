@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import unicodedata
@@ -12,6 +13,7 @@ from newspaper.configuration import Configuration
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
 from helpers.firefox import FirefoxHelpers
+from helpers.helpers import write_client_stream
 from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
 from helpers.search import SerpAPISearcher
@@ -111,16 +113,16 @@ class WebHelpers():
     @staticmethod
     def pdf_url_firefox(url: str) -> str:
         """Gets a pdf version of the url using the Firefox browser."""
-        return firefox_helpers.pdf_url(url)
+        return asyncio.run(firefox_helpers.pdf_url(url))
 
     @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:
         """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
 
-        firefox_helpers.goto(linkedin_url)
-        firefox_helpers.wait_until_text('Experience')
-        pdf_file = firefox_helpers.pdf()
+        asyncio.run(firefox_helpers.goto(linkedin_url))
+        asyncio.run(firefox_helpers.wait_until_text('Experience'))
+        pdf_file = asyncio.run(firefox_helpers.pdf())
         data = PdfHelpers.parse_pdf(pdf_file)
         os.remove(pdf_file)
         return data
@@ -172,8 +174,6 @@ class WebHelpers():
         """
         logging.debug('WebHelpers.get_url: {}'.format(url))
 
-        text = ''
-
         result = urlparse(url)
         if result.scheme == '' or result.scheme == 'file':
             if '.pdf' in result.path:
@@ -185,6 +185,6 @@ class WebHelpers():
             return PdfHelpers.parse_pdf(url)
 
         elif result.scheme == 'http' or result.scheme == 'https':
-            return WebHelpers.convert_html_to_markdown(firefox_helpers.get_url(url))
+            return WebHelpers.convert_html_to_markdown(asyncio.run(firefox_helpers.get_url(url)))
 
         return ''

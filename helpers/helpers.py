@@ -1,12 +1,15 @@
 import asyncio
 import datetime as dt
+import importlib
 import inspect
+import io
 import os
 import re
 import subprocess
 import typing
 from enum import Enum, IntEnum
 from itertools import cycle, islice
+from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import guidance
@@ -14,18 +17,65 @@ import nest_asyncio
 import pandas as pd
 from docstring_parser import parse
 from guidance.llms import LLM
+from PIL import Image
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from objects import Content, Message, User
+from objects import AstNode, Content, DebugNode, Message, StreamNode, User
 
 
-def response_writer(callee, message):
-    with (open('logs/ast.log', 'a')) as f:
-        f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')
+def write_client_stream(obj):
+    if isinstance(obj, bytes):
+        obj = StreamNode(obj, type='bytes')
+
+    frame = inspect.currentframe()
+    while frame:
+        # Check if 'self' exists in the frame's local namespace
+        if 'stream_handler' in frame.f_locals:
+            asyncio.run(frame.f_locals['stream_handler'](obj))
+            return
+
+        instance = frame.f_locals.get('self', None)
+        if hasattr(instance, 'stream_handler'):
+            asyncio.run(instance.stream_handler(obj))
+            return
+        frame = frame.f_back
 
 
 class Helpers():
+    @staticmethod
+    def get_callable(logging: Logger, method_str) -> Optional[Callable]:
+        parts = method_str.split(".")
+        class_name = ''
+
+        if len(parts) == 1:
+            # If it's a function in the current module
+            module = importlib.import_module("__main__")
+            method_name = parts[0]
+        else:
+            # If it's a method in some other module or class
+            module_name = ".".join(parts[:-2]) if len(parts) > 2 else ".".join(parts[:-1])
+            try:
+                module = importlib.import_module(module_name)
+            except ModuleNotFoundError:
+                logging.error(f"Module '{module_name}' not found")
+                return None
+
+            if len(parts) > 2:
+                class_name = parts[-2]
+                class_obj = getattr(module, class_name, None)
+                if class_obj is None:
+                    raise ValueError(f"Class '{class_name}' not found in module '{module_name}'")
+                method_name = parts[-1]
+                method = getattr(class_obj, method_name, None)
+            else:
+                method_name = parts[-1]
+                method = getattr(module, method_name, None)
+
+            if method is None:
+                logging.error(f"Method '{method_name}' not found in {'class ' + class_name + ' in ' if len(parts) > 2 else ''}module '{module_name}'")
+            return method
+
     @staticmethod
     def tfidf_similarity(query: str, text_list: list[str]):
         lowered_list = []
@@ -129,6 +179,22 @@ class Helpers():
         if result:
             return result[-1]
         return None
+
+    @staticmethod
+    def resize_image(screenshot_data, base_width=500):
+        # Load the image from the in-memory data
+        image = Image.open(io.BytesIO(screenshot_data))
+
+        # Calculate the height maintaining the aspect ratio
+        w_percent = base_width / float(image.size[0])
+        h_size = int(float(image.size[1]) * float(w_percent))
+
+        # Resize the image
+        image = image.resize((base_width, h_size), Image.NEAREST)
+
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
 
     @staticmethod
     def find_string_between_tokens(text, start_token, end_token):

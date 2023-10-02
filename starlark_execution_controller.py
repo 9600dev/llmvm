@@ -1,16 +1,26 @@
 import ast
+import asyncio
 import copy
 import math
+import os
 import random
-from typing import Any, Callable, Dict, List, Optional, cast
+import sys
+from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
-from helpers.helpers import Helpers, response_writer
-from helpers.logging_helpers import no_indent_debug, role_debug, setup_logging
-from objects import (Answer, Assistant, Content, Controller, Executor, Message,
-                     Statement, System, User)
+import pandas as pd
+
+from container import Container
+from helpers.helpers import Helpers
+from helpers.logging_helpers import (no_indent_debug, response_writer,
+                                     role_debug, setup_logging)
+from helpers.pdf import PdfHelpers
+from helpers.webhelpers import WebHelpers
+from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
+                     Message, Statement, StopNode, System, User,
+                     awaitable_none)
 from persistent_cache import PersistentCache
 from starlark_runtime import StarlarkRuntime
-from vector_store import VectorStore
+from vector_search import VectorSearch
 
 logging = setup_logging()
 
@@ -19,10 +29,9 @@ class StarlarkExecutionController(Controller):
         self,
         executor: Executor,
         agents: List[Callable],
-        vector_store: VectorStore = VectorStore(),
-        cache: PersistentCache = PersistentCache(),
+        vector_search: VectorSearch,
+        cache: PersistentCache = PersistentCache(Container().get('cache_directory') + '/starlark.cache'),
         edit_hook: Optional[Callable[[str], str]] = None,
-        stream_handler: Optional[Callable[[str], None]] = None,
         continuation_passing_style: bool = False,
         tools_model: Optional[str] = None,
     ):
@@ -30,17 +39,17 @@ class StarlarkExecutionController(Controller):
 
         self.executor = executor
         self.agents = agents
-        self.vector_store = vector_store
+        self.vector_search = vector_search
         self.cache = cache
         self.edit_hook = edit_hook
-        self.stream_handler = stream_handler
-        self.starlark_runtime = StarlarkRuntime(self, self.agents)
+        self.starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
         self.continuation_passing_style = continuation_passing_style
         self.tools_model = tools_model if tools_model else self.executor.get_default_model()
 
-    def __classify_tool_or_direct(
+    async def aclassify_tool_or_direct(
         self,
-        prompt: str,
+        message: User,
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
     ) -> Dict[str, float]:
         def parse_result(result: str) -> Dict[str, float]:
             if ',' in result:
@@ -62,27 +71,28 @@ class StarlarkExecutionController(Controller):
 
         # assess the type of task
         function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+        # todo rip out the probability from here
         query_understanding = Helpers.load_and_populate_prompt(
-            prompt_filename='prompts/query_understanding.prompt',
+            prompt_filename='prompts/starlark/query_understanding.prompt',
             template={
                 'functions': '\n'.join(function_list),
-                'user_input': prompt,
+                'user_input': str(message.message),
             }
         )
 
-        assistant: Assistant = self.executor.execute(
+        assistant: Assistant = await self.executor.aexecute(
             messages=[
                 System(Content(query_understanding['system_message'])),
                 User(Content(query_understanding['user_message']))
             ],
             temperature=0.0,
+            stream_handler=stream_handler,
         )
-
         if assistant.error or not parse_result(str(assistant.message)):
             return {'tool': 1.0}
         return parse_result(str(assistant.message))
 
-    def execute_llm_call(
+    async def aexecute_llm_call(
         self,
         message: Message,
         context_messages: List[Message],
@@ -93,10 +103,14 @@ class StarlarkExecutionController(Controller):
         temperature: float = 0.0,
         model: Optional[str] = None,
         lifo: bool = False,
-        stream_handler: Optional[Callable[[str], None]] = None,
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
     ) -> Assistant:
-        # internal helper to wrap and execute LLM call to executor.
-        def __llm_call(
+        '''
+        Internal function to execute an LLM call with prompt template and context messages.
+        Deals with chunking, map/reduce, and other logic if the message/context messages
+        are too long for the context window.
+        '''
+        async def __llm_call(
             user_message: Message,
             context_messages: List[Message],
             executor: Executor,
@@ -112,7 +126,7 @@ class StarlarkExecutionController(Controller):
                 messages.append(user_message)
 
             try:
-                assistant: Assistant = executor.execute(
+                assistant: Assistant = await executor.aexecute(
                     messages,
                     max_completion_tokens=completion_tokens,
                     temperature=temperature,
@@ -127,7 +141,7 @@ class StarlarkExecutionController(Controller):
             response_writer(prompt_filename, assistant)
             return assistant
 
-        def __llm_call_prompt(
+        async def __llm_call_prompt(
             prompt_filename: str,
             context_messages: List[Message],
             executor: Executor,
@@ -137,7 +151,7 @@ class StarlarkExecutionController(Controller):
                 prompt_filename=prompt_filename,
                 template=template,
             )
-            return __llm_call(
+            return await __llm_call(
                 User(Content(prompt['user_message'])),
                 context_messages,
                 executor,
@@ -175,7 +189,7 @@ class StarlarkExecutionController(Controller):
                     else:
                         break
 
-                assistant_result = __llm_call(
+                assistant_result = await __llm_call(
                     user_message=cast(User, message),
                     context_messages=prompt_context_messages[::-1],  # reversed, because of above
                     executor=self.executor,
@@ -187,7 +201,7 @@ class StarlarkExecutionController(Controller):
             context_message = User(Content('\n\n'.join([str(m.message) for m in context_messages])))
 
             # see if we can do a similarity search or not.
-            similarity_chunks = self.vector_store.chunk_and_rank(
+            similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
                 content=str(context_message.message),
                 chunk_token_count=256,
@@ -201,7 +215,7 @@ class StarlarkExecutionController(Controller):
 
             decision_criteria: List[str] = []
             for chunk, _ in similarity_chunks[:5]:
-                assistant_similarity = __llm_call_prompt(
+                assistant_similarity = await __llm_call_prompt(
                     prompt_filename='prompts/document_chunk.prompt',
                     context_messages=[],
                     executor=self.executor,
@@ -236,7 +250,7 @@ class StarlarkExecutionController(Controller):
                 for i in range(len(context_messages)):
                     prev_message = context_messages[i]
 
-                    similarity_chunks = self.vector_store.chunk_and_rank(
+                    similarity_chunks = self.vector_search.chunk_and_rank(
                         query=query,
                         content=str(prev_message),
                         chunk_token_count=256,
@@ -252,7 +266,7 @@ class StarlarkExecutionController(Controller):
 
                     similarity_messages.append(User(Content(similarity_message)))
 
-                assistant_result = __llm_call(
+                assistant_result = await __llm_call(
                     user_message=message,
                     context_messages=similarity_messages,
                     executor=self.executor,
@@ -272,14 +286,14 @@ class StarlarkExecutionController(Controller):
                 )
                 chunk_size = self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model) - map_reduce_prompt_tokens - self.executor.calculate_tokens([message], model=model) - 32  # noqa E501
 
-                chunks = self.vector_store.chunk(
+                chunks = self.vector_search.chunk(
                     content=str(context_message.message),
                     chunk_size=chunk_size,
                     overlap=0
                 )
 
                 for chunk in chunks:
-                    chunk_assistant = __llm_call_prompt(
+                    chunk_assistant = await __llm_call_prompt(
                         prompt_filename='prompts/map_reduce_map.prompt',
                         context_messages=[],
                         executor=self.executor,
@@ -294,7 +308,7 @@ class StarlarkExecutionController(Controller):
                 # perform the reduce
                 map_results = '\n\n====\n\n' + '\n\n====\n\n'.join(chunk_results)
 
-                assistant_result = __llm_call_prompt(
+                assistant_result = await __llm_call_prompt(
                     prompt_filename='prompts/map_reduce_reduce.prompt',
                     context_messages=[],
                     executor=self.executor,
@@ -305,7 +319,7 @@ class StarlarkExecutionController(Controller):
                     },
                 )
         else:
-            assistant_result = __llm_call(
+            assistant_result = await __llm_call(
                 user_message=cast(User, message),
                 context_messages=context_messages,
                 executor=self.executor,
@@ -313,16 +327,43 @@ class StarlarkExecutionController(Controller):
             )
         return assistant_result
 
-    def execute_with_agents(
+    def execute_llm_call(
+        self,
+        message: Message,
+        context_messages: List[Message],
+        query: str,
+        original_query: str,
+        prompt_filename: Optional[str] = None,
+        completion_tokens: int = 2048,
+        temperature: float = 0.0,
+        model: Optional[str] = None,
+        lifo: bool = False,
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
+    ) -> Assistant:
+        return asyncio.run(self.aexecute_llm_call(
+            message=message,
+            context_messages=context_messages,
+            query=query,
+            original_query=original_query,
+            prompt_filename=prompt_filename,
+            completion_tokens=completion_tokens,
+            temperature=temperature,
+            model=model,
+            lifo=lifo,
+            stream_handler=stream_handler,
+        ))
+
+    async def abuild_runnable_ast(
         self,
         messages: List[Message],
         agents: List[Callable],
         temperature: float = 0.0,
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
     ) -> Assistant:
         if self.cache and self.cache.has_key(messages):
             return cast(Assistant, self.cache.get(messages))
 
-        logging.debug('StarlarkRuntime.execute_with_agents() messages[-1] = {}'.format(str(messages[-1])[0:25]))
+        logging.debug('StarlarkRuntime.build_runnable_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
 
@@ -334,11 +375,7 @@ class StarlarkExecutionController(Controller):
             }
         )
 
-        with open('logs/tools_execution.log', 'w') as f:
-            f.write(str(tools_message['system_message']['content']) + '\n')
-            f.write(str(tools_message['user_message']['content']))
-
-        llm_response = self.execute_llm_call(
+        llm_response = await self.aexecute_llm_call(
             message=tools_message,
             context_messages=messages[0:-1],
             query='',
@@ -348,23 +385,18 @@ class StarlarkExecutionController(Controller):
             temperature=temperature,
             model=self.tools_model,
             lifo=False,
-            stream_handler=self.stream_handler,
+            stream_handler=stream_handler,
         )
-
-        with open('logs/tools_execution.log', 'a') as f:
-            f.write('\n\n')
-            for message in messages:
-                f.write(f'Message:\n{message.message}\n\n')
-            f.write(f'\n\nResponse:\n{llm_response.message}\n\n')
-            f.write('\n\n')
 
         if self.cache: self.cache.set(messages, llm_response)
         return llm_response
 
-    def execute(
+    async def aexecute(
         self,
         messages: List[Message],
         temperature: float = 0.0,
+        mode: str = 'tool',
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
     ) -> List[Statement]:
         def find_answers(d: Dict[Any, Any]) -> List[Statement]:
             current_results = []
@@ -378,14 +410,25 @@ class StarlarkExecutionController(Controller):
         results: List[Statement] = []
 
         # assess the type of task
-        classification = self.__classify_tool_or_direct(str(messages[-1].message))
+        last_message = Helpers.last(lambda m: isinstance(m, User), messages)
+        if not last_message: return []
+
+        # either classify, or we're going direct
+        if mode == 'tool':
+            classification = await self.aclassify_tool_or_direct(
+                last_message,
+                stream_handler=stream_handler
+            )
+        else:
+            classification = {'direct': 1.0}
 
         # if it requires tooling, hand it off to the AST execution engine
         if 'tool' in classification:
-            response = self.execute_with_agents(
+            response = await self.abuild_runnable_ast(
                 messages=messages,
                 agents=self.agents,
                 temperature=temperature,
+                stream_handler=stream_handler,
             )
 
             assistant_response = str(response.message).replace('Assistant:', '').strip()
@@ -431,13 +474,13 @@ class StarlarkExecutionController(Controller):
                 results.extend(self.starlark_runtime.answers)
                 return results
         else:
-            assistant_reply: Assistant = self.execute_llm_call(
+            assistant_reply: Assistant = await self.aexecute_llm_call(
                 message=messages[-1],
                 context_messages=messages[0:-1],
                 query=str(messages[-1].message),
                 temperature=temperature,
                 original_query='',
-                stream_handler=self.stream_handler,
+                stream_handler=stream_handler,
             )
 
             results.append(Answer(

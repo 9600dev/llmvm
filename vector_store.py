@@ -1,59 +1,67 @@
 import math
 import os
 import tempfile
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 from langchain.docstore.document import Document
 from langchain.document_loaders import TextLoader
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.text_splitter import (MarkdownTextSplitter, TextSplitter,
-                                     TokenTextSplitter)
+from langchain.embeddings.huggingface import HuggingFaceEmbeddings
+from langchain.text_splitter import TextSplitter, TokenTextSplitter
 
 from helpers.logging_helpers import setup_logging
-from objects import Executor
-from openai_executor import OpenAIExecutor
 
 logging = setup_logging()
-
 
 class VectorStore():
     def __init__(
         self,
-        executor: Executor = OpenAIExecutor(),
-        openai_key: str = os.environ.get('OPENAI_API_KEY'),  # type: ignore
-        store_filename: str = 'faiss_index',
+        token_calculator: Callable[[str], int],
+        store_filename: str,
+        embedding_model: str,
         chunk_size: int = 500,
-        chunk_overlap: int = 100,
+        chunk_overlap: int = 50,
     ):
-        self.openai_key = openai_key
-        self.embeddings = OpenAIEmbeddings(
-            model='text-embedding-ada-002',
-            openai_api_key=self.openai_key,
-        )  # type: ignore
-
+        self.token_calculator = token_calculator
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name=embedding_model,
+            model_kwargs={'device': 'cuda:0'},
+            encode_kwargs={'normalize_embeddings': True}
+        )
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.store_filename: str = store_filename
-        self.executor = executor
 
         if not os.path.exists(self.store_filename):
             from langchain.vectorstores import FAISS
-
             self.store: FAISS = FAISS.from_texts([''], self.embeddings)
             self.store.save_local(self.store_filename)
 
-    def load_store(self):
-        from langchain.vectorstores import FAISS
+    def __metadata_str(self, document: Document):
+        if document.metadata:
+            return ', '.join([f'{str(k)}: {str(v)}' for k, v in document.metadata.items()])
+        else:
+            return ''
 
-        if not self.store:
+    def __document_str(self, document: Document):
+        return f'{self.__metadata_str(document)} {document.page_content}'
+
+    def __load_store(self):
+        from langchain.vectorstores import FAISS
+        if not hasattr(self, 'store') or not self.store:
             self.store = FAISS.load_local(
                 self.store_filename,
                 self.embeddings
             )
-
         return self.store
 
-    def load_text(self, text: str):
+    def injest_documents(
+        self,
+        documents: List[Document],
+    ):
+        self.__load_store().add_documents(documents)
+        self.__load_store().save_local(self.store_filename)
+
+    def ingest_text(self, text: str, url: Optional[str] = None, metadata: Optional[dict] = None):
         documents = []
 
         with tempfile.NamedTemporaryFile(suffix='.txt', mode='w', delete=True) as t:
@@ -63,21 +71,29 @@ class VectorStore():
             data = text_loader.load()
             documents = text_loader.load_and_split()
 
+        if url:
+            for d in documents:
+                d.metadata['source'] = url
+                d.metadata['url'] = url
+
+        if metadata:
+            for d in documents:
+                d.metadata = metadata
+
         text_splitter = TokenTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
         split_texts = text_splitter.split_documents(documents)
-        self.load_store().add_documents(split_texts)
-        self.load_store().save_local(self.store_filename)
+        self.__load_store().add_documents(split_texts)
+        self.__load_store().save_local(self.store_filename)
 
     def search_document(self, query: str, max_results: int = 4) -> List[Document]:
-        return self.load_store().similarity_search(query, k=max_results)
+        documents = self.__load_store().similarity_search_with_relevance_scores(query, k=max_results)
+        for doc, score in documents:
+            doc.metadata['score'] = score
+        return [doc for doc, _ in documents if doc.page_content]
 
     def search(self, query: str, max_results: int = 4) -> List[str]:
-        result = self.load_store().similarity_search(query, k=max_results)
-        return [a.page_content for a in result]
-
-    def search_with_similarity(self, query: str, max_results: int = 4) -> List[Document]:
-        result = self.load_store().similarity_search(query, k=max_results)
-        return result
+        result = self.__load_store().similarity_search(query, k=max_results)
+        return [f'{self.__metadata_str(a)} {a.page_content}' for a in result if a.page_content]
 
     def chunk(
         self,
@@ -116,7 +132,7 @@ class VectorStore():
 
         split_texts = text_splitter.split_text(content)
 
-        token_chunk_cost = self.executor.calculate_tokens(split_texts[0])
+        token_chunk_cost = self.token_calculator(split_texts[0])
 
         logging.debug('VectorStore.chunk_and_rank document length: {} split_texts: {}'.format(len(content), len(split_texts)))
         chunk_faiss = FAISS.from_texts(split_texts, self.embeddings)
@@ -124,7 +140,7 @@ class VectorStore():
         chunk_k = math.floor(max_tokens / token_chunk_cost)
         result = chunk_faiss.similarity_search_with_relevance_scores(query, k=chunk_k * 5)
 
-        total_tokens = self.executor.calculate_tokens(query)
+        total_tokens = self.token_calculator(query)
         return_results = []
 
         def half_str(s):
@@ -132,15 +148,15 @@ class VectorStore():
             return s[:mid]
 
         for doc, rank in result:
-            if total_tokens + self.executor.calculate_tokens(doc.page_content) < max_tokens:
-                return_results.append((doc.page_content, rank))
-                total_tokens += self.executor.calculate_tokens(doc.page_content)
+            if total_tokens + self.token_calculator(doc.page_content) < max_tokens:
+                return_results.append((self.__document_str(doc), rank))
+                total_tokens += self.token_calculator(self.__document_str(doc))
             elif (
                 half_str(doc.page_content)
-                and total_tokens + self.executor.calculate_tokens(half_str(doc.page_content)) < max_tokens
+                and total_tokens + self.token_calculator(half_str(doc.page_content)) < max_tokens
             ):
-                return_results.append((half_str(doc.page_content)[0], rank))
-                total_tokens += self.executor.calculate_tokens(half_str(doc.page_content))
+                return_results.append((half_str(self.__document_str(doc))[0], rank))
+                total_tokens += self.token_calculator(half_str(self.__document_str(doc)))
             else:
                 break
         return return_results

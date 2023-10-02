@@ -8,6 +8,7 @@ from typing import Dict, Generator, List
 import rich
 from serpapi import BingSearch, GoogleSearch
 
+from helpers.helpers import write_client_stream
 from helpers.logging_helpers import setup_logging
 from helpers.search_hn import SearchHN
 
@@ -126,6 +127,13 @@ class SerpAPISearcher(Searcher):
             for result in organic_results:
                 yield result
 
+        # {
+        #    "position": 1,
+        #    "title": "SerpApi - Google Search API",
+        #    "link": "https://serpapi.com/",
+        #    "snippet": "SerpApi is a real-time API ..."
+        # }
+
     def search_internet_bing(
         self,
         query: str,
@@ -228,6 +236,7 @@ class SerpAPISearcher(Searcher):
                 'snippet': snippet,
                 'reviews': '\n\n'.join(reviews_text)
             }
+
         return {}
 
     def search_news(

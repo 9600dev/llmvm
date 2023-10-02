@@ -1,20 +1,22 @@
+import asyncio
 import datetime as dt
 import json
 import os
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import (Any, Callable, Dict, Generator, Generic, List, Optional,
-                    Sequence, Tuple, TypeVar, Union, cast)
+from typing import (Any, Awaitable, Callable, Dict, Generator, Generic, List,
+                    Optional, Sequence, Tuple, TypeVar, Union, cast)
 
 import openai
 import tiktoken
 
+from container import Container
 from helpers.logging_helpers import response_writer, setup_logging
-from objects import Assistant, Content, Executor, Message, System, User
+from objects import (Assistant, AstNode, Content, Executor, Message, System,
+                     TokenStopNode, User, awaitable_none)
 from persistent_cache import PersistentCache
 
 logging = setup_logging()
-
 
 class OpenAIExecutor(Executor):
     def __init__(
@@ -23,7 +25,7 @@ class OpenAIExecutor(Executor):
         default_model: str = 'gpt-3.5-turbo-16k-0613',
         api_endpoint: str = 'https://api.openai.com/v1',
         max_function_calls: int = 5,
-        cache: PersistentCache = PersistentCache(),
+        cache: PersistentCache = PersistentCache(Container().get('cache_directory') + '/openai.cache'),
         default_max_tokens: int = 4096,
     ):
         self.openai_key = openai_key
@@ -125,7 +127,7 @@ class OpenAIExecutor(Executor):
     def name(self) -> str:
         return 'openai'
 
-    def execute_direct(
+    def aexecute_direct(
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
@@ -133,8 +135,7 @@ class OpenAIExecutor(Executor):
         max_completion_tokens: int = 1024,
         temperature: float = 0.2,
         chat_format: bool = True,
-        stream: bool = False,
-    ) -> Dict:
+    ):
         message_tokens = self.calculate_tokens(messages)
         if message_tokens > self.max_prompt_tokens(max_completion_tokens):
             raise Exception('Prompt too long, message tokens: {}, completion tokens: {} total tokens: {}, available tokens: {}'
@@ -148,26 +149,26 @@ class OpenAIExecutor(Executor):
 
         if chat_format:
             if functions:
-                response = openai.ChatCompletion.create(
+                response = openai.ChatCompletion.acreate(
                     model=model if model else self.default_model,
                     temperature=temperature,
                     max_tokens=max_completion_tokens,
                     functions=functions,
                     messages=messages,
-                    stream=stream,
+                    stream=True,
                 )
             else:
                 # for whatever reason, [] functions generates an InvalidRequestError
-                response = openai.ChatCompletion.create(
+                response = openai.ChatCompletion.acreate(
                     model=model if model else self.default_model,
                     temperature=temperature,
                     max_tokens=max_completion_tokens,
                     messages=messages,
-                    stream=stream,
+                    stream=True,
                 )
             return response  # type: ignore
         else:
-            response = openai.Completion.create(
+            response = openai.Completion.acreate(
                 model=model if model else self.default_model,
                 temperature=temperature,
                 max_tokens=max_completion_tokens,
@@ -175,13 +176,13 @@ class OpenAIExecutor(Executor):
             )
             return response  # type: ignore
 
-    def execute(
+    async def aexecute(
         self,
         messages: List[Message],
         max_completion_tokens: int = 2048,
         temperature: float = 0.2,
         model: Optional[str] = None,
-        stream_handler: Optional[Callable[[str], None]] = None,
+        stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         def last(predicate, iterable):
             result = [x for x in iterable if predicate(x)]
@@ -190,6 +191,9 @@ class OpenAIExecutor(Executor):
             return None
 
         if self.cache and self.cache.has_key(messages):
+            if stream_handler:
+                await stream_handler(cast(Assistant, self.cache.get(messages)))
+                await stream_handler(TokenStopNode())
             return cast(Assistant, self.cache.get(messages))
 
         # find the system message and append to the front
@@ -198,9 +202,6 @@ class OpenAIExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
-        start_time = dt.datetime.now()
-        logging.debug('OpenAIExecutor.execute() user_message={}'.format(str(messages[-1])[0:25]))
-
         # fresh message list
         messages_list: List[Dict[str, str]] = []
 
@@ -208,47 +209,22 @@ class OpenAIExecutor(Executor):
         for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
-        chat_response = self.execute_direct(
+        chat_response = self.aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,
             chat_format=True,
             temperature=temperature,
-            stream=True if stream_handler else False,
         )
-        logging.debug('OpenAIExecutor.execute() finished in {}ms'.format((dt.datetime.now() - start_time).microseconds / 1000))
 
-        # handle the stream stuff
-        if stream_handler:
-            text_response = ''
-            for chunk in chat_response:
-                s = chunk.choices[0].delta.get('content', '')
-                stream_handler(s)
-                text_response += s
+        text_response = ''
+        async for chunk in await chat_response:  # type: ignore
+            s = chunk.choices[0].delta.get('content', '')
+            await stream_handler(Content(s))
+            text_response += s
+        await stream_handler(TokenStopNode())
 
-            stream_handler('\n')
-
-            messages_list.append({'role': 'assistant', 'content': text_response})
-            conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
-
-            assistant = Assistant(
-                message=conversation[-1].message,
-                messages_context=conversation
-            )
-
-            if self.cache: self.cache.set(messages, assistant)
-            return assistant
-
-        if len(chat_response) == 0:
-            return Assistant(
-                message=Content('The model could not execute the query.'),
-                error=True,
-                messages_context=[Message.from_dict(m) for m in messages_list],
-                system_context=system_message,
-            )
-
-        messages_list.append(chat_response['choices'][0]['message'])
-
+        messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
 
         assistant = Assistant(
@@ -258,3 +234,17 @@ class OpenAIExecutor(Executor):
 
         if self.cache: self.cache.set(messages, assistant)
         return assistant
+
+    def execute(
+        self,
+        messages: List[Message],
+        max_completion_tokens: int = 2048,
+        temperature: float = 0.2,
+        model: Optional[str] = None,
+        stream_handler: Optional[Callable[[AstNode], None]] = None,
+    ) -> Assistant:
+        async def stream_pipe(node: AstNode):
+            if stream_handler:
+                stream_handler(node)
+
+        return asyncio.run(self.aexecute(messages, max_completion_tokens, temperature, model, stream_pipe))
