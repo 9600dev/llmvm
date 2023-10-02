@@ -7,7 +7,7 @@ firefox_cookies: '~/.local/share/llmvm/cookies.txt'
 smtp_server: 'localhost'
 smtp_port: 1025
 smtp_username: 'blah@blah.net'
-smtp_password: 'blah'
+smtp_password: 'password'
 cache_directory: '~/.local/share/llmvm/cache'
 cdn_directory: '~/.local/share/llmvm/cdn'
 log_directory: '~/.local/share/llmvm/logs'
