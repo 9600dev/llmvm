@@ -45,6 +45,7 @@ aiofiles = "^23.2.1"
 jsonpickle = "^3.0.2"
 pillow = "^10.0.1"
 python-multipart = "^0.0.6"
+anthropic = "^0.3.11"
 
 
 [[tool.poetry.source]]

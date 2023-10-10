@@ -107,11 +107,14 @@ class ContentDownloader():
     def __parse_pdf(self, filename: str) -> str:
         content = PdfHelpers.parse_pdf(filename)
 
-        query_expander = self.starlark_runtime.executor.execute_llm_call(
+        query_expander = self.starlark_runtime.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/pdf_content.prompt',
-                template={
-                }),
+                template={},
+                user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                append_token=self.starlark_runtime.controller.get_executor().append_token(),
+            ),
             context_messages=[self.starlark_runtime.statement_to_message(content)],
             query=self.original_query,
             original_query=self.original_query,
@@ -182,18 +185,39 @@ class Searcher():
         self,
     ) -> str:
         # todo: we should probably return the Search instance, so we can futz with it later on.
-        query_expander = self.starlark_runtime.executor.execute_llm_call(
+        query_expander = self.starlark_runtime.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/search_expander.prompt',
                 template={
                     'query': self.query,
-                }),
+                },
+                user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                append_token=self.starlark_runtime.controller.get_executor().append_token(),
+            ),
             context_messages=[],
             query=self.query,
             original_query=self.original_query,
         )
 
-        queries = eval(str(query_expander.message))[:self.query_expansion]
+        queries = []
+
+        # double shot try
+        try:
+            queries = eval(str(query_expander.message))[:self.query_expansion]
+        except SyntaxError as ex:
+            logging.debug(f"SyntaxError: {ex}")
+
+            # try and extract a list
+            pattern = r'\[\s*("(?:\\.|[^"\\])*"\s*,\s*)*"(?:\\.|[^"\\])*"\s*\]'
+            match = re.search(pattern, str(query_expander.message))
+
+            if match:
+                try:
+                    queries = eval(match.group(0))[:self.query_expansion]
+                except SyntaxError as ex:
+                    logging.debug(f"SyntaxError: {ex}")
+                    pass
 
         # the first query is the original query
         if self.query not in queries:
@@ -238,13 +262,17 @@ class Searcher():
         }  # noqa:E501
 
         # classify the search engine
-        engine_rank = self.starlark_runtime.executor.execute_llm_call(
+        engine_rank = self.starlark_runtime.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/search_classifier.prompt',
                 template={
                     'query': '\n'.join(queries),
                     'engines': '\n'.join([f'* {key}: {value["description"]}' for key, value in engines.items()]),
-                }),
+                },
+                user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                append_token=self.starlark_runtime.controller.get_executor().append_token(),
+            ),
             context_messages=[],
             query=self.query,
             original_query=self.original_query,
@@ -265,12 +293,16 @@ class Searcher():
         # deal especially for yelp.
         if 'Yelp' in engine:
             # take the first query, and figure out the location
-            location = self.starlark_runtime.executor.execute_llm_call(
+            location = self.starlark_runtime.controller.execute_llm_call(
                 message=Helpers.load_and_populate_message(
                     prompt_filename='prompts/starlark/search_location.prompt',
                     template={
                         'query': queries[0],
-                    }),
+                    },
+                    user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                    assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                    append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                ),
                 context_messages=[],
                 query=self.query,
                 original_query=self.original_query,
@@ -299,7 +331,7 @@ class Searcher():
             for result in search_results
         }
 
-        result_rank = self.starlark_runtime.executor.execute_llm_call(
+        result_rank = self.starlark_runtime.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/search_ranker.prompt',
                 template={
@@ -307,16 +339,38 @@ class Searcher():
                     'snippets': '\n'.join(
                         [f'* {str(key)}: {value["title"]} {value["snippet"]}' for key, value in snippets.items()]
                     ),
-                }),
+                },
+                user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                append_token=self.starlark_runtime.controller.get_executor().append_token(),
+            ),
             context_messages=[],
             query=self.query,
             original_query=self.original_query,
         )
 
-        ranked_results = eval(str(result_rank.message))
+        # double shot try
+        ranked_results = []
+        try:
+            ranked_results = eval(str(result_rank.message))
+        except SyntaxError as ex:
+            logging.debug(f"SyntaxError: {ex}")
+            pattern = r'\[\s*(-?\d+\s*,\s*)*-?\d+\s*\]'
+            match = re.search(pattern, str(result_rank.message))
+
+            if match:
+                try:
+                    ranked_results = eval(match.group(0))
+                except SyntaxError as ex:
+                    logging.debug(f"SyntaxError: {ex}")
+                    pass
+
+        # anthropic doesn't follow instructions, and coerces the result into a list of ints
+        ranked_results = [str(result) for result in ranked_results]
+
         self.ordered_snippets = [snippets[key] for key in ranked_results if key in snippets]
 
-        write_client_stream(Content(f"I found {len(snippets)} results. Using the top 5 ranked:\n\n"))
+        write_client_stream(Content(f"I found #{len(self.ordered_snippets)} results. Using the top 5 ranked:\n\n"))
         for snippet in self.ordered_snippets[0:5]:
             write_client_stream(Content(f"{snippet['title']}\n{snippet['link']}\n\n"))
 
@@ -392,7 +446,10 @@ class FunctionBindable():
             prompt_filename='prompts/starlark/llm_bind_global.prompt',
             template={
                 'function_definition': function_definition,
-            }
+            },
+            user_token=self.starlark_runtime.controller.get_executor().user_token(),
+            assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+            append_token=self.starlark_runtime.controller.get_executor().append_token(),
         )
         return message
 
@@ -479,7 +536,7 @@ class FunctionBindable():
             # try and bind the callsite without executing
             while not bound and counter < 8:
 
-                llm_bind_result = self.starlark_runtime.executor.execute_llm_call(
+                llm_bind_result = self.starlark_runtime.controller.execute_llm_call(
                     message=User(Content()),  # we can pass an empty message here and the context_messages contain everything
                     context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
                     query=self.original_query,
@@ -573,7 +630,7 @@ class FunctionBindable():
                 global_counter += 1
 
                 globals_result = StarlarkRuntime(
-                    executor=self.starlark_runtime.executor,
+                    controller=self.starlark_runtime.controller,
                     agents=self.agents,
                     vector_search=self.starlark_runtime.vector_search,
                 ).run(starlark_code, '')

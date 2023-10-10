@@ -2,9 +2,7 @@ import ast
 import asyncio
 import copy
 import math
-import os
 import random
-import sys
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 import pandas as pd
@@ -46,6 +44,9 @@ class StarlarkExecutionController(Controller):
         self.continuation_passing_style = continuation_passing_style
         self.tools_model = tools_model if tools_model else self.executor.get_default_model()
 
+    def get_executor(self) -> Executor:
+        return self.executor
+
     async def aclassify_tool_or_direct(
         self,
         message: User,
@@ -77,7 +78,10 @@ class StarlarkExecutionController(Controller):
             template={
                 'functions': '\n'.join(function_list),
                 'user_input': str(message.message),
-            }
+            },
+            user_token=self.get_executor().user_token(),
+            assistant_token=self.get_executor().assistant_token(),
+            append_token=self.get_executor().append_token(),
         )
 
         assistant: Assistant = await self.executor.aexecute(
@@ -150,6 +154,9 @@ class StarlarkExecutionController(Controller):
             prompt = Helpers.load_and_populate_prompt(
                 prompt_filename=prompt_filename,
                 template=template,
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                append_token=self.get_executor().append_token(),
             )
             return await __llm_call(
                 User(Content(prompt['user_message'])),
@@ -372,7 +379,10 @@ class StarlarkExecutionController(Controller):
             template={
                 'functions': '\n'.join(functions),
                 'user_input': str(messages[-1].message),
-            }
+            },
+            user_token=self.get_executor().user_token(),
+            assistant_token=self.get_executor().assistant_token(),
+            append_token=self.get_executor().append_token(),
         )
 
         llm_response = await self.aexecute_llm_call(

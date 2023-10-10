@@ -54,14 +54,14 @@ class VectorStore():
             )
         return self.store
 
-    def injest_documents(
+    def ingest_documents(
         self,
         documents: List[Document],
     ):
         self.__load_store().add_documents(documents)
         self.__load_store().save_local(self.store_filename)
 
-    def ingest_text(self, text: str, url: Optional[str] = None, metadata: Optional[dict] = None):
+    def ingest_text(self, text: str, metadata: Optional[dict] = None):
         documents = []
 
         with tempfile.NamedTemporaryFile(suffix='.txt', mode='w', delete=True) as t:
@@ -70,11 +70,6 @@ class VectorStore():
             text_loader = TextLoader(t.name)
             data = text_loader.load()
             documents = text_loader.load_and_split()
-
-        if url:
-            for d in documents:
-                d.metadata['source'] = url
-                d.metadata['url'] = url
 
         if metadata:
             for d in documents:

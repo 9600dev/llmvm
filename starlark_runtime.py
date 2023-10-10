@@ -36,13 +36,13 @@ logging = setup_logging()
 class StarlarkRuntime:
     def __init__(
         self,
-        executor: Controller,
+        controller: Controller,
         vector_search: VectorSearch,
         agents: List[Callable] = [],
     ):
         self.original_query = ''
         self.original_code = ''
-        self.executor: Controller = executor
+        self.controller: Controller = controller
         self.vector_search = vector_search
         self.agents = agents
         self.locals_dict = {}
@@ -180,7 +180,10 @@ class StarlarkRuntime:
                     'function_call': context.to_code_call(),
                     'function_signature': context.to_definition(),
                     'function_result': str(context.result()),
-                }
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
             )
             return User(Content(result_prompt['user_message']))
 
@@ -190,7 +193,10 @@ class StarlarkRuntime:
                 template={
                     'function_callsite': context.callsite,
                     'function_result': str(context.result()),
-                }
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
             )
             return User(Content(result_prompt['user_message']))
 
@@ -199,7 +205,10 @@ class StarlarkRuntime:
                 prompt_filename=statement_result_prompts['str'],
                 template={
                     'str_result': context,
-                }
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
             )
             return User(Content(result_prompt['user_message']))
 
@@ -208,7 +217,10 @@ class StarlarkRuntime:
                 prompt_filename=statement_result_prompts['assistant'],
                 template={
                     'assistant_result': str(context.message),
-                }
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
             )
             return User(Content(result_prompt['user_message']))
 
@@ -217,7 +229,10 @@ class StarlarkRuntime:
                 prompt_filename=statement_result_prompts['list'],
                 template={
                     'list_result': '\n'.join([str(c) for c in context])
-                }
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
             )
             return User(Content(result_prompt['user_message']))
 
@@ -247,7 +262,7 @@ class StarlarkRuntime:
         for key, value in globals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
 
-        assistant = self.executor.execute_llm_call(
+        assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/answer_error_correction.prompt',
                 template={
@@ -255,7 +270,11 @@ class StarlarkRuntime:
                     'code': starlark_code,
                     'error': error,
                     'dictionary': dictionary,
-                }),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            ),
             context_messages=[],
             query=self.original_query,
             original_query=self.original_query,
@@ -310,7 +329,7 @@ class StarlarkRuntime:
         for key, value in globals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
 
-        assistant = self.executor.execute_llm_call(
+        assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/starlark_error_correction.prompt',
                 template={
@@ -318,7 +337,11 @@ class StarlarkRuntime:
                     'code': starlark_code,
                     'error': error,
                     'dictionary': dictionary,
-                }),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            ),
             context_messages=[],
             query=self.original_query,
             original_query=self.original_query,
@@ -351,10 +374,14 @@ class StarlarkRuntime:
         logging.debug('pandas_bind()')
 
         def bind_with_llm(expr_str: str) -> PandasMeta:
-            assistant = self.executor.execute_llm_call(
+            assistant = self.controller.execute_llm_call(
                 message=Helpers.load_and_populate_message(
                     prompt_filename='prompts/starlark/pandas_bind.prompt',
-                    template={}),
+                    template={},
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
                 context_messages=[self.statement_to_message(expr)],  # type: ignore
                 query=self.original_query,
                 original_query=self.original_query,
@@ -440,13 +467,16 @@ class StarlarkRuntime:
         return searcher.search()
 
     def coerce(self, expr, type_name: str) -> Any:
-        assistant = self.executor.execute_llm_call(
+        assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/coerce.prompt',
                 template={
                     'string': str(expr),
                     'type': type_name,
-                }
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
             ),
             context_messages=[],
             query='',
@@ -459,12 +489,16 @@ class StarlarkRuntime:
         if not isinstance(expr_list, list):
             expr_list = [expr_list]
 
-        assistant = self.executor.execute_llm_call(
+        assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/llm_call.prompt',
                 template={
                     'llm_call_message': llm_instruction,
-                }),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            ),
             context_messages=[self.statement_to_message(expr) for expr in expr_list],
             query=llm_instruction,
             original_query=self.original_query,
@@ -473,13 +507,17 @@ class StarlarkRuntime:
         return assistant
 
     def llm_loop_bind(self, expr, llm_instruction: str, count: int = sys.maxsize) -> List[Any]:
-        assistant = self.executor.execute_llm_call(
+        assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/llm_loop_bind.prompt',
                 template={
                     'goal': llm_instruction.replace('"', ''),
                     'context': str(expr),
-                }),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            ),
             context_messages=[],
             query=llm_instruction,
             original_query=self.original_query,
@@ -515,7 +553,7 @@ class StarlarkRuntime:
             return answer
 
         snippet = str(expr).replace('\n', ' ')[:75]
-        write_client_stream(Content(f'I think I have an answer, but I am double checking it...\n'))
+        write_client_stream(Content('I think I have an answer, but I am double checking it...\n'))
         write_client_stream(Content(f'answer("{snippet}...")\n'))
 
         # if we have a FunctionCallMeta object, it's likely we've called a helper function
@@ -532,13 +570,17 @@ class StarlarkRuntime:
             or isinstance(expr, dict)
             or expr is None
         ):
-            answer_assistant = self.executor.execute_llm_call(
+            answer_assistant = self.controller.execute_llm_call(
                 message=Helpers.load_and_populate_message(
                     prompt_filename='prompts/starlark/answer_primitive.prompt',
                     template={
                         'function_output': str(expr),
                         'original_query': self.original_query,
-                    }),
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
                 context_messages=[],  # type: ignore
                 query=self.original_query,
                 original_query=self.original_query,
@@ -555,12 +597,16 @@ class StarlarkRuntime:
         if not self.answer_error_correcting:
             # todo: the 'rewriting' logic down below helps with the prettyness of
             # the output, and we're missing that here, but this is a nice shortcut.
-            answer_assistant = self.executor.execute_llm_call(
+            answer_assistant = self.controller.execute_llm_call(
                 message=Helpers.load_and_populate_message(
                     prompt_filename='prompts/starlark/answer_nocontext.prompt',
                     template={
                         'original_query': self.original_query,
-                    }),
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
                 context_messages=[self.statement_to_message(expr)],  # type: ignore
                 query=self.original_query,
                 original_query=self.original_query,
@@ -598,7 +644,7 @@ class StarlarkRuntime:
                     self.setup()
                     # results_dict = self.compile_and_execute(error_correction)
                     results_dict = StarlarkRuntime(
-                        executor=self.executor,
+                        controller=self.controller,
                         agents=self.agents,
                         vector_search=self.vector_search,
                     ).run(error_correction, self.original_query)
@@ -611,12 +657,16 @@ class StarlarkRuntime:
         ]
         context_messages.append(self.statement_to_message(expr))  # type: ignore
 
-        answer_assistant = self.executor.execute_llm_call(
+        answer_assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/answer.prompt',
                 template={
                     'original_query': self.original_query,
-                }),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            ),
             context_messages=context_messages,
             query=self.original_query,
             original_query=self.original_query,
@@ -654,7 +704,7 @@ class StarlarkRuntime:
             {starlark_code}
             '''
 
-        assistant = self.executor.execute_llm_call(
+        assistant = self.controller.execute_llm_call(
             message=User(Content(code_prompt)),
             context_messages=[],
             query=self.original_query,
@@ -689,13 +739,16 @@ class StarlarkRuntime:
             {starlark_code}
             '''
 
-        assistant = self.executor.execute_llm_call(
+        assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
                 template={
                     'functions': '\n'.join(function_list),
                     'user_input': code_prompt,
-                }
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
             ),
             context_messages=[],
             query=self.original_query,

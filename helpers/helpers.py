@@ -553,13 +553,24 @@ class Helpers():
     def load_and_populate_prompt(
         prompt_filename: str,
         template: Dict[str, str],
+        user_token: str = 'User',
+        assistant_token: str = 'Assistant',
+        append_token: str = '',
     ) -> Dict[str, Any]:
         prompt: Dict[str, Any] = Helpers.load_prompt(prompt_filename)
+
+        if not template.get('user_token'):
+            template['user_token'] = user_token
+            template['user_colon_token'] = user_token + ':'
+        if not template.get('assistant_token'):
+            template['assistant_token'] = assistant_token
+            template['assistant_colon_token'] = assistant_token + ':'
 
         for key, value in template.items():
             prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
             prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
 
+        prompt['user_message'] += f'{append_token}'
         prompt['prompt_filename'] = prompt_filename
         return prompt
 
@@ -567,12 +578,9 @@ class Helpers():
     def load_and_populate_message(
         prompt_filename: str,
         template: Dict[str, str],
+        user_token: str = 'User',
+        assistant_token: str = 'Assistant',
+        append_token: str = '',
     ) -> Message:
-        prompt: Dict[str, Any] = Helpers.load_prompt(prompt_filename)
-
-        for key, value in template.items():
-            prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
-            prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
-
-        prompt['prompt_filename'] = prompt_filename
+        prompt = Helpers.load_and_populate_prompt(prompt_filename, template, user_token, assistant_token, append_token)
         return User(Content(prompt['user_message']))

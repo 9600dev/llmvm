@@ -1,6 +1,5 @@
 import asyncio
 import datetime as dt
-import json
 import os
 from typing import Dict, List, Optional, cast
 
@@ -16,6 +15,7 @@ from fastapi.param_functions import File, Form
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from anthropic_executor import AnthropicExecutor
 from container import Container
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers
@@ -51,13 +51,30 @@ if not os.path.exists(cdn_directory):
     os.makedirs(cdn_directory)
 
 
-executor = OpenAIExecutor(
-    openai_key=os.environ.get('OPENAI_API_KEY', ''),
-    default_model=Container().get('model'),
-    api_endpoint=Container().get('api_base'),
+openai_executor = OpenAIExecutor(
+    api_key=os.environ.get('OPENAI_API_KEY', ''),
+    default_model=Container().get('openai_model'),
+    default_tools_model=Container().get('openai_tools_model'),
+    api_endpoint=Container().get('openai_api_base'),
     cache=cache_execution,
-    default_max_tokens=int(Container().get('max_tokens')),
+    default_max_tokens=int(Container().get('openai_max_tokens')),
 )
+
+anthropic_executor = AnthropicExecutor(
+    api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
+    default_model=Container().get('anthropic_model'),
+    default_tools_model=Container().get('anthropic_tools_model'),
+    api_endpoint=Container().get('anthropic_api_base'),
+    default_max_tokens=int(Container().get('anthropic_max_tokens')),
+    cache=cache_execution,
+)
+
+# get the configured executor
+executors = [openai_executor, anthropic_executor]  # todo: wire up llama-cpp-python
+executor = Helpers.first(lambda x: x.name() == Container().get('executor'), executors)
+if executor is None:
+    raise Exception(f'Executor {Container().get("executor")} not found')
+
 
 vector_store = VectorStore(
     token_calculator=executor.calculate_tokens,
@@ -76,7 +93,7 @@ controller = StarlarkExecutionController(
     cache=cache_execution,
     edit_hook=None,
     continuation_passing_style=False,
-    tools_model=Container().get('tools_model')
+    tools_model=executor.get_default_tools_model(),
 )
 
 
@@ -311,5 +328,6 @@ if __name__ == '__main__':
         loop='asyncio',
         reload_includes=['*.py'],
     )
+
     server = uvicorn.Server(config)
     server.run()

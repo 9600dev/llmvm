@@ -97,6 +97,23 @@ class Executor(ABC):
     ) -> int:
         pass
 
+    @abstractmethod
+    def user_token(
+        self
+    ) -> str:
+        pass
+
+    @abstractmethod
+    def assistant_token(
+        self
+    ) -> str:
+        pass
+
+    @abstractmethod
+    def append_token(
+        self
+    ) -> str:
+        pass
 
 def coerce_types(a, b):
     # Function to check if a string can be converted to an integer or a float
@@ -118,7 +135,7 @@ def coerce_types(a, b):
         return str(a), str(b)
 
     # If they are of the same type, return them as-is
-    if type(a) == type(b):
+    if type(a) is type(b):
         return a, b
 
     # If one is a float and the other an int, convert the int to float
@@ -164,6 +181,10 @@ class Controller():
         lifo: bool = False,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = awaitable_none,
     ) -> 'Assistant':
+        pass
+
+    @abstractmethod
+    def get_executor() -> Executor:
         pass
 
 

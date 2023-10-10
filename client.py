@@ -45,6 +45,37 @@ global thread_id
 thread_id = 0
 
 
+def parse_command_string(s, command):
+    parts = s.split()
+    tokens = []
+    skip_next = False
+
+    for i, part in enumerate(parts):
+        if skip_next:
+            skip_next = False
+            continue
+
+        if i == 0 and part == command.name:
+            continue
+
+        # Check if this part is an option in the given click.Command
+        option = next((param for param in command.params if part in param.opts), None)
+
+        # If the option is found and it's not a flag, consume the next value.
+        if option and not option.is_flag:
+            tokens.append(part)
+            if i + 1 < len(parts):
+                tokens.append(parts[i + 1])
+                skip_next = True
+        elif option and option.is_flag:
+            tokens.append(part)
+        else:
+            message = '"' + ' '.join(parts[i:]) + '"'
+            tokens.append(message)
+            break
+    return tokens
+
+
 async def stream_gpt_response(response, print_lambda: Callable):
     async with async_timeout.timeout(280):
         try:
@@ -308,6 +339,12 @@ def print_thread(thread: SessionThread, suppress_role: bool = False):
     print_response([MessageModel.to_message(message) for message in thread.messages], suppress_role)
 
 
+def invoke_context_wrapper(ctx):
+    global invoke_context
+    invoke_context = ctx
+
+
+
 class Repl():
     def __init__(
         self,
@@ -332,36 +369,6 @@ class Repl():
 
     def open_default_editor(self, initial_text: str) -> str:
         return self.open_editor(os.environ.get('EDITOR', 'vim'), initial_text)  # type: ignore
-
-    def __parse_command_string(self, s, command):
-        parts = s.split()
-        tokens = []
-        skip_next = False
-
-        for i, part in enumerate(parts):
-            if skip_next:
-                skip_next = False
-                continue
-
-            if i == 0 and part == command.name:
-                continue
-
-            # Check if this part is an option in the given click.Command
-            option = next((param for param in command.params if part in param.opts), None)
-
-            # If the option is found and it's not a flag, consume the next value.
-            if option and not option.is_flag:
-                tokens.append(part)
-                if i + 1 < len(parts):
-                    tokens.append(parts[i + 1])
-                    skip_next = True
-            elif option and option.is_flag:
-                tokens.append(part)
-            else:
-                message = '"' + ' '.join(parts[i:]) + '"'
-                tokens.append(message)
-                break
-        return tokens
 
     def help(self):
         ctx = click.Context(cli)
@@ -444,7 +451,7 @@ class Repl():
 
                 if args[0] in commands:
                     command = ctx.command.get_command(ctx, args[0])  # type: ignore
-                    tokens = self.__parse_command_string(query, command)
+                    tokens = parse_command_string(query, command)
 
                     result = command.invoke(ctx, **{
                         param.name: value
@@ -453,7 +460,7 @@ class Repl():
                 else:
                     # default message command
                     command = ctx.command.get_command(ctx, 'message')  # type: ignore
-                    tokens = self.__parse_command_string(query, command)
+                    tokens = parse_command_string(query, command)
 
                     # wire up the session to the server side thread id
                     if '--id' not in tokens and '-i' not in tokens:
@@ -487,13 +494,34 @@ def cli(ctx):
     if ctx.invoked_subcommand is None:
         ctx.invoke(invoke_context)
     elif not invoke_context:
-        pass
-        # setup_cli(renderer)
+        commands = {
+            cmd_name: ctx.command.get_command(ctx, cmd_name).get_short_help_str()  # type: ignore
+            for cmd_name in ctx.command.list_commands(ctx)  # type: ignore
+        }
 
+        # see if the first argument is a command
+        query = ' '.join(sys.argv[1:])
+        args = query.split(' ')
 
-def invoke_context_wrapper(ctx):
-    global invoke_context
-    invoke_context = ctx
+        if args[0] in commands:
+            command = ctx.command.get_command(ctx, args[0])  # type: ignore
+            tokens = parse_command_string(query, command)
+
+            command.invoke(ctx, **{
+                param.name: value
+                for param, value in zip(command.params, command.parse_args(ctx, tokens))  # args[1:]))
+            })
+            ctx.exit(0)
+        else:
+            # default message command
+            command = ctx.command.get_command(ctx, 'message')  # type: ignore
+            tokens = parse_command_string(query, command)
+
+            command.invoke(ctx, **{
+                param.name: value
+                for param, value in zip(command.params, command.parse_args(ctx, tokens))
+            })
+            ctx.exit(0)
 
 
 @cli.command('status')
@@ -725,91 +753,8 @@ def message(
         return thread
 
 
-@click.command()
-@click.argument('message', type=str, required=False, default='')
-@click.option('--system', '-s', type=str, required=False, default='',
-              help='System prompt to use. Default is "You are a helpful assistant."')
-@click.option('--direct', '-d', type=bool, is_flag=True, required=False, default=False,
-              help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--local', '-l', type=bool, is_flag=True, required=False, default=False, help='Uses local LLM endpoint')
-@click.option('--quiet', '-q', type=bool, is_flag=True, default=False, help='Suppress logging')
-@click.option('--model', '-m', type=str, required=False, default='')
-@click.option('--tools_model', '-t', type=str, required=False, default='')
-@click.option('--api_endpoint', type=str, required=False, default='')
-def main2(
-    message: Optional[str],
-    system: Optional[str],
-    direct: bool,
-    local: bool,
-    quiet: bool,
-    model: str,
-    tools_model: str,
-    api_endpoint: str,
-):
-    if not os.path.exists(os.path.expanduser('~/.local/share/llmvm')):
-        os.makedirs(os.path.expanduser('~/.local/share/llmvm'))
-        os.makedirs(os.path.expanduser('~/.local/share/llmvm/download'))
-        os.makedirs(os.path.expanduser('~/.local/share/llmvm/cache'))
-
-    if not os.path.exists(os.path.expanduser('~/.config/llmvm')):
-        os.makedirs(os.path.expanduser('~/.config/llmvm'))
-
-    if not os.path.exists(os.path.expanduser('~/.config/llmvm/client_config.yaml')):
-        with open(os.path.expanduser('~/.config/llmvm/client_config.yaml'), 'w') as f:
-            f.write(textwrap.dedent("""
-                llmvm_api_base: 'http://127.0.0.1:8000/'
-                openai_model: 'gpt-3.5-turbo-16k-0613'
-                openai_tools_model: 'gpt-4-0613'
-                local_openai_api_base: 'http://127.0.0.1:8000/v1'
-                local_model: 'llongorca.gguf'
-                local_tools_model: 'llongorca.gguf'
-                local_model_max_tokens: 16385
-            """))
-
-    if not model:
-        model = Container().get('openai_model')
-
-    if not tools_model:
-        tools_model = Container().get('openai_tools_model')
-
-    if not system:
-        # only used for the /direct case, otherwise Repl sets it.
-        system = 'You are a helpful assistant.'
-
-    if not sys.stdin.isatty():
-        if not message: message = ''
-        file_content = sys.stdin.read()
-        context_messages = [User(Content(file_content))]
-
-
-@click.group('cli', invoke_without_command=True)
-@click.argument('message', type=str, required=False, default='')
-@click.option('--id', '-i', type=int, required=False, default=0,
-              help='thread ID to send message to. Default is last thread.')
-@click.option('--direct', '-d', type=bool, is_flag=True, required=False, default=False,
-              help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
-              help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
-@click.pass_context
-def main(ctx, message, id, direct, endpoint):
-    if ctx.invoked_subcommand is None:
-        if not message:
-            cli(prog_name='cli')
-        else:
-            llm(
-                message,
-                id,
-                direct,
-                endpoint
-            )
-    else:
-        # Handle other global setup if needed
-        pass
-
-
 if __name__ == '__main__':
     if len(sys.argv) <= 1:
-        # invoke_context_wrapper(repl)
         repl_inst = Repl()
         repl_inst.repl()
     else:

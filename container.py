@@ -1,6 +1,6 @@
 import inspect
 import os
-from typing import Dict, Type
+from typing import Dict, Type, cast
 
 import yaml
 
@@ -18,6 +18,9 @@ class Container(metaclass=Singleton):
     def __init__(self, config_file: str = os.path.expanduser('~/.config/llmvm/config.yaml')):
         self.config_file = config_file
 
+        if os.getenv('LLMVM_CONFIG'):
+            self.config_file = cast(str, os.getenv('LLMVM_CONFIG'))
+
         # try finding the filename
         def find_file(filename, search_path='.'):
             for root, dir, files in os.walk(search_path):
@@ -28,7 +31,7 @@ class Container(metaclass=Singleton):
         self.config_file = find_file(self.config_file) or self.config_file  # type: ignore
 
         if not os.path.exists(self.config_file) and not find_file(self.config_file):  # type: ignore
-            raise ValueError('configuration_file is not found {} or TRADER_CONFIG set incorrectly'.format(config_file))
+            raise ValueError('configuration_file {} is not found, or LLMVM_CONFIG set incorrectly'.format(config_file))
 
         with open(self.config_file, 'r') as conf_file:
             self.configuration: Dict = yaml.load(conf_file, Loader=yaml.FullLoader)
