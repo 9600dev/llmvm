@@ -3,6 +3,7 @@ import os
 import tempfile
 from typing import Callable, List, Optional, Tuple
 
+import torch
 from langchain.docstore.document import Document
 from langchain.document_loaders import TextLoader
 from langchain.embeddings.huggingface import HuggingFaceEmbeddings
@@ -24,7 +25,7 @@ class VectorStore():
         self.token_calculator = token_calculator
         self.embeddings = HuggingFaceEmbeddings(
             model_name=embedding_model,
-            model_kwargs={'device': 'cuda:0'},
+            model_kwargs={'device': 'cuda:0'} if torch.cuda.is_available() else {'device': 'cpu'},
             encode_kwargs={'normalize_embeddings': True}
         )
         self.chunk_size = chunk_size

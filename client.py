@@ -27,9 +27,7 @@ from pydantic.type_adapter import TypeAdapter
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.markdown import CodeBlock, Markdown
 from rich.syntax import Syntax
-from rich.text import Text
 
-from container import Container
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging, suppress_logging
 from objects import (Assistant, AstNode, Content, DownloadItem, Message,

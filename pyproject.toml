@@ -46,6 +46,11 @@ jsonpickle = "^3.0.2"
 pillow = "^10.0.1"
 python-multipart = "^0.0.6"
 anthropic = "^0.3.11"
+async-timeout = "^4.0.3"
+click-default-group = "^1.2.4"
+fastapi = "^0.103.2"
+uvicorn = "^0.23.2"
+spacy = "^3.7.1"
 
 
 [[tool.poetry.source]]
