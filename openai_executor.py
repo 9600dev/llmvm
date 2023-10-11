@@ -14,7 +14,6 @@ from container import Container
 from helpers.logging_helpers import response_writer, setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
-from persistent_cache import PersistentCache
 
 logging = setup_logging()
 
@@ -26,14 +25,12 @@ class OpenAIExecutor(Executor):
         default_tools_model: str = 'gpt-4-0613',
         api_endpoint: str = 'https://api.openai.com/v1',
         max_function_calls: int = 5,
-        cache: PersistentCache = PersistentCache(Container().get('cache_directory') + '/openai.cache'),
         default_max_tokens: int = 4096,
     ):
         self.openai_key = api_key
         self.default_model = default_model
         self.default_tools_model = default_tools_model
         self.max_function_calls = max_function_calls
-        self.cache: PersistentCache = cache
         self.api_endpoint = api_endpoint
         self.default_max_tokens = default_max_tokens
         openai.api_base = self.api_endpoint
@@ -204,12 +201,6 @@ class OpenAIExecutor(Executor):
                 return result[-1]
             return None
 
-        if self.cache and self.cache.has_key(messages):
-            if stream_handler:
-                await stream_handler(cast(Assistant, self.cache.get(messages)))
-                await stream_handler(TokenStopNode())
-            return cast(Assistant, self.cache.get(messages))
-
         # find the system message and append to the front
         system_message = last(lambda x: x.role() == 'system', messages)
 
@@ -246,7 +237,6 @@ class OpenAIExecutor(Executor):
             messages_context=conversation
         )
 
-        if self.cache: self.cache.set(messages, assistant)
         return assistant
 
     def execute(

@@ -3,6 +3,7 @@ import asyncio
 import copy
 import math
 import random
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 import pandas as pd
@@ -16,7 +17,6 @@ from helpers.webhelpers import WebHelpers
 from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
                      Message, Statement, StopNode, System, User,
                      awaitable_none)
-from persistent_cache import PersistentCache
 from starlark_runtime import StarlarkRuntime
 from vector_search import VectorSearch
 
@@ -28,7 +28,6 @@ class StarlarkExecutionController(Controller):
         executor: Executor,
         agents: List[Callable],
         vector_search: VectorSearch,
-        cache: PersistentCache = PersistentCache(Container().get('cache_directory') + '/starlark.cache'),
         edit_hook: Optional[Callable[[str], str]] = None,
         continuation_passing_style: bool = False,
         tools_model: Optional[str] = None,
@@ -38,7 +37,6 @@ class StarlarkExecutionController(Controller):
         self.executor = executor
         self.agents = agents
         self.vector_search = vector_search
-        self.cache = cache
         self.edit_hook = edit_hook
         self.starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
         self.continuation_passing_style = continuation_passing_style
@@ -367,9 +365,6 @@ class StarlarkExecutionController(Controller):
         temperature: float = 0.0,
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
     ) -> Assistant:
-        if self.cache and self.cache.has_key(messages):
-            return cast(Assistant, self.cache.get(messages))
-
         logging.debug('StarlarkRuntime.build_runnable_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
@@ -398,7 +393,6 @@ class StarlarkExecutionController(Controller):
             stream_handler=stream_handler,
         )
 
-        if self.cache: self.cache.set(messages, llm_response)
         return llm_response
 
     async def aexecute(
@@ -442,6 +436,12 @@ class StarlarkExecutionController(Controller):
             )
 
             assistant_response = str(response.message).replace('Assistant:', '').strip()
+
+            # anthropic can often embed the code in ```python blocks
+            if '```python' in assistant_response:
+                match = re.search(r'```python\n(.*?)```', assistant_response, re.DOTALL)
+                if match:
+                    assistant_response = match.group(1)
 
             no_indent_debug(logging, '')
             no_indent_debug(logging, '[bold yellow]Abstract Syntax Tree:[/bold yellow]')

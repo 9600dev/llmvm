@@ -1,6 +1,6 @@
 import inspect
 import os
-from typing import Dict, Type, cast
+from typing import Any, Dict, Type, cast
 
 import yaml
 
@@ -50,7 +50,10 @@ class Container(metaclass=Singleton):
                 args[param.name] = self.configuration[param.name]
         return t(**args)
 
-    def get(self, key: str) -> str:
+    def get(self, key: str, default: Any = '') -> Any:
+        if key not in self.configuration:
+            return default
+
         value = self.configuration[key]
         if isinstance(value, str) and '~' in value and '/' in value:
             return os.path.expanduser(value)

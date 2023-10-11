@@ -342,7 +342,6 @@ def invoke_context_wrapper(ctx):
     invoke_context = ctx
 
 
-
 class Repl():
     def __init__(
         self,
@@ -548,7 +547,7 @@ def help():
               help='thread ID to retrieve.')
 @click.option('--direct', '-d', type=bool, is_flag=True, required=False, default=True,
               help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def act(
@@ -593,7 +592,7 @@ def act(
 @click.argument('url', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to download and push the content to. Default is last thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 def download(
     url: str,
@@ -619,7 +618,7 @@ def download(
 
 @cli.command('search')
 @click.argument('query', type=str, required=False, default='')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 def search(
     query: str,
@@ -656,7 +655,7 @@ def search(
 
 @cli.command('injest')
 @click.argument('filename', type=str, required=False, default='')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 def injest(
     filename: str,
@@ -676,7 +675,7 @@ def injest(
 @cli.command('threads')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to retrieve.')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def threads(
@@ -702,7 +701,7 @@ def threads(
 
 
 @cli.command('messages')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def messages(
@@ -714,7 +713,7 @@ def messages(
 
 
 @cli.command('new')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 def new(
     endpoint: str,
@@ -730,7 +729,7 @@ def new(
               help='thread ID to send message to. Default is last thread.')
 @click.option('--direct', '-d', type=bool, is_flag=True, required=False, default=False,
               help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default='http://127.0.0.1:8000',
+@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8000'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8000')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def message(

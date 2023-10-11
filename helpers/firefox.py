@@ -126,16 +126,19 @@ class FirefoxHelpers(metaclass=Singleton):
 
 class FirefoxHelpersInternal(metaclass=Singleton):
     def __init__(self):
-        profile_directory = Container().get('firefox_profile')
         self.prefs = {
-            "profile": profile_directory,
             "print.always_print_silent": True,
             "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
             "print_printer": "Mozilla Save to PDF",
-            "browser.download.dir": Container().get('firefox_download_directory'),
+            "browser.download.dir": Container().get('firefox_download_directory', default=os.path.expanduser('~')),
             "browser.download.folderList": 2,
             "browser.helperApps.neverAsk.saveToDisk": "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream",
         }
+
+        profile_directory = Container().get('firefox_profile_directory', '')
+        if os.path.exists(profile_directory):
+            self.prefs.update({"profile": profile_directory})
+
         self._context = None
         self._page = None
         self.playwright = None
@@ -145,13 +148,13 @@ class FirefoxHelpersInternal(metaclass=Singleton):
         if self.playwright is None or self.browser is None:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.firefox.launch(
-                headless=True,
+                headless=Container().get('firefox_headless', default=True),
                 firefox_user_prefs=self.prefs
             )
 
         self._context = await self.browser.new_context(accept_downloads=True)
-        cookie_file = Container().get('firefox_cookies')
-        if cookie_file:
+        cookie_file = Container().get('firefox_cookies', '')
+        if os.path.exists(cookie_file):
             result = read_netscape_cookies(cookie_file)
             await self._context.add_cookies(result)
         return await self._context.new_page()

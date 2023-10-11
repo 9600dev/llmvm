@@ -1,11 +1,11 @@
 # install in ~/.config/llmvm/config.yaml
 # or set LLMVM_CONFIG environment variable to this file
-server_host: '127.0.0.1'
+server_host: '0.0.0.0'
 server_port: 8000
-firefox_profile: '~/.mozilla/firefox/cp6sgb0s.selenium'
-firefox_marionette_port: 2828
+firefox_profile_directory: ''  # usually ~/.mozilla/firefox/...
 firefox_download_directory: '~/.local/share/llmvm/download'
 firefox_cookies: '~/.local/share/llmvm/cookies.txt'
+firefox_headless: true
 smtp_server: 'localhost'
 smtp_port: 1025
 smtp_username: 'hello@hello.com'

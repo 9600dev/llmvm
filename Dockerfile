@@ -80,6 +80,10 @@ RUN mkdir /home/llmvm/.local
 RUN mkdir /home/llmvm/.local/share
 RUN mkdir /home/llmvm/.local/share/llmvm
 RUN mkdir /home/llmvm/.local/share/llmvm/cache
+RUN mkdir /home/llmvm/.local/share/llmvm/download
+RUN mkdir /home/llmvm/.local/share/llmvm/cdn
+RUN mkdir /home/llmvm/.local/share/llmvm/logs
+RUN mkdir /home/llmvm/.ssh
 
 RUN chown -R llmvm:llmvm /home/llmvm
 RUN chsh -s /bin/bash llmvm
@@ -142,8 +146,17 @@ ENV ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ENV SEC_API_KEY=$SEC_API_KEY
 ENV SERPAPI_API_KEY=$SERPAPI_API_KEY
 
+RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /home/llmvm/.ssh/environment
+RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /home/llmvm/.ssh/environment
+RUN echo "SEC_API_KEY=$SEC_API_KEY" >> /home/llmvm/.ssh/environment
+RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /home/llmvm/.ssh/environment
+
+RUN playwright install firefox
+
 # spin back to root, to start sshd
 USER root
+
+RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config
 
 WORKDIR /home/llmvm
 ENTRYPOINT service ssh restart && tail -f /dev/null

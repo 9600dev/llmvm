@@ -476,6 +476,30 @@ class FunctionCallMeta(Call):
         a, b = coerce_types(self._result, other)
         return a / b  # type: ignore
 
+    def __truediv__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a / b  # type: ignore
+
+    def __rtruediv__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a / b  # type: ignore
+
+    def __radd__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a + b  # type: ignore
+
+    def __rsub__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a - b  # type: ignore
+
+    def __rmul__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a * b  # type: ignore
+
+    def __rdiv__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a / b  # type: ignore
+
     def __gt__(self, other):
         a, b = coerce_types(self._result, other)
         return a > b  # type: ignore
@@ -490,6 +514,23 @@ class FunctionCallMeta(Call):
 
     def __le__(self, other):
         a, b = coerce_types(self._result, other)
+        return a <= b  # type: ignore
+
+    def __rgt__(self, other):
+        # Note the order in coerce_types is reversed
+        a, b = coerce_types(other, self._result)
+        return a > b  # type: ignore
+
+    def __rlt__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a < b  # type: ignore
+
+    def __rge__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a >= b  # type: ignore
+
+    def __rle__(self, other):
+        a, b = coerce_types(other, self._result)
         return a <= b  # type: ignore
 
 

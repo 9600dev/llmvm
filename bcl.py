@@ -161,7 +161,7 @@ class Searcher():
         original_code: str,
         original_query: str,
         vector_search: VectorSearch,
-        total_links_to_return: int = 4,
+        total_links_to_return: int = 3,
     ):
         self.query = expr
         self.messages: List[Message] = messages

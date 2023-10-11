@@ -60,7 +60,7 @@ class WebHelpers():
                     blank_counter = 0
             return '\n'.join(lines)
 
-        logging.debug('convert_html_to_markdown_soup')
+        logging.debug(f'WebHelpers.convert_html_to_markdown_soup: {html[:25]}')
         soup = BeautifulSoup(html, features='lxml')
 
         for data in soup(['style', 'script']):

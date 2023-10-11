@@ -1,6 +1,7 @@
 import asyncio
 import datetime as dt
 import os
+import sys
 from typing import Dict, List, Optional, cast
 
 import async_timeout
@@ -44,11 +45,18 @@ agents = list(
 for agent in agents:
     rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore
 
+os.makedirs(Container().get('cache_directory'), exist_ok=True)
+os.makedirs(Container().get('cdn_directory'), exist_ok=True)
+os.makedirs(Container().get('log_directory'), exist_ok=True)
+os.makedirs(Container().get('vector_store_index_directory'), exist_ok=True)
+
 cache_session = PersistentCache(Container().get('cache_directory') + '/session.cache')
-cache_execution = PersistentCache(Container().get('cache_directory') + '/execution.cache')
 cdn_directory = Container().get('cdn_directory')
-if not os.path.exists(cdn_directory):
-    os.makedirs(cdn_directory)
+
+
+if not os.environ.get('OPENAI_API_KEY', '') and not os.environ.get('ANTHROPIC_API_KEY'):  # pragma: no cover
+    rich.print('[red]Neither OPENAI_API_KEY or ANTHROPIC_API_KEY are set. One of these API keys needs to be set in your terminal environment[/red]')
+    sys.exit(1)
 
 
 openai_executor = OpenAIExecutor(
@@ -56,7 +64,6 @@ openai_executor = OpenAIExecutor(
     default_model=Container().get('openai_model'),
     default_tools_model=Container().get('openai_tools_model'),
     api_endpoint=Container().get('openai_api_base'),
-    cache=cache_execution,
     default_max_tokens=int(Container().get('openai_max_tokens')),
 )
 
@@ -66,7 +73,6 @@ anthropic_executor = AnthropicExecutor(
     default_tools_model=Container().get('anthropic_tools_model'),
     api_endpoint=Container().get('anthropic_api_base'),
     default_max_tokens=int(Container().get('anthropic_max_tokens')),
-    cache=cache_execution,
 )
 
 # get the configured executor
@@ -90,7 +96,6 @@ controller = StarlarkExecutionController(
     executor=executor,
     agents=agents,  # type: ignore
     vector_search=vector_search,
-    cache=cache_execution,
     edit_hook=None,
     continuation_passing_style=False,
     tools_model=executor.get_default_tools_model(),
@@ -229,6 +234,7 @@ async def download(
             yield data
 
         await task
+
         content = task.result()
         thread.messages.append(MessageModel.from_message(User(Content(content))))
         cache_session.set(thread.id, thread)
@@ -248,6 +254,13 @@ async def get_threads() -> List[SessionThread]:
 async def clear_threads() -> None:
     for id in cache_session.keys():
         cache_session.delete(id)
+
+@app.get('/firefox')
+async def firefox(url: str = 'https://9600.dev'):
+    logging.debug(f'/firefox?url={url}')
+    firefox = FirefoxHelpers()
+    result = await firefox.get_url(url)
+    return JSONResponse(content=result)
 
 @app.post('/v1/chat/tools_completions', response_model=None)
 async def tools_completions(request: SessionThread):
@@ -272,6 +285,11 @@ async def tools_completions(request: SessionThread):
         queue.put_nowait(token)
 
     async def stream():
+        def handle_exception(task):
+            if not task.cancelled() and task.exception() is not None:
+                logging.error(f'/v1/chat/tools_completion threw an exception: {task.exception()}')
+                queue.put_nowait(StopNode())
+
         async def execute_and_signal():
             result = await controller.aexecute(
                 messages=messages,
@@ -283,6 +301,7 @@ async def tools_completions(request: SessionThread):
             return result
 
         task = asyncio.create_task(execute_and_signal())
+        task.add_done_callback(handle_exception)
 
         while True:
             data = await queue.get()
@@ -290,7 +309,17 @@ async def tools_completions(request: SessionThread):
                 break
             yield data
 
-        await task
+        try:
+            await task
+        except Exception as e:
+            pass
+
+        # error handling
+        if task.exception() is not None:
+            thread.messages.append(MessageModel.from_message(Assistant(Content(f'Error: {str(task.exception())}'))))
+            yield thread.model_dump()
+            return
+
         statements: List[Statement] = task.result()
 
         # todo parse Answers into Assistants for now
@@ -315,8 +344,8 @@ async def tools_completions(request: SessionThread):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    rich.print(f"Unhandled error: {exc}")
-    return {"detail": f"Unhandled error: {exc}"}
+    logging.exception(exc)
+    return JSONResponse(content={"error": f"Unhandled exception: {exc}"})
 
 
 if __name__ == '__main__':
@@ -327,6 +356,7 @@ if __name__ == '__main__':
         reload=True,
         loop='asyncio',
         reload_includes=['*.py'],
+        log_level='debug',
     )
 
     server = uvicorn.Server(config)

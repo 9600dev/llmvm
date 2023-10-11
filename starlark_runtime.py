@@ -5,6 +5,7 @@ import inspect
 import math
 import os
 import random
+import re
 import sys
 from re import L
 from typing import (Any, Awaitable, Callable, Dict, Generator, List, Optional,
@@ -258,6 +259,7 @@ class StarlarkRuntime:
         identify the single place in the code where this may have occurred, and
         see if we can manually patch it.
         '''
+        logging.debug('StarlarkRuntime.rewrite_answer_error_correction()')
         dictionary = ''
         for key, value in globals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
@@ -325,6 +327,7 @@ class StarlarkRuntime:
         error: str,
         globals_dictionary: Dict[Any, Any],
     ) -> str:
+        logging.debug('StarlarkRuntime.rewrite_starlark_error_correction()')
         dictionary = ''
         for key, value in globals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
@@ -414,6 +417,7 @@ class StarlarkRuntime:
         return [str(m.message) for m in self.messages_list[:-1] if m.role() != 'system']
 
     def llm_bind(self, expr, func: str):
+        logging.debug(f'llm_bind({str(expr)[:20]}, {str(func)})')
         from bcl import FunctionBindable
 
         bindable = FunctionBindable(
@@ -435,7 +439,7 @@ class StarlarkRuntime:
         self,
         expr: str,
     ) -> str:
-        logging.debug(f'download({expr})')
+        logging.debug(f'download({str(expr)})')
         from bcl import ContentDownloader
 
         downloader = ContentDownloader(
@@ -452,7 +456,7 @@ class StarlarkRuntime:
         self,
         expr: str,
     ) -> str:
-        logging.debug(f'search({expr})')
+        logging.debug(f'search({str(expr)})')
         from bcl import Searcher
 
         searcher = Searcher(
@@ -467,6 +471,7 @@ class StarlarkRuntime:
         return searcher.search()
 
     def coerce(self, expr, type_name: str) -> Any:
+        logging.debug(f'coerce({str(expr)[:20]}, {str(type_name)})')
         assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/coerce.prompt',
@@ -486,6 +491,7 @@ class StarlarkRuntime:
         return self.__eval_with_error_wrapper(str(assistant.message))
 
     def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
+        logging.debug(f'llm_call({str(expr_list)[:20]}, {str(llm_instruction)})')
         if not isinstance(expr_list, list):
             expr_list = [expr_list]
 
@@ -507,6 +513,7 @@ class StarlarkRuntime:
         return assistant
 
     def llm_loop_bind(self, expr, llm_instruction: str, count: int = sys.maxsize) -> List[Any]:
+        logging.debug(f'llm_loop_bind({str(expr)[:20]}, {str(llm_instruction)})')
         assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/starlark/llm_loop_bind.prompt',
@@ -524,8 +531,17 @@ class StarlarkRuntime:
             prompt_filename='prompts/starlark/llm_loop_bind.prompt'
         )
 
+        list_result = str(assistant.message)
+
+        # for anthropic
+        if not list_result.startswith('['):
+            pattern = r'\[\s*(?:(\d+|"[^"]*"|\'[^\']*\')\s*,\s*)*(\d+|"[^"]*"|\'[^\']*\')\s*\]'
+            match = re.search(pattern, list_result)
+            if match:
+                list_result = match.group(0)
+
         try:
-            result = cast(list, eval(str(assistant.message)))
+            result = cast(list, eval(list_result))
             if not isinstance(result, list):
                 raise ValueError('llm_loop_bind result is not a list, or is malformed')
             return result[:count]
@@ -544,6 +560,7 @@ class StarlarkRuntime:
             return result[:count]
 
     def answer(self, expr) -> Answer:
+        logging.debug(f'answer({str(expr)[:20]}')
         # if we have a list of answers, maybe just return them.
         if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
             answer = Answer(
@@ -690,6 +707,7 @@ class StarlarkRuntime:
         starlark_code: str,
         error: str,
     ):
+        logging.debug('StarlarkRuntime.compile_error()')
         # SyntaxError, or other more global error. We should rewrite the entire code.
         # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
         code_prompt = \
@@ -721,6 +739,7 @@ class StarlarkRuntime:
         starlark_code: str,
         error: str,
     ):
+        logging.debug('StarlarkRuntime.rewrite()')
         # SyntaxError, or other more global error. We should rewrite the entire code.
         function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
         code_prompt = \
@@ -779,6 +798,7 @@ class StarlarkRuntime:
         self,
         starlark_code: str,
     ) -> Dict[Any, Any]:
+        logging.debug('__compile_and_execute()')
         parsed_ast = ast.parse(starlark_code)
         exec(compile(parsed_ast, filename="<ast>", mode="exec"), self.globals_dict, self.locals_dict)
         return self.locals_dict
