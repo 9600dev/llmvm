@@ -57,6 +57,7 @@ RUN apt-get install -y libncurses5-dev
 RUN apt-get install -y libssl-dev
 RUN apt-get install -y libffi-dev
 RUN apt-get install -y liblzma-dev
+RUN apt-get install -y firefox-esr
 
 RUN echo 'llmvm:llmvm' | chpasswd
 RUN service ssh start

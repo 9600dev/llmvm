@@ -145,7 +145,7 @@ class FirefoxHelpersInternal(metaclass=Singleton):
         if self.playwright is None or self.browser is None:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.firefox.launch(
-                headless=False,
+                headless=True,
                 firefox_user_prefs=self.prefs
             )
 
