@@ -2,17 +2,19 @@
 
 This project is a research prototype that enables a Large Language Model (LLM) to break down user tasks into manageable locally executable sub-tasks, and then schedule and oversee their execution on an interpreted virtual machine (in this case, Python), collaboratively addressing syntax and semantic errors through a back-and-forth dialogue.
 
+It supports ChatGPT 3.5/4.0 from OpenAI, and Claude-v2 from Anthropic.
+
 Let's look at an example of breaking down the user task: ```"Go to the https://ten13.vc/team website, extract the list of names, and then get me a summary of their LinkedIn profiles."```
 
 ## Example Walkthrough
 
-Fire up the local FastAPI server: ```python server.py```.
+Fire up the local FastAPI server: ```python server.py``` or via the docker Dockerfile.
 
 ![](docs/2023-10-01-18-02-28.png)
 
 Fire up the client tool ```python client.py``` and submit the user task:
 
-![](docs/2023-10-01-18-04-23.png)
+![](docs/2023-10-11-13-18-38.png)
 
 
 Starlark code is returned from ChatGPT 3.5 when passing the user task query + [prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt) pair:

@@ -1,7 +1,7 @@
 # install in ~/.config/llmvm/config.yaml
 # or set LLMVM_CONFIG environment variable to this file
 server_host: '0.0.0.0'
-server_port: 8000
+server_port: 8011
 firefox_profile_directory: ''  # usually ~/.mozilla/firefox/...
 firefox_download_directory: '~/.local/share/llmvm/download'
 firefox_cookies: '~/.local/share/llmvm/cookies.txt'

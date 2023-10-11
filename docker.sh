@@ -119,7 +119,7 @@ force_clean() {
 run() {
     echo "running container $CONTNAME with this command:"
     echo ""
-    echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME -ti -p 2222:22 -p starting -p 8888:8000 --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
+    echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME -ti -p 2222:22 -p starting -p 8011:8011 --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
     echo ""
 
     if [ ! "$(docker image ls -a | grep $IMGNAME)" ]; then
@@ -135,7 +135,7 @@ run() {
         --name $CONTNAME \
         -ti \
         -p 2222:22 \
-        -p 8888:8000 \
+        -p 8011:8011 \
         --tmpfs /run \
         --tmpfs /run/lock \
         -v /lib/modules:/lib/modules:ro \
