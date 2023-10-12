@@ -166,20 +166,20 @@ def search(query: str):
     results = vector_search.search(query, max_results=10, min_score=0.7)
     return results
 
-@app.post('/injest')
-async def injest(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+@app.post('/ingest')
+async def ingest(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     try:
         name = os.path.basename(str(file.filename))
 
         with open(f"{cdn_directory}/{name}", "wb") as buffer:
             buffer.write(file.file.read())
             background_tasks.add_task(
-                vector_search.injest_file,
+                vector_search.ingest_file,
                 f"{cdn_directory}/{name}",
                 str(file.filename),
                 {}
             )
-        return {"filename": file.filename, "detail": "Injestion started."}
+        return {"filename": file.filename, "detail": "Ingestion started."}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Exception: {e}")
@@ -217,7 +217,7 @@ async def download(
 
             if content:
                 background_tasks.add_task(
-                    vector_search.injest_text,
+                    vector_search.ingest_text,
                     content,
                     content[:25],
                     download_item.url,

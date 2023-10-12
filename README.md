@@ -8,7 +8,7 @@ Let's look at an example of breaking down the user task: ```"Go to the https://t
 
 ## Example Walkthrough
 
-Fire up the local FastAPI server: ```python server.py``` or via the docker Dockerfile.
+Fire up the local FastAPI server: ```python server.py``` or via the docker and the Dockerfile:
 
 ![](docs/2023-10-01-18-02-28.png)
 
@@ -107,19 +107,21 @@ And another example ```get a summary of the front page of https://bbc.com```. Th
 
 ## Architecture
 
-![](docs/2023-10-02-10-25-55.png)
+![](docs/2023-10-11-13-24-31.png)
 
 #### You can:
 
 * Write arbitrary natural language queries that get translated into Starlark code and cooperatively executed
-* Upload .pdf, .txt, .csv etc and have them injested by FAISS and searchable by the LLM.
+* Upload .pdf, .txt, .csv etc and have them ingested by FAISS and searchable by the LLM.
 * Add arbitrary Python helpers by modifying ~/.config/llmvm/config.yaml and adding your Python based helper. Note: you may need to hook the helper in [starlark_runtime.py](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt). You may also need to show examples of its use in [prompts/starlark/starlark_tool_execution.prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt)
 * Server.py via /v1/chat/completions endpoint, mimics and forwards to OpenAI's /v1/chat/completions API.
 * TODO: build a web frontend for this thing
 * TODO: build real time streaming, so you can wire up pipelines of llmvm execution to arbitrary streams of incoming data.
-* TODO: uploaded code files should be parsed, transformed into graphs, and injested via an LLM transformation first.
+* TODO: uploaded code files should be parsed, transformed into graphs, and ingested via an LLM transformation first.
 * TODO: search is weak. Make it better.
 * TODO: all the threading stuff is probably pretty broken. Fix it. Might use RxPy.
+* TODO: local llama (works with a bunch of hacks, fix them)
+* TODO: anthropic support [done]
 
 ## Error Correction
 
@@ -183,42 +185,77 @@ llm "write a small blog post from the bullet points in the previous message" | \
 llm "create a nice html file to display the content" > output.html
 ```
 
+### Ingesting files
+
+You can upload files to the server so that they are ingested into the vector database and included in searches, summarizations, and other tasks you'd like the LLM to perform for you:
+
+```python client.py ingest random_invoice_document.pdf```
+```python client.py "extract any payments made to Acme LLC from my local files"```
 
 
 ## Install
 
-* Install pyenv: ```curl https://pyenv.run | bash```
-  * ```pyenv install 3.11.4```
-  * ```pyenv virtualenv 3.11.4 llmvm```
-  * ```pyenv local llmvm```
-* Install poetry: ```curl -sSL https://install.python-poetry.org | python3 -```
-  * ```poetry config virtualenvs.prefer-active-python true```
-  * ```poetry install```
-* Edit config.yaml
-  * cp config_example.yaml config.yaml
-  * vim config.yaml
-* Build and install FAISS
-  * ```git submodule update --init --recursive```
-  * ```cd faiss```
-  * ```cmake -DFAISS_ENABLE_GPU=ON -DCUDAToolkit_INCLUDE_DIR=/usr/include -DCUDAToolkit_ROOT=/usr/lib/cuda -DCMAKE_CXX_STANDARD=11 -DCMAKE_CXX_STANDARD_REQUIRED=ON -B build .```
-  * ```cd build```
-  * ```make -C faiss -j faiss```
-  * ```make -C faiss -j swigfaiss```
-  * ```cd python```
-  * ```python setup.py install```
-* Run the llmvm repl:
-  * ```python server.py```
-  * ```python client.py```
-  * ```/help```
+You'll need either an OpenAI API account (including access to GPT 4.0 on the API) or an Anthropic API account. It's highly recommended to sign up for a free [SerpAPI](https://serpapi.com/) account to ensure that searches work. A [sec-api.io](https://sec-api.io) is optional to get public company 10K or 10Q filings.
 
 Ensure you have the following environment variables set:
 
 ```python
-OPENAPI_API_KEY  # your openai API key
-SERPAPI_API_KEY  # https://serpapi.com/ API key for web and news searches.
-SEC_API_KEY  # if you want to use SEC's Edgar api to get 10K's and 10Q's etc, get an account at https://sec-api.io/
-EDITOR  # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Starlark code before it gets executed etc.
+OPENAPI_API_KEY     # your openai API key, or ...
+ANTHROPIC_API_KEY   # your anthropic API key
+SERPAPI_API_KEY     # https://serpapi.com/ API key for web and news searches.
+SEC_API_KEY         # if you want to use SEC's Edgar api to get 10K's and 10Q's etc, get an account at https://sec-api.io/
+EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Starlark code before it gets executed etc.
 ```
+
+#### Docker instructions:
+
+* run `docker.sh -g` (builds the image, deploys into a container and runs the container)
+* server.py will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
+* Use docker desktop to have a look at the running server.py logs; or you can ssh into the container, kill the server.py process, and restart from your own shell.
+
+With the docker container running, you can run client.py on your local machine:
+
+* export LLMVM_ENDPOINT="http://localhost:8011"
+* python client.py
+
+You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
+
+#### Manual Installation
+
+* Install [pyenv](https://github.com/pyenv/pyenv): ```curl https://pyenv.run | bash```
+  * ```pyenv install 3.11.4```
+  * ```pyenv virtualenv 3.11.4 llmvm```
+  * ```pyenv local llmvm```
+* Install [poetry](https://python-poetry.org/): ```curl -sSL https://install.python-poetry.org | python3 -```
+  * ```poetry config virtualenvs.prefer-active-python true```
+* Install library dependencies:
+  * ```poetry install```
+* Install [faiss](https://github.com/facebookresearch/faiss):
+  * ```sudo apt install faiss-cpu```
+* Edit and save config.yaml
+  * cp config_example.yaml ~/.config/llmvm/config.yaml
+
+ Run the llmvm server and client:
+  * ```python server.py```
+  * ```python client.py```
+
+#### Configuring Anthropic vs. OpenAI
+
+* open `~/.config/llmvm/config.yaml` and change executor to 'anthropic' or 'openai':
+
+```yaml
+executor: 'anthropic'  # or 'openai'
+```
+
+#### Debugging Firefox Automation Issues
+
+The Starlark runtime uses [Playwright](https://playwright.dev/python/) to automate Firefox on its behalf. By default, it runs Firefox in headless mode, but this can be changed in `~/.config/llmvm/config.yaml`:
+
+```yaml
+firefox_headless: false
+```
+
+You can also copy your own Firefox cookies into Playwright's Firefox automation instance, by creating a new Firefox profile,
 
 ## Things to do
 

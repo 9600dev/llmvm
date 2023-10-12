@@ -25,7 +25,7 @@ class EntityMetadata():
     ):
         self.title: str = ''
         self.url: str = ''
-        self.injest_datetime: str = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.ingest_datetime: str = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         self.type: str = ''
         self.names: List[str] = []
         self.locations: List[str] = []
@@ -39,7 +39,7 @@ class EntityMetadata():
         d = {
             'title': self.title,
             'url': self.url,
-            'injest_datetime': self.injest_datetime,
+            'ingest_datetime': self.ingest_datetime,
             'type': self.type,
             'names': self.names,
             'locations': self.locations,
@@ -122,7 +122,7 @@ class VectorSearch():
         title: Optional[str] = None,
         url: Optional[str] = None,
         type: Optional[str] = None,
-        injest_datetime: Optional[str] = None,
+        ingest_datetime: Optional[str] = None,
         parent: Optional[str] = None,
         extra_metdata: Optional[dict] = None,
     ) -> EntityMetadata:
@@ -135,7 +135,10 @@ class VectorSearch():
             elif ent.label_ == "EVENT":
                 e.events.append(ent.text)
             elif ent.label_ == "DATE":
-                e.dates.append(parse(ent.text))
+                try:
+                    e.dates.append(parse(ent.text))
+                except Exception as ex:
+                    logging.debug(ex)
             elif ent.label_ == "GPE" or ent.label_ == "LOC":
                 e.locations.append(ent.text)
             elif ent.label_ == "ORG":
@@ -147,15 +150,15 @@ class VectorSearch():
             e.url = url
         if type:
             e.type = type
-        if injest_datetime:
-            e.injest_datetime = injest_datetime
+        if ingest_datetime:
+            e.ingest_datetime = ingest_datetime
         if parent:
             e.parent = parent
         if extra_metdata:
             e.extra = extra_metdata
         return e
 
-    def injest_messages(
+    def ingest_messages(
         self,
         messages: List[Message],
         title: str,
@@ -163,19 +166,19 @@ class VectorSearch():
         metadata: dict
     ) -> None:
         for m in messages:
-            logging.debug('injesting message: {}'.format(str(m.message)[0:25]))
+            logging.debug('ingesting message: {}'.format(str(m.message)[0:25]))
             entity = self.parse_metadata(
                 content=str(m.message),
                 title=title,
                 url=url,
                 type='message',
-                injest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 parent='',
                 extra_metdata=metadata
             )
             self.vector_store.ingest_text(str(m.message), metadata)
 
-    def injest_text(
+    def ingest_text(
         self,
         text: str,
         title: str,
@@ -187,13 +190,13 @@ class VectorSearch():
             title=title,
             url=url,
             type='text',
-            injest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             parent='',
             extra_metdata=metadata
         )
         self.vector_store.ingest_text(text, entity.to_dict())
 
-    def injest_file(
+    def ingest_file(
         self,
         filename: str,
         url: str,
@@ -216,7 +219,7 @@ class VectorSearch():
                     result[class_name]['methods'][method.name] = ast.get_docstring(method)
             return result
 
-        logging.debug('injesting file: {}'.format(filename))
+        logging.debug('ingesting file: {}'.format(filename))
 
         if filename.endswith('.pdf'):
             text = PdfHelpers.parse_pdf(filename)
@@ -225,7 +228,7 @@ class VectorSearch():
                 title='',
                 url=url,
                 type='pdf',
-                injest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 parent='',
                 extra_metdata=metadata
             )
@@ -244,7 +247,7 @@ class VectorSearch():
                 title='',
                 url=url,
                 type='csv',
-                injest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 parent='',
                 extra_metdata=metadata
             )
@@ -257,7 +260,7 @@ class VectorSearch():
                     title='',
                     url=url,
                     type='txt',
-                    injest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     parent='',
                     extra_metdata=metadata
                 )
@@ -271,7 +274,7 @@ class VectorSearch():
                     title='',
                     url=url,
                     type='html',
-                    injest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     parent='',
                     extra_metdata=metadata,
                 )
@@ -294,11 +297,11 @@ class VectorSearch():
                     title=filename,
                     url=url,
                     type='python',
-                    injest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     parent='',
                     extra_metdata=metadata,
                 )
                 self.vector_store.ingest_text(code, entity.to_dict())
         else:
-            logging.debug('file not supported for injestion: {}'.format(filename))
+            logging.debug('file not supported for ingestion: {}'.format(filename))
 

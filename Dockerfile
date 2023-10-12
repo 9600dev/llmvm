@@ -44,6 +44,7 @@ RUN apt-get install -y net-tools
 RUN apt-get install -y rsync
 RUN apt-get install -y iputils-ping
 RUN apt-get install -y lnav
+RUN apt-get install -y poppler-utils
 
 # required for pyenv to build 3.10.11 properly
 RUN apt-get install -y libbz2-dev
@@ -158,5 +159,6 @@ USER root
 
 RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config
 
-WORKDIR /home/llmvm
-ENTRYPOINT service ssh restart && tail -f /dev/null
+WORKDIR /home/llmvm/llmvm
+# ENTRYPOINT service ssh restart && tail -f /dev/null
+ENTRYPOINT service ssh restart && python server.py && tail -f /dev/null

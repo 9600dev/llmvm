@@ -653,19 +653,24 @@ def search(
             console.print('\n\n')
 
 
-@cli.command('injest')
-@click.argument('filename', type=str, required=False, default='')
+@cli.command('ingest')
+@click.argument('filename', type=str, required=True)
 @click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-def injest(
+def ingest(
     filename: str,
     endpoint: str,
 ):
+    if filename.startswith('"') and filename.endswith('"'):
+        filename = filename[1:-1]
+
+    filename = os.path.abspath(filename)
+
     async def upload_helper():
         async with httpx.AsyncClient(timeout=280.0) as client:
             with open(filename, 'rb') as f:
                 files = {'file': (filename, f)}
-                response = await client.post(f'{endpoint}/injest', files=files)
+                response = await client.post(f'{endpoint}/ingest', files=files)
                 return response.text
 
     response = asyncio.run(upload_helper())
