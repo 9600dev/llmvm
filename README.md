@@ -231,7 +231,8 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 * Install library dependencies:
   * ```poetry install```
 * Install [faiss](https://github.com/facebookresearch/faiss):
-  * ```sudo apt install faiss-cpu```
+  * ```pip install faiss-cpu```
+  * There's a GPU version which you may need to clone and compile to via cuBLAS/CUDA.
 * Edit and save config.yaml
   * cp config_example.yaml ~/.config/llmvm/config.yaml
 
