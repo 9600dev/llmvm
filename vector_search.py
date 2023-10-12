@@ -304,4 +304,3 @@ class VectorSearch():
                 self.vector_store.ingest_text(code, entity.to_dict())
         else:
             logging.debug('file not supported for ingestion: {}'.format(filename))
-

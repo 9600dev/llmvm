@@ -17,7 +17,8 @@ class VectorStore():
     def __init__(
         self,
         token_calculator: Callable[[str], int],
-        store_filename: str,
+        store_directory: str,
+        index_name: str,
         embedding_model: str,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
@@ -30,12 +31,16 @@ class VectorStore():
         )
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.store_filename: str = store_filename
+        self.store_directory: str = store_directory
+        self.index_name: str = index_name
 
-        if not os.path.exists(self.store_filename):
+        if not os.path.exists(self.store_directory):
+            os.makedirs(self.store_directory)
+
+        if not os.path.exists(os.path.join(self.store_directory, self.index_name + '.index')):
             from langchain.vectorstores import FAISS
             self.store: FAISS = FAISS.from_texts([''], self.embeddings)
-            self.store.save_local(self.store_filename)
+            self.store.save_local(folder_path=self.store_directory, index_name=self.index_name)
 
     def __metadata_str(self, document: Document):
         if document.metadata:
@@ -50,8 +55,9 @@ class VectorStore():
         from langchain.vectorstores import FAISS
         if not hasattr(self, 'store') or not self.store:
             self.store = FAISS.load_local(
-                self.store_filename,
-                self.embeddings
+                folder_path=self.store_directory,
+                embeddings=self.embeddings,
+                index_name=self.index_name
             )
         return self.store
 
@@ -60,7 +66,7 @@ class VectorStore():
         documents: List[Document],
     ):
         self.__load_store().add_documents(documents)
-        self.__load_store().save_local(self.store_filename)
+        self.__load_store().save_local(folder_path=self.store_directory, index_name=self.index_name)
 
     def ingest_text(self, text: str, metadata: Optional[dict] = None):
         documents = []
@@ -79,7 +85,7 @@ class VectorStore():
         text_splitter = TokenTextSplitter(chunk_size=self.chunk_size, chunk_overlap=self.chunk_overlap)
         split_texts = text_splitter.split_documents(documents)
         self.__load_store().add_documents(split_texts)
-        self.__load_store().save_local(self.store_filename)
+        self.__load_store().save_local(folder_path=self.store_directory, index_name=self.index_name)
 
     def search_document(self, query: str, max_results: int = 4) -> List[Document]:
         documents = self.__load_store().similarity_search_with_relevance_scores(query, k=max_results)

@@ -84,7 +84,8 @@ if executor is None:
 
 vector_store = VectorStore(
     token_calculator=executor.calculate_tokens,
-    store_filename=Container().get('vector_store_index_directory'),
+    store_directory=Container().get('vector_store_index_directory'),
+    index_name='index',
     embedding_model=Container().get('vector_store_embedding_model'),
     chunk_size=int(Container().get('vector_store_chunk_size')),
     chunk_overlap=10

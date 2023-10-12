@@ -84,6 +84,7 @@ RUN mkdir /home/llmvm/.local/share/llmvm/cache
 RUN mkdir /home/llmvm/.local/share/llmvm/download
 RUN mkdir /home/llmvm/.local/share/llmvm/cdn
 RUN mkdir /home/llmvm/.local/share/llmvm/logs
+RUN mkdir /home/llmvm/.local/share/llmvm/faiss
 RUN mkdir /home/llmvm/.ssh
 
 RUN chown -R llmvm:llmvm /home/llmvm
