@@ -222,17 +222,21 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
 #### Manual Installation
 
-* Install [pyenv](https://github.com/pyenv/pyenv): ```curl https://pyenv.run | bash```
-  * ```pyenv install 3.11.4```
-  * ```pyenv virtualenv 3.11.4 llmvm```
+* Install [pyenv](https://github.com/pyenv/pyenv):
+  * ```curl https://pyenv.run | bash```
+* Install Python 3.11.6 using pyenv and set a virtualenv:
+  * ```pyenv install 3.11.6```
+  * ```pyenv virtualenv 3.11.6 llmvm```
   * ```pyenv local llmvm```
-* Install [poetry](https://python-poetry.org/): ```curl -sSL https://install.python-poetry.org | python3 -```
+* Install [poetry](https://python-poetry.org/):
+  * ```curl -sSL https://install.python-poetry.org | python3 -```
   * ```poetry config virtualenvs.prefer-active-python true```
 * Install library dependencies:
-  * ```poetry install```
-* Install [faiss](https://github.com/facebookresearch/faiss):
-  * ```pip install faiss-cpu```
-  * There's a GPU version which you may need to clone and compile to via cuBLAS/CUDA.
+  * ```poetry install firefox```
+* Install spacy model:
+  * ```spacy download en_core_web_sm```
+* Install playwright Firefox automation:
+  * ```playwright install```
 * Edit and save config.yaml
   * cp config_example.yaml ~/.config/llmvm/config.yaml
 
@@ -284,8 +288,7 @@ I haven't had a lot of success getting LLama-2 chat trained models to respond we
   * This should fire up an OpenAI API compatible web server that we can use with LLMVM
 * ```python server.py```
 * ```python client.py```
-* ```/local```
-* ```/direct What is your name? ```
+* ```-d What is your name? ```
   * Assistant: My name is AI Assistant.
 
 

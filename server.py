@@ -42,6 +42,8 @@ agents = list(
     )
 )
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 for agent in agents:
     rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore
 
