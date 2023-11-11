@@ -232,17 +232,25 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
   * ```curl -sSL https://install.python-poetry.org | python3 -```
   * ```poetry config virtualenvs.prefer-active-python true```
 * Install library dependencies:
-  * ```poetry install firefox```
-* Install spacy model:
+  * ```poetry install```
+* Install [spacy](https://spacy.io/) nlp model
   * ```spacy download en_core_web_sm```
-* Install playwright Firefox automation:
-  * ```playwright install```
+* Install [Playwright](https://playwright.dev/python/) Firefox automation:
+  * ```playwright install firefox```
+* Install [Poppler](https://poppler.freedesktop.org/)
+  * ```sudo apt install poppler-utils```
+  * ```brew install poppler```
 * Edit and save config.yaml
   * cp config_example.yaml ~/.config/llmvm/config.yaml
 
  Run the llmvm server and client:
   * ```python server.py```
   * ```python client.py```
+
+[Optional]
+
+* Install [viu](https://github.com/atanunq/viu) for image rendering in macos/linux terminals ``cargo install viu```
+* (the Kitty terminal renders images out of the box)
 
 #### Configuring Anthropic vs. OpenAI
 
@@ -257,10 +265,18 @@ executor: 'anthropic'  # or 'openai'
 The Starlark runtime uses [Playwright](https://playwright.dev/python/) to automate Firefox on its behalf. By default, it runs Firefox in headless mode, but this can be changed in `~/.config/llmvm/config.yaml`:
 
 ```yaml
-firefox_headless: false
+firefox_headless: true
 ```
 
-You can also copy your own Firefox cookies into Playwright's Firefox automation instance, by creating a new Firefox profile,
+You can also copy your own browsers cookies file into Playwright's Firefox automation instance. This allows the Playwright instance to assume your logged in sessions to things like LinkedIn. Simply:
+
+* run ```scripts/extract_cookies.sh > cookies.txt```
+* move the cookies.txt file to a secure location
+* update ```config.yaml``` to point to the cookies file:
+
+```yaml
+firefox_cookies: '~/.local/share/llmvm/cookies.txt'
+```
 
 ## Things to do
 

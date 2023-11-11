@@ -14,10 +14,7 @@ from urllib.parse import urlparse
 
 import astunparse
 import pandas as pd
-from openai import InvalidRequestError
 
-from ast_parser import Parser
-# from bcl import ContentDownloader, FunctionBindable, Searcher
 from helpers.edgar import EdgarHelpers
 from helpers.email_helpers import EmailHelpers
 from helpers.firefox import FirefoxHelpers
@@ -660,7 +657,8 @@ class StarlarkRuntime:
                     # try and perform the error correction
                     self.setup()
                     # results_dict = self.compile_and_execute(error_correction)
-                    results_dict = StarlarkRuntime(
+
+                    _ = StarlarkRuntime(
                         controller=self.controller,
                         agents=self.agents,
                         vector_search=self.vector_search,
@@ -727,6 +725,7 @@ class StarlarkRuntime:
             context_messages=[],
             query=self.original_query,
             original_query=self.original_query,
+            model=None,
         )
         lines = str(assistant.message).split('\n')
         logging.debug('StarlarkRuntime.compile_error() Re-written Starlark code:')

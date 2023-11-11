@@ -1,14 +1,9 @@
-import asyncio
-import datetime as dt
-import inspect
-import uuid
+import base64
 from abc import ABC, abstractmethod
-from enum import Enum
 from typing import (Any, Awaitable, Callable, Dict, Generator, Generic, List,
                     Optional, Sequence, Tuple, TypeVar, Union, cast)
 
 import pandas as pd
-import pandas_gpt
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -36,8 +31,8 @@ class Executor(ABC):
         messages: List['Message'],
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
-        model: Optional[str] = None,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
+        model: Optional[str] = None,
     ) -> 'Assistant':
         pass
 
@@ -47,8 +42,8 @@ class Executor(ABC):
         messages: List['Message'],
         max_completion_tokens: int = 2048,
         temperature: float = 1.0,
-        model: Optional[str] = None,
         stream_handler: Optional[Callable[['AstNode'], None]] = None,
+        model: Optional[str] = None,
     ) -> 'Assistant':
         pass
 
@@ -165,6 +160,7 @@ class Controller():
         temperature: float = 0.0,
         lifo: bool = False,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
     ) -> 'Assistant':
         pass
 
@@ -180,6 +176,7 @@ class Controller():
         temperature: float = 0.0,
         lifo: bool = False,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
     ) -> 'Assistant':
         pass
 
@@ -261,7 +258,7 @@ class DebugNode(AstNode):
 class Content(AstNode):
     def __init__(
         self,
-        sequence: Optional[AstNode | List[AstNode] | str] = None,
+        sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
     ):
         if sequence is None:
             self.sequence = ''
@@ -269,14 +266,25 @@ class Content(AstNode):
 
         if isinstance(sequence, str):
             self.sequence = [sequence]
+        elif isinstance(sequence, bytes):
+            self.sequence = sequence
         elif isinstance(sequence, Content):
             self.sequence = sequence.sequence  # type: ignore
         elif isinstance(sequence, AstNode):
             self.sequence = [sequence]
         elif isinstance(sequence, list) and len(sequence) > 0 and isinstance(sequence[0], AstNode):
             self.sequence = sequence
+        elif (
+            isinstance(sequence, list)
+            and len(sequence) > 0
+            and isinstance(sequence[0], dict)
+            and 'type' in sequence[0]
+            and sequence[0]['type'] == 'image_url'
+        ):
+            base = sequence[0]['image_url']['url'].split(',')[1]
+            self.sequence = base64.b64decode(base)  # bytes
         else:
-            raise ValueError('not supported')
+            raise ValueError(f'type {type(sequence)} is not supported')
 
     def __str__(self):
         if isinstance(self.sequence, list):
@@ -300,9 +308,22 @@ class Message(AstNode):
         pass
 
     @staticmethod
-    def from_dict(message: Dict[str, str]) -> 'Message':
+    def from_dict(message: Dict[str, Any]) -> 'Message':
         role = message['role']
         content = message['content']
+
+        # when converting from MessageModel, there can be an embedded image
+        # in the content parameter that needs to be converted back to bytes
+        if (
+            isinstance(content, list)
+            and len(content) > 0
+            and 'type' in content[0]
+            and content[0]['type'] == 'image_url'
+            and 'image_url' in content[0]
+            and 'url' in content[0]['image_url']
+        ):
+            content = base64.b64decode(content[0]['image_url']['url'].split(',')[1])
+
         if role == 'user':
             return User(Content(content))
         elif role == 'system':
@@ -315,7 +336,18 @@ class Message(AstNode):
         return {'role': self.role(), 'content': self.message}
 
     @staticmethod
-    def to_dict(message: 'Message') -> Dict[str, str]:
+    def to_dict(message: 'Message') -> Dict[str, Any]:
+        if isinstance(message, User) and isinstance(message.message.sequence, bytes):
+            return {
+                'role': message.role(),
+                'content': [{
+                    'type': 'image_url',
+                    'image_url': {
+                        'url': f"data:image/jpeg;base64,{base64.b64encode(message.message.sequence).decode('utf-8')}",
+                        'detail': 'high'
+                    }
+                }]
+            }
         return {'role': message.role(), 'content': str(message.message)}
 
 
@@ -666,7 +698,7 @@ class DownloadItem(BaseModel):
 
 class MessageModel(BaseModel):
     role: str
-    content: str
+    content: str | List[Dict[str, Any]]
 
     def to_message(self) -> Message:
         return Message.from_dict(self.model_dump())
@@ -678,8 +710,10 @@ class MessageModel(BaseModel):
 
 class SessionThread(BaseModel):
     id: int = -1
+    model: str = ''
     current_mode: str = 'tool'
     temperature: float = 0.0
+    cookies: List[Dict[str, Any]] = []
     messages: List[MessageModel] = []
 
 

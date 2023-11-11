@@ -1,39 +1,41 @@
 import asyncio
+import base64
 import datetime as dt
-import json
 import os
 from abc import ABC, abstractmethod
 from enum import Enum
+from io import BytesIO
 from typing import (Any, Awaitable, Callable, Dict, Generator, Generic, List,
                     Optional, Sequence, Tuple, TypeVar, Union, cast)
 
-import openai
 import tiktoken
+from openai import AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
+from openai.types.chat.completion_create_params import Function
+from openai.types.shared import FunctionDefinition
+from PIL import Image
 
 from container import Container
+from helpers.helpers import Helpers
 from helpers.logging_helpers import response_writer, setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
 
 logging = setup_logging()
+aclient = AsyncOpenAI()
 
 class OpenAIExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
-        default_model: str = 'gpt-3.5-turbo-16k-0613',
-        default_tools_model: str = 'gpt-4-0613',
+        default_model: str = 'gpt-4-1106-preview',
         api_endpoint: str = 'https://api.openai.com/v1',
-        max_function_calls: int = 5,
-        default_max_tokens: int = 4096,
+        default_max_tokens: int = 8192,
     ):
         self.openai_key = api_key
         self.default_model = default_model
-        self.default_tools_model = default_tools_model
-        self.max_function_calls = max_function_calls
         self.api_endpoint = api_endpoint
         self.default_max_tokens = default_max_tokens
-        openai.api_base = self.api_endpoint
 
     def user_token(self) -> str:
         return 'User'
@@ -47,11 +49,17 @@ class OpenAIExecutor(Executor):
     def max_tokens(self, model: Optional[str]) -> int:
         model = model if model else self.default_model
         match model:
+            case 'gpt-4-vision-preview':
+                return 128000
+            case 'gpt-4-1106-preview':
+                return 128000
             case 'gpt-4-0613':
-                return 8191
+                return 8192
+            case 'gpt-4-32k':
+                return 32768
             case 'gpt-4':
-                return 8191
-            case 'gpt-3.5-turbo-16k-0613':
+                return 8192
+            case 'gpt-3.5-turbo-16k-1106':
                 return 16385
             case 'gpt-3.5-turbo-16k':
                 return 16385
@@ -65,9 +73,6 @@ class OpenAIExecutor(Executor):
     def get_default_model(self):
         return self.default_model
 
-    def get_default_tools_model(self):
-        return self.default_tools_model
-
     def set_default_max_tokens(self, default_max_tokens: int):
         self.default_max_tokens = default_max_tokens
 
@@ -77,6 +82,15 @@ class OpenAIExecutor(Executor):
         model: Optional[str] = None,
     ) -> int:
         return self.max_tokens(model) - completion_token_count
+
+    def __calculate_image_tokens(self, width: int, height: int):
+        from math import ceil
+
+        h = ceil(height / 512)
+        w = ceil(width / 512)
+        n = w * h
+        total = 85 + 170 * n
+        return total
 
     def calculate_tokens(
         self,
@@ -95,6 +109,8 @@ class OpenAIExecutor(Executor):
                 "gpt-3.5-turbo-16k-0613",
                 "gpt-4",
                 "gpt-4-0314",
+                "gpt-4-vision-preview",
+                "gpt-4-1106-preview",
                 "gpt-4-32k-0314",
                 "gpt-4-0613",
                 "gpt-4-32k-0613",
@@ -105,10 +121,8 @@ class OpenAIExecutor(Executor):
                 tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
                 tokens_per_name = -1  # if there's a name, the role is omitted
             elif "gpt-3.5-turbo" in model:
-                logging.warning("Warning: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
                 return num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613")
             elif "gpt-4" in model:
-                logging.warning("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
                 return num_tokens_from_messages(messages, model="gpt-4-0613")
             else:
                 logging.error(f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens.""")  # noqa: E501
@@ -117,10 +131,21 @@ class OpenAIExecutor(Executor):
             num_tokens = 0
             for message in messages:
                 num_tokens += tokens_per_message
+
                 for key, value in message.items():
-                    num_tokens += len(encoding.encode(value))
-                    if key == "name":
-                        num_tokens += tokens_per_name
+                    if isinstance(value, list):
+                        for list_item in value:
+                            if 'type' in list_item and list_item['type'] == 'image_url' and 'image_url' in list_item:
+                                if 'detail' in list_item['image_url'] and list_item['image_url']['detail'] == 'high':
+                                    with Image.open(BytesIO(base64.b64decode(list_item['image_url']['url'].split(',')[1]))) as img:  # NOQA: E501
+                                        width, height = img.size
+                                        num_tokens += self.__calculate_image_tokens(width=width, height=height)
+                                else:
+                                    num_tokens += 85
+                    else:
+                        num_tokens += len(encoding.encode(value))
+                        if key == "name":
+                            num_tokens += tokens_per_name
             num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
             return num_tokens
 
@@ -138,52 +163,65 @@ class OpenAIExecutor(Executor):
     def name(self) -> str:
         return 'openai'
 
-    def aexecute_direct(
+    async def aexecute_direct(
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
-        max_completion_tokens: int = 1024,
+        max_completion_tokens: int = 2048,
         temperature: float = 0.2,
         chat_format: bool = True,
     ):
+        model = model if model else self.default_model
+
         message_tokens = self.calculate_tokens(messages)
         if message_tokens > self.max_prompt_tokens(max_completion_tokens):
             raise Exception('Prompt too long, message tokens: {}, completion tokens: {} total tokens: {}, available tokens: {}'
                             .format(message_tokens,
                                     max_completion_tokens,
                                     message_tokens + max_completion_tokens,
-                                    self.max_tokens(model if model else self.default_model)))
+                                    self.max_tokens(model)))
 
         if not chat_format and len(functions) > 0:
             raise Exception('Functions are not supported in non-chat format')
 
+        messages_cast = cast(List[ChatCompletionMessageParam], messages)
+        functions_cast = cast(List[Function], functions)
+
         if chat_format:
             if functions:
-                response = openai.ChatCompletion.acreate(
-                    model=model if model else self.default_model,
+                response = await aclient.chat.completions.create(
+                    model=model,
                     temperature=temperature,
                     max_tokens=max_completion_tokens,
-                    functions=functions,
-                    messages=messages,
-                    stream=True,
+                    functions=functions_cast,
+                    messages=messages_cast,
+                    stream=True
                 )
             else:
                 # for whatever reason, [] functions generates an InvalidRequestError
-                response = openai.ChatCompletion.acreate(
+                response = await aclient.chat.completions.create(
                     model=model if model else self.default_model,
                     temperature=temperature,
                     max_tokens=max_completion_tokens,
-                    messages=messages,
-                    stream=True,
+                    messages=messages_cast,
+                    stream=True
                 )
             return response  # type: ignore
         else:
-            response = openai.Completion.acreate(
+            # have to collapse the messages in to a single string
+            prompt = ''
+            for message in messages:
+                if message['role'] == 'assistant':
+                    prompt += f"""{self.assistant_token()} {message['content']}\n\n"""
+                elif message['role'] == 'user':
+                    prompt += f"""{self.user_token()} {message['content']}\n\n"""
+
+            response = await aclient.completions.create(
                 model=model if model else self.default_model,
                 temperature=temperature,
                 max_tokens=max_completion_tokens,
-                messages=messages,
+                prompt=prompt
             )
             return response  # type: ignore
 
@@ -195,6 +233,8 @@ class OpenAIExecutor(Executor):
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
+        model = model if model else self.default_model
+
         def last(predicate, iterable):
             result = [x for x in iterable if predicate(x)]
             if result:
@@ -224,7 +264,7 @@ class OpenAIExecutor(Executor):
 
         text_response = ''
         async for chunk in await chat_response:  # type: ignore
-            s = chunk.choices[0].delta.get('content', '')
+            s = chunk.choices[0].delta.content or ''
             await stream_handler(Content(s))
             text_response += s
         await stream_handler(TokenStopNode())

@@ -51,6 +51,7 @@ class EntityMetadata():
         for k, v in self.extra.items():
             if k not in d:
                 d[k] = v
+        return d
 
 class VectorSearch():
     def __init__(
@@ -233,6 +234,7 @@ class VectorSearch():
                 extra_metdata=metadata
             )
             self.vector_store.ingest_text(text, entity.to_dict())
+            logging.debug('ingested pdf file: {}'.format(filename))
         elif filename.endswith('.csv'):
             columns = []
             try:
@@ -252,7 +254,8 @@ class VectorSearch():
                 extra_metdata=metadata
             )
             self.vector_store.ingest_text(content, entity.to_dict())
-        elif filename.endswith('.txt'):
+            logging.debug('ingested csv file: {}'.format(filename))
+        elif filename.endswith('.txt') or filename.endswith('.md'):
             with open(filename, 'r') as f:
                 text = f.read()
                 entity = self.parse_metadata(
@@ -265,6 +268,7 @@ class VectorSearch():
                     extra_metdata=metadata
                 )
                 self.vector_store.ingest_text(text, entity.to_dict())
+                logging.debug('ingested text file: {}'.format(filename))
         elif filename.endswith('.html') or filename.endswith('.htm'):
             with open(filename, 'r') as f:
                 html = f.read()
@@ -279,6 +283,7 @@ class VectorSearch():
                     extra_metdata=metadata,
                 )
                 self.vector_store.ingest_text(text, entity.to_dict())
+                logging.debug('ingested html file: {}'.format(filename))
         elif filename.endswith('.py'):
             with open(filename, 'r') as f:
                 code = f.read()
@@ -302,5 +307,6 @@ class VectorSearch():
                     extra_metdata=metadata,
                 )
                 self.vector_store.ingest_text(code, entity.to_dict())
+                logging.debug('ingested python file: {}'.format(filename))
         else:
             logging.debug('file not supported for ingestion: {}'.format(filename))

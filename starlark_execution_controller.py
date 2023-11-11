@@ -30,7 +30,6 @@ class StarlarkExecutionController(Controller):
         vector_search: VectorSearch,
         edit_hook: Optional[Callable[[str], str]] = None,
         continuation_passing_style: bool = False,
-        tools_model: Optional[str] = None,
     ):
         super().__init__()
 
@@ -40,7 +39,6 @@ class StarlarkExecutionController(Controller):
         self.edit_hook = edit_hook
         self.starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
         self.continuation_passing_style = continuation_passing_style
-        self.tools_model = tools_model if tools_model else self.executor.get_default_model()
 
     def get_executor(self) -> Executor:
         return self.executor
@@ -49,7 +47,10 @@ class StarlarkExecutionController(Controller):
         self,
         message: User,
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
     ) -> Dict[str, float]:
+        model = model if model else self.executor.get_default_model()
+
         def parse_result(result: str) -> Dict[str, float]:
             if ',' in result:
                 if result.startswith('Assistant: '):
@@ -89,6 +90,7 @@ class StarlarkExecutionController(Controller):
             ],
             temperature=0.0,
             stream_handler=stream_handler,
+            model=model,
         )
         if assistant.error or not parse_result(str(assistant.message)):
             return {'tool': 1.0}
@@ -103,15 +105,17 @@ class StarlarkExecutionController(Controller):
         prompt_filename: Optional[str] = None,
         completion_tokens: int = 2048,
         temperature: float = 0.0,
-        model: Optional[str] = None,
         lifo: bool = False,
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
     ) -> Assistant:
         '''
         Internal function to execute an LLM call with prompt template and context messages.
         Deals with chunking, map/reduce, and other logic if the message/context messages
         are too long for the context window.
         '''
+        model = model if model else self.executor.get_default_model()
+
         async def __llm_call(
             user_message: Message,
             context_messages: List[Message],
@@ -132,8 +136,8 @@ class StarlarkExecutionController(Controller):
                     messages,
                     max_completion_tokens=completion_tokens,
                     temperature=temperature,
-                    model=model,
                     stream_handler=stream_handler,
+                    model=model,
                 )
                 role_debug(logging, prompt_filename, 'User', str(user_message.message))
                 role_debug(logging, prompt_filename, 'Assistant', str(assistant.message))
@@ -341,10 +345,12 @@ class StarlarkExecutionController(Controller):
         prompt_filename: Optional[str] = None,
         completion_tokens: int = 2048,
         temperature: float = 0.0,
-        model: Optional[str] = None,
         lifo: bool = False,
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
     ) -> Assistant:
+        model = model if model else self.executor.get_default_model()
+
         return asyncio.run(self.aexecute_llm_call(
             message=message,
             context_messages=context_messages,
@@ -364,8 +370,10 @@ class StarlarkExecutionController(Controller):
         agents: List[Callable],
         temperature: float = 0.0,
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
     ) -> Assistant:
         logging.debug('StarlarkRuntime.build_runnable_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
+        model = model if model else self.executor.get_default_model()
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
 
@@ -388,9 +396,9 @@ class StarlarkExecutionController(Controller):
             prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
             completion_tokens=2048,
             temperature=temperature,
-            model=self.tools_model,
             lifo=False,
             stream_handler=stream_handler,
+            model=model,
         )
 
         return llm_response
@@ -401,7 +409,10 @@ class StarlarkExecutionController(Controller):
         temperature: float = 0.0,
         mode: str = 'tool',
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
+        model: Optional[str] = None,
     ) -> List[Statement]:
+        model = model if model else self.executor.get_default_model()
+
         def find_answers(d: Dict[Any, Any]) -> List[Statement]:
             current_results = []
             for _, value in d.items():
@@ -421,7 +432,8 @@ class StarlarkExecutionController(Controller):
         if mode == 'tool':
             classification = await self.aclassify_tool_or_direct(
                 last_message,
-                stream_handler=stream_handler
+                stream_handler=stream_handler,
+                model=model,
             )
         else:
             classification = {'direct': 1.0}
@@ -433,6 +445,7 @@ class StarlarkExecutionController(Controller):
                 agents=self.agents,
                 temperature=temperature,
                 stream_handler=stream_handler,
+                model=model,
             )
 
             assistant_response = str(response.message).replace('Assistant:', '').strip()
@@ -440,6 +453,12 @@ class StarlarkExecutionController(Controller):
             # anthropic can often embed the code in ```python blocks
             if '```python' in assistant_response:
                 match = re.search(r'```python\n(.*?)```', assistant_response, re.DOTALL)
+                if match:
+                    assistant_response = match.group(1)
+
+            # openai can often embed the code in ```starlark blocks
+            if '```starlark' in assistant_response:
+                match = re.search(r'```starlark\n(.*?)```', assistant_response, re.DOTALL)
                 if match:
                     assistant_response = match.group(1)
 
@@ -491,6 +510,7 @@ class StarlarkExecutionController(Controller):
                 temperature=temperature,
                 original_query='',
                 stream_handler=stream_handler,
+                model=model,
             )
 
             results.append(Answer(

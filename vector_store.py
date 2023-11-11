@@ -24,11 +24,8 @@ class VectorStore():
         chunk_overlap: int = 50,
     ):
         self.token_calculator = token_calculator
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=embedding_model,
-            model_kwargs={'device': 'cuda:0'} if torch.cuda.is_available() else {'device': 'cpu'},
-            encode_kwargs={'normalize_embeddings': True}
-        )
+        self._embeddings = None
+        self.embedding_model = embedding_model
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.store_directory: str = store_directory
@@ -37,10 +34,19 @@ class VectorStore():
         if not os.path.exists(self.store_directory):
             os.makedirs(self.store_directory)
 
-        if not os.path.exists(os.path.join(self.store_directory, self.index_name + '.index')):
+        if not os.path.exists(os.path.join(self.store_directory, self.index_name + '.faiss')):
             from langchain.vectorstores import FAISS
-            self.store: FAISS = FAISS.from_texts([''], self.embeddings)
+            self.store: FAISS = FAISS.from_texts([''], self.embeddings())
             self.store.save_local(folder_path=self.store_directory, index_name=self.index_name)
+
+    def embeddings(self):
+        if not self._embeddings:
+            self._embeddings = HuggingFaceEmbeddings(
+                model_name=self.embedding_model,
+                model_kwargs={'device': 'cuda:0'} if torch.cuda.is_available() else {'device': 'cpu'},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+        return self._embeddings
 
     def __metadata_str(self, document: Document):
         if document.metadata:
@@ -56,7 +62,7 @@ class VectorStore():
         if not hasattr(self, 'store') or not self.store:
             self.store = FAISS.load_local(
                 folder_path=self.store_directory,
-                embeddings=self.embeddings,
+                embeddings=self.embeddings(),
                 index_name=self.index_name
             )
         return self.store
@@ -137,7 +143,7 @@ class VectorStore():
         token_chunk_cost = self.token_calculator(split_texts[0])
 
         logging.debug('VectorStore.chunk_and_rank document length: {} split_texts: {}'.format(len(content), len(split_texts)))
-        chunk_faiss = FAISS.from_texts(split_texts, self.embeddings)
+        chunk_faiss = FAISS.from_texts(split_texts, self.embeddings())
 
         chunk_k = math.floor(max_tokens / token_chunk_cost)
         result = chunk_faiss.similarity_search_with_relevance_scores(query, k=chunk_k * 5)

@@ -2,7 +2,7 @@
 # or set LLMVM_CONFIG environment variable to this file
 server_host: '0.0.0.0'
 server_port: 8011
-firefox_profile_directory: ''  # usually ~/.mozilla/firefox/...
+firefox_profile: ''
 firefox_download_directory: '~/.local/share/llmvm/download'
 firefox_cookies: '~/.local/share/llmvm/cookies.txt'
 firefox_headless: true
@@ -17,16 +17,13 @@ vector_store_index_directory: '~/.local/share/llmvm/faiss'
 vector_store_embedding_model: 'BAAI/bge-base-en'
 vector_store_chunk_size: 500
 openai_api_base: 'https://api.openai.com/v1'
-openai_model: 'gpt-3.5-turbo-16k-0613'
-openai_tools_model: 'gpt-4-0613'
+openai_model: 'gpt-4-1106-preview'
 openai_max_tokens: 16384
 anthropic_api_base: 'https://api.anthropic.com'
 anthropic_model: 'claude-v2'
-anthropic_tools_model: 'claude-v2'
 anthropic_max_tokens: 100000 
 local_api_base: 'http://localhost:8000/v1'
 local_model: 'llongorca.gguf'
-local_tools_model: 'llongorca.gguf'
 local_model_max_tokens: 16385
 executor: 'openai'  # openai, anthropic, local 
 helper_functions:

@@ -1,27 +1,23 @@
 import asyncio
+import base64
 import datetime as dt
 import importlib
 import inspect
 import io
-import os
 import re
-import subprocess
 import typing
 from enum import Enum, IntEnum
 from itertools import cycle, islice
 from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
-import guidance
 import nest_asyncio
-import pandas as pd
 from docstring_parser import parse
-from guidance.llms import LLM
 from PIL import Image
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from objects import AstNode, Content, DebugNode, Message, StreamNode, User
+from objects import Content, Message, StreamNode, User
 
 
 def write_client_stream(obj):
@@ -43,6 +39,62 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def is_image(byte_stream):
+        try:
+            if isinstance(byte_stream, io.BytesIO):
+                byte_stream = byte_stream.getvalue()
+
+            with Image.open(io.BytesIO(byte_stream)) as im:
+                return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def is_base64_encoded(s):
+        import binascii
+
+        try:
+            if len(s) % 4 == 0:
+                base64.b64decode(s, validate=True)
+                return True
+        except (ValueError, binascii.Error):
+            return False
+        return False
+
+    @staticmethod
+    def encode_image(image_path):
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+
+    @staticmethod
+    def read_netscape_cookies(cookies_file_content: str) -> List[Dict[str, Any]]:
+        cookies = []
+        for line in cookies_file_content.splitlines():
+            if not line.startswith('#') and line.strip():  # Ignore comments and empty lines
+                try:
+                    domain, _, path, secure, expires_value, name, value = line.strip().split('\t')
+
+                    if int(expires_value) != -1 and int(expires_value) < 0:
+                        continue  # Skip invalid cookies
+
+                    dt_object = dt.datetime.fromtimestamp(int(expires_value))
+                    if dt_object.date() < dt.datetime.now().date():
+                        continue
+
+                    cookies.append({
+                        "name": name,
+                        "value": value,
+                        "domain": domain,
+                        "path": path,
+                        "expires": int(expires_value),
+                        "httpOnly": False,
+                        "secure": secure == "TRUE"
+                    })
+                except Exception as ex:
+                    pass
+        return cookies
+
     @staticmethod
     def get_callable(logging: Logger, method_str) -> Optional[Callable]:
         parts = method_str.split(".")
@@ -375,34 +427,6 @@ class Helpers():
             .replace('{{#assistant~}}', '') \
             .replace('{{~/assistant}}', '')
         return result
-
-    @staticmethod
-    async def execute_llm_template_async(template: str, llm: LLM, **kwargs) -> Dict[str, str]:
-        prompt = guidance(template, llm, stream=True)  # type: ignore
-
-        token_results = []
-        for text in Helpers.run_and_stream(prompt, **kwargs):
-            print(text, end='')
-            token_results.append(text)
-
-        prompt_result = ''.join(token_results)
-        assistant_result = Helpers.find_string_between_tokens(prompt_result, 'ASSISTANT: ', '</s>')
-
-        return {'prompt_result': str(prompt_result), 'answer': assistant_result}
-
-    @staticmethod
-    def execute_llm_template(template: str, llm: LLM, **kwargs) -> Dict[str, str]:
-        prompt = guidance(template, llm)  # type: ignore   # , stream=True, async_mode=True)  # type: ignore
-        prompt_result = prompt(**kwargs)
-
-        assistant_result = ''
-        pattern = r'ASSISTANT: (.*?)</s>'
-        matches = re.findall(pattern, str(prompt_result), re.MULTILINE | re.DOTALL)
-
-        if matches:
-            assistant_result = matches[-1]
-
-        return {'prompt_result': str(prompt_result), 'answer': assistant_result}
 
     @staticmethod
     def __get_class_of_func(func):

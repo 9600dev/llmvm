@@ -23,13 +23,11 @@ class AnthropicExecutor(Executor):
         self,
         api_key: str,
         default_model: str = 'claude-v2',
-        default_tools_model: str = 'claude-v2',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_tokens: int = 100000,
     ):
         self.default_max_tokens = default_max_tokens
         self.default_model = default_model
-        self.default_tools_model = default_tools_model
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
         self.tokenizer = Tokenizer(BPE())
 
@@ -53,9 +51,6 @@ class AnthropicExecutor(Executor):
 
     def get_default_model(self):
         return self.default_model
-
-    def get_default_tools_model(self):
-        return self.default_tools_model
 
     def set_default_max_tokens(self, default_max_tokens: int):
         self.default_max_tokens = default_max_tokens
@@ -112,7 +107,7 @@ class AnthropicExecutor(Executor):
 
     def aexecute_direct(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
         max_completion_tokens: int = 2048,

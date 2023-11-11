@@ -2,12 +2,15 @@ import asyncio
 import datetime as dt
 import os
 import sys
-from typing import Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 import async_timeout
 import jsonpickle
 import nest_asyncio
-import openai
+from openai import AsyncOpenAI, OpenAI
+
+client = OpenAI()
+aclient = AsyncOpenAI()
 import rich
 import uvicorn
 from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request,
@@ -18,6 +21,7 @@ from pydantic import BaseModel
 
 from anthropic_executor import AnthropicExecutor
 from container import Container
+from helpers.browser import BrowserHelper
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
@@ -44,9 +48,6 @@ agents = list(
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-for agent in agents:
-    rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore
-
 os.makedirs(Container().get('cache_directory'), exist_ok=True)
 os.makedirs(Container().get('cdn_directory'), exist_ok=True)
 os.makedirs(Container().get('log_directory'), exist_ok=True)
@@ -57,14 +58,13 @@ cdn_directory = Container().get('cdn_directory')
 
 
 if not os.environ.get('OPENAI_API_KEY', '') and not os.environ.get('ANTHROPIC_API_KEY'):  # pragma: no cover
-    rich.print('[red]Neither OPENAI_API_KEY or ANTHROPIC_API_KEY are set. One of these API keys needs to be set in your terminal environment[/red]')
+    rich.print('[red]Neither OPENAI_API_KEY or ANTHROPIC_API_KEY are set. One of these API keys needs to be set in your terminal environment[/red]')  # NOQA: E501
     sys.exit(1)
 
 
 openai_executor = OpenAIExecutor(
     api_key=os.environ.get('OPENAI_API_KEY', ''),
     default_model=Container().get('openai_model'),
-    default_tools_model=Container().get('openai_tools_model'),
     api_endpoint=Container().get('openai_api_base'),
     default_max_tokens=int(Container().get('openai_max_tokens')),
 )
@@ -72,7 +72,6 @@ openai_executor = OpenAIExecutor(
 anthropic_executor = AnthropicExecutor(
     api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
     default_model=Container().get('anthropic_model'),
-    default_tools_model=Container().get('anthropic_tools_model'),
     api_endpoint=Container().get('anthropic_api_base'),
     default_max_tokens=int(Container().get('anthropic_max_tokens')),
 )
@@ -101,7 +100,6 @@ controller = StarlarkExecutionController(
     vector_search=vector_search,
     edit_hook=None,
     continuation_passing_style=False,
-    tools_model=executor.get_default_tools_model(),
 )
 
 
@@ -137,21 +135,21 @@ async def chat_completions(request: Request):
 
         # Get the JSON body of the request
         if 'stream' in data and data['stream']:
-            response = await openai.ChatCompletion.acreate(
+            response = await aclient.chat.completions.create(
                 model=data['model'],
                 temperature=0.0,
                 max_tokens=150,
                 messages=messages,
-                stream=True,
+                stream=True
             )
             return StreamingResponse(stream_response(response), media_type='text/event-stream')  # media_type="application/json")
         else:
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model=data['model'],
                 temperature=0.0,
                 max_tokens=150,
                 messages=messages,
-                stream=False,
+                stream=False
             )
             return response
     except Exception as e:
@@ -247,16 +245,22 @@ async def download(
 
 @app.get('/v1/chat/get_thread')
 async def get_thread(id: int) -> SessionThread:
-    return __get_thread(id)
+    thread = __get_thread(id)
+    return thread
 
 @app.get('/v1/chat/get_threads')
 async def get_threads() -> List[SessionThread]:
-    return [cast(SessionThread, cache_session.get(id)) for id in cache_session.keys()]
+    result = [cast(SessionThread, cache_session.get(id)) for id in cache_session.keys()]
+    return result
 
 @app.get('v1/chat/clear_threads')
 async def clear_threads() -> None:
     for id in cache_session.keys():
         cache_session.delete(id)
+
+@app.get('/health')
+async def health():
+    return {'status': 'ok'}
 
 @app.get('/firefox')
 async def firefox(url: str = 'https://9600.dev'):
@@ -264,6 +268,18 @@ async def firefox(url: str = 'https://9600.dev'):
     firefox = FirefoxHelpers()
     result = await firefox.get_url(url)
     return JSONResponse(content=result)
+
+@app.post('/v1/chat/cookies', response_model=None)
+async def set_cookies(requests: Request):
+    request_body = await requests.json()
+    id = request_body['id']
+    cookies = request_body['cookies']
+
+    logging.debug(f'/v1/chat/cookies?id={id}')
+    thread = __get_thread(id)
+    thread.cookies = cookies
+    cache_session.set(thread.id, thread)
+    return thread
 
 @app.post('/v1/chat/tools_completions', response_model=None)
 async def tools_completions(request: SessionThread):
@@ -276,6 +292,7 @@ async def tools_completions(request: SessionThread):
     messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
     mode = thread.current_mode
     queue = asyncio.Queue()
+    model = thread.model
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')
@@ -294,11 +311,13 @@ async def tools_completions(request: SessionThread):
                 queue.put_nowait(StopNode())
 
         async def execute_and_signal():
+            # todo: this is a hack
             result = await controller.aexecute(
                 messages=messages,
                 temperature=thread.temperature,
                 mode=mode,
                 stream_handler=callback,
+                model=model,
             )
             queue.put_nowait(StopNode())
             return result
@@ -352,13 +371,15 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == '__main__':
+    for agent in agents:
+        rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore
+
     config = uvicorn.Config(
         app='server:app',
         host=Container().get('server_host'),
         port=int(Container().get('server_port')),
-        reload=True,
+        reload=False,
         loop='asyncio',
-        reload_includes=['*.py'],
         log_level='debug',
     )
 
