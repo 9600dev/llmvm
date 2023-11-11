@@ -2,9 +2,11 @@
 
 This project is a research prototype that enables a Large Language Model (LLM) to break down user tasks into manageable locally executable sub-tasks, and then schedule and oversee their execution on an interpreted virtual machine (in this case, Python), collaboratively addressing syntax and semantic errors through a back-and-forth dialogue.
 
-It supports ChatGPT 3.5/4.0 from OpenAI, and Claude-v2 from Anthropic.
+It supports ChatGPT 3.5/4.0/4 Turbo/Vision models from OpenAI, and Claude-v2 from Anthropic.
 
-Let's look at an example of breaking down the user task: ```"Go to the https://ten13.vc/team website, extract the list of names, and then get me a summary of their LinkedIn profiles."```
+Let's look at an example of breaking down the user task:
+
+```"Go to the https://ten13.vc/team website, extract the list of names, and then get me a summary of their LinkedIn profiles."```
 
 ## Example Walkthrough
 
@@ -14,10 +16,10 @@ Fire up the local FastAPI server: ```python server.py``` or via the docker and t
 
 Fire up the client tool ```python client.py``` and submit the user task:
 
-![](docs/2023-10-11-13-18-38.png)
+![](docs/2023-11-11-12-49-01.png)
 
 
-Starlark code is returned from ChatGPT 3.5 when passing the user task query + [prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt) pair:
+Starlark code is returned from ChatGPT API when passing the user task query + [prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt) pair:
 
 ```python
 var1 = download("https://ten13.vc/team")  # Step 1: Download the webpage
@@ -28,7 +30,6 @@ for list_item in llm_loop_bind(var2, "list of names"):  # Step 3: Loop over the 
     var4 = llm_call([var3], "summarize career profile")  # Step 5: Summarize the career profile of each person
     answers.append(var4)  # Step 6: Add the summary to the list of answers
 answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the user
-
 ```
 
 This Starlark code represents "breaking down a user query into manageable and locally executable sub-tasks". Execution of this code proceeds step-by-step on a Python runtime until completion, or error.
@@ -94,13 +95,13 @@ And ```llm_loop_bind()``` takes this arbitrary text and converts it to: ["Steve 
 
 The resulting Starlark AST:
 
-![](docs/2023-08-29-15-46-13.png)
+![](docs/2023-11-11-12-51-42.png)
 
 After execution:
 
-![](docs/2023-08-29-15-45-31.png)
+![](docs/2023-11-11-12-51-11.png)
 
-And another example ```get a summary of the front page of https://bbc.com```. This demonstrates inline images of the content that the Starlark Runtime is downloading and searching (this only works for the [kitty terminal](https://sw.kovidgoyal.net/kitty/) as kitty supports image rendering):
+And another example ```get a summary of the front page of https://bbc.com```. This demonstrates inline images of the content that the Starlark Runtime is downloading and searching (this works for the [kitty terminal](https://sw.kovidgoyal.net/kitty/) as kitty supports image rendering, or iTerm and Alacritty via the [vui](https://github.com/atanunq/viu) tool):
 
 ![](docs/2023-10-01-18-07-07.png)
 
@@ -114,7 +115,7 @@ And another example ```get a summary of the front page of https://bbc.com```. Th
 * Write arbitrary natural language queries that get translated into Starlark code and cooperatively executed
 * Upload .pdf, .txt, .csv etc and have them ingested by FAISS and searchable by the LLM.
 * Add arbitrary Python helpers by modifying ~/.config/llmvm/config.yaml and adding your Python based helper. Note: you may need to hook the helper in [starlark_runtime.py](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt). You may also need to show examples of its use in [prompts/starlark/starlark_tool_execution.prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt)
-* Server.py via /v1/chat/completions endpoint, mimics and forwards to OpenAI's /v1/chat/completions API.
+* server.py via /v1/chat/completions endpoint, mimics and forwards to OpenAI's /v1/chat/completions API.
 * TODO: build a web frontend for this thing
 * TODO: build real time streaming, so you can wire up pipelines of llmvm execution to arbitrary streams of incoming data.
 * TODO: uploaded code files should be parsed, transformed into graphs, and ingested via an LLM transformation first.
@@ -184,6 +185,15 @@ llm "download the latest news about Elon Musk as bullet points" | \
 llm "write a small blog post from the bullet points in the previous message" | \
 llm "create a nice html file to display the content" > output.html
 ```
+
+Image understanding is now supported via OpenAI's vision model:
+
+```bash
+cat docs/beach.jpg | llm "download the latest news about Elon Musk as bullet points"
+```
+
+![](docs/2023-11-11-12-59-39.png)
+
 
 ### Ingesting files
 
@@ -258,6 +268,14 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
 ```yaml
 executor: 'anthropic'  # or 'openai'
+```
+
+and for talking directly to the LLM via client.py without the server running:
+
+```bash
+export LLMVM_MODEL='gpt-4-vision-preview'
+export LLMVM_EXECUTOR='openai'
+python client.py "hello, who are you?"
 ```
 
 #### Debugging Firefox Automation Issues
