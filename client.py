@@ -48,9 +48,11 @@ logging = setup_logging()
 # setup globals for the repl
 global thread_id
 global current_mode
+global suppress_role
 
 thread_id = 0
 current_mode = 'tool'
+suppress_role = False
 
 
 def parse_command_string(s, command):
@@ -270,6 +272,7 @@ def llm(
     context_messages: List[Message] = []
 
     if not sys.stdin.isatty():
+        # input is coming from a pipe
         if not message: message = ''
 
         file_content = sys.stdin.buffer.read()
@@ -1030,7 +1033,7 @@ def new(
               help='cookies.txt file in Netscape format to use for the request. Default is $LLMVM_COOKIES or empty.')
 @click.option('--model', '-m', type=str, required=False, default=os.environ.get('LLMVM_MODEL', 'gpt-4-1106-preview'),
               help='model to use. Default is $LLMVM_MODEL or gpt-4-1106-preview.')
-@click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
+@click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
 def message(
     message: Optional[str | bytes],
     id: int,
@@ -1041,6 +1044,9 @@ def message(
     suppress_role: bool,
 ):
     global thread_id
+
+    if not suppress_role and not sys.stdin.isatty():
+        suppress_role = True
 
     if message:
         if isinstance(message, str) and message.startswith('"') and message.endswith('"'):
