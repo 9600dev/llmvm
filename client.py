@@ -304,10 +304,11 @@ class StreamPrinter():
         try:
             # Create a temporary file to store the output from kitty icat
             with tempfile.NamedTemporaryFile(delete=True) as temp_file:
-                if shutil.which('kitty'):
+                if shutil.which('kitty') or os.path.exists('/Applications/kitty.app/Contents/MacOS/kitty'):
                     # Use kitty icat to save its output to the temporary file
+                    cmd_path = shutil.which('kitty') or '/Applications/kitty.app/Contents/MacOS/kitty'
                     process = subprocess.Popen(
-                        ['kitty', 'icat', '--transfer-mode', 'file'],
+                        [cmd_path, 'icat', '--transfer-mode', 'file'],
                         stdin=subprocess.PIPE,
                         stdout=temp_file
                     )
@@ -364,7 +365,7 @@ def print_response(messages: List[Message], suppress_role: bool = False):
         return any(token in s for token in tokens)
 
     def pprint(prepend: str, s: str):
-        markdown_tokens = ['###', '* ', '](', '```']
+        markdown_tokens = ['###', '* ', '](', '```', '## ']
         console = Console()
 
         if contains_token(s, markdown_tokens):
