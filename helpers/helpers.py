@@ -12,6 +12,7 @@ from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
 import nest_asyncio
+import psutil
 from docstring_parser import parse
 from PIL import Image
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -39,6 +40,47 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def is_running(process_name):
+        for proc in psutil.process_iter():
+            try:
+                if process_name.lower() in proc.name().lower():
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        return False
+
+    @staticmethod
+    def __find_terminal_emulator(process):
+        try:
+            if process.parent():
+                # Check if the process name matches known terminal emulators
+                name = process.parent().name()
+                if 'Terminal' in name:
+                    return 'Terminal'
+                elif 'iTerm' in name:
+                    return 'iTerm2'
+                elif 'alacritty' in name:
+                    return 'alacritty'
+                elif 'kitty' in name:
+                    return 'kitty'
+                elif 'tmux' in name:
+                    return 'tmux'
+                # If no match, check the next parent
+                return Helpers.__find_terminal_emulator(process.parent())
+            else:
+                # No more parents, terminal emulator not found
+                return 'Unknown'
+        except Exception as e:
+            return str(e)
+
+    @staticmethod
+    def is_emulator(emulator: str):
+        import os
+        current_process = psutil.Process(os.getpid())
+        result = Helpers.__find_terminal_emulator(current_process)
+        return emulator == result
+
     @staticmethod
     def is_image(byte_stream):
         try:

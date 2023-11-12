@@ -52,6 +52,7 @@ torch = ">=2.0.0, !=2.0.1, !=2.1.0"
 tiktoken = "^0.5.1"
 openai = "^1.2.3"
 langchain = "^0.0.334"
+psutil = "^5.9.6"
 
 
 [[tool.poetry.source]]

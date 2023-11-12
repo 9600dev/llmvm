@@ -303,8 +303,22 @@ class StreamPrinter():
     def display_image(self, image_bytes):
         try:
             # Create a temporary file to store the output from kitty icat
-            with tempfile.NamedTemporaryFile(delete=True) as temp_file:
-                if shutil.which('kitty') or os.path.exists('/Applications/kitty.app/Contents/MacOS/kitty'):
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+                if (
+                    Helpers.is_emulator('kitty')
+                    and (
+                        shutil.which('kitty')
+                        or os.path.exists('/Applications/kitty.app/Contents/MacOS/kitty')
+                    )
+                    or (
+                        Helpers.is_emulator('tmux')
+                        and (
+                            shutil.which('kitty')
+                            or os.path.exists('/Applications/kitty.app/Contents/MacOS/kitty')
+                        )
+                        and Helpers.is_running('kitty')
+                    )
+                ):
                     # Use kitty icat to save its output to the temporary file
                     cmd_path = shutil.which('kitty') or '/Applications/kitty.app/Contents/MacOS/kitty'
                     process = subprocess.Popen(
@@ -316,7 +330,11 @@ class StreamPrinter():
                     process.wait()
                     # Now cat the temporary file to stderr
                     subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
-                elif shutil.which('viu'):
+                elif (
+                    shutil.which('viu')
+                ):
+                    temp_file.write(image_bytes)
+                    temp_file.flush()
                     subprocess.run(['viu', temp_file.name], stdout=sys.stderr)
         except Exception as e:
             pass
