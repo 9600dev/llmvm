@@ -170,7 +170,6 @@ class OpenAIExecutor(Executor):
         model: Optional[str] = None,
         max_completion_tokens: int = 2048,
         temperature: float = 0.2,
-        chat_format: bool = True,
     ):
         model = model if model else self.default_model
 
@@ -182,48 +181,28 @@ class OpenAIExecutor(Executor):
                                     message_tokens + max_completion_tokens,
                                     self.max_tokens(model)))
 
-        if not chat_format and len(functions) > 0:
-            raise Exception('Functions are not supported in non-chat format')
-
         messages_cast = cast(List[ChatCompletionMessageParam], messages)
         functions_cast = cast(List[Function], functions)
 
-        if chat_format:
-            if functions:
-                response = await aclient.chat.completions.create(
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_completion_tokens,
-                    functions=functions_cast,
-                    messages=messages_cast,
-                    stream=True
-                )
-            else:
-                # for whatever reason, [] functions generates an InvalidRequestError
-                response = await aclient.chat.completions.create(
-                    model=model if model else self.default_model,
-                    temperature=temperature,
-                    max_tokens=max_completion_tokens,
-                    messages=messages_cast,
-                    stream=True
-                )
-            return response  # type: ignore
+        if functions:
+            response = await aclient.chat.completions.create(
+                model=model,
+                temperature=temperature,
+                max_tokens=max_completion_tokens,
+                functions=functions_cast,
+                messages=messages_cast,
+                stream=True
+            )
         else:
-            # have to collapse the messages in to a single string
-            prompt = ''
-            for message in messages:
-                if message['role'] == 'assistant':
-                    prompt += f"""{self.assistant_token()} {message['content']}\n\n"""
-                elif message['role'] == 'user':
-                    prompt += f"""{self.user_token()} {message['content']}\n\n"""
-
-            response = await aclient.completions.create(
+            # for whatever reason, [] functions generates an InvalidRequestError
+            response = await aclient.chat.completions.create(
                 model=model if model else self.default_model,
                 temperature=temperature,
                 max_tokens=max_completion_tokens,
-                prompt=prompt
+                messages=messages_cast,
+                stream=True
             )
-            return response  # type: ignore
+        return response  # type: ignore
 
     async def aexecute(
         self,
@@ -258,7 +237,6 @@ class OpenAIExecutor(Executor):
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,
-            chat_format=True,
             temperature=temperature,
         )
 

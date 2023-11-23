@@ -34,7 +34,8 @@ from rich.syntax import Syntax
 from anthropic_executor import AnthropicExecutor
 from container import Container
 from helpers.helpers import Helpers
-from helpers.logging_helpers import setup_logging, suppress_logging
+from helpers.logging_helpers import (disable_timing, get_timer, setup_logging,
+                                     suppress_logging)
 from objects import (Assistant, AstNode, Content, DownloadItem, Executor,
                      Message, MessageModel, Response, SessionThread,
                      StreamNode, System, TokenStopNode, User)
@@ -43,17 +44,18 @@ from openai_executor import OpenAIExecutor
 nest_asyncio.apply()
 
 invoke_context = None
-logging = setup_logging()
+logging = setup_logging(enable_timing=True)
 
 # setup globals for the repl
 global thread_id
 global current_mode
 global suppress_role
+global timing
 
 thread_id = 0
 current_mode = 'tool'
 suppress_role = False
-
+timing = get_timer()
 
 def parse_command_string(s, command):
     parts = s.split()
@@ -187,10 +189,13 @@ async def __execute_llm_call_direct(
     context_messages: list[Message] = [],
     executor_name: str = os.environ.get('LLMVM_EXECUTOR', default='openai'),
 ) -> SessionThread:
+    global timing
+
     message_response = ''
     printer = StreamPrinter('')
 
     def chained_printer(s: str):
+        timing.save_intermediate('first_token')
         nonlocal message_response
         message_response += s
         printer.write(s)  # type: ignore
@@ -206,14 +211,18 @@ async def __execute_llm_call_direct(
     elif executor_name == 'anthropic':
         executor = AnthropicExecutor(
             api_key=os.environ.get('ANTHROPIC_API_KEY', default=''),
-            default_model=os.environ.get('LLMVM_MODEL', default='claude-v2'),
+            default_model=os.environ.get('LLMVM_MODEL', default='claude-2'),
         )
     else:
         raise ValueError('no executor specified.')
 
+    timing.start()
+
     response = await executor.aexecute_direct(messages_list)  # type: ignore
     asyncio.run(stream_gpt_response(response, chained_printer))
-    return SessionThread(id=-1, messages=[MessageModel(role='assistant', content=message_response)])
+    result = SessionThread(id=-1, messages=[MessageModel(role='assistant', content=message_response)])
+    timing.end()
+    return result
 
 
 async def execute_llm_call(

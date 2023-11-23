@@ -254,7 +254,6 @@ class Searcher():
         engines = {
             'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
             'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': url_to_text, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
-            'Google Product Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Product Search is a product search engine that is excellent at finding the prices of products, finding products that match descriptions of products, and finding where to buy a particular product.'},  # noqa:E501
             'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
@@ -370,8 +369,8 @@ class Searcher():
 
         self.ordered_snippets = [snippets[key] for key in ranked_results if key in snippets]
 
-        write_client_stream(Content(f"I found #{len(self.ordered_snippets)} results. Using the top 5 ranked:\n\n"))
-        for snippet in self.ordered_snippets[0:5]:
+        write_client_stream(Content(f"I found and ranked #{len(self.ordered_snippets)} results. Returning the top {self.total_links_to_return}:\n\n"))  # noqa:E501
+        for snippet in self.ordered_snippets[0:self.total_links_to_return]:
             write_client_stream(Content(f"{snippet['title']}\n{snippet['link']}\n\n"))
 
         return self.result()

@@ -3108,6 +3108,16 @@ full = ["Pillow (>=8.0.0)", "PyCryptodome", "cryptography"]
 image = ["Pillow (>=8.0.0)"]
 
 [[package]]
+name = "pyperclip"
+version = "1.8.2"
+description = "A cross-platform clipboard module for Python. (Only handles plain text for now.)"
+optional = false
+python-versions = "*"
+files = [
+    {file = "pyperclip-1.8.2.tar.gz", hash = "sha256:105254a8b04934f0bc84e9c24eb360a591aaf6535c9def5f29d92af107a9bf57"},
+]
+
+[[package]]
 name = "pyreadline3"
 version = "3.4.1"
 description = "A python implementation of GNU readline."
@@ -5102,4 +5112,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "4352d0970cb4868071ee91e578e4fbc1061267c089a2aaac038c194ae8f2e9c8"
+content-hash = "081c7987a7cb10cf5faf440398524e68e3afcde5c2c1f730fec76861e9c0529c"

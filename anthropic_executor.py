@@ -1,18 +1,14 @@
 import asyncio
 import datetime as dt
-import json
 import os
-from abc import ABC, abstractmethod
-from enum import Enum
 from typing import (Any, Awaitable, Callable, Dict, Generator, Generic, List,
                     Optional, Sequence, Tuple, TypeVar, Union, cast)
 
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
 from tokenizers import Tokenizer
-from tokenizers.models import BPE
 
 from container import Container
-from helpers.logging_helpers import response_writer, setup_logging
+from helpers.logging_helpers import TimedLogger, response_writer, setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
 
@@ -22,14 +18,13 @@ class AnthropicExecutor(Executor):
     def __init__(
         self,
         api_key: str,
-        default_model: str = 'claude-v2',
+        default_model: str = 'claude-2',
         api_endpoint: str = 'https://api.anthropic.com',
-        default_max_tokens: int = 100000,
+        default_max_tokens: int = 200000,
     ):
         self.default_max_tokens = default_max_tokens
         self.default_model = default_model
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
-        self.tokenizer = Tokenizer(BPE())
 
     def user_token(self):
         return HUMAN_PROMPT.replace(':', '').replace('\n', '')
@@ -70,10 +65,17 @@ class AnthropicExecutor(Executor):
     ) -> int:
         model_str = model if model else self.default_model
 
+        async def tokenizer_len(text: str) -> int:
+            return len((await self.client.get_tokenizer()).encode(text))
+
         def num_tokens_from_messages(messages, model: str):
             # this is inexact, but it's a reasonable approximation
             if model in {
-                "claude-v2"
+                'claude-2',
+                'claude-2.0',
+                'claude-2.1',
+                'claude-instant-1.2',
+                'claude-instant-1',
             }:
                 tokens_per_message = 3
                 tokens_per_name = 1
@@ -85,7 +87,7 @@ class AnthropicExecutor(Executor):
             for message in messages:
                 num_tokens += tokens_per_message
                 for key, value in message.items():
-                    num_tokens += len(self.tokenizer.encode(value))
+                    num_tokens += asyncio.run(tokenizer_len(value))
                     if key == "name":
                         num_tokens += tokens_per_name
             num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
@@ -112,8 +114,9 @@ class AnthropicExecutor(Executor):
         model: Optional[str] = None,
         max_completion_tokens: int = 2048,
         temperature: float = 0.2,
-        chat_format: bool = True,
     ):
+        model = model if model else self.default_model
+
         def __format_prompt(messages: List[Dict[str, str]]) -> str:
             prompt = ''
             for message in messages:
@@ -134,11 +137,11 @@ class AnthropicExecutor(Executor):
                             .format(message_tokens,
                                     max_completion_tokens,
                                     message_tokens + max_completion_tokens,
-                                    self.max_tokens(model if model else self.default_model)))
+                                    self.max_tokens(model)))
 
         stream = self.client.completions.create(
             max_tokens_to_sample=max_completion_tokens,
-            model='claude-2',
+            model=model,
             stream=True,
             temperature=temperature,
             prompt=__format_prompt(messages),
@@ -153,6 +156,8 @@ class AnthropicExecutor(Executor):
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
+        model = model if model else self.default_model
+
         def last(predicate, iterable):
             result = [x for x in iterable if predicate(x)]
             if result:
@@ -175,8 +180,7 @@ class AnthropicExecutor(Executor):
         stream = self.aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
-            model=model if model else self.default_model,
-            chat_format=True,
+            model=model,
             temperature=temperature,
         )
 

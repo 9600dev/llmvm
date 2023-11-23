@@ -565,6 +565,8 @@ class FunctionCallMeta(Call):
         a, b = coerce_types(other, self._result)
         return a <= b  # type: ignore
 
+    def __format__(self, format_spec):
+        return format(self._result, format_spec)
 
 class PandasMeta(Call):
     def __init__(

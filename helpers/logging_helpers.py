@@ -1,9 +1,8 @@
 import datetime as dt
-import inspect
 import logging
 import os
 import sys
-import types
+import time
 from logging import Logger
 from typing import Any, Dict, Protocol
 
@@ -13,8 +12,49 @@ from rich.traceback import install
 
 from container import Container
 
+
+class TimedLogger(logging.Logger):
+    def __init__(self, name='timing', level=logging.NOTSET):
+        super().__init__(name, level)
+        self._start_time = None
+        self._intermediate_timings = {}
+        self._prepend = ''
+
+    def start(self, prepend=''):
+        self._start_time = time.time()
+        self._intermediate_timings.clear()  # Clear previous intermediate timings
+        self._prepend = prepend
+
+    def save_intermediate(self, label):
+        if self._start_time is None:
+            self.warning("Timer was not started!")
+            return
+
+        if label in self._intermediate_timings:
+            return
+
+        current_time = time.time()
+        elapsed_time = (current_time - self._start_time) * 1000  # Convert to milliseconds
+        self._intermediate_timings[label] = elapsed_time
+        self.debug(f"'{label}' timing: {elapsed_time:.2f} ms {self._prepend}")
+
+    def end(self, message="Elapsed time"):
+        if self._start_time is None:
+            self.warning("Timer was not started!")
+            return
+        elapsed_time = (time.time() - self._start_time) * 1000  # Convert to milliseconds
+        self.debug(f"{message}: {elapsed_time:.2f} ms {self._prepend}")
+        # Optionally, log intermediate timings at the end
+        for label, timing in self._intermediate_timings.items():
+            self.debug(f"'{label}' timing: {timing:.2f} ms {self._prepend}")
+        self._start_time = None
+        self._intermediate_timings.clear()
+
+
+timing = TimedLogger()
 global_loggers: Dict[str, Logger] = {}
 handler = RichHandler()
+
 if not os.path.exists(Container().get('log_directory')):
     os.makedirs(Container().get('log_directory'))
 
@@ -82,6 +122,7 @@ def role_debug(logger, callee, role, message) -> None:
 def setup_logging(
     module_name='root',
     default_level=logging.DEBUG,
+    enable_timing=False,
 ):
     logging.getLogger('asyncio').setLevel(logging.WARNING)
     logging.getLogger('markdown_it').setLevel(logging.WARNING)
@@ -113,8 +154,19 @@ def setup_logging(
     logger.setLevel(default_level)
     logger.addHandler(handler)
 
+    if enable_timing:
+        handlers_to_remove = [h for h in timing.handlers if isinstance(handler, logging.StreamHandler)]
+        for h in handlers_to_remove:
+            timing.removeHandler(h)
+
+        timing.setLevel(default_level)
+        timing.addHandler(handler)
+    else:
+        timing.setLevel(logging.CRITICAL)
+
     global_loggers[module_name] = logger
     return logger
+
 
 def suppress_logging():
     logging.getLogger().setLevel(logging.CRITICAL)
@@ -127,6 +179,16 @@ def suppress_logging():
     logging.getLogger('httpcore').setLevel(logging.CRITICAL)
 
 
+def get_timer():
+    return timing
+
+
+def disable_timing(name='timing'):
+    timing.setLevel(logging.DEBUG)
+
+
 def response_writer(callee, message):
     with (open(f"{Container().get('log_directory')}/ast.log", 'a')) as f:
         f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')
+
+

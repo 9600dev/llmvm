@@ -53,6 +53,7 @@ tiktoken = "^0.5.1"
 openai = "^1.2.3"
 langchain = "^0.0.334"
 psutil = "^5.9.6"
+pyperclip = "^1.8.2"
 
 
 [[tool.poetry.source]]
