@@ -8,9 +8,9 @@ from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Dict, List
+from zoneinfo import ZoneInfo
 
 import icalevents.icalparser
-import pytz
 from icalendar import Calendar, Event, vCalAddress, vText
 
 from container import Container
@@ -98,7 +98,7 @@ class EmailHelpers():
         cal.add('method', 'REQUEST')
 
         local_timezone = dt.datetime.now().astimezone().tzinfo
-        utc_timezone = pytz.timezone('UTC')
+        utc_timezone = ZoneInfo('UTC')
 
         if start_date.tzinfo is None:
             start_date = start_date.replace(tzinfo=local_timezone)

@@ -1,5 +1,7 @@
 import datetime as dt
 
+import pandas as pd
+
 
 class MarketHelpers():
     @staticmethod
@@ -25,8 +27,18 @@ class MarketHelpers():
             else:
                 return date
 
+        def subtract_day(date):
+            return adjust_weekend(date - dt.timedelta(days=1))
+
         date_only = adjust_weekend(date_only)
+        result = pd.DataFrame()
+
         result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5))
+
+        if len(result) == 0:
+            date_only = adjust_weekend(subtract_day(date_only))
+            result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5))
+
         if len(result) == 0:
             raise ValueError(f'either the symbol {symbol} does not exist, or there is no price data for date {date_only}')
         close = result.head(1)['Close'].iloc[0]

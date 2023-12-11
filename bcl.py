@@ -8,9 +8,9 @@ import time
 from datetime import timedelta
 from typing import Any, Callable, Dict, Generator, List, Optional, cast
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import astunparse
-import pytz
 from dateutil.parser import parse
 from dateutil.relativedelta import relativedelta
 
@@ -46,10 +46,10 @@ class BCL():
             quarter = int(relative_expression[1:])
             return BCL.__last_day_of_quarter(dt.datetime.now().year, quarter)
 
-        tz = pytz.timezone(time.tzname[0])
+        tz = dt.datetime.now().astimezone().tzinfo
 
         if timezone:
-            tz = pytz.timezone(timezone)
+            tz = ZoneInfo(timezone)
 
         if 'now' in relative_expression:
             return dt.datetime.now(tz)
