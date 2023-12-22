@@ -82,7 +82,6 @@ executor = Helpers.first(lambda x: x.name() == Container().get('executor'), exec
 if executor is None:
     raise Exception(f'Executor {Container().get("executor")} not found')
 
-
 vector_store = VectorStore(
     token_calculator=executor.calculate_tokens,
     store_directory=Container().get('vector_store_index_directory'),
@@ -248,6 +247,17 @@ async def get_thread(id: int) -> SessionThread:
     thread = __get_thread(id)
     return thread
 
+@app.post('/v1/chat/set_thread')
+async def set_thread(request: SessionThread) -> SessionThread:
+    thread = request
+
+    if not cache_session.has_key(thread.id) or thread.id <= 0:
+        temp = __get_thread(0)
+        thread.id = temp.id
+
+    cache_session.set(thread.id, thread)
+    return cast(SessionThread, cache_session.get(thread.id))
+
 @app.get('/v1/chat/get_threads')
 async def get_threads() -> List[SessionThread]:
     result = [cast(SessionThread, cache_session.get(id)) for id in cache_session.keys()]
@@ -371,6 +381,9 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == '__main__':
+    rich.print(f'[green]Using executor: {executor.name()}[/green]')
+    rich.print(f'[green]Default model is: {executor.get_default_model()}[/green]')
+
     for agent in agents:
         rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore
 

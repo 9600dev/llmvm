@@ -82,6 +82,18 @@ class Helpers():
         return emulator == result
 
     @staticmethod
+    def is_pdf(byte_stream):
+        # PDF files start with "%PDF-" (hex: 25 50 44 46 2D)
+        pdf_signature = b'%PDF-'
+        # Read the first 5 bytes to check the signature
+        first_bytes = byte_stream.read(5)
+        # Reset the stream position to the beginning if possible
+        if hasattr(byte_stream, 'seek'):
+            byte_stream.seek(0)
+        # Return True if the signature matches
+        return first_bytes == pdf_signature
+
+    @staticmethod
     def is_image(byte_stream):
         try:
             if isinstance(byte_stream, io.BytesIO):
@@ -221,6 +233,23 @@ class Helpers():
         after_start = s[s.find(start) + len(start):]
         part = after_start[:after_start.find(end)]
         return part
+
+    @staticmethod
+    def in_between_ends(s, start, end_strs: List[str]):
+        # get the text from s between start and any of the end_strs strings.
+        possibilities = []
+        for end in end_strs:
+            if end == '\n' and '\n' not in s:
+                result = s[s.find(start) + len(start):]
+                possibilities.append(result)
+            elif end in s:
+                after_start = s[s.find(start) + len(start):]
+                part = after_start[:after_start.find(end)]
+                if part:
+                    possibilities.append(part)
+
+        # return the shortest one
+        return min(possibilities, key=len)
 
     @staticmethod
     def extract_context(s, start, end, stop_tokens=['\n', '.', '?', '!']):

@@ -296,6 +296,26 @@ class Content(AstNode):
         return f'Content({self.sequence})'
 
 
+class ImageContent(Content):
+    def __init__(
+        self,
+        sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
+        url: str = '',
+    ):
+        super().__init__(sequence)
+        self.url = url
+
+
+class PdfContent(Content):
+    def __init__(
+        self,
+        sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
+        url: str = '',
+    ):
+        super().__init__(sequence)
+        self.url = url
+
+
 class Message(AstNode):
     def __init__(
         self,
@@ -310,26 +330,30 @@ class Message(AstNode):
     @staticmethod
     def from_dict(message: Dict[str, Any]) -> 'Message':
         role = message['role']
-        content = message['content']
+        message_content = message['content']
+        content = Content(message_content)
 
         # when converting from MessageModel, there can be an embedded image
         # in the content parameter that needs to be converted back to bytes
         if (
-            isinstance(content, list)
-            and len(content) > 0
-            and 'type' in content[0]
-            and content[0]['type'] == 'image_url'
-            and 'image_url' in content[0]
-            and 'url' in content[0]['image_url']
+            isinstance(message_content, list)
+            and len(message_content) > 0
+            and 'type' in message_content[0]
+            and message_content[0]['type'] == 'image_url'
+            and 'image_url' in message_content[0]
+            and 'url' in message_content[0]['image_url']
         ):
-            content = base64.b64decode(content[0]['image_url']['url'].split(',')[1])
+            byte_content = base64.b64decode(message_content[0]['image_url']['url'].split(',')[1])
+            content = ImageContent(byte_content, message_content[0]['image_url']['url'])
+
+        # todo: pdf parsing here
 
         if role == 'user':
-            return User(Content(content))
+            return User(content)
         elif role == 'system':
-            return System(Content(content))
+            return System(content)
         elif role == 'assistant':
-            return Assistant(Content(content))
+            return Assistant(content)
         raise ValueError('role not found supported')
 
     def __getitem__(self, key):

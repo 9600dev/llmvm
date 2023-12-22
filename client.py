@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import io
 import json
 import os
@@ -36,9 +37,10 @@ from container import Container
 from helpers.helpers import Helpers
 from helpers.logging_helpers import (disable_timing, get_timer, setup_logging,
                                      suppress_logging)
+from helpers.pdf import PdfHelpers
 from objects import (Assistant, AstNode, Content, DownloadItem, Executor,
-                     Message, MessageModel, Response, SessionThread,
-                     StreamNode, System, TokenStopNode, User)
+                     ImageContent, Message, MessageModel, PdfContent, Response,
+                     SessionThread, StreamNode, System, TokenStopNode, User)
 from openai_executor import OpenAIExecutor
 
 nest_asyncio.apply()
@@ -56,6 +58,57 @@ thread_id = 0
 current_mode = 'tool'
 suppress_role = False
 timing = get_timer()
+
+
+def get_config_variable(name: str, alternate_name: str = '', default: str = '') -> str:
+    if name in os.environ:
+        return os.environ.get(name, default)
+
+    config_file = os.environ.get('LLMVM_CONFIG', default='~/.config/llmvm/config.yaml')
+    if config_file.startswith('~'):
+        config_file = os.path.expanduser(config_file)
+
+    if not os.path.exists(config_file):
+        return default
+
+    container = Container(config_file)
+    if container.has(name.replace('LLMVM_', '').lower()):
+        return container.get(name.replace('LLMVM_', '').lower())
+    elif container.has(alternate_name.replace('LLMVM_', '').lower()):
+        return container.get(alternate_name.replace('LLMVM_', '').lower())
+    else:
+        return default
+
+def parse_message_thread(message: str):
+    def create_message(type) -> Message:
+        MessageClass = globals()[type]
+        return MessageClass('')
+
+    messages = []
+    roles = ['Assistant: ', 'System: ', 'User: ']
+
+    while any(message.startswith(role) for role in roles):
+        role = next(role for role in roles if message.startswith(role))
+        parsed_message = create_message(role.replace(': ', ''))
+
+        message_content = Helpers.in_between_ends(message, role, roles)
+        content = message_content
+
+        if 'ImageContent(' in content:
+            content = Helpers.in_between(content, 'ImageContent(', ')')
+            with open(content, 'rb') as file_content:
+                parsed_message.message = ImageContent(file_content.read(), url=content)
+                messages.append(parsed_message)
+        elif 'PdfContent(' in content:
+            logging.debug('PdfContent found, but not implemented')
+            parsed_message.message = Content(content)
+        else:
+            parsed_message.message = Content(content)
+            messages.append(parsed_message)
+
+        message = message[len(role) + len(message_content):]
+    return messages
+
 
 def parse_command_string(s, command):
     parts = s.split()
@@ -175,6 +228,17 @@ async def get_thread(
     thread = SessionThread.model_validate(response.json())
     return thread
 
+async def set_thread(
+    api_endpoint: str,
+    thread: SessionThread,
+):
+    async with httpx.AsyncClient(timeout=280.0) as client:
+        response = await client.post(
+            f'{api_endpoint}/v1/chat/set_thread',
+            json=thread.model_dump()
+        )
+        session_thread = SessionThread.model_validate(response.json())
+        return session_thread
 
 async def get_threads(
     api_endpoint: str,
@@ -185,11 +249,14 @@ async def get_threads(
 
 
 async def __execute_llm_call_direct(
-    message: User,
+    message: Message,
     context_messages: list[Message] = [],
-    executor_name: str = os.environ.get('LLMVM_EXECUTOR', default='openai'),
+    executor_name: str = get_config_variable('LLMVM_EXECUTOR', 'executor', default='openai'),
 ) -> SessionThread:
     global timing
+
+    print('asdf')
+    print(executor_name)
 
     message_response = ''
     printer = StreamPrinter('')
@@ -205,13 +272,13 @@ async def __execute_llm_call_direct(
 
     if executor_name == 'openai':
         executor = OpenAIExecutor(
-            api_key=os.environ.get('OPENAI_API_KEY', default=''),
-            default_model=os.environ.get('LLMVM_MODEL', default='gpt-4-1106-preview'),
+            api_key=get_config_variable('OPENAI_API_KEY', default=''),
+            default_model=get_config_variable('LLMVM_MODEL', 'openai_model', default='gpt-4-vision-preview'),
         )
     elif executor_name == 'anthropic':
         executor = AnthropicExecutor(
-            api_key=os.environ.get('ANTHROPIC_API_KEY', default=''),
-            default_model=os.environ.get('LLMVM_MODEL', default='claude-2'),
+            api_key=get_config_variable('ANTHROPIC_API_KEY', default=''),
+            default_model=get_config_variable('LLMVM_MODEL', 'anthropic_model', default='claude-2'),
         )
     else:
         raise ValueError('no executor specified.')
@@ -228,20 +295,24 @@ async def __execute_llm_call_direct(
 async def execute_llm_call(
     api_endpoint: str,
     id: int,
-    message: User,
+    message: Message,
     direct: bool,
     context_messages: list[Message] = [],
     model: str = '',
     cookies: List[Dict[str, Any]] = [],
+    append_to_server_thread: bool = True,
 ) -> SessionThread:
+
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(f'{api_endpoint}/health')
             response.raise_for_status()
 
         thread = await get_thread(api_endpoint, id)
-        for context_message in context_messages:
-            thread.messages.append(MessageModel.from_message(message=context_message))
+
+        if append_to_server_thread:
+            for context_message in context_messages:
+                thread.messages.append(MessageModel.from_message(message=context_message))
 
         thread.messages.append(MessageModel.from_message(message=message))
         thread.current_mode = 'tool' if not direct else 'direct'
@@ -259,9 +330,9 @@ async def execute_llm_call(
             return session_thread
         return thread
     except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
-        if os.environ.get('LLMVM_EXECUTOR'):
-            return await __execute_llm_call_direct(message, context_messages, os.environ.get('LLMVM_EXECUTOR', ''))
-        elif os.environ.get('OPENAI_API_KEY'):
+        if get_config_variable('LLMVM_EXECUTOR', 'executor'):
+            return await __execute_llm_call_direct(message, context_messages, get_config_variable('LLMVM_EXECUTOR', 'executor'))
+        elif get_config_variable('OPENAI_API_KEY'):
             return await __execute_llm_call_direct(message, context_messages, 'openai')
         elif os.environ.get('ANTHROPIC_API_KEY'):
             return await __execute_llm_call_direct(message, context_messages, 'anthropic')
@@ -271,17 +342,25 @@ async def execute_llm_call(
 
 
 def llm(
-    message: Optional[str | bytes],
+    message: Optional[str | bytes | Message],
     id: int,
     direct: bool,
     endpoint: str,
     model: str,
     cookies: List[Dict[str, Any]] = [],
 ) -> SessionThread:
+    user_message = User(Content(''))
+    if isinstance(message, str):
+        user_message = User(Content(message))
+    elif isinstance(message, bytes):
+        user_message = User(Content(message.decode('utf-8')))
+    elif isinstance(message, Message):
+        user_message = message
+
     context_messages: List[Message] = []
 
     if not sys.stdin.isatty():
-        # input is coming from a pipe
+        # input is coming from a pipe, could be binary or text
         if not message: message = ''
 
         file_content = sys.stdin.buffer.read()
@@ -293,15 +372,34 @@ def llm(
                     img.save(output, format='JPEG')
                     StreamPrinter('user').display_image(output.getvalue())
                     bytes_buffer.seek(0)
-
-                context_messages.append(User(Content(bytes_buffer.read())))
+                context_messages.append(User(ImageContent(bytes_buffer.read(), url='cli')))
+            elif Helpers.is_pdf(bytes_buffer):
+                context_messages.append(User(PdfContent(bytes_buffer.read(), url='cli')))
             else:
                 context_messages.append(User(Content(bytes_buffer.read().decode('utf-8'))))
 
-    if not message:
-        message = ''
+    append_to_server_thread = True
 
-    return asyncio.run(execute_llm_call(endpoint, id, User(Content(message)), direct, context_messages, model, cookies))
+    # if the incoming message is a thread, parse it and send it through
+    role_strings = ['Assistant: ', 'System: ', 'User: ']
+    if isinstance(message, str) and any(role_string in message for role_string in role_strings):
+        all_messages = parse_message_thread(message)
+        user_message = all_messages[-1]
+        context_messages += all_messages[:-1]
+        append_to_server_thread = False
+
+    return asyncio.run(
+        execute_llm_call(
+            endpoint,
+            id,
+            user_message,
+            direct,
+            context_messages,
+            model,
+            cookies,
+            append_to_server_thread
+        )
+    )
 
 
 class StreamPrinter():
@@ -394,16 +492,22 @@ def print_response(messages: List[Message], suppress_role: bool = False):
     def contains_token(s, tokens):
         return any(token in s for token in tokens)
 
-    def pprint(prepend: str, s: str):
+    def pprint(prepend: str, content: Content):
         markdown_tokens = ['###', '* ', '](', '```', '## ']
         console = Console()
 
-        if contains_token(s, markdown_tokens):
+        if isinstance(content, ImageContent):
+            StreamPrinter('user').display_image(content.sequence)
+        elif isinstance(content, PdfContent):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
-            console.print(Markdown(s))
+            console.print(Markdown('PdfContent: ' + content.url))
+        elif contains_token(str(content), markdown_tokens):
+            CodeBlock.__rich_console__ = markdown__rich_console__
+            console.print(f'{prepend}', end='')
+            console.print(Markdown(str(content)))
         else:
-            console.print(f'{prepend}{s}')
+            console.print(f'{prepend}{content}')
 
     def fire_helper(string: str):
         if 'digraph' and 'edge' and 'node' in string:
@@ -418,24 +522,48 @@ def print_response(messages: List[Message], suppress_role: bool = False):
     for message in messages:
         if message.role() == 'assistant':
             if not suppress_role:
-                pprint('[bold cyan]Assistant[/bold cyan]: ', str(message))
+                pprint('[bold cyan]Assistant[/bold cyan]: ', message.message)
             else:
-                pprint('', str(message))
+                pprint('', message.message)
             fire_helper(str(message))
         elif message.role() == 'system':
             if not suppress_role:
-                pprint('[bold red]System[/bold red]: ', str(message))
+                pprint('[bold red]System[/bold red]: ', message.message)
             else:
-                pprint('', str(message))
+                pprint('', message.message)
         elif message.role() == 'user':
             if not suppress_role:
-                pprint('[bold cyan]User[/bold cyan]: ', str(message))
+                pprint('[bold cyan]User[/bold cyan]: ', message.message)
             else:
-                pprint('', str(message))
+                pprint('', message.message)
 
 
 def print_thread(thread: SessionThread, suppress_role: bool = False):
     print_response([MessageModel.to_message(message) for message in thread.messages], suppress_role)
+
+
+def get_string_thread_with_roles(thread: SessionThread):
+    string_result = ''
+    for message in [MessageModel.to_message(message) for message in thread.messages]:
+        if message.role() == 'assistant':
+            string_result += 'Assistant: '
+        elif message.role() == 'system':
+            string_result += 'System: '
+        elif message.role() == 'user':
+            string_result += 'User: '
+
+        if isinstance(message.message, ImageContent):
+            if message.message.url.startswith('data:image'):
+                decoded_base64 = base64.b64decode(message.message.url.split(',')[1])
+                with tempfile.NamedTemporaryFile(mode='w+b', suffix='.jpg', delete=False) as temp_file:
+                    temp_file.write(decoded_base64)
+                    temp_file.flush()
+                    string_result += f'[ImageContent({temp_file.name})]\n\n'
+            else:
+                string_result += f'[ImageContent({message.message.url})]\n\n'
+        else:
+            string_result += str(message) + '\n\n'
+    return string_result
 
 
 def invoke_context_wrapper(ctx):
@@ -480,15 +608,19 @@ class Repl():
         for key, value in commands.items():
             if key == 'message':
                 key = 'message (default)'
-            rich.print(f' [green]{key.ljust(23)}  {value}[/green]')
+            rich.print(f' [green]{key.ljust(23)}[/green]  {value}')
             for option in [param for param in ctx.command.get_command(ctx, key).params if isinstance(param, click.Option)]:  # type: ignore  # NOQA: E501
                 rich.print(f'  {str(", ".join(option.opts)).ljust(25)} {option.help if option.help else ""}')
 
         rich.print()
         rich.print()
-        rich.print('[white](Ctrl-c or "exit" to exit, Ctrl-e to open $EDITOR for multiline input, Ctrl-r search prompt history)[/white]')  # noqa: E501
+        rich.print('[white](Ctrl-c or "exit" to exit)[/white]')
+        rich.print('[white](Ctrl-n to clear the current line)[/white]')
+        rich.print('[white](Ctrl-e to open $EDITOR for multi-line User prompt)[/white]')
+        rich.print('[white](Ctrl-g to open $EDITOR for multi messages edit)[/white]')
+        rich.print('[white](Ctrl-r search prompt history)[/white]')
         rich.print('[white](If the LLMVM server is not running, messages are executed directly)[/white]')
-        rich.print('[white]"message" is the default command, so you can omit it.[/white]')
+        rich.print('[white]("message" is the default command, so you can omit it)[/white]')
         rich.print()
         rich.print('[bold]I am a helpful assistant that has access to tools. Use "mode" to switch tools on and off.[/bold]')
         rich.print()
@@ -497,18 +629,46 @@ class Repl():
         self,
     ):
         global thread_id
-        global mode
+        global current_mode
 
         ctx = click.Context(cli)
         console = Console()
         history = FileHistory(os.path.expanduser('~/.local/share/llmvm/.repl_history'))
         kb = KeyBindings()
-        mode = 'tool'
+        current_mode = 'tool'
 
         @kb.add('c-e')
         def _(event):
             editor = os.environ.get('EDITOR', 'vim')
             text = self.open_editor(editor, event.app.current_buffer.text)
+            event.app.current_buffer.text = text
+            event.app.current_buffer.cursor_position = len(text) - 1
+
+        # @kb.add('c-h')
+        # def _(event):
+        #     event.app.current_buffer.text = ''
+        #     event.app.current_buffer.cursor_position = 0
+
+        @kb.add('c-n')
+        def _(event):
+            global thread_id
+            thread = asyncio.run(get_thread(get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), 0))
+            thread_id = thread.id
+            rich.print('New thread created.')
+
+        @kb.add('c-g')
+        def _(event):
+            editor = os.environ.get('EDITOR', 'vim')
+            thread = asyncio.run(get_thread(get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), thread_id))
+            thread_text = get_string_thread_with_roles(thread)
+
+            current_text = event.app.current_buffer.text
+            if len(current_text) > 0:
+                thread_text = thread_text + 'User:  ' + current_text
+            else:
+                thread_text = thread_text + 'User:  '
+
+            text = self.open_editor(editor, thread_text)
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text) - 1
 
@@ -553,7 +713,7 @@ class Repl():
             ):
                 tokens = ['--id', str(thread_id)] + tokens
             if (
-                mode == 'direct'
+                current_mode == 'direct'
                 and (has_option('--direct', command) or has_option('-d', command))
                 and ('--direct' not in tokens or '-d' not in tokens)
             ):
@@ -662,11 +822,11 @@ def status():
 
 @cli.command('mode', help='Switch between "direct" and "tool" mode.')
 def mode():
-    global mode
+    global current_mode
 
-    old_mode = mode
-    mode = 'direct' if mode == 'tool' else 'tool'
-    rich.print(f'Switching mode from {old_mode} to {mode}')
+    old_mode = current_mode
+    mode = 'direct' if current_mode == 'tool' else 'tool'
+    rich.print(f'Switching mode from {old_mode} to {current_mode}')
 
 
 @cli.command('exit', hidden=True)
@@ -695,7 +855,7 @@ def ls():
               help='location of Firefox/Chrome cookies txt file in Netscape format.')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread id to attach cookies to')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def cookies(
     sqlite: str,
@@ -775,7 +935,7 @@ def cookies(
               help='thread ID to retrieve.')
 @click.option('--direct', '-d', type=bool, is_flag=True, required=False,
               help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def act(
@@ -817,18 +977,15 @@ def act(
             ctx.params['endpoint'] = endpoint
             return message.invoke(ctx)
 
-@cli.command('file', help='Insert a file (image, document or pdf) into the message thread.')
+@cli.command('file', help='Insert a file (image or pdf) into the message thread.')
 @click.argument('filename', type=str, required=True)
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to attach content to. Default is last thread.')
-@click.option('--direct', '-d', type=bool, is_flag=True, required=False,
-              help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def file(
     filename: str,
     id: int,
-    direct: bool,
     endpoint: str,
 ):
     global thread_id
@@ -838,45 +995,44 @@ def file(
     if filename.startswith('"') and filename.endswith('"'):
         filename = filename[1:-1]
 
-    output = io.BytesIO()
-    model = ''
-
     if not os.path.exists(filename):
         rich.print(f'File {filename} does not exist.')
         return
     else:
+        user_message = User(Content(''))
         try:
+
             with open(filename, 'rb') as file_content:
-                with Image.open(io.BytesIO(file_content.read())) as img:
-                    img.save(output, format='JPEG')
-                    StreamPrinter('user').display_image(output.getvalue())
-                    # todo: we don't support images in tool mode yet
-                    model = 'gpt-4-vision-preview'
-                    direct = True
+                bytes_content = file_content.read()
+                file_content.seek(0)
+
+                if Helpers.is_image(bytes_content):
+                    output = io.BytesIO()
+                    with Image.open(io.BytesIO(file_content.read())) as img:
+                        img.save(output, format='JPEG')
+                        StreamPrinter('user').display_image(output.getvalue())
+                        file_content.seek(0)
+                    user_message = User(ImageContent(bytes_content, url='cli'))
+                elif Helpers.is_pdf(file_content):
+                    user_message = User(PdfContent(bytes_content, url='cli'))
+                else:
+                    user_message = User(Content(bytes_content.decode('utf-8')))
         except Exception as ex:
             pass
 
-        with open(filename, 'rb') as f:
-            if output.getvalue() == 0:
-                output = io.BytesIO(f.read())
-
-            with click.Context(message) as ctx:
-                ctx.ensure_object(dict)
-                ctx.params['message'] = output.getvalue()
-                ctx.params['id'] = id
-                ctx.params['direct'] = direct
-                ctx.params['endpoint'] = endpoint
-                ctx.params['model'] = model
-                ctx.params['cookies'] = []
-                ctx.params['suppress_role'] = False
-                return message.invoke(ctx)
+        thread = asyncio.run(get_thread(endpoint, id))
+        thread.messages.append(MessageModel.from_message(message=user_message))
+        rich.print(f'Inserting file {filename} into thread [{thread.id}]')
+        result = asyncio.run(set_thread(endpoint, thread))
+        thread_id = result
+        return result
 
 
 @cli.command('url', help='Download a url and insert the content into the message thread.')
 @click.argument('url', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to download and push the content to. Default is last thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def url(
     url: str,
@@ -902,7 +1058,7 @@ def url(
 
 @cli.command('search', help='Perform a search on ingested content using the LLMVM search engine.')
 @click.argument('query', type=str, required=False, default='')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def search(
     query: str,
@@ -944,7 +1100,7 @@ def search(
 
 @cli.command('ingest', help='Ingest a file into the LLMVM search engine.')
 @click.argument('filename', type=str, required=True)
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def ingest(
     filename: str,
@@ -967,19 +1123,21 @@ def ingest(
 
 
 @cli.command('threads', help='List all message threads and set to last.')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def threads(
     endpoint: str,
 ):
     global thread_id
-
     threads = asyncio.run(get_threads(endpoint))
+
     for thread in threads:
         if len(thread.messages) > 0:
             message_content = str(thread.messages[-1].content).replace('\n', ' ')[0:75]
             rich.print(f'[{thread.id}]: {message_content}')
+
     active_threads = [t for t in threads if len(t.messages) > 0]
+
     if thread_id == 0 and len(active_threads) > 0:
         thread_id = active_threads[-1].id
         return active_threads[-1]
@@ -987,7 +1145,7 @@ def threads(
 
 @cli.command('thread', help='List all message threads.')
 @click.argument('id', type=str, required=True)
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def thread(
     id: str,
@@ -1007,7 +1165,7 @@ def thread(
 
 
 @cli.command('messages', help='List all messages in a message thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def messages(
@@ -1020,7 +1178,7 @@ def messages(
 
 
 @cli.command('new', help='Create a new message thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def new(
     endpoint: str,
@@ -1036,15 +1194,15 @@ def new(
               help='thread ID to send message to. Default is last thread.')
 @click.option('--direct', '-d', type=bool, is_flag=True, required=False,
               help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default=os.environ.get('LLMVM_ENDPOINT', 'http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
-@click.option('--cookies', '-e', type=str, required=False, default=os.environ.get('LLMVM_COOKIES', ''),
+@click.option('--cookies', '-e', type=str, required=False, default=get_config_variable('LLMVM_COOKIES', default=''),
               help='cookies.txt file in Netscape format to use for the request. Default is $LLMVM_COOKIES or empty.')
-@click.option('--model', '-m', type=str, required=False, default=os.environ.get('LLMVM_MODEL', 'gpt-4-1106-preview'),
-              help='model to use. Default is $LLMVM_MODEL or gpt-4-1106-preview.')
+@click.option('--model', '-m', type=str, required=False, default=get_config_variable('LLMVM_MODEL', default=''),
+              help='model to use. Default is $LLMVM_MODEL or empty.')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
 def message(
-    message: Optional[str | bytes],
+    message: Optional[str | bytes | Message],
     id: int,
     direct: bool,
     endpoint: str,
@@ -1062,7 +1220,7 @@ def message(
             message = message[1:-1]
 
         if id <= 0:
-            id = thread_id
+            id = thread_id  # type: ignore
 
         cookies_list = []
         if cookies:
