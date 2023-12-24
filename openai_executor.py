@@ -63,6 +63,10 @@ class OpenAIExecutor(Executor):
                 return 16385
             case 'gpt-3.5-turbo-16k':
                 return 16385
+            case 'gpt-3.5-turbo':
+                return 4096
+            case 'gpt-3.5-turbo-1106':
+                return 16385
             case _:
                 logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_tokens}')
                 return self.default_max_tokens

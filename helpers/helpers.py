@@ -4,6 +4,7 @@ import datetime as dt
 import importlib
 import inspect
 import io
+import os
 import re
 import typing
 from enum import Enum, IntEnum
@@ -76,7 +77,6 @@ class Helpers():
 
     @staticmethod
     def is_emulator(emulator: str):
-        import os
         current_process = psutil.Process(os.getpid())
         result = Helpers.__find_terminal_emulator(current_process)
         return emulator == result

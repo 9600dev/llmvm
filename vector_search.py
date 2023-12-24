@@ -14,6 +14,7 @@ from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
 from helpers.webhelpers import WebHelpers
 from objects import Message
+from source import Source
 from vector_store import VectorStore
 
 logging = setup_logging()
@@ -197,29 +198,42 @@ class VectorSearch():
         )
         self.vector_store.ingest_text(text, entity.to_dict())
 
+    def parse_python_file(
+        self,
+        filename: str,
+        url: str,
+        metadata: dict
+    ) -> None:
+        metadata.update({'classes': []})
+        metadata.update({'methods': []})
+        metadata.update({'docstrings': []})
+        sourcer = Source(filename)
+
+        classes = sourcer.get_classes()
+        for _class in classes:
+            metadata['classes'].append(_class)
+            for _method in sourcer.get_methods(_class):
+                metadata['methods'].append(_method.name)
+                metadata['docstrings'].append(_method.docstring)
+
+        entity = self.parse_metadata(
+            content=sourcer.source_code,
+            title=filename,
+            url=url,
+            type='python',
+            ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            parent='',
+            extra_metdata=metadata,
+        )
+        self.vector_store.ingest_text(sourcer.source_code, entity.to_dict())
+        logging.debug('ingested python file: {}'.format(filename))
+
     def ingest_file(
         self,
         filename: str,
         url: str,
         metadata: dict
     ) -> None:
-        def extract_classes_methods_and_docstrings(python_code):
-            node = ast.parse(python_code)
-            classes = [n for n in node.body if isinstance(n, ast.ClassDef)]
-            result = {}
-
-            for cls in classes:
-                class_name = cls.name
-                result[class_name] = {
-                    'docstring': ast.get_docstring(cls),
-                    'methods': {}
-                }
-
-                methods = [n for n in cls.body if isinstance(n, ast.FunctionDef)]
-                for method in methods:
-                    result[class_name]['methods'][method.name] = ast.get_docstring(method)
-            return result
-
         logging.debug('ingesting file: {}'.format(filename))
 
         if filename.endswith('.pdf'):
@@ -285,28 +299,6 @@ class VectorSearch():
                 self.vector_store.ingest_text(text, entity.to_dict())
                 logging.debug('ingested html file: {}'.format(filename))
         elif filename.endswith('.py'):
-            with open(filename, 'r') as f:
-                code = f.read()
-                metadata.update({'classes': []})
-                metadata.update({'methods': []})
-                metadata.update({'docstrings': []})
-
-                classes = extract_classes_methods_and_docstrings(code)
-                for _class, value in classes.items():
-                    metadata['classes'].append(_class)
-                    for _method, value in value['methods'].items():
-                        metadata['methods'].append(_method)
-                        metadata['docstrings'].append(value)
-                entity = self.parse_metadata(
-                    content=code,
-                    title=filename,
-                    url=url,
-                    type='python',
-                    ingest_datetime=dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    parent='',
-                    extra_metdata=metadata,
-                )
-                self.vector_store.ingest_text(code, entity.to_dict())
-                logging.debug('ingested python file: {}'.format(filename))
+            self.parse_python_file(filename, url, metadata)
         else:
             logging.debug('file not supported for ingestion: {}'.format(filename))

@@ -18,7 +18,7 @@ class AnthropicExecutor(Executor):
     def __init__(
         self,
         api_key: str,
-        default_model: str = 'claude-2',
+        default_model: str = 'claude-2.1',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_tokens: int = 200000,
     ):

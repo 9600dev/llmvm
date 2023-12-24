@@ -60,25 +60,6 @@ suppress_role = False
 timing = get_timer()
 
 
-def get_config_variable(name: str, alternate_name: str = '', default: str = '') -> str:
-    if name in os.environ:
-        return os.environ.get(name, default)
-
-    config_file = os.environ.get('LLMVM_CONFIG', default='~/.config/llmvm/config.yaml')
-    if config_file.startswith('~'):
-        config_file = os.path.expanduser(config_file)
-
-    if not os.path.exists(config_file):
-        return default
-
-    container = Container(config_file)
-    if container.has(name.replace('LLMVM_', '').lower()):
-        return container.get(name.replace('LLMVM_', '').lower())
-    elif container.has(alternate_name.replace('LLMVM_', '').lower()):
-        return container.get(alternate_name.replace('LLMVM_', '').lower())
-    else:
-        return default
-
 def parse_message_thread(message: str):
     def create_message(type) -> Message:
         MessageClass = globals()[type]
@@ -250,13 +231,12 @@ async def get_threads(
 
 async def __execute_llm_call_direct(
     message: Message,
+    api_key: str,
+    executor_name: str,
+    model_name: str,
     context_messages: list[Message] = [],
-    executor_name: str = get_config_variable('LLMVM_EXECUTOR', 'executor', default='openai'),
 ) -> SessionThread:
     global timing
-
-    print('asdf')
-    print(executor_name)
 
     message_response = ''
     printer = StreamPrinter('')
@@ -272,16 +252,16 @@ async def __execute_llm_call_direct(
 
     if executor_name == 'openai':
         executor = OpenAIExecutor(
-            api_key=get_config_variable('OPENAI_API_KEY', default=''),
-            default_model=get_config_variable('LLMVM_MODEL', 'openai_model', default='gpt-4-vision-preview'),
+            api_key=api_key,
+            default_model=model_name,
         )
     elif executor_name == 'anthropic':
         executor = AnthropicExecutor(
-            api_key=get_config_variable('ANTHROPIC_API_KEY', default=''),
-            default_model=get_config_variable('LLMVM_MODEL', 'anthropic_model', default='claude-2'),
+            api_key=api_key,
+            default_model=model_name,
         )
     else:
-        raise ValueError('no executor specified.')
+        raise ValueError('No executor specified.')
 
     timing.start()
 
@@ -296,9 +276,10 @@ async def execute_llm_call(
     api_endpoint: str,
     id: int,
     message: Message,
+    executor: str,
+    model: str,
     direct: bool,
     context_messages: list[Message] = [],
-    model: str = '',
     cookies: List[Dict[str, Any]] = [],
     append_to_server_thread: bool = True,
 ) -> SessionThread:
@@ -317,6 +298,7 @@ async def execute_llm_call(
         thread.messages.append(MessageModel.from_message(message=message))
         thread.current_mode = 'tool' if not direct else 'direct'
         thread.cookies = cookies
+        thread.executor = executor
         thread.model = model
 
         async with httpx.AsyncClient(timeout=280.0) as client:
@@ -330,14 +312,36 @@ async def execute_llm_call(
             return session_thread
         return thread
     except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
-        if get_config_variable('LLMVM_EXECUTOR', 'executor'):
-            return await __execute_llm_call_direct(message, context_messages, get_config_variable('LLMVM_EXECUTOR', 'executor'))
-        elif get_config_variable('OPENAI_API_KEY'):
-            return await __execute_llm_call_direct(message, context_messages, 'openai')
+        # server is down, go direct. this means that executor and model can't be nothing
+        if not executor and not model:
+            if Container.get_config_variable('LLMVM_EXECUTOR', 'executor'):
+                executor = Container.get_config_variable('LLMVM_EXECUTOR')
+
+            if Container.get_config_variable('LLMVM_MODEL', 'model'):
+                model = Container.get_config_variable('LLMVM_MODEL')
+
+        if executor and model:
+            api_key = executor == 'openai' and Container.get_config_variable('OPENAI_API_KEY') or os.environ.get('ANTHROPIC_API_KEY', '')
+            if not api_key: logging.warning(f'No api key found for executor {executor}.')
+            return await __execute_llm_call_direct(message, api_key, executor, model, context_messages)  # type: ignore
+        elif Container.get_config_variable('OPENAI_API_KEY'):
+            return await __execute_llm_call_direct(
+                message,
+                Container.get_config_variable('OPENAI_API_KEY'),
+                'openai',
+                'gpt-4-vision-preview',
+                context_messages
+            )
         elif os.environ.get('ANTHROPIC_API_KEY'):
-            return await __execute_llm_call_direct(message, context_messages, 'anthropic')
+            return await __execute_llm_call_direct(
+                message,
+                Container.get_config_variable('ANTHROPIC_API_KEY'),
+                'anthropic',
+                'claude-2.1',
+                context_messages
+            )
         else:
-            logging.warning('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY set. Unable to execute direct call to LLM.')
+            logging.warning('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
             raise ex
 
 
@@ -346,6 +350,7 @@ def llm(
     id: int,
     direct: bool,
     endpoint: str,
+    executor: str,
     model: str,
     cookies: List[Dict[str, Any]] = [],
 ) -> SessionThread:
@@ -393,9 +398,10 @@ def llm(
             endpoint,
             id,
             user_message,
+            executor,
+            model,
             direct,
             context_messages,
-            model,
             cookies,
             append_to_server_thread
         )
@@ -607,13 +613,17 @@ class Repl():
         rich.print('[red]Commands:[/red]')
         for key, value in commands.items():
             if key == 'message':
-                key = 'message (default)'
+                key = 'message [red](default)[/red]'
             rich.print(f' [green]{key.ljust(23)}[/green]  {value}')
             for option in [param for param in ctx.command.get_command(ctx, key).params if isinstance(param, click.Option)]:  # type: ignore  # NOQA: E501
                 rich.print(f'  {str(", ".join(option.opts)).ljust(25)} {option.help if option.help else ""}')
 
         rich.print()
+        rich.print(f'$LLMVM_EXECUTOR: {Container.get_config_variable("LLMVM_EXECUTOR", default="(not set)")}')
+        rich.print(f'$LLMVM_MODEL: {Container.get_config_variable("LLMVM_MODEL", default="(not set)")}')
         rich.print()
+        rich.print()
+        rich.print('[bold]Keys:[/bold]')
         rich.print('[white](Ctrl-c or "exit" to exit)[/white]')
         rich.print('[white](Ctrl-n to clear the current line)[/white]')
         rich.print('[white](Ctrl-e to open $EDITOR for multi-line User prompt)[/white]')
@@ -652,14 +662,14 @@ class Repl():
         @kb.add('c-n')
         def _(event):
             global thread_id
-            thread = asyncio.run(get_thread(get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), 0))
+            thread = asyncio.run(get_thread(Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), 0))
             thread_id = thread.id
             rich.print('New thread created.')
 
         @kb.add('c-g')
         def _(event):
             editor = os.environ.get('EDITOR', 'vim')
-            thread = asyncio.run(get_thread(get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), thread_id))
+            thread = asyncio.run(get_thread(Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), thread_id))
             thread_text = get_string_thread_with_roles(thread)
 
             current_text = event.app.current_buffer.text
@@ -855,7 +865,7 @@ def ls():
               help='location of Firefox/Chrome cookies txt file in Netscape format.')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread id to attach cookies to')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def cookies(
     sqlite: str,
@@ -935,7 +945,7 @@ def cookies(
               help='thread ID to retrieve.')
 @click.option('--direct', '-d', type=bool, is_flag=True, required=False,
               help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),  # type: ignore
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def act(
@@ -981,7 +991,7 @@ def act(
 @click.argument('filename', type=str, required=True)
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to attach content to. Default is last thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def file(
     filename: str,
@@ -1032,7 +1042,7 @@ def file(
 @click.argument('url', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to download and push the content to. Default is last thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def url(
     url: str,
@@ -1058,7 +1068,7 @@ def url(
 
 @cli.command('search', help='Perform a search on ingested content using the LLMVM search engine.')
 @click.argument('query', type=str, required=False, default='')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def search(
     query: str,
@@ -1100,7 +1110,7 @@ def search(
 
 @cli.command('ingest', help='Ingest a file into the LLMVM search engine.')
 @click.argument('filename', type=str, required=True)
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def ingest(
     filename: str,
@@ -1123,7 +1133,7 @@ def ingest(
 
 
 @cli.command('threads', help='List all message threads and set to last.')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def threads(
     endpoint: str,
@@ -1145,7 +1155,7 @@ def threads(
 
 @cli.command('thread', help='List all message threads.')
 @click.argument('id', type=str, required=True)
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def thread(
     id: str,
@@ -1165,7 +1175,7 @@ def thread(
 
 
 @cli.command('messages', help='List all messages in a message thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
 def messages(
@@ -1178,7 +1188,7 @@ def messages(
 
 
 @cli.command('new', help='Create a new message thread.')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def new(
     endpoint: str,
@@ -1194,12 +1204,14 @@ def new(
               help='thread ID to send message to. Default is last thread.')
 @click.option('--direct', '-d', type=bool, is_flag=True, required=False,
               help='Send messages directly to LLM without using the Starlark runtime.')
-@click.option('--endpoint', '-e', type=str, required=False, default=get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
-@click.option('--cookies', '-e', type=str, required=False, default=get_config_variable('LLMVM_COOKIES', default=''),
-              help='cookies.txt file in Netscape format to use for the request. Default is $LLMVM_COOKIES or empty.')
-@click.option('--model', '-m', type=str, required=False, default=get_config_variable('LLMVM_MODEL', default=''),
-              help='model to use. Default is $LLMVM_MODEL or empty.')
+@click.option('--cookies', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_COOKIES', default=''),
+              help='cookies.txt file (Netscape) for the request. Default is $LLMVM_COOKIES or empty.')
+@click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
+              help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
+@click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
+              help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
 def message(
     message: Optional[str | bytes | Message],
@@ -1207,6 +1219,7 @@ def message(
     direct: bool,
     endpoint: str,
     cookies: str,
+    executor: str,
     model: str,
     suppress_role: bool,
 ):
@@ -1215,8 +1228,19 @@ def message(
     if not suppress_role and not sys.stdin.isatty():
         suppress_role = True
 
+    if model:
+        if (model.startswith('"') and model.endswith('"')) or (model.startswith("'") and model.endswith("'")):
+            model = model[1:-1]
+
+    if executor:
+        if (executor.startswith('"') and executor.endswith('"')) or (executor.startswith("'") and executor.endswith("'")):
+            executor = executor[1:-1]
+
     if message:
-        if isinstance(message, str) and message.startswith('"') and message.endswith('"'):
+        if isinstance(message, str) and (
+            (message.startswith('"') and message.endswith('"'))
+            or (message.startswith("'") and message.endswith("'"))
+        ):
             message = message[1:-1]
 
         if id <= 0:
@@ -1227,7 +1251,7 @@ def message(
             with open(cookies, 'r') as f:
                 cookies_list = Helpers.read_netscape_cookies(f.read())
 
-        thread = llm(message, id, direct, endpoint, model, cookies_list)
+        thread = llm(message, id, direct, endpoint, executor, model, cookies_list)
         if not suppress_role: StreamPrinter('').write_string('\n')
         print_response([MessageModel.to_message(thread.messages[-1])], suppress_role)
         if not suppress_role: StreamPrinter('').write_string('\n')

@@ -34,7 +34,7 @@ class Container(metaclass=Singleton):
             raise ValueError('configuration_file {} is not found, or LLMVM_CONFIG set incorrectly'.format(config_file))
 
         with open(self.config_file, 'r') as conf_file:
-            self.configuration: Dict = yaml.load(conf_file, Loader=yaml.FullLoader)
+            self.configuration: Dict = yaml.load(conf_file, Loader=yaml.FullLoader)  # type: ignore
             self.type_instance_cache: Dict[Type, object] = {}
 
     def resolve(self, t: Type, **extra_args):
@@ -72,3 +72,23 @@ class Container(metaclass=Singleton):
         else:
             self.type_instance_cache[t] = self.resolve(t, extra_args=extra_args)
             return self.type_instance_cache[t]
+
+    @staticmethod
+    def get_config_variable(name: str, alternate_name: str = '', default: str = '') -> str:
+        if name in os.environ:
+            return os.environ.get(name, default)
+
+        config_file = os.environ.get('LLMVM_CONFIG', default='~/.config/llmvm/config.yaml')
+        if config_file.startswith('~'):
+            config_file = os.path.expanduser(config_file)
+
+        if not os.path.exists(config_file):
+            return default
+
+        container = Container(config_file)
+        if container.has(name.replace('LLMVM_', '').lower()):
+            return container.get(name.replace('LLMVM_', '').lower())
+        elif container.has(alternate_name.replace('LLMVM_', '').lower()):
+            return container.get(alternate_name.replace('LLMVM_', '').lower())
+        else:
+            return default

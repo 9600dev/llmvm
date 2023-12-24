@@ -78,12 +78,13 @@ anthropic_executor = AnthropicExecutor(
 
 # get the configured executor
 executors = [openai_executor, anthropic_executor]  # todo: wire up llama-cpp-python
-executor = Helpers.first(lambda x: x.name() == Container().get('executor'), executors)
-if executor is None:
+default_executor_string = Container().get('executor')
+default_executor = Helpers.first(lambda x: x.name() == default_executor_string, executors)
+if default_executor is None:
     raise Exception(f'Executor {Container().get("executor")} not found')
 
 vector_store = VectorStore(
-    token_calculator=executor.calculate_tokens,
+    token_calculator=default_executor.calculate_tokens,
     store_directory=Container().get('vector_store_index_directory'),
     index_name='index',
     embedding_model=Container().get('vector_store_embedding_model'),
@@ -93,13 +94,23 @@ vector_store = VectorStore(
 
 vector_search = VectorSearch(vector_store=vector_store)
 
-controller = StarlarkExecutionController(
-    executor=executor,
+openai_controller = StarlarkExecutionController(
+    executor=openai_executor,
     agents=agents,  # type: ignore
     vector_search=vector_search,
     edit_hook=None,
     continuation_passing_style=False,
 )
+
+anthropic_controller = StarlarkExecutionController(
+    executor=anthropic_executor,
+    agents=agents,  # type: ignore
+    vector_search=vector_search,
+    edit_hook=None,
+    continuation_passing_style=False,
+)
+
+default_controller = openai_controller if default_executor_string == 'openai' else anthropic_controller
 
 
 def __get_thread(id: int) -> SessionThread:
@@ -208,7 +219,7 @@ async def download(
                 expr=download_item.url,
                 agents=[],
                 messages=[],
-                starlark_runtime=controller.starlark_runtime,
+                starlark_runtime=default_controller.starlark_runtime,
                 original_code='',
                 original_query=''
             )
@@ -303,6 +314,9 @@ async def tools_completions(request: SessionThread):
     mode = thread.current_mode
     queue = asyncio.Queue()
     model = thread.model
+    controller = openai_controller if thread.executor == 'openai' else anthropic_controller
+
+    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')
@@ -381,8 +395,8 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == '__main__':
-    rich.print(f'[green]Using executor: {executor.name()}[/green]')
-    rich.print(f'[green]Default model is: {executor.get_default_model()}[/green]')
+    rich.print(f'[green]Default executor is: {default_executor.name()}[/green]')
+    rich.print(f'[green]Default model is: {default_executor.get_default_model()}[/green]')
 
     for agent in agents:
         rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore

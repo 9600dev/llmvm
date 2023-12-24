@@ -1,0 +1,117 @@
+import ast
+from typing import List
+
+
+class Source:
+    class Callsite:
+        def __init__(self, class_name, method_name, line, col):
+            self.class_name = class_name
+            self.method_name = method_name
+            self.line = line
+            self.col = col
+
+        def __repr__(self):
+            return f"Callsite(class_name={self.class_name!r}, method_name={self.method_name!r}, line={self.line}, col={self.col})"
+
+    class Symbol:
+        def __init__(self, name, underlying_type, params, type, parent, docstring, line, col):
+            self.name = name
+            self.underlying_type = underlying_type
+            self.params = params
+            self.type = type
+            self.parent = parent
+            self.docstring = docstring
+            self.line = line
+            self.col = col
+
+        def __repr__(self):
+            params_repr = ', '.join([f"{name}: {ptype}" for name, ptype in self.params]) if self.params else 'None'
+            return (f"Symbol(name={self.name!r}, underlying_type={self.underlying_type!r}, "
+                    f"params={params_repr}, type={self.type!r}, parent={self.parent!r}, "
+                    f"docstring={self.docstring!r}, line={self.line}, col={self.col})")
+
+    def __init__(self, file_path):
+        self.file_path = file_path
+        self.source_code, self.tree = self._parse_file()
+
+    def _parse_file(self):
+        with open(self.file_path, 'r') as file:
+            source_code = file.read()
+            return source_code, ast.parse(source_code)
+
+    def get_tree(self):
+        return self.tree
+
+    def get_methods(self, class_name) -> List[Symbol]:
+        methods = []
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef):
+                        method_name = item.name
+                        params = []
+                        for arg in item.args.args:
+                            # Check if there is a type annotation
+                            param_type = ast.get_source_segment(self.source_code, arg.annotation) if arg.annotation else None
+                            params.append((arg.arg, param_type))
+                        symbol = Source.Symbol(
+                            name=method_name,
+                            underlying_type=class_name,
+                            params=params,
+                            type='method',
+                            parent=class_name,
+                            docstring=ast.get_docstring(item),
+                            line=item.lineno,
+                            col=item.col_offset,
+                        )
+                        methods.append(symbol)
+        return methods
+
+    def get_classes(self) -> List[Symbol]:
+        class_symbols = []
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef):
+                class_docstring = ast.get_docstring(node)
+                symbol = Source.Symbol(
+                    name=node.name,
+                    underlying_type=None,  # Class definitions don't have an underlying type
+                    params=[],  # Class definitions don't have parameters
+                    type='class',
+                    parent=None,  # Class definitions don't have a parent
+                    docstring=class_docstring,
+                    line=node.lineno,
+                    col=node.col_offset
+                )
+                class_symbols.append(symbol)
+        return class_symbols
+
+    @staticmethod
+    def get_references(tree, method_name) -> List['Source.Callsite']:
+        references = []
+        current_class = None
+        current_method = None
+
+        class Visitor(ast.NodeVisitor):
+            def visit_ClassDef(self, node):
+                nonlocal current_class
+                prev_class = current_class
+                current_class = node.name
+                self.generic_visit(node)
+                current_class = prev_class
+
+            def visit_FunctionDef(self, node):
+                nonlocal current_method
+                prev_method = current_method
+                current_method = node.name
+                self.generic_visit(node)
+                current_method = prev_method
+
+            def visit_Call(self, node):
+                if ((hasattr(node.func, 'id') and node.func.id == method_name) or
+                        (hasattr(node.func, 'attr') and node.func.attr == method_name)):
+                    callsite = Source.Callsite(current_class, current_method, node.lineno, node.col_offset)
+                    references.append(callsite)
+                self.generic_visit(node)
+
+        Visitor().visit(tree)
+        return references

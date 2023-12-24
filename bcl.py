@@ -206,7 +206,8 @@ class Searcher():
         try:
             queries = eval(str(query_expander.message))[:self.query_expansion]
         except SyntaxError as ex:
-            logging.debug(f"SyntaxError: {ex}")
+            logging.debug(f"search() SyntaxError: {ex}")
+            logging.debug("search() trying again with regex list extractor")
 
             # try and extract a list
             pattern = r'\[\s*("(?:\\.|[^"\\])*"\s*,\s*)*"(?:\\.|[^"\\])*"\s*\]'
@@ -216,7 +217,7 @@ class Searcher():
                 try:
                     queries = eval(match.group(0))[:self.query_expansion]
                 except SyntaxError as ex:
-                    logging.debug(f"SyntaxError: {ex}")
+                    logging.debug(f"search() failed regex extractor with SyntaxError: {ex}")
                     pass
 
         # the first query is the original query

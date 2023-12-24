@@ -256,7 +256,7 @@ class StarlarkRuntime:
         identify the single place in the code where this may have occurred, and
         see if we can manually patch it.
         '''
-        logging.debug('StarlarkRuntime.rewrite_answer_error_correction()')
+        logging.debug('rewrite_answer_error_correction()')
         dictionary = ''
         for key, value in globals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
@@ -324,7 +324,7 @@ class StarlarkRuntime:
         error: str,
         globals_dictionary: Dict[Any, Any],
     ) -> str:
-        logging.debug('StarlarkRuntime.rewrite_starlark_error_correction()')
+        logging.debug('rewrite_starlark_error_correction()')
         dictionary = ''
         for key, value in globals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
@@ -705,7 +705,7 @@ class StarlarkRuntime:
         starlark_code: str,
         error: str,
     ):
-        logging.debug('StarlarkRuntime.compile_error()')
+        logging.debug('compile_error()')
         # SyntaxError, or other more global error. We should rewrite the entire code.
         # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
         code_prompt = \
@@ -728,7 +728,7 @@ class StarlarkRuntime:
             model=None,
         )
         lines = str(assistant.message).split('\n')
-        logging.debug('StarlarkRuntime.compile_error() Re-written Starlark code:')
+        logging.debug('compile_error() Re-written Starlark code:')
         for line in lines:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)
@@ -738,7 +738,7 @@ class StarlarkRuntime:
         starlark_code: str,
         error: str,
     ):
-        logging.debug('StarlarkRuntime.rewrite()')
+        logging.debug('rewrite()')
         # SyntaxError, or other more global error. We should rewrite the entire code.
         function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
         code_prompt = \
@@ -774,7 +774,7 @@ class StarlarkRuntime:
             prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
         )
         lines = str(assistant.message).split('\n')
-        logging.debug('StarlarkRuntime.rewrite() Re-written Starlark code:')
+        logging.debug('rewrite() Re-written Starlark code:')
         for line in lines:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)

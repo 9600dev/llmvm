@@ -736,6 +736,7 @@ class MessageModel(BaseModel):
 
 class SessionThread(BaseModel):
     id: int = -1
+    executor: str = ''
     model: str = ''
     current_mode: str = 'tool'
     temperature: float = 0.0

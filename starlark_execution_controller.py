@@ -6,17 +6,11 @@ import random
 import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
-import pandas as pd
-
-from container import Container
 from helpers.helpers import Helpers
 from helpers.logging_helpers import (no_indent_debug, response_writer,
                                      role_debug, setup_logging)
-from helpers.pdf import PdfHelpers
-from helpers.webhelpers import WebHelpers
 from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
-                     Message, Statement, StopNode, System, User,
-                     awaitable_none)
+                     Message, Statement, System, User, awaitable_none)
 from starlark_runtime import StarlarkRuntime
 from vector_search import VectorSearch
 
@@ -235,7 +229,7 @@ class StarlarkExecutionController(Controller):
                 )
 
                 decision_criteria.append(str(assistant_similarity.message))
-                logging.debug('map_reduce_required, query_or_task: {}, response: {}'.format(
+                logging.debug('aexecute_llm_call() map_reduce_required, query_or_task: {}, response: {}'.format(
                     query,
                     assistant_similarity.message,
                 ))
@@ -372,8 +366,10 @@ class StarlarkExecutionController(Controller):
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
         model: Optional[str] = None,
     ) -> Assistant:
-        logging.debug('StarlarkRuntime.build_runnable_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
+        logging.debug('abuild_runnable_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
         model = model if model else self.executor.get_default_model()
+        logging.debug('abuild_runnable_ast() model = {}'.format(model))
+        logging.debug('abuild_runnable_ast() executor = {}'.format(self.executor.name()))
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
 
@@ -463,11 +459,11 @@ class StarlarkExecutionController(Controller):
                     assistant_response = match.group(1)
 
             no_indent_debug(logging, '')
-            no_indent_debug(logging, '[bold yellow]Abstract Syntax Tree:[/bold yellow]')
+            no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')
             # debug out AST
             lines = str(assistant_response).split('\n')
             for line in lines:
-                no_indent_debug(logging, '{}'.format(str(line).replace("[", "\\[")))
+                no_indent_debug(logging, '  {}'.format(str(line).replace("[", "\\[")))
             no_indent_debug(logging, '')
 
             # debug output
@@ -480,7 +476,7 @@ class StarlarkExecutionController(Controller):
                 try:
                     _ = ast.parse(str(assistant_response))
                 except SyntaxError as ex:
-                    logging.debug('StarlarkRuntime.execute() SyntaxError: {}'.format(str(ex)))
+                    logging.debug('aexecute() SyntaxError: {}'.format(str(ex)))
                     assistant_response = self.starlark_runtime.compile_error(
                         starlark_code=str(assistant_response),
                         error=str(ex),
