@@ -178,7 +178,7 @@ def search(query: str):
     return results
 
 @app.post('/ingest')
-async def ingest(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+async def ingest(file: UploadFile = File(...), project: str = Form(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     try:
         name = os.path.basename(str(file.filename))
 
@@ -188,6 +188,7 @@ async def ingest(file: UploadFile = File(...), background_tasks: BackgroundTasks
                 vector_search.ingest_file,
                 f"{cdn_directory}/{name}",
                 str(file.filename),
+                project,
                 {}
             )
         return {"filename": file.filename, "detail": "Ingestion started."}

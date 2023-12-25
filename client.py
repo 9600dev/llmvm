@@ -826,8 +826,20 @@ def cli(ctx):
 
 
 @cli.command('status')
-def status():
-    rich.print('status')
+@click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
+def status(
+    endpoint: str,
+):
+    async def status_helper():
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            try:
+                response = await client.get(f'{endpoint}/health')
+                return response.json()
+            except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
+                return {'status': f'LLMVM server not available at {endpoint}'}
+
+    rich.print(asyncio.run(status_helper()))
 
 
 @cli.command('mode', help='Switch between "direct" and "tool" mode.')
@@ -1110,26 +1122,50 @@ def search(
 
 @cli.command('ingest', help='Ingest a file into the LLMVM search engine.')
 @click.argument('filename', type=str, required=True)
+@click.option('--recursive', '-r', type=bool, required=True, is_flag=True, help='Walk the directory recursively.')
+@click.option('--project', '-p', type=str, required=True, default='', help='Assign the ingested content to project.')
 @click.option('--endpoint', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def ingest(
     filename: str,
+    recursive: bool,
+    project: str,
     endpoint: str,
 ):
+    files = []
+
     if filename.startswith('"') and filename.endswith('"'):
         filename = filename[1:-1]
 
-    filename = os.path.abspath(filename)
+    filename_directory = os.path.abspath(filename)
+
+    if not os.path.exists(filename_directory):
+        rich.print(f'File or directory {filename_directory} does not exist.')
+        return
+
+    if os.path.isdir(filename_directory):
+        if recursive:
+            for root, dirs, filenames in os.walk(filename_directory):
+                for filename in filenames:
+                    files.append(os.path.join(root, filename))
+        else:
+            files += [os.path.join(filename_directory, f) for f in os.listdir(filename_directory) if os.path.isfile(os.path.join(filename_directory, f))]
 
     async def upload_helper():
         async with httpx.AsyncClient(timeout=280.0) as client:
-            with open(filename, 'rb') as f:
-                files = {'file': (filename, f)}
-                response = await client.post(f'{endpoint}/ingest', files=files)
-                return response.text
+            responses = []
+            for filename_str in files:
+                with open(filename_str, 'rb') as f:
+                    data = {
+                        'file': (filename_str, f),
+                        'project': project,
+                    }
+                    response = await client.post(f'{endpoint}/ingest', files=data)
+                    responses.append(response.text)
+                    rich.print(response.text)
+            return responses
 
-    response = asyncio.run(upload_helper())
-    rich.print(response)
+    return asyncio.run(upload_helper())
 
 
 @cli.command('threads', help='List all message threads and set to last.')

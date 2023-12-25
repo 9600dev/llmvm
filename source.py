@@ -2,6 +2,41 @@ import ast
 from typing import List
 
 
+class Project:
+    def __init__(self, file_paths: List[str]):
+        self.sources = []
+        for source_path in file_paths:
+            source = Source(source_path)
+            self.sources.append(source)
+
+    def get_sources(self):
+        return self.sources
+
+    def get_source(self, file_path):
+        for source in self.sources:
+            if source.file_path == file_path:
+                return source
+        raise ValueError(f"Source file not found: {file_path}")
+
+    def get_methods(self, class_name) -> List['Source.Symbol']:
+        methods = []
+        for source in self.sources:
+            methods.extend(source.get_methods(class_name))
+        return methods
+
+    def get_classes(self) -> List['Source.Symbol']:
+        classes = []
+        for source in self.sources:
+            classes.extend(source.get_classes())
+        return classes
+
+    def get_references(self, method_name) -> List['Source.Callsite']:
+        references = []
+        for source in self.sources:
+            references.extend(Source.get_references(source.get_tree(), method_name))
+        return references
+
+
 class Source:
     class Callsite:
         def __init__(self, class_name, method_name, line, col):

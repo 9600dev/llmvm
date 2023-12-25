@@ -232,9 +232,10 @@ class VectorSearch():
         self,
         filename: str,
         url: str,
+        project: str,
         metadata: dict
     ) -> None:
-        logging.debug('ingesting file: {}'.format(filename))
+        logging.debug(f'ingesting file: {filename} with url {url} into project: {project}')
 
         if filename.endswith('.pdf'):
             text = PdfHelpers.parse_pdf(filename)
