@@ -23,6 +23,7 @@ from helpers.search import SerpAPISearcher
 from helpers.webhelpers import WebHelpers
 from objects import (Assistant, Content, DebugNode, Executor, FunctionCall,
                      Message, StreamNode, System, User)
+from source import Source
 from starlark_runtime import StarlarkRuntime
 from vector_search import VectorSearch
 
@@ -667,3 +668,47 @@ class FunctionBindable():
             return bindable
 
         raise ValueError('could not bind and or execute the function: {} expr: {}'.format(func, expr))
+
+
+class SourceProject:
+    def __init__(
+        self,
+        files,
+        messages: List[Message],
+        starlark_runtime: StarlarkRuntime,
+        original_code: str,
+        original_query: str,
+        vector_search: VectorSearch,
+    ):
+        self.sources = []
+        for source_path in files:
+            source = Source(source_path)
+            self.sources.append(source)
+
+    def get_files(self):
+        return self.sources
+
+    def get_source_file(self, file_path):
+        for source in self.sources:
+            if source.file_path == file_path:
+                return source
+        raise ValueError(f"Source file not found: {file_path}")
+
+    def get_methods(self, class_name) -> List['Source.Symbol']:
+        methods = []
+        for source in self.sources:
+            methods.extend(source.get_methods(class_name))
+        return methods
+
+    def get_classes(self) -> List['Source.Symbol']:
+        classes = []
+        for source in self.sources:
+            classes.extend(source.get_classes())
+        return classes
+
+    def get_references(self, method_name) -> List['Source.Callsite']:
+        references = []
+        for source in self.sources:
+            references.extend(Source.get_references(source.get_tree(), method_name))
+        return references
+
