@@ -142,8 +142,10 @@ class Source:
                 current_method = prev_method
 
             def visit_Call(self, node):
-                if ((hasattr(node.func, 'id') and node.func.id == method_name) or
-                        (hasattr(node.func, 'attr') and node.func.attr == method_name)):
+                if (
+                    (hasattr(node.func, 'id') and node.func.id == method_name)  # type: ignore
+                    or (hasattr(node.func, 'attr') and node.func.attr == method_name)  # type: ignore
+                ):
                     callsite = Source.Callsite(current_class, current_method, node.lineno, node.col_offset)
                     references.append(callsite)
                 self.generic_visit(node)

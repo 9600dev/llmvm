@@ -403,7 +403,7 @@ class StarlarkExecutionController(Controller):
         self,
         messages: List[Message],
         temperature: float = 0.0,
-        mode: str = 'tool',
+        mode: str = 'auto',
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
         model: Optional[str] = None,
     ) -> List[Statement]:
@@ -425,12 +425,14 @@ class StarlarkExecutionController(Controller):
         if not last_message: return []
 
         # either classify, or we're going direct
-        if mode == 'tool':
+        if mode == 'auto':
             classification = await self.aclassify_tool_or_direct(
                 last_message,
                 stream_handler=stream_handler,
                 model=model,
             )
+        elif mode == 'tool':
+            classification = {'tool': 1.0}
         else:
             classification = {'direct': 1.0}
 
