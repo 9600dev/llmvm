@@ -33,6 +33,7 @@ class Executor(ABC):
         temperature: float = 1.0,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
         model: Optional[str] = None,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> 'Assistant':
         pass
 
@@ -44,6 +45,7 @@ class Executor(ABC):
         temperature: float = 1.0,
         stream_handler: Optional[Callable[['AstNode'], None]] = None,
         model: Optional[str] = None,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> 'Assistant':
         pass
 
@@ -259,6 +261,7 @@ class Content(AstNode):
     def __init__(
         self,
         sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
+        content_type: str = 'text',
     ):
         if sequence is None:
             self.sequence = ''
@@ -299,10 +302,11 @@ class Content(AstNode):
 class ImageContent(Content):
     def __init__(
         self,
-        sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
+        sequence: bytes,
         url: str = '',
     ):
-        super().__init__(sequence)
+        # super().__init__(sequence, 'image')
+        self.sequence = sequence
         self.url = url
 
 
@@ -312,8 +316,27 @@ class PdfContent(Content):
         sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
         url: str = '',
     ):
-        super().__init__(sequence)
+        super().__init__(sequence, 'pdf')
         self.url = url
+
+
+class FileContent(Content):
+    def __init__(
+        self,
+        sequence: bytes | str,
+        url: str = '',
+    ):
+        self.sequence = sequence
+        self.url = url
+
+    def encode(self) -> str:
+        if isinstance(self.sequence, str):
+            return self.sequence
+        return base64.b64encode(self.sequence).decode('utf-8')
+
+    @staticmethod
+    def decode(base64_str: str) -> bytes:
+        return base64.b64decode(base64_str)
 
 
 class Message(AstNode):
@@ -331,6 +354,8 @@ class Message(AstNode):
     def from_dict(message: Dict[str, Any]) -> 'Message':
         role = message['role']
         message_content = message['content']
+        content_type = message['content_type'] if 'content_type' in message else ''
+
         content = Content(message_content)
 
         # when converting from MessageModel, there can be an embedded image
@@ -347,6 +372,8 @@ class Message(AstNode):
             content = ImageContent(byte_content, message_content[0]['image_url']['url'])
 
         # todo: pdf parsing here
+        if role == 'user' and content_type == 'file':
+            return User(FileContent(message_content))
 
         if role == 'user':
             return User(content)
@@ -360,8 +387,9 @@ class Message(AstNode):
         return {'role': self.role(), 'content': self.message}
 
     @staticmethod
-    def to_dict(message: 'Message') -> Dict[str, Any]:
-        if isinstance(message, User) and isinstance(message.message.sequence, bytes):
+    def to_dict(message: 'Message', add_content_type: bool = False) -> Dict[str, Any]:
+        # primarily to pass to Anthropic or OpenAI api
+        if isinstance(message, User) and isinstance(message.message, ImageContent):
             return {
                 'role': message.role(),
                 'content': [{
@@ -370,9 +398,23 @@ class Message(AstNode):
                         'url': f"data:image/jpeg;base64,{base64.b64encode(message.message.sequence).decode('utf-8')}",
                         'detail': 'high'
                     }
-                }]
+                }],
+                **({'content_type': 'image'} if add_content_type else {})
             }
-        return {'role': message.role(), 'content': str(message.message)}
+        elif isinstance(message, User) and isinstance(message.message, PdfContent):
+            raise ValueError('pdf not supported')
+        elif isinstance(message, User) and isinstance(message.message, FileContent):
+            return {
+                'role': message.role(),
+                'content': message.message.encode(),
+                'content_type': 'file'
+            }
+        else:
+            return {
+                'role': message.role(),
+                'content': str(message.message),
+                **({'content_type': 'image'} if add_content_type else {})
+            }
 
 
 class User(Message):
@@ -702,21 +744,6 @@ class UncertainOrError(Statement):
         return 'uncertain_or_error'
 
 
-class LambdaVisitor(Visitor):
-    def __init__(
-        self,
-        node_lambda: Callable[[AstNode], Any],
-    ):
-        self.node_lambda = node_lambda
-
-    def visit(self, node: AstNode) -> AstNode:
-        if self.node_lambda(node):
-            self.node_lambda(node)
-            return node
-        else:
-            return node
-
-
 class DownloadItem(BaseModel):
     id: int
     url: str
@@ -724,6 +751,7 @@ class DownloadItem(BaseModel):
 
 class MessageModel(BaseModel):
     role: str
+    content_type: Optional[str] = None
     content: str | List[Dict[str, Any]]
 
     def to_message(self) -> Message:
@@ -731,7 +759,7 @@ class MessageModel(BaseModel):
 
     @staticmethod
     def from_message(message: Message) -> 'MessageModel':
-        return MessageModel(**Message.to_dict(message))
+        return MessageModel(**Message.to_dict(message, True))
 
 
 class SessionThread(BaseModel):
@@ -753,27 +781,3 @@ class Response(BaseModel):
         super().__init__()
         self.thread = thread
         self.response = stream
-
-
-# class SessionThread():
-#     def __init__(
-#         self,
-#         mode: str,
-#         id: int = -1,
-#     ) -> None:
-#         super().__init__()
-#         self.id = id
-#         self.current_mode = mode
-#         self.started = dt.datetime.now()
-#         self.messages: List[Message] = []
-
-
-# class Response():
-#     def __init__(
-#         self,
-#         thread: Optional[SessionThread] = None,
-#         stream: Optional[StreamingResponse] = None,
-#     ):
-#         super().__init__()
-#         self.thread = thread
-#         self.response = stream

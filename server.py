@@ -26,8 +26,9 @@ from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from objects import (Answer, Assistant, AstNode, Content, DownloadItem,
-                     Message, MessageModel, Response, SessionThread, Statement,
-                     StopNode, System, TokenStopNode, User)
+                     FileContent, Message, MessageModel, Response,
+                     SessionThread, Statement, StopNode, System, TokenStopNode,
+                     User)
 from openai_executor import OpenAIExecutor
 from persistent_cache import PersistentCache
 from starlark_execution_controller import StarlarkExecutionController
@@ -302,6 +303,104 @@ async def set_cookies(requests: Request):
     thread.cookies = cookies
     cache_session.set(thread.id, thread)
     return thread
+
+@app.post('/v1/chat/code_completions', response_model=None)
+async def code_completions(request: SessionThread):
+    thread = request
+    messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
+    local_files = []
+
+    # typically there are User messages with FileContent Content type in them
+    # we need to download the files and store them locally
+    try:
+        for file_content in [m.message for m in messages if m.message is not None and isinstance(m.message, FileContent)]:
+            # full_file_name = file_content.url
+            abs_path = os.path.abspath(file_content.url)
+            base_name = os.path.basename(file_content.url)
+
+            os.makedirs(f"{cdn_directory}/{thread.id}{abs_path}", exist_ok=True)
+            with open(f"{cdn_directory}/{thread.id}{abs_path}/{base_name}", "wb") as buffer:
+                buffer.write(FileContent.decode(str(file_content.sequence)))
+                local_files.append(f"{cdn_directory}/{thread.id}{abs_path}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Exception: {e}")
+
+    if not cache_session.has_key(thread.id) or thread.id <= 0:
+        temp = __get_thread(0)
+        thread.id = temp.id
+
+    mode = thread.current_mode
+    queue = asyncio.Queue()
+    model = thread.model
+    controller = openai_controller if thread.executor == 'openai' else anthropic_controller
+
+    logging.debug(f'/v1/chat/code_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
+
+    if len(messages) == 0:
+        raise HTTPException(status_code=400, detail='No messages provided')
+
+    async def callback(token: AstNode):
+        queue.put_nowait(token)
+
+    async def stream():
+        def handle_exception(task):
+            if not task.cancelled() and task.exception() is not None:
+                logging.error(f'/v1/chat/code_completion threw an exception: {task.exception()}')
+                queue.put_nowait(StopNode())
+
+        async def execute_and_signal():
+            result = await controller.aexecute(
+                messages=messages,
+                temperature=thread.temperature,
+                mode='code',
+                stream_handler=callback,
+                model=model,
+                template_args={'files': local_files}
+            )
+            queue.put_nowait(StopNode())
+            return result
+
+        task = asyncio.create_task(execute_and_signal())
+        task.add_done_callback(handle_exception)
+
+        while True:
+            data = await queue.get()
+            if isinstance(data, StopNode):
+                break
+            yield data
+
+        try:
+            await task
+        except Exception as e:
+            pass
+
+        # error handling
+        if task.exception() is not None:
+            thread.messages.append(MessageModel.from_message(Assistant(Content(f'Error: {str(task.exception())}'))))
+            yield thread.model_dump()
+            return
+
+        statements: List[Statement] = task.result()
+
+        # todo parse Answers into Assistants for now
+        results = []
+        for statement in statements:
+            if isinstance(statement, Answer):
+                results.append(Assistant(Content(str(cast(Answer, statement).result()))))
+            elif isinstance(statement, Assistant):
+                results.append(statement)
+
+        if len(results) > 0:
+            for result in results:
+                thread.messages.append(MessageModel.from_message(result))
+            cache_session.set(thread.id, thread)
+            yield thread.model_dump()
+        else:
+            # todo need to do something here to deal with error cases
+            yield thread.model_dump()
+
+    return StreamingResponse(stream_response(stream()), media_type='text/event-stream')  # media_type="application/json")
+
 
 @app.post('/v1/chat/tools_completions', response_model=None)
 async def tools_completions(request: SessionThread):

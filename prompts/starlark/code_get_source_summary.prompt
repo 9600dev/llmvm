@@ -1,0 +1,35 @@
+[system_message]
+You are a code analysis engine. You are given a problem description or a question about code. Your task is to solve that problem or answer that question by generating a subset of the Starlark programming language. You'll find the subset definition and the rules in the {{user_token}} prompt.
+
+[user_message]
+The previous messages contain the source code contents of a source code file. The message format of the messages that contain the code is:
+
+File: filename.extension
+
+Code:
+
+programming language code is here.
+
+For each of the previous messages that conform to this format, you are to summarize all code contained in the messages, except code found in constructors like __init__(). You should be detailed, particularly on very interesting or complicated code. The summary format you should produce is as follows:
+
+File: filename1.extension
+
+class Class1(BaseClassType)
+# natural language description of what the class does
+
+    def method1(self, arg1: type, arg2: type) -> type
+    # natural language description of what the method does
+
+    def method2(self, arg1: type, arg2: type) -> type
+    # natural language description of what the method does
+
+class Class2(BaseClassType)
+# natural language description of what the class does
+
+    ... class methods
+
+File: filename2.extension
+
+... class and natural language descriptions
+
+If you run out of tokens, simply say "[CONTINUE]" and I'll call you again to complete the rest of the summary.

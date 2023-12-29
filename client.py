@@ -9,7 +9,7 @@ import sys
 import tempfile
 import textwrap
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 import async_timeout
 import click
@@ -19,6 +19,8 @@ import nest_asyncio
 import pandas as pd
 import pyperclip
 import rich
+from anthropic.lib.streaming._messages import (AsyncMessageStream,
+                                               AsyncMessageStreamManager)
 from anthropic.types.completion import Completion
 from click_default_group import DefaultGroup
 from PIL import Image
@@ -41,8 +43,9 @@ from helpers.logging_helpers import (disable_timing, get_timer, setup_logging,
                                      suppress_logging)
 from helpers.pdf import PdfHelpers
 from objects import (Assistant, AstNode, Content, DownloadItem, Executor,
-                     ImageContent, Message, MessageModel, PdfContent, Response,
-                     SessionThread, StreamNode, System, TokenStopNode, User)
+                     FileContent, ImageContent, Message, MessageModel,
+                     PdfContent, Response, SessionThread, StreamNode, System,
+                     TokenStopNode, User)
 from openai_executor import OpenAIExecutor
 
 nest_asyncio.apply()
@@ -124,11 +127,40 @@ def parse_command_string(s, command):
     return tokens
 
 
+def parse_path(ctx, param, value) -> List[str]:
+    files = []
+
+    if isinstance(value, str):
+        value = [value]
+
+    for item in value:
+        if os.path.isdir(item):
+            # If it's a directory, add all files within
+            for dirpath, dirnames, filenames in os.walk(item):
+                for filename in filenames:
+                    files.append(os.path.join(dirpath, filename))
+        elif os.path.isfile(item):
+            # If it's a file, add it to the list
+            files.append(item)
+        else:
+            raise click.BadParameter(f'Path {item} is not a valid file or directory')
+    return files
+
+
 async def stream_gpt_response(response, print_lambda: Callable):
     async with async_timeout.timeout(280):
+        # anthropic new messages API
+        if isinstance(response, AsyncMessageStreamManager):
+            async with response as stream_async:
+                async for text in stream_async.text_stream:  # type: ignore
+                    print_lambda(text)
+
+            _ = await stream_async.get_final_message()
+            return
         try:
             async for chunk in response:
-                if isinstance(chunk, Completion):  # anthropic completion
+                # anthropic completion prior to messages API introduction
+                if isinstance(chunk, Completion):
                     print_lambda(chunk.completion)
                 else:
                     if chunk.choices[0].delta.content:
@@ -236,7 +268,7 @@ async def __execute_llm_call_direct(
     api_key: str,
     executor_name: str,
     model_name: str,
-    context_messages: list[Message] = [],
+    context_messages: Sequence[Message] = [],
 ) -> SessionThread:
     global timing
 
@@ -249,7 +281,7 @@ async def __execute_llm_call_direct(
         message_response += s
         printer.write(s)  # type: ignore
 
-    messages_list = [Message.to_dict(m) for m in context_messages + [message]]
+    messages_list = [Message.to_dict(m) for m in list(context_messages) + [message]]
     executor: Optional[Executor] = None
 
     if executor_name == 'openai':
@@ -281,7 +313,7 @@ async def execute_llm_call(
     executor: str,
     model: str,
     mode: str,
-    context_messages: list[Message] = [],
+    context_messages: Sequence[Message] = [],
     cookies: List[Dict[str, Any]] = [],
     append_to_server_thread: bool = True,
 ) -> SessionThread:
@@ -303,8 +335,17 @@ async def execute_llm_call(
         thread.executor = executor
         thread.model = model
 
+        if mode == 'direct' or mode == 'tool' or mode == 'auto':
+            endpoint = 'tools_completions'
+        else:
+            endpoint = 'code_completions'
+
         async with httpx.AsyncClient(timeout=280.0) as client:
-            async with client.stream('POST', f'{api_endpoint}/v1/chat/tools_completions', json=thread.model_dump()) as response:
+            async with client.stream(
+                'POST',
+                f'{api_endpoint}/v1/chat/{endpoint}',
+                json=thread.model_dump(),
+            ) as response:
                 objs = await stream_response(response, StreamPrinter('').write)
 
         await response.aclose()
@@ -313,40 +354,58 @@ async def execute_llm_call(
             session_thread = SessionThread.model_validate(objs[-1])
             return session_thread
         return thread
+
     except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
-        # server is down, go direct. this means that executor and model can't be nothing
-        if not executor and not model:
-            if Container.get_config_variable('LLMVM_EXECUTOR', 'executor'):
-                executor = Container.get_config_variable('LLMVM_EXECUTOR')
+        if mode == 'tool' or mode == 'code':
+            logging.debug('LLMVM server is down, but we are in tool mode. Cannot execute directly')
+            raise ex
 
-            if Container.get_config_variable('LLMVM_MODEL', 'model'):
-                model = Container.get_config_variable('LLMVM_MODEL')
+    # server is down, go direct. this means that executor and model can't be nothing
+    if not executor and not model:
+        if Container.get_config_variable('LLMVM_EXECUTOR', 'executor'):
+            executor = Container.get_config_variable('LLMVM_EXECUTOR')
 
-        if executor and model:
-            api_key = executor == 'openai' \
-                and (Container.get_config_variable('OPENAI_API_KEY') or os.environ.get('ANTHROPIC_API_KEY', ''))
-            if not api_key: logging.warning(f'No api key found for executor {executor}.')
-            return await __execute_llm_call_direct(message, api_key, executor, model, context_messages)  # type: ignore
-        elif Container.get_config_variable('OPENAI_API_KEY'):
+        if Container.get_config_variable('LLMVM_MODEL', 'model'):
+            model = Container.get_config_variable('LLMVM_MODEL')
+
+    if executor and model:
+        if executor == 'openai' and Container.get_config_variable('OPENAI_API_KEY'):
             return await __execute_llm_call_direct(
                 message,
                 Container.get_config_variable('OPENAI_API_KEY'),
                 'openai',
-                'gpt-4-vision-preview',
+                model,
                 context_messages
             )
-        elif os.environ.get('ANTHROPIC_API_KEY'):
+        elif executor == 'anthropic' and Container.get_config_variable('ANTHROPIC_API_KEY'):
             return await __execute_llm_call_direct(
                 message,
                 Container.get_config_variable('ANTHROPIC_API_KEY'),
                 'anthropic',
-                'claude-2.1',
+                model,
                 context_messages
             )
         else:
-            logging.warning('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
-            raise ex
-
+            raise ValueError(f'Executor {executor} and model {model} are set, but no API key is set.')
+    elif Container.get_config_variable('OPENAI_API_KEY'):
+        return await __execute_llm_call_direct(
+            message,
+            Container.get_config_variable('OPENAI_API_KEY'),
+            'openai',
+            'gpt-4-vision-preview',
+            context_messages
+        )
+    elif os.environ.get('ANTHROPIC_API_KEY'):
+        return await __execute_llm_call_direct(
+            message,
+            Container.get_config_variable('ANTHROPIC_API_KEY'),
+            'anthropic',
+            'claude-2.1',
+            context_messages
+        )
+    else:
+        logging.warning('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
+        raise ValueError('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
 
 def llm(
     message: Optional[str | bytes | Message],
@@ -355,6 +414,7 @@ def llm(
     endpoint: str,
     executor: str,
     model: str,
+    context_messages: Sequence[Message] = [],
     cookies: List[Dict[str, Any]] = [],
 ) -> SessionThread:
     user_message = User(Content(''))
@@ -365,7 +425,7 @@ def llm(
     elif isinstance(message, Message):
         user_message = message
 
-    context_messages: List[Message] = []
+    context_messages_list = list(context_messages)
 
     if not sys.stdin.isatty():
         # input is coming from a pipe, could be binary or text
@@ -380,11 +440,11 @@ def llm(
                     img.save(output, format='JPEG')
                     StreamPrinter('user').display_image(output.getvalue())
                     bytes_buffer.seek(0)
-                context_messages.append(User(ImageContent(bytes_buffer.read(), url='cli')))
+                context_messages_list.append(User(ImageContent(bytes_buffer.read(), url='cli')))
             elif Helpers.is_pdf(bytes_buffer):
-                context_messages.append(User(PdfContent(bytes_buffer.read(), url='cli')))
+                context_messages_list.append(User(PdfContent(bytes_buffer.read(), url='cli')))
             else:
-                context_messages.append(User(Content(bytes_buffer.read().decode('utf-8'))))
+                context_messages_list.append(User(Content(bytes_buffer.read().decode('utf-8'))))
 
     append_to_server_thread = True
 
@@ -393,7 +453,7 @@ def llm(
     if isinstance(message, str) and any(role_string in message for role_string in role_strings):
         all_messages = parse_message_thread(message)
         user_message = all_messages[-1]
-        context_messages += all_messages[:-1]
+        context_messages_list += all_messages[:-1]
         append_to_server_thread = False
 
     return asyncio.run(
@@ -404,9 +464,9 @@ def llm(
             executor,
             model,
             mode,
-            context_messages,
+            context_messages_list,
             cookies,
-            append_to_server_thread
+            append_to_server_thread,
         )
     )
 
@@ -498,6 +558,8 @@ def markdown__rich_console__(
 
 
 def print_response(messages: List[Message], suppress_role: bool = False):
+    # if we're being piped or redirected, we probably want to keep the
+    # original output of the LLM, rather than render markdown.
     def contains_token(s, tokens):
         return any(token in s for token in tokens)
 
@@ -511,7 +573,7 @@ def print_response(messages: List[Message], suppress_role: bool = False):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
             console.print(Markdown('PdfContent: ' + content.url))
-        elif contains_token(str(content), markdown_tokens):
+        elif contains_token(str(content), markdown_tokens) and sys.stdout.isatty():
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
             console.print(Markdown(str(content)))
@@ -724,8 +786,8 @@ class Repl():
             ):
                 tokens = ['--id', str(thread_id)] + tokens
             if (
-                (has_option('--mode', command) or has_option('-m', command))
-                and ('--mode' not in tokens or '-m' not in tokens)
+                (has_option('--mode', command))
+                and ('--mode' not in tokens)
             ):
                 tokens = ['--mode', current_mode] + tokens
             return tokens
@@ -927,7 +989,7 @@ def cookies(
 
             if os.path.exists(os.path.expanduser('~/.mozilla/firefox')):
                 # find any cookies.sqlite file and print the directory
-                for root, dirs, files in os.walk(os.path.expanduser('~/.mozilla/firefox')):
+                for root, _, files in os.walk(os.path.expanduser('~/.mozilla/firefox')):
                     for file in files:
                         if file == 'cookies.sqlite':
                             start_locations.append(os.path.join(root, file))
@@ -980,7 +1042,7 @@ def cookies(
 @click.argument('actor', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to retrieve.')
-@click.option('--mode', '-m', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
+@click.option('--mode', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
               help='ode to use "auto", "tool" or "direct". Default is "auto".')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
@@ -1183,7 +1245,7 @@ def ingest(
 
     if os.path.isdir(filename_directory):
         if recursive:
-            for root, dirs, filenames in os.walk(filename_directory):
+            for root, _, filenames in os.walk(filename_directory):
                 for filename in filenames:
                     files.append(os.path.join(root, filename))
         else:
@@ -1279,12 +1341,82 @@ def new(
     thread = asyncio.run(get_thread(endpoint, 0))
     thread_id = thread.id
 
+@cli.command('code')
+@click.argument('message', type=str, required=False, default='')
+@click.option('--path', '-p', callback=parse_path, required=True,
+              help='Path to a single file, multiple files, or a directory of source files to use.')
+@click.option('--id', '-i', type=int, required=False, default=0,
+              help='thread ID to send message to. Default is last thread.')
+@click.option('--endpoint', '-e', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+              help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
+@click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
+              help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
+@click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
+              help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
+@click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
+def code(
+    message: Optional[str | bytes | Message],
+    path: List[str],
+    id: int,
+    endpoint: str,
+    executor: str,
+    model: str,
+    suppress_role: bool,
+):
+    global thread_id
+    global last_thread
+
+    if not suppress_role and not sys.stdin.isatty():
+        suppress_role = True
+
+    if model:
+        if (model.startswith('"') and model.endswith('"')) or (model.startswith("'") and model.endswith("'")):
+            model = model[1:-1]
+
+    if executor:
+        if (executor.startswith('"') and executor.endswith('"')) or (executor.startswith("'") and executor.endswith("'")):
+            executor = executor[1:-1]
+
+    if message:
+        if isinstance(message, str) and (
+            (message.startswith('"') and message.endswith('"'))
+            or (message.startswith("'") and message.endswith("'"))
+        ):
+            message = message[1:-1]
+
+        if id <= 0:
+            id = thread_id
+
+        # batch up the files into User messages with FileContent type
+        files: Sequence[User] = []
+        for file_path in path:
+            with open(file_path, 'rb') as f:
+                file_content = f.read()
+                files.append(User(FileContent(file_content, url=os.path.basename(file_path))))
+
+        thread = llm(
+            message=message,
+            id=id,
+            mode='code',
+            endpoint=endpoint,
+            executor=executor,
+            model=model,
+            cookies=[],
+            context_messages=files
+        )
+        if not suppress_role: StreamPrinter('').write_string('\n')
+        print_response([MessageModel.to_message(thread.messages[-1])], suppress_role)
+        if not suppress_role: StreamPrinter('').write_string('\n')
+        last_thread = thread
+        return thread
+
 
 @cli.command('message')
 @click.argument('message', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to send message to. Default is last thread.')
-@click.option('--mode', '-m', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
+@click.option('--mode', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
               help='Mode to use "auto", "tool" or "direct". Default is "auto".')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
@@ -1335,7 +1467,16 @@ def message(
             with open(cookies, 'r') as f:
                 cookies_list = Helpers.read_netscape_cookies(f.read())
 
-        thread = llm(message, id, mode, endpoint, executor, model, cookies_list)
+        thread = llm(
+            message=message,
+            id=id,
+            mode=mode,
+            endpoint=endpoint,
+            executor=executor,
+            model=model,
+            context_messages=[],
+            cookies=cookies_list
+        )
         if not suppress_role: StreamPrinter('').write_string('\n')
         print_response([MessageModel.to_message(thread.messages[-1])], suppress_role)
         if not suppress_role: StreamPrinter('').write_string('\n')

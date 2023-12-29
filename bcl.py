@@ -258,8 +258,8 @@ class Searcher():
             'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': url_to_text, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
             'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
-            'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
             'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
+            'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
         }  # noqa:E501
 
         # classify the search engine
@@ -676,14 +676,40 @@ class SourceProject:
         files,
         messages: List[Message],
         starlark_runtime: StarlarkRuntime,
-        original_code: str,
-        original_query: str,
         vector_search: VectorSearch,
     ):
-        self.sources = []
+        self.sources: List[Source] = []
         for source_path in files:
             source = Source(source_path)
             self.sources.append(source)
+
+    def get_source_structure(self) -> str:
+        """
+        gets all class names, method names, and docstrings for all classes and methods in all files
+        listed in "Files:". This method does not return any source code.
+        """
+        structure = ''
+        for source in self.sources:
+            structure += f'File: {source.file_path}\n'
+            for class_def in source.get_classes():
+                structure += f'class {class_def.name}:\n'
+                structure += f'    """{class_def.docstring}"""\n'
+                structure += '\n'
+                for method_def in source.get_methods(class_def.name):
+                    structure += f'    def {method_def.name}:\n'
+                    structure += f'        """{method_def.docstring}"""\n'
+                    structure += '\n'
+            structure += '\n\n'
+
+        return structure
+
+    # def get_source_summary(self, file_name: str) -> str:
+    # get_source_summary(file_name: str) -> str  # gets all class names, method names and natural language descriptions of class and method names for a given source file. The file_name must be in the "Files:" list. It does not return any source code.
+    # get_source(file_name: str) -> str  # gets the source code for a given file. The file_name must be in the "Files:" list.
+    # get_classes() -> List[str]  # gets all the class signatures and their docstrings for all source files in the project directory recursively.
+    # get_class_source(class_name: str) -> str  # gets the source code for a given class.
+    # get_methods(class_name: str) -> List[str]  # gets all the method signatures and their docstrings for given class.
+    # get_references(class_name: str) -> List[str]  # gets all the callee method signatures and their docstrings that call any method from the provided class.
 
     def get_files(self):
         return self.sources

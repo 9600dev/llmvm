@@ -358,7 +358,44 @@ class StarlarkExecutionController(Controller):
             stream_handler=stream_handler,
         ))
 
-    async def abuild_runnable_ast(
+    async def abuild_runnable_code_ast(
+        self,
+        messages: List[Message],
+        files: List[str],
+        temperature: float = 0.0,
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
+    ) -> Assistant:
+        logging.debug('abuild_runnable_code_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
+        model = model if model else self.executor.get_default_model()
+        logging.debug('abuild_runnable_code_ast() model = {}, executor = {}'.format(model, self.executor.name()))
+
+        tools_message = Helpers.load_and_populate_message(
+            prompt_filename='prompts/starlark/starlark_code_insights.prompt',
+            template={
+                'user_input': str(messages[-1].message),
+                'files': '\n'.join(files),
+            },
+            user_token=self.get_executor().user_token(),
+            assistant_token=self.get_executor().assistant_token(),
+            append_token=self.get_executor().append_token(),
+        )
+
+        llm_response = await self.aexecute_llm_call(
+            message=tools_message,
+            context_messages=messages[0:-1],
+            query='',
+            original_query='',
+            prompt_filename='prompts/starlark/starlark_code_insights.prompt',
+            completion_tokens=4096,
+            temperature=temperature,
+            lifo=False,
+            stream_handler=stream_handler,
+            model=model,
+        )
+        return llm_response
+
+    async def abuild_runnable_tools_ast(
         self,
         messages: List[Message],
         agents: List[Callable],
@@ -366,10 +403,9 @@ class StarlarkExecutionController(Controller):
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
         model: Optional[str] = None,
     ) -> Assistant:
-        logging.debug('abuild_runnable_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
+        logging.debug('abuild_runnable_tools_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
         model = model if model else self.executor.get_default_model()
-        logging.debug('abuild_runnable_ast() model = {}'.format(model))
-        logging.debug('abuild_runnable_ast() executor = {}'.format(self.executor.name()))
+        logging.debug('abuild_runnable_tools_ast() model = {}, executor = {}'.format(model, self.executor.name()))
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
 
@@ -406,6 +442,7 @@ class StarlarkExecutionController(Controller):
         mode: str = 'auto',
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
         model: Optional[str] = None,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> List[Statement]:
         model = model if model else self.executor.get_default_model()
 
@@ -433,18 +470,31 @@ class StarlarkExecutionController(Controller):
             )
         elif mode == 'tool':
             classification = {'tool': 1.0}
+        elif mode == 'code':
+            classification = {'code': 1.0}
         else:
             classification = {'direct': 1.0}
 
         # if it requires tooling, hand it off to the AST execution engine
-        if 'tool' in classification:
-            response = await self.abuild_runnable_ast(
-                messages=messages,
-                agents=self.agents,
-                temperature=temperature,
-                stream_handler=stream_handler,
-                model=model,
-            )
+        if 'tool' in classification or 'code' in classification:
+            response: Assistant = Assistant(Content(''))
+
+            if 'tool' in classification:
+                response = await self.abuild_runnable_tools_ast(
+                    messages=messages,
+                    agents=self.agents,
+                    temperature=temperature,
+                    stream_handler=stream_handler,
+                    model=model,
+                )
+            elif 'code' in classification:
+                response = await self.abuild_runnable_code_ast(
+                    messages=messages,
+                    files=template_args['files'] if template_args and 'files' in template_args else [],
+                    temperature=temperature,
+                    stream_handler=stream_handler,
+                    model=model,
+                )
 
             assistant_response = str(response.message).replace('Assistant:', '').strip()
 

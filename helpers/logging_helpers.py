@@ -137,6 +137,7 @@ def setup_logging(
     logging.getLogger('httpcore').setLevel(logging.WARNING)
     logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
     logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('anthropic').setLevel(logging.WARNING)
 
     logger: Logger = logging.getLogger()
 
