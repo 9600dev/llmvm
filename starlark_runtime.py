@@ -121,6 +121,7 @@ class StarlarkRuntime:
         self.globals_dict['source_project'] = source
         self.globals_dict['get_source_structure'] = source.get_source_structure
         self.globals_dict['get_source'] = source.get_source
+        self.globals_dict['get_source_summary'] = source.get_source_summary
         self.globals_dict['get_classes'] = source.get_classes
         self.globals_dict['get_methods'] = source.get_methods
         self.globals_dict['get_references'] = source.get_references
@@ -575,9 +576,8 @@ class StarlarkRuntime:
             )
             return answer
 
-        snippet = str(expr).replace('\n', ' ')[:75]
-        write_client_stream(Content('I think I have an answer, but I am double checking it...\n'))
-        write_client_stream(Content(f'answer("{snippet}...")\n'))
+        snippet = str(expr).replace('\n', ' ')[:150]
+        write_client_stream(Content(f'I think I have an answer, but I am double checking it: answer("{snippet} ...")\n'))
 
         # if we have a FunctionCallMeta object, it's likely we've called a helper function
         # and we're just keen to return that.

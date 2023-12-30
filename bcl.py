@@ -703,6 +703,30 @@ class SourceProject:
 
         return structure
 
+    def get_source_summary(self, file_path: str) -> str:
+        def _summary_helper(source: Source) -> str:
+            summary = ''
+            for class_def in source.get_classes():
+                summary += f'class {class_def.name}:\n'
+                summary += f'    """{class_def.docstring}"""\n'
+                summary += '\n'
+
+                for method_def in source.get_methods(class_def.name):
+                    summary += f'    def {method_def.name}:\n'
+                    summary += f'        """{method_def.docstring}"""\n'
+                    summary += '\n'
+
+                summary += '\n\n'
+            return summary
+        """
+        gets all class names, method names and natural language descriptions of class and method names for a given source file.
+        The file_name must be in the "Files:" list. It does not return any source code.
+        """
+        for source in self.sources:
+            if source.file_path == file_path:
+                return _summary_helper(source)
+        raise ValueError(f"Source file not found: {file_path}")
+
     # def get_source_summary(self, file_name: str) -> str:
     # get_source_summary(file_name: str) -> str  # gets all class names, method names and natural language descriptions of class and method names for a given source file. The file_name must be in the "Files:" list. It does not return any source code.
     # get_source(file_name: str) -> str  # gets the source code for a given file. The file_name must be in the "Files:" list.
@@ -717,7 +741,7 @@ class SourceProject:
     def get_source(self, file_path):
         for source in self.sources:
             if source.file_path == file_path:
-                return source
+                return source.source_code
         raise ValueError(f"Source file not found: {file_path}")
 
     def get_methods(self, class_name) -> List['Source.Symbol']:

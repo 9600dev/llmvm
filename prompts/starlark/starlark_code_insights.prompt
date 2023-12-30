@@ -25,7 +25,7 @@ get_class_source(class_name: str) -> str  # gets the source code for a given cla
 get_methods(class_name: str) -> List[str]  # gets all the method signatures and their docstrings for given class.
 get_references(class_name: str) -> List[str]  # gets all the callee method signatures and their docstrings that call any method from the provided class.
 llm_call(expression_list: List, instruction: str) -> str. Allows you to call yourself from my Starlark execution engine to perform arbitrary computation, text analysis, or text translation for us. You return a text result as a string. Use it by emitting: llm_call([variable1, "expression2"], "instruction to large language model").   # If the Starlark execution engine sees this call, it will send whatever values are in "expression_list" as {{user_token}} messages, along with the natural language instruction message you specify in "instruction", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summation, text understanding, text analysis, text comparison, text differences and so on.
-llm_bind(expression, function_str: str) -> Callable.  # allows you to properly bind the helper function call-site to the data in the expression. This is useful in situations where you have arbitrary data in the expression, and you want to late bind that data to the helper function arguments. Example: class_name = llm_call([source_code], "get the name of the class that talks to the network") and you want to bind that data to a helper function get_class_source(class_name: str). You can call llm_bind(class_name, "get_class_source(class_name: str)") and it will return a properly late-bound callsite: get_class_source("NetworkHelpers").
+llm_bind(expression, function_str: str) -> Callable.  # allows you to properly bind the helper function call-site to the data in the expression. This is useful in situations where you have arbitrary data in the expression, and you want to late bind that data to the helper function arguments. Example: class_name = llm_call([source_code_string], "get the name of the class that talks to the network") and you want to bind that data to a helper function get_class_source(class_name: str). You can call llm_bind(class_name, "get_class_source(class_name: str)") and it will return a properly late-bound callsite: get_class_source("NetworkHelpers").
 llm_loop_bind(expression, llm_instruction: str, count: int = sys.maxsize) -> Iterator[str]  # allows you to properly bind text to a string list of size count. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings of size 'count' extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.
 answer(expression, checked: bool = true) -> Answer.   # allows you to emit an answer to the natural language query, question or problem back to the user. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Starlark code. You can emit multiple answers at any stage of the execution of code. If 'checked' is false, do not double check the answer against the "{{user_colon_token}}" query - this is useful for emitting partial answers.
 
@@ -43,13 +43,13 @@ c.py
 {{assistant_colon_token}}
 ```starlark
 # summarize the README.md file
-readme_summary = llm_call(["README.md"], "summarize this text")
+readme_summary = llm_call([get_source("README.md")], "summarize this text")
 # summarize the source files
-a_summary = llm_call(["a.py"], "summarize this python source code")
+a_summary = llm_call([get_source("a.py")], "summarize this python source code")
 answer(a_summary, false)
-b_summary = llm_call(["b.py"], "summarize this python source code")
+b_summary = llm_call([get_source("b.py")], "summarize this python source code")
 answer(b_summary, false)
-c_summary = llm_call(["c.py"], "summarize this python source code")
+c_summary = llm_call([get_source("c.py")], "summarize this python source code")
 answer(c_summary, false)
 result = llm_call([a_summary, b_summary, c_summary], "using the summaries of each file, put together a comprehensive summary of the code-base" )
 # generate an answer to the query for the user

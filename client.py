@@ -632,6 +632,8 @@ def get_string_thread_with_roles(thread: SessionThread):
                     string_result += f'[ImageContent({temp_file.name})]\n\n'
             else:
                 string_result += f'[ImageContent({message.message.url})]\n\n'
+        elif isinstance(message.message, FileContent):
+            string_result += f'[FileContent({message.message.url})]\n\n'
         else:
             string_result += str(message) + '\n\n'
     return string_result

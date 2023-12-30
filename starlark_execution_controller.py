@@ -498,7 +498,6 @@ class StarlarkExecutionController(Controller):
                     stream_handler=stream_handler,
                     model=model,
                 )
-
             assistant_response = str(response.message).replace('Assistant:', '').strip()
 
             # anthropic can often embed the code in ```python blocks
