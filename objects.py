@@ -262,10 +262,14 @@ class Content(AstNode):
         self,
         sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
         content_type: str = 'text',
+        url: str = '',
     ):
         if sequence is None:
             self.sequence = ''
             return
+
+        self.content_type = content_type
+        self.url = url
 
         if isinstance(sequence, str):
             self.sequence = [sequence]
@@ -298,6 +302,15 @@ class Content(AstNode):
     def __repr__(self):
         return f'Content({self.sequence})'
 
+    def b64encode(self) -> str:
+        if isinstance(self.sequence, bytes):
+            return base64.b64encode(self.sequence).decode('utf-8')
+        raise ValueError('sequence is not bytes')
+
+    @staticmethod
+    def decode(base64_str: str):
+        return base64.b64decode(base64_str)
+
 
 class ImageContent(Content):
     def __init__(
@@ -305,38 +318,28 @@ class ImageContent(Content):
         sequence: bytes,
         url: str = '',
     ):
-        # super().__init__(sequence, 'image')
+        super().__init__(sequence, 'image', url)
         self.sequence = sequence
-        self.url = url
 
 
 class PdfContent(Content):
     def __init__(
         self,
-        sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
+        sequence: bytes,
         url: str = '',
     ):
-        super().__init__(sequence, 'pdf')
-        self.url = url
+        super().__init__(sequence, 'pdf', url)
+        self.sequence = sequence
 
 
 class FileContent(Content):
     def __init__(
         self,
-        sequence: bytes | str,
+        sequence: bytes,
         url: str = '',
     ):
+        super().__init__(sequence, 'file', url)
         self.sequence = sequence
-        self.url = url
-
-    def encode(self) -> str:
-        if isinstance(self.sequence, str):
-            return self.sequence
-        return base64.b64encode(self.sequence).decode('utf-8')
-
-    @staticmethod
-    def decode(base64_str: str) -> bytes:
-        return base64.b64decode(base64_str)
 
 
 class Message(AstNode):
@@ -354,6 +357,10 @@ class Message(AstNode):
     def from_dict(message: Dict[str, Any]) -> 'Message':
         role = message['role']
         message_content = message['content']
+
+        # this can be from a MessageModel, which has a url and content_type
+        # or from the LLM, which doesn't.
+        url = message['url'] if 'url' in message else ''
         content_type = message['content_type'] if 'content_type' in message else ''
 
         content = Content(message_content)
@@ -373,8 +380,7 @@ class Message(AstNode):
 
         # todo: pdf parsing here
         if role == 'user' and content_type == 'file':
-            return User(FileContent(message_content))
-
+            return User(FileContent(FileContent.decode(str(message_content)), url))
         if role == 'user':
             return User(content)
         elif role == 'system':
@@ -387,7 +393,7 @@ class Message(AstNode):
         return {'role': self.role(), 'content': self.message}
 
     @staticmethod
-    def to_dict(message: 'Message', add_content_type: bool = False) -> Dict[str, Any]:
+    def to_dict(message: 'Message', add_metadata: bool = False) -> Dict[str, Any]:
         # primarily to pass to Anthropic or OpenAI api
         if isinstance(message, User) and isinstance(message.message, ImageContent):
             return {
@@ -399,21 +405,24 @@ class Message(AstNode):
                         'detail': 'high'
                     }
                 }],
-                **({'content_type': 'image'} if add_content_type else {})
+                **({'url': message.message.url} if add_metadata else {}),
+                **({'content_type': 'image'} if add_metadata else {})
             }
         elif isinstance(message, User) and isinstance(message.message, PdfContent):
             raise ValueError('pdf not supported')
         elif isinstance(message, User) and isinstance(message.message, FileContent):
             return {
                 'role': message.role(),
-                'content': message.message.encode(),
-                'content_type': 'file'
+                'content': message.message.b64encode(),
+                **({'url': message.message.url} if add_metadata else {}),
+                **({'content_type': 'file'} if add_metadata else {})
             }
         else:
             return {
                 'role': message.role(),
                 'content': str(message.message),
-                **({'content_type': 'image'} if add_content_type else {})
+                **({'url': message.message.url} if add_metadata else {}),
+                **({'content_type': ''} if add_metadata else {})
             }
 
 
@@ -753,6 +762,7 @@ class MessageModel(BaseModel):
     role: str
     content_type: Optional[str] = None
     content: str | List[Dict[str, Any]]
+    url: Optional[str] = None
 
     def to_message(self) -> Message:
         return Message.from_dict(self.model_dump())

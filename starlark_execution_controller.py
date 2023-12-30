@@ -488,9 +488,12 @@ class StarlarkExecutionController(Controller):
                     model=model,
                 )
             elif 'code' in classification:
+                files = template_args['files'] if template_args and 'files' in template_args else []
+                if files:
+                    self.starlark_runtime.globals_dict['source_project'].set_files(files)
                 response = await self.abuild_runnable_code_ast(
                     messages=messages,
-                    files=template_args['files'] if template_args and 'files' in template_args else [],
+                    files=files,
                     temperature=temperature,
                     stream_handler=stream_handler,
                     model=model,

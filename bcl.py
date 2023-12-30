@@ -673,12 +673,12 @@ class FunctionBindable():
 class SourceProject:
     def __init__(
         self,
-        files,
-        messages: List[Message],
-        starlark_runtime: StarlarkRuntime,
-        vector_search: VectorSearch,
+        starlark_runtime: StarlarkRuntime
     ):
+        self.starlark_runtime = starlark_runtime
         self.sources: List[Source] = []
+
+    def set_files(self, files):
         for source_path in files:
             source = Source(source_path)
             self.sources.append(source)
@@ -714,7 +714,7 @@ class SourceProject:
     def get_files(self):
         return self.sources
 
-    def get_source_file(self, file_path):
+    def get_source(self, file_path):
         for source in self.sources:
             if source.file_path == file_path:
                 return source

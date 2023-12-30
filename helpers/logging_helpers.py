@@ -55,8 +55,8 @@ timing = TimedLogger()
 global_loggers: Dict[str, Logger] = {}
 handler = RichHandler()
 
-if not os.path.exists(Container().get('log_directory')):
-    os.makedirs(Container().get('log_directory'))
+if not os.path.exists(Container.get_config_variable('log_directory', default='~/.local/share/llmvm/logs')):
+    os.makedirs(Container.get_config_variable('log_directory', default='~/.local/share/llmvm/logs'))
 
 def no_indent_debug(logger, message) -> None:
     if logger.level <= logging.DEBUG:

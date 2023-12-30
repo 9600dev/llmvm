@@ -75,6 +75,9 @@ class Container(metaclass=Singleton):
 
     @staticmethod
     def get_config_variable(name: str, alternate_name: str = '', default: str = '') -> str:
+        if default.startswith('~'):
+            default = os.path.expanduser(default)
+
         if name in os.environ:
             return os.environ.get(name, default)
 

@@ -311,17 +311,18 @@ async def code_completions(request: SessionThread):
     local_files = []
 
     # typically there are User messages with FileContent Content type in them
-    # we need to download the files and store them locally
+    # we need to download the files, store them locally, then remove them from the messages
+    # as the prompt will generate code that will be able to access the files locally
     try:
         for file_content in [m.message for m in messages if m.message is not None and isinstance(m.message, FileContent)]:
             # full_file_name = file_content.url
-            abs_path = os.path.abspath(file_content.url)
+            dirname = os.path.dirname(file_content.url)
             base_name = os.path.basename(file_content.url)
 
-            os.makedirs(f"{cdn_directory}/{thread.id}{abs_path}", exist_ok=True)
-            with open(f"{cdn_directory}/{thread.id}{abs_path}/{base_name}", "wb") as buffer:
-                buffer.write(FileContent.decode(str(file_content.sequence)))
-                local_files.append(f"{cdn_directory}/{thread.id}{abs_path}")
+            os.makedirs(f"{cdn_directory}/{thread.id}{dirname}", exist_ok=True)
+            with open(f"{cdn_directory}/{thread.id}{dirname}/{base_name}", "wb") as buffer:
+                buffer.write(file_content.sequence)  # type: ignore
+                local_files.append(f"{cdn_directory}/{thread.id}{dirname}/{base_name}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Exception: {e}")
 
@@ -350,7 +351,7 @@ async def code_completions(request: SessionThread):
 
         async def execute_and_signal():
             result = await controller.aexecute(
-                messages=messages,
+                messages=[message for message in messages if not isinstance(message.message, FileContent)],
                 temperature=thread.temperature,
                 mode='code',
                 stream_handler=callback,

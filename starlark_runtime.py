@@ -87,12 +87,13 @@ class StarlarkRuntime:
                         return wrapper
                 raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
-        from bcl import BCL
+        from bcl import BCL, SourceProject
 
         self.answers = []
         self.locals_dict = {}
         self.globals_dict = {}
 
+        # todo: fix this hack
         self.globals_dict['llm_bind'] = self.llm_bind
         self.globals_dict['llm_call'] = self.llm_call
         self.globals_dict['llm_loop_bind'] = self.llm_loop_bind
@@ -115,6 +116,14 @@ class StarlarkRuntime:
         self.globals_dict['os'] = os
         self.globals_dict['pandas'] = pd
         self.globals_dict['datetime'] = dt
+        # code stuff
+        source = SourceProject(self)
+        self.globals_dict['source_project'] = source
+        self.globals_dict['get_source_structure'] = source.get_source_structure
+        self.globals_dict['get_source'] = source.get_source
+        self.globals_dict['get_classes'] = source.get_classes
+        self.globals_dict['get_methods'] = source.get_methods
+        self.globals_dict['get_references'] = source.get_references
 
     def __find_variable_assignment(
         self,
@@ -811,7 +820,9 @@ class StarlarkRuntime:
         self.original_code = starlark_code
         self.original_query = original_query
         self.messages_list = messages
-        self.setup()
+        # todo: why are we running setup again here?
+        # self.setup()
+        self.locals_dict = {}
 
         return self.__compile_and_execute(starlark_code)
 
