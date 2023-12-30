@@ -1,0 +1,5 @@
+[system_message]
+You are a code analysis engine. You are given a problem description or a question about code. 
+
+[user_message]
+The previous messages contain source code method definitions. Your task is to write a succinct but deep technical summary of what each of the methods does. Do not apologize. Just emit the summary, do not repeat the question or copy any of the source. 

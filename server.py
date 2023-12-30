@@ -310,19 +310,31 @@ async def code_completions(request: SessionThread):
     messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
     local_files = []
 
+    # todo: refector this crap, it's not good.
     # typically there are User messages with FileContent Content type in them
     # we need to download the files, store them locally, then remove them from the messages
     # as the prompt will generate code that will be able to access the files locally
+
+    # alternatively, we could just pass the files in as a list of strings
     try:
         for file_content in [m.message for m in messages if m.message is not None and isinstance(m.message, FileContent)]:
-            # full_file_name = file_content.url
-            dirname = os.path.dirname(file_content.url)
-            base_name = os.path.basename(file_content.url)
+            # check to see if the FileContent is just a pointer to a local file
+            if file_content.is_local():
+                local_files.append(file_content.url)
+            else:
+                # put it in the CDN directory so the runtime can reference it
+                # file_content.url is absolute path to client.py directory
+                dirname = os.path.dirname(file_content.url)
+                base_name = os.path.basename(file_content.url)
 
-            os.makedirs(f"{cdn_directory}/{thread.id}{dirname}", exist_ok=True)
-            with open(f"{cdn_directory}/{thread.id}{dirname}/{base_name}", "wb") as buffer:
-                buffer.write(file_content.sequence)  # type: ignore
-                local_files.append(f"{cdn_directory}/{thread.id}{dirname}/{base_name}")
+                os.makedirs(f"{cdn_directory}/{thread.id}{dirname}", exist_ok=True)
+                with open(f"{cdn_directory}/{thread.id}{dirname}/{base_name}", "wb") as buffer:
+                    buffer.write(file_content.sequence)  # type: ignore
+                    local_files.append(f"{cdn_directory}/{thread.id}{dirname}/{base_name}")
+
+        # remove the FileContent messages from the messages list
+        messages = [message for message in messages if not isinstance(message.message, FileContent)]
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Exception: {e}")
 
@@ -351,7 +363,7 @@ async def code_completions(request: SessionThread):
 
         async def execute_and_signal():
             result = await controller.aexecute(
-                messages=[message for message in messages if not isinstance(message.message, FileContent)],
+                messages=messages,
                 temperature=thread.temperature,
                 mode='code',
                 stream_handler=callback,

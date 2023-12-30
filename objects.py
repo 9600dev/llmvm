@@ -1,4 +1,5 @@
 import base64
+import os
 from abc import ABC, abstractmethod
 from typing import (Any, Awaitable, Callable, Dict, Generator, Generic, List,
                     Optional, Sequence, Tuple, TypeVar, Union, cast)
@@ -340,6 +341,9 @@ class FileContent(Content):
     ):
         super().__init__(sequence, 'file', url)
         self.sequence = sequence
+
+    def is_local(self):
+        return os.path.isfile(self.url)
 
 
 class Message(AstNode):

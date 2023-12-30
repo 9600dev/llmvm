@@ -58,7 +58,7 @@ class BCL():
         parts = relative_expression.split()
 
         if len(parts) != 2:
-            return parse(relative_expression)
+            return parse(relative_expression)  # type: ignore
 
         value = int(parts[0])
         unit = parts[1].lower()
@@ -72,7 +72,7 @@ class BCL():
         elif unit == "hours":
             return dt.datetime.now(tz) + timedelta(hours=value)
         else:
-            return parse(relative_expression)
+            return parse(relative_expression)  # type: ignore
 
     @staticmethod
     def datetime(expr, timezone: Optional[str] = None) -> dt.datetime:
@@ -675,13 +675,18 @@ class SourceProject:
         self,
         starlark_runtime: StarlarkRuntime
     ):
+        # todo: this is weirdly circular - Controller -> Runtime -> BCL -> Controller. Weird.. Fix.
         self.starlark_runtime = starlark_runtime
         self.sources: List[Source] = []
+        self.other_files: List[str] = []
 
     def set_files(self, files):
         for source_path in files:
             source = Source(source_path)
-            self.sources.append(source)
+            if source.tree:
+                self.sources.append(source)
+            else:
+                self.other_files.append(source_path)
 
     def get_source_structure(self) -> str:
         """
@@ -704,36 +709,52 @@ class SourceProject:
         return structure
 
     def get_source_summary(self, file_path: str) -> str:
+        """
+        gets all class names, method names and natural language descriptions of class and method names
+        for a given source file. The file_name must be in the "Files:" list. It does not return any source code.
+        """
         def _summary_helper(source: Source) -> str:
+            write_client_stream(Content(f"Asking LLM to summarize file: {source.file_path}\n\n"))
             summary = ''
             for class_def in source.get_classes():
                 summary += f'class {class_def.name}:\n'
                 summary += f'    """{class_def.docstring}"""\n'
                 summary += '\n'
 
+                method_definition = ''
                 for method_def in source.get_methods(class_def.name):
-                    summary += f'    def {method_def.name}:\n'
-                    summary += f'        """{method_def.docstring}"""\n'
-                    summary += '\n'
+                    method_definition += f'    def {method_def.name}({", ".join([param[0] for param in method_def.params])})\n'
+                    method_definition += f'        """{method_def.docstring}"""\n'
+                    method_definition += '\n'
+                    method_definition += f'        {source.get_method_source(method_def.name)}\n\n'
+                    method_definition += f'Summary of method {method_def.name}:\n'
+
+                    # get the natural language definition
+                    assistant = self.starlark_runtime.controller.execute_llm_call(
+                        message=Helpers.load_and_populate_message(
+                            prompt_filename='prompts/starlark/code_method_definition.prompt',
+                            template={},
+                            user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                            assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                            append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                        ),
+                        context_messages=[User(Content(method_definition))],
+                        query='',
+                        original_query='',
+                        completion_tokens=2048,
+                    )
+
+                    method_definition += str(assistant.message) + '\n\n'
+                    summary += method_definition
+                    write_client_stream(Content(method_definition))
 
                 summary += '\n\n'
             return summary
-        """
-        gets all class names, method names and natural language descriptions of class and method names for a given source file.
-        The file_name must be in the "Files:" list. It does not return any source code.
-        """
+
         for source in self.sources:
             if source.file_path == file_path:
                 return _summary_helper(source)
         raise ValueError(f"Source file not found: {file_path}")
-
-    # def get_source_summary(self, file_name: str) -> str:
-    # get_source_summary(file_name: str) -> str  # gets all class names, method names and natural language descriptions of class and method names for a given source file. The file_name must be in the "Files:" list. It does not return any source code.
-    # get_source(file_name: str) -> str  # gets the source code for a given file. The file_name must be in the "Files:" list.
-    # get_classes() -> List[str]  # gets all the class signatures and their docstrings for all source files in the project directory recursively.
-    # get_class_source(class_name: str) -> str  # gets the source code for a given class.
-    # get_methods(class_name: str) -> List[str]  # gets all the method signatures and their docstrings for given class.
-    # get_references(class_name: str) -> List[str]  # gets all the callee method signatures and their docstrings that call any method from the provided class.
 
     def get_files(self):
         return self.sources
@@ -742,6 +763,12 @@ class SourceProject:
         for source in self.sources:
             if source.file_path == file_path:
                 return source.source_code
+
+        for source in self.other_files:
+            if source == file_path:
+                with open(source, 'r') as file:
+                    return file.read()
+
         raise ValueError(f"Source file not found: {file_path}")
 
     def get_methods(self, class_name) -> List['Source.Symbol']:

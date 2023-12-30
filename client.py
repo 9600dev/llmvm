@@ -130,6 +130,12 @@ def parse_command_string(s, command):
 def parse_path(ctx, param, value) -> List[str]:
     files = []
 
+    if value.startswith('"') or value.startswith("'"):
+        value = value[1:]
+
+    if ',' in value:
+        value = value.split(',')
+
     if isinstance(value, str):
         value = [value]
 
@@ -1347,6 +1353,8 @@ def new(
 @click.argument('message', type=str, required=False, default='')
 @click.option('--path', '-p', callback=parse_path, required=True,
               help='Path to a single file, multiple files, or a directory of source files to use.')
+@click.option('--upload', '-u', is_flag=True, required=True, default=False,
+              help='Upload the files to the LLMVM server. If False, LLMVM server must be run locally. Default is False.')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to send message to. Default is last thread.')
 @click.option('--endpoint', '-e', type=str, required=False,
@@ -1360,6 +1368,7 @@ def new(
 def code(
     message: Optional[str | bytes | Message],
     path: List[str],
+    upload: bool,
     id: int,
     endpoint: str,
     executor: str,
@@ -1368,6 +1377,8 @@ def code(
 ):
     global thread_id
     global last_thread
+
+    parsable_code_files = ['.py', 'Dockerfile', '.md', '.sh']
 
     if not suppress_role and not sys.stdin.isatty():
         suppress_role = True
@@ -1393,9 +1404,19 @@ def code(
         # batch up the files into User messages with FileContent type
         files: Sequence[User] = []
         for file_path in path:
-            with open(file_path, 'rb') as f:
-                file_content = f.read()
-                files.append(User(FileContent(file_content, url=os.path.basename(file_path))))
+            # check to see if the file matches or ends with a parsable file type
+            if not any(file_path.endswith(parsable_file_type) for parsable_file_type in parsable_code_files):
+                continue
+            try:
+                with open(file_path, 'r') as f:
+                    if upload:
+                        file_content = f.read().encode('utf-8')
+                    else:
+                        file_content = b''
+                    files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
+            # we don't upload or parse binary files
+            except UnicodeDecodeError:
+                pass
 
         thread = llm(
             message=message,

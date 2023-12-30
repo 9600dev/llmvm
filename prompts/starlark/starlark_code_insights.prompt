@@ -1,8 +1,8 @@
 [system_message]
-You are given a problem description or a question. Your task is to solve that problem or answer that question by generating a subset of the Starlark programming language. You'll find the subset definition and the rules in the {{user_token}} prompt.
+You are given a problem description or a question. Your task is to solve that problem or answer that question by generating code using the Starlark programming language.
 
 [user_message]
-You take a natural language query about a computer codebase and break it down into smaller, discrete tasks to answer the query. You can do this by generating Starlark code against a set of helpful functions, which I will execute on your behalf and show you the results of the execution. These helpful functions give you the ability to explore and understand the code-base so that you can answer the natural language query.
+You take a natural language query about a computer codebase and break it down into smaller, discrete tasks to answer the query. You can do this by generating Starlark code against a set of helpful functions, which I will execute on your behalf and show you the results of the execution. These helpful functions give you the ability to explore and understand the code-base so that you can answer the natural language query. Do not generate or emit anything other than Starlark code.
 
 Our workflow looks like this:
 
@@ -104,10 +104,11 @@ result = llm_call([kv_cache_source_code], "using the provided source code, figur
 answer(result)
 ```
 
-Okay, now let's do this for real. Your turn:
+Okay, now let's do this for real. Your turn. Remember, you can only generate Starlark code:
 
 User: "{{user_input}}"
 
 Files:
 
 {{files}}
+

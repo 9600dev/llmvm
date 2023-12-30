@@ -37,12 +37,19 @@ class Source:
     def _parse_file(self):
         with open(self.file_path, 'r') as file:
             source_code = file.read()
-            return source_code, ast.parse(source_code)
+            try:
+                ast_tree = ast.parse(source_code)
+            except Exception as ex:
+                return source_code, None
+            return source_code, ast_tree
 
     def get_tree(self):
         return self.tree
 
     def get_methods(self, class_name) -> List[Symbol]:
+        if not self.tree:
+            return []
+
         methods = []
         for node in ast.walk(self.tree):
             if isinstance(node, ast.ClassDef) and node.name == class_name:
@@ -67,7 +74,19 @@ class Source:
                         methods.append(symbol)
         return methods
 
+    def get_method_source(self, method_name) -> str:
+        if not self.tree:
+            return ''
+
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef) and node.name == method_name:
+                return ast.get_source_segment(self.source_code, node)  # type: ignore
+        raise ValueError(f"Method {method_name} not found in source code")
+
     def get_classes(self) -> List[Symbol]:
+        if not self.tree:
+            return []
+
         class_symbols = []
         for node in ast.walk(self.tree):
             if isinstance(node, ast.ClassDef):
