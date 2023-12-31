@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import glob
 import io
 import json
 import os
@@ -129,13 +130,24 @@ def parse_command_string(s, command):
 
 
 def parse_path(ctx, param, value) -> List[str]:
+    def is_glob_pattern(s):
+        return any(char in s for char in "*?[]")
+
+    if not value:
+        return []
+
+    if (
+        (value.startswith('"') or value.startswith("'"))
+        and (value.endswith("'") or value.endswith('"'))
+    ):
+        value = value[1:-1]
+
     files = []
+
+    recursive = ctx.params.get('recursive', False)
 
     if not value:
         return files
-
-    if value.startswith('"') or value.startswith("'"):
-        value = value[1:]
 
     if ',' in value:
         value = value.split(',')
@@ -149,9 +161,16 @@ def parse_path(ctx, param, value) -> List[str]:
             for dirpath, dirnames, filenames in os.walk(item):
                 for filename in filenames:
                     files.append(os.path.join(dirpath, filename))
+
+                if not recursive:
+                    dirnames.clear()
         elif os.path.isfile(item):
             # If it's a file, add it to the list
             files.append(item)
+        # check for glob
+        elif is_glob_pattern(item):
+            for filepath in glob.glob(item, recursive=recursive):
+                files.append(filepath)
         else:
             raise click.BadParameter(f'Path {item} is not a valid file or directory')
     return files
@@ -1399,7 +1418,9 @@ def new(
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to send message to. Default is last thread.')
 @click.option('--path', '-p', callback=parse_path, required=False,
-              help='Path to a single file, multiple files, or a directory of files to add to User message stack.')
+              help='Path to a single file, multiple files, directory of files, or a glob, to add to User message stack.')
+@click.option('--recursive', '-r', type=bool, required=False, default=False, is_flag=True,
+              help='When using the --path option, recursively walk the directory.')
 @click.option('--upload', '-u', is_flag=True, required=True, default=False,
               help='Upload the files to the LLMVM server. If False, LLMVM server must be run locally. Default is False.')
 @click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool', 'code'], case_sensitive=False),
@@ -1419,6 +1440,7 @@ def message(
     message: Optional[str | bytes | Message],
     id: int,
     path: List[str],
+    recursive: bool,
     upload: bool,
     mode: str,
     endpoint: str,
@@ -1488,7 +1510,7 @@ def message(
 
 if __name__ == '__main__':
     # special case the hijacking of --help
-    if len(sys.argv) == 2 and sys.argv[1] == '--help' or sys.argv[1] == '-h':
+    if len(sys.argv) == 2 and (sys.argv[1] == '--help' or sys.argv[1] == '-h'):
         Repl().help()
         sys.exit(0)
 

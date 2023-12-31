@@ -390,7 +390,12 @@ class Message(AstNode):
 
         # todo: pdf parsing here
         if role == 'user' and content_type == 'file':
-            return User(FileContent(FileContent.decode(str(message_content)), url))
+            # if there's a url here, but no content, then it's a file local to the server
+            if url and not message_content:
+                with open(url, 'r') as f:
+                    return User(FileContent(f.read().encode('utf-8'), url))
+            else:
+                return User(FileContent(FileContent.decode(str(message_content)), url))
         if role == 'user':
             return User(content)
         elif role == 'system':
