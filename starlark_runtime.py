@@ -502,6 +502,8 @@ class StarlarkRuntime:
         if not isinstance(expr_list, list):
             expr_list = [expr_list]
 
+        write_client_stream(Content(f'Calling LLM with instruction: {llm_instruction} ...\n'))
+
         assistant = self.controller.execute_llm_call(
             message=Helpers.load_and_populate_message(
                 prompt_filename='prompts/llm_call.prompt',
@@ -517,6 +519,7 @@ class StarlarkRuntime:
             original_query=self.original_query,
             prompt_filename='prompts/llm_call.prompt',
         )
+        write_client_stream(Content(f'LLM returned: {str(assistant.message)}\n'))
         return assistant
 
     def llm_loop_bind(self, expr, llm_instruction: str, count: int = sys.maxsize) -> List[Any]:

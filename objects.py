@@ -332,6 +332,9 @@ class PdfContent(Content):
         super().__init__(sequence, 'pdf', url)
         self.sequence = sequence
 
+    def __str__(self):
+        return f'PdfContent({self.url})'
+
 
 class FileContent(Content):
     def __init__(
@@ -344,6 +347,9 @@ class FileContent(Content):
 
     def is_local(self):
         return os.path.isfile(self.url)
+
+    def __str__(self):
+        return f'FileContent({self.url})'
 
 
 class Message(AstNode):

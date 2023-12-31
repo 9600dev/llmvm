@@ -137,13 +137,22 @@ class AnthropicExecutor(Executor):
                 system_message = message['content']
                 messages.remove(message)
 
-        # the messages API also doesn't allow for multiple User messages in a row, so we're
-        # going to add an Assistant message in between two user messages.
-        messages_list: List[Dict[str, str]] = []
+        # anthropic disallows empty messages, so we're going to remove any Message that doesn't contain content
         for message in messages:
-            if messages_list and messages_list[-1]['role'] == 'user' and message['role'] == 'user':
-                messages_list.append({'role': 'assistant', 'content': 'Thanks. I am ready for your next message.'})
-            messages_list.append(message)
+            if not message['content'] or message['content'] == '' or message['content'] == b'':
+                messages.remove(message)
+
+        # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
+        # going to add an Assistant message in between two User messages, and a User message between two Assistant.
+        messages_list: List[Dict[str, str]] = []
+
+        for i in range(len(messages)):
+            if i > 0 and messages[i]['role'] == messages[i - 1]['role']:
+                if messages[i]['role'] == 'user':
+                    messages_list.append({'role': 'assistant', 'content': 'Thanks. I am ready for your next message.'})
+                elif messages[i]['role'] == 'assistant':
+                    messages_list.append({'role': 'user', 'content': 'Thanks. I am ready for your next message.'})
+            messages_list.append(messages[i])
 
         stream = self.client.beta.messages.stream(
             max_tokens=max_completion_tokens,

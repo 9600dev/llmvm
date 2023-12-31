@@ -22,6 +22,7 @@ import rich
 from anthropic.lib.streaming._messages import (AsyncMessageStream,
                                                AsyncMessageStreamManager)
 from anthropic.types.completion import Completion
+from click import MissingParameter
 from click_default_group import DefaultGroup
 from PIL import Image
 from prompt_toolkit import PromptSession, prompt
@@ -130,6 +131,9 @@ def parse_command_string(s, command):
 def parse_path(ctx, param, value) -> List[str]:
     files = []
 
+    if not value:
+        return files
+
     if value.startswith('"') or value.startswith("'"):
         value = value[1:]
 
@@ -150,6 +154,43 @@ def parse_path(ctx, param, value) -> List[str]:
             files.append(item)
         else:
             raise click.BadParameter(f'Path {item} is not a valid file or directory')
+    return files
+
+
+def get_files_as_messages(
+    path: List[str],
+    upload: bool = False,
+    allowed_file_types: List[str] = []
+) -> List[User]:
+
+    files: Sequence[User] = []
+    for file_path in path:
+        if allowed_file_types and not any(file_path.endswith(parsable_file_type) for parsable_file_type in allowed_file_types):
+            continue
+
+        if file_path.endswith('.pdf'):
+            if upload:
+                with open(file_path, 'rb') as f:
+                    files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
+            else:
+                files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
+        elif file_path.endswith('.png') or file_path.endswith('.jpg') or file_path.endswith('.jpeg'):
+            if upload:
+                with open(file_path, 'rb') as f:
+                    files.append(User(ImageContent(f.read(), url=os.path.abspath(file_path))))
+            else:
+                files.append(User(ImageContent(b'', url=os.path.abspath(file_path))))
+        else:
+            # assume it's a text file
+            try:
+                with open(file_path, 'r') as f:
+                    if upload:
+                        file_content = f.read().encode('utf-8')
+                    else:
+                        file_content = b''
+                    files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
+            except UnicodeDecodeError:
+                raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
     return files
 
 
@@ -446,11 +487,11 @@ def llm(
                     img.save(output, format='JPEG')
                     StreamPrinter('user').display_image(output.getvalue())
                     bytes_buffer.seek(0)
-                context_messages_list.append(User(ImageContent(bytes_buffer.read(), url='cli')))
+                context_messages_list.insert(0, User(ImageContent(bytes_buffer.read(), url='cli')))
             elif Helpers.is_pdf(bytes_buffer):
-                context_messages_list.append(User(PdfContent(bytes_buffer.read(), url='cli')))
+                context_messages_list.insert(0, User(PdfContent(bytes_buffer.read(), url='cli')))
             else:
-                context_messages_list.append(User(Content(bytes_buffer.read().decode('utf-8'))))
+                context_messages_list.insert(0, User(Content(bytes_buffer.read().decode('utf-8'))))
 
     append_to_server_thread = True
 
@@ -878,10 +919,10 @@ def cli(ctx):
             for cmd_name in ctx.command.list_commands(ctx)  # type: ignore
         }
 
-        # see if the first argument is a command
         query = ' '.join(sys.argv[1:])
         args = query.split(' ')
 
+        # see if the first argument is a command
         if args[0] in commands:
             command = ctx.command.get_command(ctx, args[0])  # type: ignore
             tokens = parse_command_string(query, command)
@@ -921,7 +962,7 @@ def status(
     rich.print(asyncio.run(status_helper()))
 
 
-@cli.command('mode', help='Switch between "auto", "tool" and "direct" mode.')
+@cli.command('mode', help='Switch between "auto", "tool", "direct" and "code" mode.')
 @click.argument('mode', type=str, required=False, default='')
 def mode(
     mode: str,
@@ -935,8 +976,9 @@ def mode(
     if not mode:
         if current_mode == 'auto': current_mode = 'tool'
         elif current_mode == 'tool': current_mode = 'direct'
-        elif current_mode == 'direct': current_mode = 'auto'
-    elif mode == 'auto' or mode == 'tool' or mode == 'direct':
+        elif current_mode == 'direct': current_mode = 'code'
+        elif current_mode == 'code': current_mode = 'auto'
+    elif mode == 'auto' or mode == 'tool' or mode == 'direct' or mode == 'code':
         current_mode = mode
     else:
         rich.print(f'Invalid mode: {mode}')
@@ -1095,6 +1137,8 @@ def act(
             ctx.ensure_object(dict)
             ctx.params['message'] = prompt_result
             ctx.params['id'] = id
+            ctx.params['path'] = ''
+            ctx.params['upload'] = False
             ctx.params['mode'] = mode
             ctx.params['endpoint'] = endpoint
             ctx.params['cookies'] = ''
@@ -1349,98 +1393,18 @@ def new(
     thread = asyncio.run(get_thread(endpoint, 0))
     thread_id = thread.id
 
-@cli.command('code')
-@click.argument('message', type=str, required=False, default='')
-@click.option('--path', '-p', callback=parse_path, required=True,
-              help='Path to a single file, multiple files, or a directory of source files to use.')
-@click.option('--upload', '-u', is_flag=True, required=True, default=False,
-              help='Upload the files to the LLMVM server. If False, LLMVM server must be run locally. Default is False.')
-@click.option('--id', '-i', type=int, required=False, default=0,
-              help='thread ID to send message to. Default is last thread.')
-@click.option('--endpoint', '-e', type=str, required=False,
-              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
-              help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
-@click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
-              help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
-@click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
-              help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
-@click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
-def code(
-    message: Optional[str | bytes | Message],
-    path: List[str],
-    upload: bool,
-    id: int,
-    endpoint: str,
-    executor: str,
-    model: str,
-    suppress_role: bool,
-):
-    global thread_id
-    global last_thread
-
-    parsable_code_files = ['.py', 'Dockerfile', '.md', '.sh']
-
-    if not suppress_role and not sys.stdin.isatty():
-        suppress_role = True
-
-    if model:
-        if (model.startswith('"') and model.endswith('"')) or (model.startswith("'") and model.endswith("'")):
-            model = model[1:-1]
-
-    if executor:
-        if (executor.startswith('"') and executor.endswith('"')) or (executor.startswith("'") and executor.endswith("'")):
-            executor = executor[1:-1]
-
-    if message:
-        if isinstance(message, str) and (
-            (message.startswith('"') and message.endswith('"'))
-            or (message.startswith("'") and message.endswith("'"))
-        ):
-            message = message[1:-1]
-
-        if id <= 0:
-            id = thread_id
-
-        # batch up the files into User messages with FileContent type
-        files: Sequence[User] = []
-        for file_path in path:
-            # check to see if the file matches or ends with a parsable file type
-            if not any(file_path.endswith(parsable_file_type) for parsable_file_type in parsable_code_files):
-                continue
-            try:
-                with open(file_path, 'r') as f:
-                    if upload:
-                        file_content = f.read().encode('utf-8')
-                    else:
-                        file_content = b''
-                    files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
-            # we don't upload or parse binary files
-            except UnicodeDecodeError:
-                pass
-
-        thread = llm(
-            message=message,
-            id=id,
-            mode='code',
-            endpoint=endpoint,
-            executor=executor,
-            model=model,
-            cookies=[],
-            context_messages=files
-        )
-        if not suppress_role: StreamPrinter('').write_string('\n')
-        print_response([MessageModel.to_message(thread.messages[-1])], suppress_role)
-        if not suppress_role: StreamPrinter('').write_string('\n')
-        last_thread = thread
-        return thread
-
 
 @cli.command('message')
 @click.argument('message', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to send message to. Default is last thread.')
-@click.option('--mode', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
-              help='Mode to use "auto", "tool" or "direct". Default is "auto".')
+@click.option('--path', '-p', callback=parse_path, required=False,
+              help='Path to a single file, multiple files, or a directory of files to add to User message stack.')
+@click.option('--upload', '-u', is_flag=True, required=True, default=False,
+              help='Upload the files to the LLMVM server. If False, LLMVM server must be run locally. Default is False.')
+@click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool', 'code'], case_sensitive=False),
+              required=False, default='auto',
+              help='Mode to use "auto", "tool", "code", or "direct". Default is "auto".')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
@@ -1454,6 +1418,8 @@ def code(
 def message(
     message: Optional[str | bytes | Message],
     id: int,
+    path: List[str],
+    upload: bool,
     mode: str,
     endpoint: str,
     cookies: str,
@@ -1463,6 +1429,10 @@ def message(
 ):
     global thread_id
     global last_thread
+    context_messages: List[User] = []
+
+    if mode == 'code' and not path:
+        raise MissingParameter('path')
 
     if not suppress_role and not sys.stdin.isatty():
         suppress_role = True
@@ -1474,6 +1444,15 @@ def message(
     if executor:
         if (executor.startswith('"') and executor.endswith('"')) or (executor.startswith("'") and executor.endswith("'")):
             executor = executor[1:-1]
+
+    if path:
+        allowed_extensions = ['.py', '.md', 'Dockerfile', '.sh', '.txt'] if mode == 'code' else []
+        context_messages = get_files_as_messages(path, upload, allowed_extensions)
+
+    # if we have files, but no message, grab the last file and use it as the message
+    if not message and context_messages:
+        message = context_messages[-1]
+        context_messages = context_messages[:-1]
 
     if message:
         if isinstance(message, str) and (
@@ -1497,7 +1476,7 @@ def message(
             endpoint=endpoint,
             executor=executor,
             model=model,
-            context_messages=[],
+            context_messages=context_messages,
             cookies=cookies_list
         )
         if not suppress_role: StreamPrinter('').write_string('\n')
@@ -1508,6 +1487,11 @@ def message(
 
 
 if __name__ == '__main__':
+    # special case the hijacking of --help
+    if len(sys.argv) == 2 and sys.argv[1] == '--help' or sys.argv[1] == '-h':
+        Repl().help()
+        sys.exit(0)
+
     if len(sys.argv) <= 1:
         repl_inst = Repl()
         repl_inst.repl()
