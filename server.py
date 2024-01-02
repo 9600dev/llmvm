@@ -1,8 +1,7 @@
 import asyncio
-import datetime as dt
 import os
 import sys
-from typing import Any, Dict, List, Optional, cast
+from typing import List, cast
 
 import async_timeout
 import jsonpickle
@@ -11,24 +10,22 @@ from openai import AsyncOpenAI, OpenAI
 
 client = OpenAI()
 aclient = AsyncOpenAI()
+
 import rich
 import uvicorn
 from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request,
                      UploadFile)
 from fastapi.param_functions import File, Form
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
 
 from anthropic_executor import AnthropicExecutor
 from container import Container
-from helpers.browser import BrowserHelper
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from objects import (Answer, Assistant, AstNode, Content, DownloadItem,
-                     FileContent, Message, MessageModel, Response,
-                     SessionThread, Statement, StopNode, System, TokenStopNode,
-                     User)
+                     FileContent, MessageModel, SessionThread, Statement,
+                     StopNode, User)
 from openai_executor import OpenAIExecutor
 from persistent_cache import PersistentCache
 from starlark_execution_controller import StarlarkExecutionController
@@ -346,8 +343,14 @@ async def code_completions(request: SessionThread):
 
     mode = thread.current_mode
     queue = asyncio.Queue()
-    model = thread.model
-    controller = openai_controller if thread.executor == 'openai' else anthropic_controller
+
+    # set the defaults, or use what the SessionThread thread asks
+    controller = default_controller
+    if thread.executor == 'anthropic':
+        controller = anthropic_controller
+    elif thread.executor == 'openai':
+        controller = openai_controller
+    model = thread.model if thread.model else controller.get_executor().get_default_model()
 
     logging.debug(f'/v1/chat/code_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
 
@@ -429,7 +432,7 @@ async def tools_completions(request: SessionThread):
     mode = thread.current_mode
     queue = asyncio.Queue()
 
-    # set the defaults
+    # set the defaults, or use what the SessionThread thread asks
     controller = default_controller
     if thread.executor == 'anthropic':
         controller = anthropic_controller

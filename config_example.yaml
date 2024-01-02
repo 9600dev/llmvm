@@ -32,6 +32,4 @@ helper_functions:
   - helpers.edgar.EdgarHelpers.get_report
   - helpers.market.MarketHelpers.get_stock_price
   - helpers.market.MarketHelpers.get_current_market_capitalization
-  - helpers.email_helpers.EmailHelpers.send_email
-  - helpers.email_helpers.EmailHelpers.send_calendar_invite
   - bcl.BCL.datetime

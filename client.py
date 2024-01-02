@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import csv
 import glob
 import io
 import json
@@ -9,31 +10,27 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
+from typing import Any, Callable, Dict, List, Optional, Sequence, cast
 
 import async_timeout
 import click
 import httpx
 import jsonpickle
 import nest_asyncio
-import pandas as pd
 import pyperclip
 import rich
-from anthropic.lib.streaming._messages import (AsyncMessageStream,
-                                               AsyncMessageStreamManager)
+from anthropic.lib.streaming._messages import AsyncMessageStreamManager
 from anthropic.types.completion import Completion
 from click import MissingParameter
 from click_default_group import DefaultGroup
 from httpx import ConnectError
 from PIL import Image
-from prompt_toolkit import PromptSession, prompt
+from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import (Completer, PathCompleter, WordCompleter,
+from prompt_toolkit.completion import (PathCompleter, WordCompleter,
                                        merge_completers)
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style
 from pydantic.type_adapter import TypeAdapter
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -43,31 +40,27 @@ from rich.syntax import Syntax
 from anthropic_executor import AnthropicExecutor
 from container import Container
 from helpers.helpers import Helpers
-from helpers.logging_helpers import (disable_timing, get_timer, setup_logging,
-                                     suppress_logging)
+from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
-from objects import (Assistant, AstNode, Content, DownloadItem, Executor,
-                     FileContent, ImageContent, Message, MessageModel,
-                     PdfContent, Response, SessionThread, StreamNode, System,
-                     TokenStopNode, User)
+from objects import (AstNode, Content, DownloadItem, Executor, FileContent,
+                     ImageContent, Message, MessageModel, PdfContent,
+                     SessionThread, StreamNode, TokenStopNode, User)
 from openai_executor import OpenAIExecutor
 
 nest_asyncio.apply()
 
 invoke_context = None
-logging = setup_logging(enable_timing=True)
+logging = setup_logging()
 
 global thread_id
 global current_mode
 global last_thread
 global suppress_role
-global timing
 
 
 thread_id: int = 0
 current_mode = 'auto'
 suppress_role = False
-timing = get_timer()
 
 
 def parse_message_thread(message: str):
@@ -321,6 +314,7 @@ async def get_thread(
     thread = SessionThread.model_validate(response.json())
     return thread
 
+
 async def set_thread(
     api_endpoint: str,
     thread: SessionThread,
@@ -332,6 +326,7 @@ async def set_thread(
         )
         session_thread = SessionThread.model_validate(response.json())
         return session_thread
+
 
 async def get_threads(
     api_endpoint: str,
@@ -348,13 +343,11 @@ async def __execute_llm_call_direct(
     model_name: str,
     context_messages: Sequence[Message] = [],
 ) -> SessionThread:
-    global timing
 
     message_response = ''
     printer = StreamPrinter('')
 
     def chained_printer(s: str):
-        timing.save_intermediate('first_token')
         nonlocal message_response
         message_response += s
         printer.write(s)  # type: ignore
@@ -375,8 +368,6 @@ async def __execute_llm_call_direct(
     else:
         raise ValueError('No executor specified.')
 
-    timing.start()
-
     response: Dict = await executor.aexecute_direct(messages_list)  # type: ignore
     asyncio.run(stream_gpt_response(response, chained_printer))
 
@@ -384,7 +375,6 @@ async def __execute_llm_call_direct(
     response_messages.append(MessageModel.from_message(message))
     response_messages.append(MessageModel(role='assistant', content=message_response))
     result = SessionThread(id=-1, messages=response_messages)
-    timing.end()
     return result
 
 
@@ -488,6 +478,7 @@ async def execute_llm_call(
     else:
         logging.warning('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
         raise ValueError('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
+
 
 def llm(
     message: Optional[str | bytes | Message],
@@ -771,6 +762,8 @@ class Repl():
             if key == 'message':
                 key = 'message [red](default)[/red]'
             rich.print(f' [green]{key.ljust(23)}[/green]  {value}')
+            for argument in [param for param in ctx.command.get_command(ctx, key).params if isinstance(param, click.Argument)]:  # type: ignore  # NOQA: E501
+                rich.print(f'  ({argument.name}')
             for option in [param for param in ctx.command.get_command(ctx, key).params if isinstance(param, click.Option)]:  # type: ignore  # NOQA: E501
                 rich.print(f'  {str(", ".join(option.opts)).ljust(25)} {option.help if option.help else ""}')
 
@@ -778,20 +771,23 @@ class Repl():
         rich.print(f'$LLMVM_EXECUTOR: {Container.get_config_variable("LLMVM_EXECUTOR", default="(not set)")}')
         rich.print(f'$LLMVM_MODEL: {Container.get_config_variable("LLMVM_MODEL", default="(not set)")}')
         rich.print()
-        rich.print()
         rich.print('[bold]Keys:[/bold]')
-        rich.print('[white](Ctrl-c or "exit" to exit)[/white]')
-        rich.print('[white](Ctrl-n to clear the current line)[/white]')
+        rich.print('[white](Ctrl-c or "exit" to exit, or cancel current request)[/white]')
+        rich.print('[white](Ctrl-n to create a new thread)[/white]')
         rich.print('[white](Ctrl-e to open $EDITOR for multi-line User prompt)[/white]')
-        rich.print('[white](Ctrl-g to open $EDITOR for multi messages edit)[/white]')
+        rich.print('[white](Ctrl-g to open $EDITOR for full message thread editing)[/white]')
         rich.print('[white](Ctrl-r search prompt history)[/white]')
-        rich.print('[white](If the LLMVM server is not running, messages are executed directly)[/white]')
+        rich.print('[white](Ctrl-y+y yank the last message to the clipboard)[/white]')
+        rich.print('[white](Ctrl-y+a yank entire message thread to clipboard)[/white]')
+        rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
+        rich.print('')
+        rich.print('[white](If the LLMVM server.py is not running, messages are executed directly)[/white]')
         rich.print('[white]("message" is the default command, so you can omit it)[/white]')
         rich.print()
         rich.print('[bold]I am a helpful assistant that has access to tools. Use "mode" to switch tools on and off.[/bold]')
         rich.print()
 
-    def repl(
+    async def repl(
         self,
     ):
         global thread_id
@@ -812,11 +808,21 @@ class Repl():
             event.app.current_buffer.cursor_position = len(text) - 1
 
         @kb.add('c-y', 'y')
-        def _(event):
+        async def _(event):
             if 'last_thread' in globals():
                 last_thread_t: SessionThread = last_thread
                 pyperclip.copy(str(last_thread_t.messages[-1].content))
                 rich.print('Last message copied to clipboard.\n')
+                rich.print(f"[{thread_id}] query>> ", end="")
+
+        @kb.add('c-y', 'a')
+        def _(event):
+            if 'last_thread' in globals():
+                last_thread_t: SessionThread = last_thread
+                whole_thread = get_string_thread_with_roles(last_thread_t)
+                pyperclip.copy(str(whole_thread))
+                rich.print('Thread copied to clipboard.\n')
+                rich.print(f"[{thread_id}] query>> ", end="")
 
         async def __invoke_paste_image(thread: SessionThread, raw_data: bytes):
             global current_mode
@@ -890,6 +896,7 @@ class Repl():
             thread = asyncio.run(get_thread(Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), 0))
             thread_id = thread.id
             rich.print('New thread created.')
+            rich.print(f"[{thread_id}] query>> ", end="")
 
         @kb.add('c-g')
         def _(event):
@@ -973,7 +980,7 @@ class Repl():
             try:
                 ctx = click.Context(cli)
 
-                query = session.prompt(
+                query = await session.prompt_async(
                     f'[{thread_id}] query>> ',
                 )
 
@@ -1083,7 +1090,7 @@ def status(
                 response = await client.get(f'{endpoint}/health')
                 return response.json()
             except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
-                return {'status': f'LLMVM server not available at {endpoint}'}
+                return {'status': f'LLMVM server not available at {endpoint}. Set endpoint using $LLMVM_ENDPOINT.'}
 
     rich.print(asyncio.run(status_helper()))
 
@@ -1238,20 +1245,27 @@ def act(
     suppress_role: bool,
 ):
     client_directory = os.path.dirname(os.path.abspath(__file__))
-    df = pd.read_csv(f'{client_directory}/prompts/awesome_prompts.csv')
+
+    rows = []
+    with open(f'{client_directory}/prompts/awesome_prompts.csv', 'r') as f:
+        reader = csv.reader(f)
+        rows = list(reader)
+
+    column_names = rows[0]
+
     if not actor:
         from rich.console import Console
         from rich.table import Table
         console = Console()
         table = Table(show_header=True, header_style="bold magenta")
-        for column in df.columns:
+        for column in column_names:
             table.add_column(column)
-        for _, row in df.iterrows():  # type: ignore
+        for row in rows[1:]:  # type: ignore
             table.add_row(*row)
 
         console.print(table)
     else:
-        prompt_result = Helpers.tfidf_similarity(actor, (df.act + ' ' + df.processed_prompt).to_list())
+        prompt_result = Helpers.tfidf_similarity(actor, [row[0] + ' ' + row[1] for row in rows])
 
         rich.print()
         rich.print('[bold red]Setting actor mode.[/bold red]')
@@ -1273,57 +1287,6 @@ def act(
             ctx.params['model'] = model
             ctx.params['suppress_role'] = suppress_role
             return message.invoke(ctx)
-
-@cli.command('file', help='Insert a file (image or pdf) into the message thread.')
-@click.argument('filename', type=str, required=True)
-@click.option('--id', '-i', type=int, required=False, default=0,
-              help='thread ID to attach content to. Default is last thread.')
-@click.option('--endpoint', '-e', type=str, required=False,
-              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
-              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-def file(
-    filename: str,
-    id: int,
-    endpoint: str,
-):
-    global thread_id
-    if id <= 0:
-        id = thread_id
-
-    if filename.startswith('"') and filename.endswith('"'):
-        filename = filename[1:-1]
-
-    if not os.path.exists(filename):
-        rich.print(f'File {filename} does not exist.')
-        return
-    else:
-        user_message = User(Content(''))
-        try:
-
-            with open(filename, 'rb') as file_content:
-                bytes_content = file_content.read()
-                file_content.seek(0)
-
-                if Helpers.is_image(bytes_content):
-                    output = io.BytesIO()
-                    with Image.open(io.BytesIO(file_content.read())) as img:
-                        img.save(output, format='JPEG')
-                        StreamPrinter('user').display_image(output.getvalue())
-                        file_content.seek(0)
-                    user_message = User(ImageContent(bytes_content, url='cli'))
-                elif Helpers.is_pdf(file_content):
-                    user_message = User(PdfContent(bytes_content, url='cli'))
-                else:
-                    user_message = User(Content(bytes_content.decode('utf-8')))
-        except Exception as ex:
-            pass
-
-        thread = asyncio.run(get_thread(endpoint, id))
-        thread.messages.append(MessageModel.from_message(message=user_message))
-        rich.print(f'Inserting file {filename} into thread [{thread.id}]')
-        result = asyncio.run(set_thread(endpoint, thread))
-        thread_id = result.id
-        return result
 
 
 @cli.command('url', help='Download a url and insert the content into the message thread.')
@@ -1379,7 +1342,6 @@ def search(
             snippet = result['snippet']
             link = result['link']
             score = result['score']
-            metadata = result['metadata']
 
             if not link.startswith('http'):
                 link = f'file:///{link}'
@@ -1554,7 +1516,7 @@ def new(
 @click.option('--recursive', '-r', type=bool, required=False, default=False, is_flag=True,
               help='When using the --path option, recursively walk the directory.')
 @click.option('--upload', '-u', is_flag=True, required=True, default=False,
-              help='Upload the files to the LLMVM server. If False, LLMVM server must be run locally. Default is False.')
+              help='Upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
 @click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool', 'code'], case_sensitive=False),
               required=False, default='auto',
               help='Mode to use "auto", "tool", "code", or "direct". Default is "auto".')
@@ -1661,6 +1623,7 @@ if __name__ == '__main__':
 
     if len(sys.argv) <= 1:
         repl_inst = Repl()
-        repl_inst.repl()
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(repl_inst.repl())
     else:
         cli()

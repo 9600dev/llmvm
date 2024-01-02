@@ -144,8 +144,6 @@ their current strategy, investments and risks.
 PdfHelpers.parse_pdf(url_or_file)  # You can only use either a url or a path to a pdf file.
 MarketHelpers.get_stock_price(symbol)  # Get the current or latest price of the specified stock symbol
 MarketHelpers.get_market_capitalization(symbol)  # Get the current market capitalization of the specified stock symbol
-EmailHelpers.send_email(sender_email, receiver_email, subject, body)  # Send an email from sender to receiver with the specified subject and body text
-EmailHelpers.send_calendar_invite(from_name, from_email, attendee_emails, subject, body, start_date, end_date)  # Send a calendar invite to the attendee
 ```
 
 Downloading web content (html, PDF's etc), and searching the web is done through special functions: ```download()``` and ```search()``` which are defined in the LLMVM runtimes base class libraries. ```download()``` as mentioned uses Firefox via Microsoft Playwright so that we can avoid web server blocking issues that tend to occur with requests.get(). ```search()``` uses [SerpAPI](https://serpapi.com/), which may require a paid subscription.

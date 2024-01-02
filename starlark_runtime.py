@@ -1,31 +1,24 @@
 import ast
-import copy
 import datetime as dt
 import inspect
-import math
 import os
-import random
 import re
 import sys
-from re import L
-from typing import (Any, Awaitable, Callable, Dict, Generator, List, Optional,
-                    Tuple, cast)
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 import astunparse
 import pandas as pd
 
 from helpers.edgar import EdgarHelpers
-from helpers.email_helpers import EmailHelpers
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers, write_client_stream
-from helpers.logging_helpers import response_writer, setup_logging
+from helpers.logging_helpers import setup_logging
 from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.webhelpers import WebHelpers
-from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
-                     FunctionCall, FunctionCallMeta, ImageContent, Message,
-                     PandasMeta, Statement, User, awaitable_none)
+from objects import (Answer, Assistant, Content, Controller, FunctionCall,
+                     FunctionCallMeta, Message, PandasMeta, Statement, User)
 from vector_search import VectorSearch
 
 logging = setup_logging()
@@ -108,7 +101,6 @@ class StarlarkRuntime:
         self.globals_dict['PdfHelpers'] = CallWrapper(self, PdfHelpers)
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
-        self.globals_dict['EmailHelpers'] = CallWrapper(self, EmailHelpers)
         self.globals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
         self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
         self.globals_dict['answer'] = self.answer
