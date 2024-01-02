@@ -191,5 +191,3 @@ def disable_timing(name='timing'):
 def response_writer(callee, message):
     with (open(f"{Container().get('log_directory')}/ast.log", 'a')) as f:
         f.write(f'{str(dt.datetime.now())} {callee}: {message}\n')
-
-

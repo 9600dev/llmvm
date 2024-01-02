@@ -42,6 +42,21 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def late_bind(module_name, class_name, method_name, *args, **kwargs):
+        try:
+            module = importlib.import_module(module_name)
+            cls = getattr(module, class_name)
+            method = getattr(cls, method_name)
+
+            if isinstance(method, staticmethod):
+                return method.__func__(*args, **kwargs)
+            else:
+                instance = cls()
+                return getattr(instance, method_name)(*args, **kwargs)
+        except Exception as e:
+            pass
+
+    @staticmethod
     def is_running(process_name):
         for proc in psutil.process_iter():
             try:

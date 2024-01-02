@@ -11,6 +11,7 @@ import sys
 import tempfile
 import textwrap
 from typing import Any, Callable, Dict, List, Optional, Sequence, cast
+from urllib.parse import urlparse
 
 import async_timeout
 import click
@@ -18,6 +19,7 @@ import httpx
 import jsonpickle
 import nest_asyncio
 import pyperclip
+import requests
 import rich
 from anthropic.lib.streaming._messages import AsyncMessageStreamManager
 from anthropic.types.completion import Completion
@@ -139,7 +141,8 @@ def parse_path(ctx, param, value) -> List[str]:
         return []
 
     if (
-        (value.startswith('"') or value.startswith("'"))
+        (isinstance(value, str))
+        and (value.startswith('"') or value.startswith("'"))
         and (value.endswith("'") or value.endswith('"'))
     ):
         value = value[1:-1]
@@ -151,7 +154,7 @@ def parse_path(ctx, param, value) -> List[str]:
     if not value:
         return files
 
-    if ',' in value:
+    if isinstance(value, str) and ',' in value:
         value = value.split(',')
 
     if isinstance(value, str):
@@ -176,12 +179,14 @@ def parse_path(ctx, param, value) -> List[str]:
         elif is_glob_pattern(item):
             for filepath in glob.glob(item, recursive=recursive):
                 files.append(filepath)
+        elif item.startswith('http'):
+            files.append(item)
         else:
-            raise click.BadParameter(f'Path {item} is not a valid file or directory')
+            raise click.BadParameter(f'Path {item} is not a valid file, directory, glob, or url')
     return files
 
 
-def get_files_as_messages(
+def get_path_as_messages(
     path: List[str],
     upload: bool = False,
     allowed_file_types: List[str] = []
@@ -189,32 +194,69 @@ def get_files_as_messages(
 
     files: Sequence[User] = []
     for file_path in path:
+        # check for url
+        result = urlparse(file_path)
+
+        if (result.scheme == 'http' or result.scheme == 'https'):
+            download_request = requests.get(result.geturl())
+            if download_request.status_code == 200:
+                file_name = os.path.basename(result.path)
+                _, file_extension = os.path.splitext(file_name)
+                file_extension = '.html' if file_extension == '' else file_extension.lower()
+                with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+                    temp_file.write(download_request.content)
+                    temp_file.flush()
+                    file_path = temp_file.name
+                    result = urlparse(file_path)
+
         if allowed_file_types and not any(file_path.endswith(parsable_file_type) for parsable_file_type in allowed_file_types):
             continue
 
-        if file_path.endswith('.pdf'):
-            if upload:
-                with open(file_path, 'rb') as f:
-                    files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
-            else:
-                files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
-        elif file_path.endswith('.png') or file_path.endswith('.jpg') or file_path.endswith('.jpeg'):
-            if upload:
-                with open(file_path, 'rb') as f:
-                    files.append(User(ImageContent(f.read(), url=os.path.abspath(file_path))))
-            else:
-                files.append(User(ImageContent(b'', url=os.path.abspath(file_path))))
-        else:
-            # assume it's a text file
-            try:
-                with open(file_path, 'r') as f:
-                    if upload:
+        if result.scheme == '' or result.scheme == 'file':
+            if '.pdf' in result.path:
+                if upload:
+                    with open(file_path, 'rb') as f:
+                        files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
+                else:
+                    files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
+            elif '.htm' in result.path or '.html' in result.path:
+                try:
+                    with open(file_path, 'r') as f:
                         file_content = f.read().encode('utf-8')
-                    else:
-                        file_content = b''
-                    files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
-            except UnicodeDecodeError:
-                raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
+                        # try to parse as markdown
+                        markdown = Helpers.late_bind(
+                            'helpers.webhelpers',
+                            'WebHelpers',
+                            'convert_html_to_markdown',
+                            file_content,
+                        )
+                        file_content = markdown if markdown else file_content
+                        file_content = f.read().encode('utf-8')
+                        files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
+                except UnicodeDecodeError:
+                    raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
+            elif '.pdf' in result.path:
+                if upload:
+                    with open(file_path, 'rb') as f:
+                        files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
+                else:
+                    files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
+            elif '.png' in result.path or '.jpg' in result.path or '.jpeg' in result.path:
+                if upload:
+                    with open(file_path, 'rb') as f:
+                        files.append(User(ImageContent(f.read(), url=os.path.abspath(file_path))))
+                else:
+                    files.append(User(ImageContent(b'', url=os.path.abspath(file_path))))
+            else:
+                try:
+                    with open(file_path, 'r') as f:
+                        if upload:
+                            file_content = f.read().encode('utf-8')
+                        else:
+                            file_content = b''
+                        files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
+                except UnicodeDecodeError:
+                    raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
     return files
 
 
@@ -896,6 +938,8 @@ class Repl():
             thread = asyncio.run(get_thread(Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), 0))
             thread_id = thread.id
             rich.print('New thread created.')
+            event.app.current_buffer.text = ''
+            event.app.current_buffer.cursor_position = 0
             rich.print(f"[{thread_id}] query>> ", end="")
 
         @kb.add('c-g')
@@ -1362,8 +1406,9 @@ def search(
 
 @cli.command('ingest', help='Ingest a file into the LLMVM search engine.')
 @click.argument('filename', type=str, required=True)
-@click.option('--recursive', '-r', type=bool, required=True, is_flag=True, help='Walk the directory recursively.')
-@click.option('--project', '-p', type=str, required=True, default='', help='Assign the ingested content to project.')
+@click.option('--recursive', '-r', type=bool, required=False, is_flag=True, default=False,
+              help='Walk the directory recursively.')
+@click.option('--project', '-p', type=str, required=False, default='', help='Assign the ingested content to project.')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
@@ -1375,6 +1420,7 @@ def ingest(
 ):
     files = []
 
+    # change all this to the path parsing stuff that def messages() uses
     if filename.startswith('"') and filename.endswith('"'):
         filename = filename[1:-1]
 
@@ -1392,17 +1438,18 @@ def ingest(
         else:
             files += [os.path.join(filename_directory, f)
                       for f in os.listdir(filename_directory) if os.path.isfile(os.path.join(filename_directory, f))]
+    elif os.path.isfile(filename_directory):
+        files.append(filename_directory)
 
     async def upload_helper():
         async with httpx.AsyncClient(timeout=300.0) as client:
             responses = []
             for filename_str in files:
                 with open(filename_str, 'rb') as f:
-                    data = {
-                        'file': (filename_str, f),
-                        'project': project,
+                    file = {
+                        'file': f,
                     }
-                    response = await client.post(f'{endpoint}/ingest', files=data)
+                    response = await client.post(f'{endpoint}/ingest', files=file)
                     responses.append(response.text)
                     rich.print(response.text)
             return responses
@@ -1511,10 +1558,10 @@ def new(
 @click.argument('message', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to send message to. Default is last thread.')
-@click.option('--path', '-p', callback=parse_path, required=False,
-              help='Path to a single file, multiple files, directory of files, or a glob, to add to User message stack.')
+@click.option('--path', '-p', callback=parse_path, required=False, multiple=True,
+              help='Path to a single file, multiple files, directory of files, glob, or url to add to User message stack.')
 @click.option('--recursive', '-r', type=bool, required=False, default=False, is_flag=True,
-              help='When using the --path option, recursively walk the directory.')
+              help='When using the --path option, recursively walk any directories specified.')
 @click.option('--upload', '-u', is_flag=True, required=True, default=False,
               help='Upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
 @click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool', 'code'], case_sensitive=False),
@@ -1564,7 +1611,7 @@ def message(
 
     if path:
         allowed_extensions = ['.py', '.md', 'Dockerfile', '.sh', '.txt'] if mode == 'code' else []
-        context_messages = get_files_as_messages(path, upload, allowed_extensions)
+        context_messages = get_path_as_messages(path, upload, allowed_extensions)
 
     # if we have files, but no message, grab the last file and use it as the message
     if not message and context_messages:

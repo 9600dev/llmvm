@@ -222,6 +222,7 @@ class StarlarkExecutionController(Controller):
             # see if we can do a similarity search or not.
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
+                token_calculator=self.executor.calculate_tokens,
                 content=str(context_message.message),
                 chunk_token_count=256,
                 chunk_overlap=0,
@@ -271,6 +272,7 @@ class StarlarkExecutionController(Controller):
 
                     similarity_chunks = self.vector_search.chunk_and_rank(
                         query=query,
+                        token_calculator=self.executor.calculate_tokens,
                         content=str(prev_message),
                         chunk_token_count=256,
                         chunk_overlap=0,

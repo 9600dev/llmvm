@@ -1,14 +1,9 @@
-import ast
 import datetime as dt
-import os
-import tempfile
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
-import spacy
 from dateutil.parser import parse
-from langchain.docstore.document import Document
-from langchain.text_splitter import TextSplitter, TokenTextSplitter
+from langchain.text_splitter import TextSplitter
 
 from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
@@ -60,7 +55,6 @@ class VectorSearch():
         vector_store: VectorStore,
     ):
         self.vector_store = vector_store
-        self.nlp = spacy.load('en_core_web_sm')
 
     def search(
         self,
@@ -104,6 +98,7 @@ class VectorSearch():
         self,
         query: str,
         content: str,
+        token_calculator: Callable[[str], int],
         chunk_token_count: int = 256,
         chunk_overlap: int = 0,
         max_tokens: int = 8196,
@@ -112,6 +107,7 @@ class VectorSearch():
         return self.vector_store.chunk_and_rank(
             query,
             content,
+            token_calculator,
             chunk_token_count,
             chunk_overlap,
             max_tokens,
@@ -128,23 +124,7 @@ class VectorSearch():
         parent: Optional[str] = None,
         extra_metdata: Optional[dict] = None,
     ) -> EntityMetadata:
-        doc = self.nlp(content)
         e = EntityMetadata()
-
-        for ent in doc.ents:
-            if ent.label_ == "PERSON":
-                e.names.append(ent.text)
-            elif ent.label_ == "EVENT":
-                e.events.append(ent.text)
-            elif ent.label_ == "DATE":
-                try:
-                    e.dates.append(parse(ent.text))
-                except Exception as ex:
-                    logging.debug(ex)
-            elif ent.label_ == "GPE" or ent.label_ == "LOC":
-                e.locations.append(ent.text)
-            elif ent.label_ == "ORG":
-                e.organizations.append(ent.text)
 
         if title:
             e.title = title
@@ -231,8 +211,8 @@ class VectorSearch():
     def ingest_file(
         self,
         filename: str,
-        url: str,
         project: str,
+        url: str,
         metadata: dict
     ) -> None:
         logging.debug(f'ingesting file: {filename} with url {url} into project: {project}')

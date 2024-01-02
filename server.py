@@ -1,7 +1,7 @@
 import asyncio
 import os
 import sys
-from typing import List, cast
+from typing import List, Optional, cast
 
 import async_timeout
 import jsonpickle
@@ -55,62 +55,59 @@ cache_session = PersistentCache(Container().get('cache_directory') + '/session.c
 cdn_directory = Container().get('cdn_directory')
 
 
-if not os.environ.get('OPENAI_API_KEY', '') and not os.environ.get('ANTHROPIC_API_KEY'):  # pragma: no cover
+if not os.environ.get('OPENAI_API_KEY') and not os.environ.get('ANTHROPIC_API_KEY'):  # pragma: no cover
     rich.print('[red]Neither OPENAI_API_KEY or ANTHROPIC_API_KEY are set. One of these API keys needs to be set in your terminal environment[/red]')  # NOQA: E501
     sys.exit(1)
 
 
-openai_executor = OpenAIExecutor(
-    api_key=os.environ.get('OPENAI_API_KEY', ''),
-    default_model=Container().get_config_variable('openai_model', 'LLMVM_MODEL'),
-    api_endpoint=Container().get('openai_api_base'),
-    default_max_tokens=int(Container().get('openai_max_tokens')),
-)
-
-anthropic_executor = AnthropicExecutor(
-    api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
-    default_model=Container().get_config_variable('anthropic_model', 'LLMVM_MODEL'),
-    api_endpoint=Container().get('anthropic_api_base'),
-    default_max_tokens=int(Container().get('anthropic_max_tokens')),
-)
-
-# get the configured executor
-executors = [openai_executor, anthropic_executor]  # todo: wire up llama-cpp-python
-default_executor_string = Container().get_config_variable('executor', 'LLMVM_EXECUTOR')
-default_executor = Helpers.first(lambda x: x.name() == default_executor_string, executors)
-if default_executor is None:
-    raise Exception(f"Executor {Container().get_config_variable('executor', 'LLMVM_EXECUTOR')} not found")
-
 vector_store = VectorStore(
-    token_calculator=default_executor.calculate_tokens,
     store_directory=Container().get('vector_store_index_directory'),
     index_name='index',
     embedding_model=Container().get('vector_store_embedding_model'),
     chunk_size=int(Container().get('vector_store_chunk_size')),
     chunk_overlap=10
 )
-
 vector_search = VectorSearch(vector_store=vector_store)
 
-openai_controller = StarlarkExecutionController(
-    executor=openai_executor,
-    agents=agents,  # type: ignore
-    vector_search=vector_search,
-    edit_hook=None,
-    continuation_passing_style=False,
-)
 
-anthropic_controller = StarlarkExecutionController(
-    executor=anthropic_executor,
-    agents=agents,  # type: ignore
-    vector_search=vector_search,
-    edit_hook=None,
-    continuation_passing_style=False,
-)
+def get_controller(controller: Optional[str] = None) -> StarlarkExecutionController:
+    if not controller:
+        controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
 
-default_controller = anthropic_controller if (
-    Container().get_config_variable('executor', 'LLMVM_EXECUTOR') == 'anthropic'
-) else openai_controller
+    if not controller:
+        raise EnvironmentError('No executor specified in environment or config file')
+
+    if controller == 'anthropic':
+        anthropic_executor = AnthropicExecutor(
+            api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
+            default_model=Container().get_config_variable('anthropic_model', 'LLMVM_MODEL'),
+            api_endpoint=Container().get('anthropic_api_base'),
+            default_max_tokens=int(Container().get('anthropic_max_tokens')),
+        )
+        anthropic_controller = StarlarkExecutionController(
+            executor=anthropic_executor,
+            agents=agents,  # type: ignore
+            vector_search=vector_search,
+            edit_hook=None,
+            continuation_passing_style=False,
+        )
+        return anthropic_controller
+    else:
+        openai_executor = OpenAIExecutor(
+            api_key=os.environ.get('OPENAI_API_KEY', ''),
+            default_model=Container().get_config_variable('openai_model', 'LLMVM_MODEL'),
+            api_endpoint=Container().get('openai_api_base'),
+            default_max_tokens=int(Container().get('openai_max_tokens')),
+        )
+
+        openai_controller = StarlarkExecutionController(
+            executor=openai_executor,
+            agents=agents,  # type: ignore
+            vector_search=vector_search,
+            edit_hook=None,
+            continuation_passing_style=False,
+        )
+        return openai_controller
 
 
 def __get_thread(id: int) -> SessionThread:
@@ -178,7 +175,7 @@ def search(query: str):
     return results
 
 @app.post('/ingest')
-async def ingest(file: UploadFile = File(...), project: str = Form(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+async def ingest(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
     try:
         name = os.path.basename(str(file.filename))
 
@@ -187,8 +184,8 @@ async def ingest(file: UploadFile = File(...), project: str = Form(...), backgro
             background_tasks.add_task(
                 vector_search.ingest_file,
                 f"{cdn_directory}/{name}",
+                '',
                 str(file.filename),
-                project,
                 {}
             )
         return {"filename": file.filename, "detail": "Ingestion started."}
@@ -220,7 +217,7 @@ async def download(
                 expr=download_item.url,
                 agents=[],
                 messages=[],
-                starlark_runtime=default_controller.starlark_runtime,
+                starlark_runtime=get_controller().starlark_runtime,
                 original_code='',
                 original_query=''
             )
@@ -345,11 +342,7 @@ async def code_completions(request: SessionThread):
     queue = asyncio.Queue()
 
     # set the defaults, or use what the SessionThread thread asks
-    controller = default_controller
-    if thread.executor == 'anthropic':
-        controller = anthropic_controller
-    elif thread.executor == 'openai':
-        controller = openai_controller
+    controller = get_controller(thread.executor)
     model = thread.model if thread.model else controller.get_executor().get_default_model()
 
     logging.debug(f'/v1/chat/code_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
@@ -433,11 +426,7 @@ async def tools_completions(request: SessionThread):
     queue = asyncio.Queue()
 
     # set the defaults, or use what the SessionThread thread asks
-    controller = default_controller
-    if thread.executor == 'anthropic':
-        controller = anthropic_controller
-    elif thread.executor == 'openai':
-        controller = openai_controller
+    controller = get_controller(thread.executor)
     model = thread.model if thread.model else controller.get_executor().get_default_model()
 
     logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
@@ -519,12 +508,17 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == '__main__':
-    rich.print(f'[green]Default executor is: {default_executor.name()}[/green]')
-    rich.print(f'[green]Default model is: {default_executor.get_default_model()}[/green]')
+    default_controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
+    default_model_str = f'{default_controller}_model'
+    default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
+    rich.print(f'[green]Default executor is: {default_controller}[/green]')
+    rich.print(f'[green]Default model is: {default_model}[/green]')
 
     for agent in agents:
         rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore
 
+    # you can run this using uvicorn to get better asynchronousy, but don't count on it yet.
+    # uvicorn server:app --loop asyncio --workers 4 --log-level debug --host 0.0.0.0 --port 8011
     config = uvicorn.Config(
         app='server:app',
         host=Container().get('server_host'),

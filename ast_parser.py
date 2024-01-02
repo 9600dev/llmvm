@@ -1,9 +1,7 @@
-import copy
 from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 from helpers.helpers import Helpers
-from objects import (Answer, Content, DataFrame, Executor, FunctionCall,
-                     Statement, UncertainOrError, User)
+from objects import Content, FunctionCall, UncertainOrError
 
 # <program> ::= { <statement> }
 # <statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <set> | <get> | <uncertain_or_error>

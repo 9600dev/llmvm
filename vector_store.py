@@ -16,14 +16,12 @@ logging = setup_logging()
 class VectorStore():
     def __init__(
         self,
-        token_calculator: Callable[[str], int],
         store_directory: str,
         index_name: str,
         embedding_model: str,
         chunk_size: int = 500,
         chunk_overlap: int = 50,
     ):
-        self.token_calculator = token_calculator
         self._embeddings = None
         self.embedding_model = embedding_model
         self.chunk_size = chunk_size
@@ -118,6 +116,7 @@ class VectorStore():
         self,
         query: str,
         content: str,
+        token_calculator: Callable[[str], int],
         chunk_token_count: int = 256,
         chunk_overlap: int = 0,
         max_tokens: int = 8196,
@@ -140,7 +139,7 @@ class VectorStore():
 
         split_texts = text_splitter.split_text(content)
 
-        token_chunk_cost = self.token_calculator(split_texts[0])
+        token_chunk_cost = token_calculator(split_texts[0])
 
         logging.debug('VectorStore.chunk_and_rank document length: {} split_texts: {}'.format(len(content), len(split_texts)))
         chunk_faiss = FAISS.from_texts(split_texts, self.embeddings())
@@ -148,7 +147,7 @@ class VectorStore():
         chunk_k = math.floor(max_tokens / token_chunk_cost)
         result = chunk_faiss.similarity_search_with_relevance_scores(query, k=chunk_k * 5)
 
-        total_tokens = self.token_calculator(query)
+        total_tokens = token_calculator(query)
         return_results = []
 
         def half_str(s):
@@ -156,15 +155,15 @@ class VectorStore():
             return s[:mid]
 
         for doc, rank in result:
-            if total_tokens + self.token_calculator(doc.page_content) < max_tokens:
+            if total_tokens + token_calculator(doc.page_content) < max_tokens:
                 return_results.append((self.__document_str(doc), rank))
-                total_tokens += self.token_calculator(self.__document_str(doc))
+                total_tokens += token_calculator(self.__document_str(doc))
             elif (
                 half_str(doc.page_content)
-                and total_tokens + self.token_calculator(half_str(doc.page_content)) < max_tokens
+                and total_tokens + token_calculator(half_str(doc.page_content)) < max_tokens
             ):
                 return_results.append((half_str(self.__document_str(doc))[0], rank))
-                total_tokens += self.token_calculator(half_str(self.__document_str(doc)))
+                total_tokens += token_calculator(half_str(self.__document_str(doc)))
             else:
                 break
         return return_results
