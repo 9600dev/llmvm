@@ -9,8 +9,10 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 from helpers.helpers import Helpers
 from helpers.logging_helpers import (no_indent_debug, response_writer,
                                      role_debug, setup_logging)
+from helpers.pdf import PdfHelpers
 from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
-                     Message, Statement, System, User, awaitable_none)
+                     Message, PdfContent, Statement, System, User,
+                     awaitable_none)
 from starlark_runtime import StarlarkRuntime
 from vector_search import VectorSearch
 
@@ -52,6 +54,11 @@ class StarlarkExecutionController(Controller):
 
                 first = result.split(',')[0].strip()
                 second = result.split(',')[1].strip()
+
+                match = re.search(r"[-+]?[0-9]*\.?[0-9]+", second)
+                if match:
+                    second = match.group(0)
+
                 try:
                     if first.startswith('tool') or first.startswith('"tool"'):
                         return {'tool': float(second)}
@@ -167,6 +174,15 @@ class StarlarkExecutionController(Controller):
         context relavence to the prompt_message.
         """
         assistant_result: Assistant
+
+        # If we have a PdfContent here, we need to convert it into the appropriate format
+        # before firing off the call.
+        # todo: this should probably use ContentDownloader.parse_pdf (so that context messages)
+        # are included in the assessment of if the Pdf has been converted or not
+        for c_message in context_messages:
+            if isinstance(c_message.message, PdfContent) and not c_message.message.is_text():
+                text_result = PdfHelpers.parse_pdf(c_message.message.url)
+                c_message.message.sequence = text_result
 
         # I have either a message, or a list of messages. They might need to be map/reduced.
         # todo: we usually have a prepended message of context to help the LLM figure out
@@ -537,12 +553,21 @@ class StarlarkExecutionController(Controller):
                     )
 
             if not self.continuation_passing_style:
+                old_model = self.starlark_runtime.controller.get_executor().get_default_model()
+
+                if model:
+                    self.starlark_runtime.controller.get_executor().set_default_model(model)
+
                 _ = self.starlark_runtime.run(
                     starlark_code=assistant_response,
                     original_query=str(messages[-1].message),
                     messages=messages,
                 )
                 results.extend(self.starlark_runtime.answers)
+
+                if model:
+                    self.starlark_runtime.controller.get_executor().set_default_model(old_model)
+
                 return results
             else:
                 _ = self.starlark_runtime.run_continuation_passing(

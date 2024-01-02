@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import datetime as dt
+import json
 import re
 import time
 from datetime import timedelta
@@ -13,8 +14,11 @@ from zoneinfo import ZoneInfo
 import astunparse
 from dateutil.parser import parse
 from dateutil.relativedelta import relativedelta
+from googlesearch import SearchResult
+from googlesearch import search as google_search
 
 from ast_parser import Parser
+from container import Container
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers, write_client_stream
 from helpers.logging_helpers import setup_logging
@@ -105,7 +109,7 @@ class ContentDownloader():
         if self.expr.startswith('"') and self.expr.endswith('"'):
             self.expr = self.expr[1:-1]
 
-    def __parse_pdf(self, filename: str) -> str:
+    def parse_pdf(self, filename: str) -> str:
         content = PdfHelpers.parse_pdf(filename)
 
         query_expander = self.starlark_runtime.controller.execute_llm_call(
@@ -132,7 +136,7 @@ class ContentDownloader():
         result = urlparse(self.expr)
         if result.scheme == '' or result.scheme == 'file':
             if '.pdf' in result.path:
-                return self.__parse_pdf(result.path)
+                return self.parse_pdf(result.path)
             if '.htm' in result.path or '.html' in result.path:
                 return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
 
@@ -141,7 +145,7 @@ class ContentDownloader():
             task = loop.create_task(self.firefox_helper.pdf_url(self.expr))
 
             pdf_filename = loop.run_until_complete(task)
-            return self.__parse_pdf(pdf_filename)
+            return self.parse_pdf(pdf_filename)
 
         elif result.scheme == 'http' or result.scheme == 'https':
             loop = asyncio.get_event_loop()
@@ -181,6 +185,34 @@ class Searcher():
 
         if self.query.startswith('"') and self.query.endswith('"'):
             self.query = self.query[1:-1]
+
+    def search_hook(self, url: str, query: str):
+        write_client_stream(
+            Content("$SERP_API_KEY not found, using googlesearch-python to talk to Google Search.\n")
+        )
+
+        results = list(google_search(query, advanced=True))
+        return_results: List[Dict] = []
+        for result in results:
+            return_results.append({
+                'title': result.title,
+                'link': result.url,
+                'snippet': result.description,
+            })
+
+        return return_results
+
+    def search_google_hook(self, query: str):
+        if not Container().get_config_variable('SERP_API_KEY'):
+            return self.search_hook('https://www.google.com/search?q=', query)
+        else:
+            return SerpAPISearcher().search_internet(query)
+
+    def search_news_hook(self, query: str):
+        if not Container().get_config_variable('SERP_API_KEY'):
+            return self.search_hook('https://news.google.com/search?q=', query)
+        else:
+            return SerpAPISearcher().search_news(query)
 
     def search(
         self,
@@ -254,9 +286,9 @@ class Searcher():
             return return_str
 
         engines = {
-            'Google Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
-            'Google News': {'searcher': SerpAPISearcher().search_news, 'parser': url_to_text, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
-            'Google Patent Search': {'searcher': SerpAPISearcher().search_internet, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
+            'Google Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
+            'Google News': {'searcher': self.search_news_hook, 'parser': url_to_text, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
+            'Google Patent Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
@@ -279,7 +311,7 @@ class Searcher():
             original_query=self.original_query,
         )
         engine = str(engine_rank.message).split('\n')[0]
-        searcher = SerpAPISearcher().search_internet
+        searcher = self.search_google_hook
 
         for key, value in engines.items():
             if key in engine:
@@ -788,4 +820,3 @@ class SourceProject:
         for source in self.sources:
             references.extend(Source.get_references(source.get_tree(), method_name))
         return references
-

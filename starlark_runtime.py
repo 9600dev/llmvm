@@ -24,8 +24,8 @@ from helpers.market import MarketHelpers
 from helpers.pdf import PdfHelpers
 from helpers.webhelpers import WebHelpers
 from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
-                     FunctionCall, FunctionCallMeta, Message, PandasMeta,
-                     Statement, User, awaitable_none)
+                     FunctionCall, FunctionCallMeta, ImageContent, Message,
+                     PandasMeta, Statement, User, awaitable_none)
 from vector_search import VectorSearch
 
 logging = setup_logging()
@@ -251,6 +251,9 @@ class StarlarkRuntime:
             # todo
             return User(Content(context._result.result()))  # type: ignore
 
+        elif isinstance(context, User):
+            return context
+
         logging.debug('statement_to_message() unusual type, context is: {}'.format(context))
         return User(Content(str(context)))
 
@@ -421,7 +424,7 @@ class StarlarkRuntime:
         if len(self.messages_list) == 0:
             return []
 
-        return [str(m.message) for m in self.messages_list[:-1] if m.role() != 'system']
+        return [m for m in self.messages_list[:-1] if m.role() != 'system']
 
     def llm_bind(self, expr, func: str):
         logging.debug(f'llm_bind({str(expr)[:20]}, {str(func)})')
@@ -581,6 +584,16 @@ class StarlarkRuntime:
 
         snippet = str(expr).replace('\n', ' ')[:150]
         write_client_stream(Content(f'I think I have an answer, but I am double checking it: answer("{snippet} ...")\n'))
+
+        # if the original query is referring to an image, it's because we were in tool mode
+        # so this is a todo: hack to fix answers() so that it works for images
+        if "I've just pasted you an image." in self.original_query:
+            answer = Answer(
+                conversation=self.messages_list,
+                result=str(expr)
+            )
+            self.answers.append(answer)
+            return answer
 
         # if we have a FunctionCallMeta object, it's likely we've called a helper function
         # and we're just keen to return that.

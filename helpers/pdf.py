@@ -48,6 +48,13 @@ class PdfHelpers():
         return stream
 
     @staticmethod
+    def parse_pdf_bytes(stream: bytes) -> str:
+        with tempfile.NamedTemporaryFile(suffix='.pdf') as temp:
+            temp.write(stream)
+            temp.seek(0)
+            return PdfHelpers.parse_pdf(temp.name)
+
+    @staticmethod
     def parse_pdf_image(url_or_file: str) -> str:
         result = urlparse(url_or_file)
 

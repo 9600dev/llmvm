@@ -25,6 +25,7 @@ from anthropic.lib.streaming._messages import (AsyncMessageStream,
 from anthropic.types.completion import Completion
 from click import MissingParameter
 from click_default_group import DefaultGroup
+from httpx import ConnectError
 from PIL import Image
 from prompt_toolkit import PromptSession, prompt
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -32,6 +33,7 @@ from prompt_toolkit.completion import (Completer, PathCompleter, WordCompleter,
                                        merge_completers)
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.styles import Style
 from pydantic.type_adapter import TypeAdapter
 from rich.console import Console, ConsoleOptions, RenderResult
@@ -88,8 +90,15 @@ def parse_message_thread(message: str):
                 parsed_message.message = ImageContent(file_content.read(), url=content)
                 messages.append(parsed_message)
         elif 'PdfContent(' in content:
-            logging.debug('PdfContent found, but not implemented')
-            parsed_message.message = Content(content)
+            content = Helpers.in_between(content, 'PdfContent(', ')')
+            with open(content, 'rb') as file_content:
+                parsed_message.message = PdfContent(file_content.read(), url=content)
+                messages.append(parsed_message)
+        elif 'FileContent(' in content:
+            content = Helpers.in_between(content, 'FileContent(', ')')
+            with open(content, 'r') as file_content:
+                parsed_message.message = FileContent(file_content.read().encode('utf-8'), url=content)
+                messages.append(parsed_message)
         else:
             parsed_message.message = Content(content)
             messages.append(parsed_message)
@@ -156,6 +165,9 @@ def parse_path(ctx, param, value) -> List[str]:
         value = [value]
 
     for item in value:
+        # deal with ~
+        item = os.path.expanduser(item)
+
         if os.path.isdir(item):
             # If it's a directory, add all files within
             for dirpath, dirnames, filenames in os.walk(item):
@@ -214,7 +226,7 @@ def get_files_as_messages(
 
 
 async def stream_gpt_response(response, print_lambda: Callable):
-    async with async_timeout.timeout(280):
+    async with async_timeout.timeout(300):
         # anthropic new messages API
         if isinstance(response, AsyncMessageStreamManager):
             async with response as stream_async:
@@ -267,7 +279,7 @@ async def stream_response(response, print_lambda: Callable):
             return False
 
     response_objects = []
-    async with async_timeout.timeout(280):
+    async with async_timeout.timeout(300):
         try:
             buffer = ''
             async for raw_bytes in response.aiter_raw():
@@ -313,7 +325,7 @@ async def set_thread(
     api_endpoint: str,
     thread: SessionThread,
 ) -> SessionThread:
-    async with httpx.AsyncClient(timeout=280.0) as client:
+    async with httpx.AsyncClient(timeout=300.0) as client:
         response = await client.post(
             f'{api_endpoint}/v1/chat/set_thread',
             json=thread.model_dump()
@@ -347,7 +359,7 @@ async def __execute_llm_call_direct(
         message_response += s
         printer.write(s)  # type: ignore
 
-    messages_list = [Message.to_dict(m) for m in list(context_messages) + [message]]
+    messages_list = [Message.to_dict(m, server_serialization=False) for m in list(context_messages) + [message]]
     executor: Optional[Executor] = None
 
     if executor_name == 'openai':
@@ -365,9 +377,13 @@ async def __execute_llm_call_direct(
 
     timing.start()
 
-    response = await executor.aexecute_direct(messages_list)  # type: ignore
+    response: Dict = await executor.aexecute_direct(messages_list)  # type: ignore
     asyncio.run(stream_gpt_response(response, chained_printer))
-    result = SessionThread(id=-1, messages=[MessageModel(role='assistant', content=message_response)])
+
+    response_messages = list([MessageModel.from_message(m) for m in context_messages])
+    response_messages.append(MessageModel.from_message(message))
+    response_messages.append(MessageModel(role='assistant', content=message_response))
+    result = SessionThread(id=-1, messages=response_messages)
     timing.end()
     return result
 
@@ -406,7 +422,7 @@ async def execute_llm_call(
         else:
             endpoint = 'code_completions'
 
-        async with httpx.AsyncClient(timeout=280.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             async with client.stream(
                 'POST',
                 f'{api_endpoint}/v1/chat/{endpoint}',
@@ -634,11 +650,16 @@ def print_response(messages: List[Message], suppress_role: bool = False):
         console = Console()
 
         if isinstance(content, ImageContent):
+            console.print(f'{prepend}\n', end='')
             StreamPrinter('user').display_image(content.sequence)
         elif isinstance(content, PdfContent):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
-            console.print(Markdown('PdfContent: ' + content.url))
+            console.print(Markdown(f'[PdfContent({content.url})]'))
+        elif isinstance(content, FileContent):
+            CodeBlock.__rich_console__ = markdown__rich_console__
+            console.print(f'{prepend}', end='')
+            console.print(Markdown(f'[FileContent({content.url})]'))
         elif contains_token(str(content), markdown_tokens) and sys.stdout.isatty():
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
@@ -700,6 +721,8 @@ def get_string_thread_with_roles(thread: SessionThread):
                 string_result += f'[ImageContent({message.message.url})]\n\n'
         elif isinstance(message.message, FileContent):
             string_result += f'[FileContent({message.message.url})]\n\n'
+        elif isinstance(message.message, PdfContent):
+            string_result += f'[PdfContent({message.message.url})]\n\n'
         else:
             string_result += str(message) + '\n\n'
     return string_result
@@ -788,20 +811,102 @@ class Repl():
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text) - 1
 
+        @kb.add('c-y', 'y')
+        def _(event):
+            if 'last_thread' in globals():
+                last_thread_t: SessionThread = last_thread
+                pyperclip.copy(str(last_thread_t.messages[-1].content))
+                rich.print('Last message copied to clipboard.\n')
+
+        async def __invoke_paste_image(thread: SessionThread, raw_data: bytes):
+            global current_mode
+
+            with click.Context(message) as ctx:
+                ctx.ensure_object(dict)
+                ctx.params['message'] = "I've just pasted you an image."
+                ctx.params['id'] = thread.id
+                ctx.params['path'] = ''
+                ctx.params['recursive'] = False
+                ctx.params['path'] = ''
+                ctx.params['upload'] = False
+                ctx.params['mode'] = current_mode
+                ctx.params['endpoint'] = Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
+                ctx.params['cookies'] = thread.cookies
+                ctx.params['executor'] = thread.executor
+                ctx.params['model'] = thread.model
+                ctx.params['suppress_role'] = False
+                ctx.params['context_messages'] = [User(ImageContent(cast(bytes, raw_data), url=''))]
+                return message.invoke(ctx)
+
+        @kb.add('c-y', 'p')
+        def _(event):
+            global thread_id
+            global last_thread
+
+            from PIL import ImageGrab
+            im = ImageGrab.grabclipboard()
+
+            if im is not None:
+                with io.BytesIO() as output:
+                    im.save(output, format='PNG')
+                    raw_data = output.getvalue()
+                    rich.print('Pasting image into thread and calling LLM:')
+                    StreamPrinter('user').display_image(raw_data)
+
+                    thread: SessionThread = SessionThread(id=-1)
+
+                    if 'last_thread' in globals():
+                        thread = last_thread
+                    else:
+                        try:
+                            thread = asyncio.run(
+                                get_thread(
+                                    Container.get_config_variable('LLMVM_ENDPOINT',
+                                                                  default='http://127.0.0.1:8011'),
+                                    thread_id
+                                )
+                            )
+                        except Exception as ex:
+                            pass
+
+                    if thread.executor != 'openai' and Container.get_config_variable('LLMVM_EXECUTOR') != 'openai':
+                        rich.print('Pasting images only works with OpenAI right now.')
+                        return
+
+                    if (
+                        (thread.model != 'gpt-4-vision-preview')
+                        and (Container.get_config_variable('LLMVM_MODEL') != 'gpt-4-vision-preview')
+                    ):
+                        rich.print('Pasting images only works with gpt-4-vision-preview right now.')
+                        rich.print('Set using `export LLMVM_MODEL=gpt-4-vision-preview`')
+                        return
+
+                    asyncio.create_task(__invoke_paste_image(thread, raw_data))
+
         @kb.add('c-n')
         def _(event):
             global thread_id
+
             thread = asyncio.run(get_thread(Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), 0))
             thread_id = thread.id
             rich.print('New thread created.')
 
         @kb.add('c-g')
         def _(event):
+            global last_thread
+            global thread_id
+
             editor = os.environ.get('EDITOR', 'vim')
-            thread = asyncio.run(
-                get_thread(Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), thread_id)
-            )
-            thread_text = get_string_thread_with_roles(thread)
+
+            if 'thread_id' in globals() and thread_id > 0:
+                try:
+                    last_thread = asyncio.run(
+                        get_thread(Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'), thread_id)
+                    )
+                except Exception as ex:
+                    pass
+
+            thread_text = get_string_thread_with_roles(last_thread)
 
             current_text = event.app.current_buffer.text
             if len(current_text) > 0:
@@ -855,7 +960,9 @@ class Repl():
                 tokens = ['--id', str(thread_id)] + tokens
             if (
                 (has_option('--mode', command))
-                and ('--mode' not in tokens)
+                and (
+                    ('--mode' not in tokens) or ('-o' not in tokens)
+                )
             ):
                 tokens = ['--mode', current_mode] + tokens
             return tokens
@@ -1097,7 +1204,7 @@ def cookies(
         cookies = Helpers.read_netscape_cookies(result.stdout)
 
     async def cookies_helper():
-        async with httpx.AsyncClient(timeout=280.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             response = await client.post(f'{endpoint}/v1/chat/cookies', json={'id': id, 'cookies': cookies})  # type: ignore
             session_thread = SessionThread.model_validate(response.json())
         return session_thread
@@ -1111,8 +1218,8 @@ def cookies(
 @click.argument('actor', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to retrieve.')
-@click.option('--mode', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
-              help='ode to use "auto", "tool" or "direct". Default is "auto".')
+@click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
+              help='Mode to use "auto", "tool" or "direct". Default is "auto".')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
@@ -1157,6 +1264,7 @@ def act(
             ctx.params['message'] = prompt_result
             ctx.params['id'] = id
             ctx.params['path'] = ''
+            ctx.params['recursive'] = False
             ctx.params['upload'] = False
             ctx.params['mode'] = mode
             ctx.params['endpoint'] = endpoint
@@ -1234,7 +1342,7 @@ def url(
     global thread_id
 
     async def download_helper():
-        async with httpx.AsyncClient(timeout=280.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             async with client.stream('POST', f'{endpoint}/download', json=item.model_dump()) as response:
                 objs = await stream_response(response, StreamPrinter('').write)
         await response.aclose()
@@ -1258,7 +1366,7 @@ def search(
 ):
     console = Console()
 
-    response: httpx.Response = httpx.get(f'{endpoint}/search/{query}', timeout=280.0)
+    response: httpx.Response = httpx.get(f'{endpoint}/search/{query}', timeout=300.0)
     if response.status_code == 200:
         results = response.json()
 
@@ -1324,7 +1432,7 @@ def ingest(
                       for f in os.listdir(filename_directory) if os.path.isfile(os.path.join(filename_directory, f))]
 
     async def upload_helper():
-        async with httpx.AsyncClient(timeout=280.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             responses = []
             for filename_str in files:
                 with open(filename_str, 'rb') as f:
@@ -1397,8 +1505,17 @@ def messages(
     suppress_role: bool,
 ):
     global thread_id
-    thread = asyncio.run(get_thread(endpoint, thread_id))
-    print_thread(thread=thread, suppress_role=suppress_role)
+    global last_thread
+
+    try:
+        thread = asyncio.run(get_thread(endpoint, thread_id))
+        print_thread(thread=thread, suppress_role=suppress_role)
+    except Exception:
+        if 'last_thread' in globals():
+            rich.print('LLMVM server not available. Showing local thread:')
+            print_thread(thread=last_thread, suppress_role=suppress_role)
+        else:
+            rich.print('LLMVM server not available.')
 
 
 @cli.command('new', help='Create a new message thread.')
@@ -1409,8 +1526,23 @@ def new(
     endpoint: str,
 ):
     global thread_id
-    thread = asyncio.run(get_thread(endpoint, 0))
-    thread_id = thread.id
+    global last_thread
+
+    try:
+        thread = asyncio.run(get_thread(endpoint, 0))
+        thread_id = thread.id
+        last_thread = thread
+    except ConnectError:
+        if 'last_thread' in globals():
+            rich.print('LLMVM server not available. Creating new local thread.')
+            new_thread = SessionThread(
+                id=-1,
+                executor=last_thread.executor,
+                model=last_thread.model,
+                current_mode=last_thread.current_mode,
+                cookies=last_thread.cookies,
+            )
+            last_thread = new_thread
 
 
 @cli.command('message')
@@ -1448,10 +1580,11 @@ def message(
     executor: str,
     model: str,
     suppress_role: bool,
+    context_messages: Sequence[Message] = [],
 ):
     global thread_id
     global last_thread
-    context_messages: List[User] = []
+    # context_messages: Sequence[Message] = []
 
     if mode == 'code' and not path:
         raise MissingParameter('path')
@@ -1486,6 +1619,17 @@ def message(
         if id <= 0:
             id = thread_id  # type: ignore
 
+        # if we have a last_thread but the thread_id is 0 or -1, then we don't
+        # have a connection to the server, so we'll just use the last thread
+        if thread_id <= 0 and 'last_thread' in globals() and last_thread:
+            # unless we have a full parsable thread
+            # hacky as anything todo: lift this logic somehwere else as llm() does the same thing
+            role_strings = ['Assistant: ', 'System: ', 'User: ']
+            if isinstance(message, str) and any(role_string in message for role_string in role_strings):
+                pass
+            else:
+                context_messages = [MessageModel.to_message(m) for m in last_thread.messages] + list(context_messages)
+
         cookies_list = []
         if cookies:
             with open(cookies, 'r') as f:
@@ -1505,6 +1649,7 @@ def message(
         print_response([MessageModel.to_message(thread.messages[-1])], suppress_role)
         if not suppress_role: StreamPrinter('').write_string('\n')
         last_thread = thread
+        thread_id = thread.id
         return thread
 
 

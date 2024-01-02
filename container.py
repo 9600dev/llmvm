@@ -81,6 +81,9 @@ class Container(metaclass=Singleton):
         if name in os.environ:
             return os.environ.get(name, default)
 
+        if alternate_name in os.environ:
+            return os.environ.get(alternate_name, default)
+
         config_file = os.environ.get('LLMVM_CONFIG', default='~/.config/llmvm/config.yaml')
         if config_file.startswith('~'):
             config_file = os.path.expanduser(config_file)

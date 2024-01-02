@@ -54,6 +54,7 @@ langchain = "^0.0.334"
 psutil = "^5.9.6"
 pyperclip = "^1.8.2"
 anthropic = "^0.8.1"
+googlesearch-python = "^1.2.3"
 
 
 [[tool.poetry.source]]

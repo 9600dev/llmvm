@@ -174,7 +174,7 @@ class OpenAIExecutor(Executor):
         model: Optional[str] = None,
         max_completion_tokens: int = 2048,
         temperature: float = 0.2,
-    ):
+    ) -> Dict:
         model = model if model else self.default_model
 
         message_tokens = self.calculate_tokens(messages)

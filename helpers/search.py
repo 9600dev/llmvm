@@ -27,12 +27,15 @@ class Searcher(ABC):
 class SerpAPISearcher(Searcher):
     def __init__(
         self,
-        api_key: str = os.environ.get('SERPAPI_API_KEY'),  # type: ignore
+        api_key: str = os.environ.get('SERPAPI_API_KEY', ''),  # type: ignore
         country_code: str = 'US',
         location: str = 'United States',
         interval: int = 7,
         page_limit: int = 1,
     ):
+        if not api_key:
+            raise ValueError('SerpAPISearcher requires a valid api_key')
+
         self.api_key = api_key
         self.country_code = country_code
         self.location = location

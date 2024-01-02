@@ -1230,6 +1230,20 @@ files = [
 requests = "*"
 
 [[package]]
+name = "googlesearch-python"
+version = "1.2.3"
+description = "A Python library for scraping the Google search engine."
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "googlesearch-python-1.2.3.tar.gz", hash = "sha256:38b251121dd140439bd08cdf2a05a0b195d852908ee2bfed30e57d16aa68ae5e"},
+]
+
+[package.dependencies]
+beautifulsoup4 = ">=4.9"
+requests = ">=2.20"
+
+[[package]]
 name = "greenlet"
 version = "3.0.0"
 description = "Lightweight in-process concurrent programming"
@@ -5133,4 +5147,4 @@ testing = ["coverage (>=5.0.3)", "zope.event", "zope.testing"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "987c081e66539ae5137777f2ae87a7e4c90da8958f9e1e56b34fc221af0b0c5e"
+content-hash = "39c7b71f1b0d383faa217c235dd27961b7de4e2a32e8270d85c50348e119543b"

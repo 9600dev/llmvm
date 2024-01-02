@@ -121,16 +121,29 @@ var3 = llm_call([var2], "Generate small essay"])
 answer(var3)
 
 Here is an example of being asked to search local files on the users computer: 
+
 {{user_colon_token}} "find files that contain anything related to water pressure, building plans and approval documents"
 {{assistant_colon_token}}
 var1 = search("local search: water pressure building plans approval documents")
 answer(var1)
+
+Here is an example of transforming the last message into something else:
 
 {{user_colon_token}} "Convert the last message into a bullet point list"
 {{assistant_colon_token}}
 last_message = messages()[-1]
 var1 = llm_call([last_message], "Convert into a bullet point list") 
 answer(var1)
+
+Another example: 
+
+{{user_colon_token}} "I've just pasted you an image."
+{{assistant_colon_token}} 
+last_message = messages()[-1]
+var1 = llm_call([last_message], "analyze the image")
+answer(var1)
+
+Another example: 
 
 {{user_colon_token}} "What is 5 MSFT stocks worth as grams of gold?"
 {{assistant_colon_token}} 

@@ -65,24 +65,24 @@ if not os.environ.get('OPENAI_API_KEY', '') and not os.environ.get('ANTHROPIC_AP
 
 openai_executor = OpenAIExecutor(
     api_key=os.environ.get('OPENAI_API_KEY', ''),
-    default_model=Container().get('openai_model'),
+    default_model=Container().get_config_variable('openai_model', 'LLMVM_MODEL'),
     api_endpoint=Container().get('openai_api_base'),
     default_max_tokens=int(Container().get('openai_max_tokens')),
 )
 
 anthropic_executor = AnthropicExecutor(
     api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
-    default_model=Container().get('anthropic_model'),
+    default_model=Container().get_config_variable('anthropic_model', 'LLMVM_MODEL'),
     api_endpoint=Container().get('anthropic_api_base'),
     default_max_tokens=int(Container().get('anthropic_max_tokens')),
 )
 
 # get the configured executor
 executors = [openai_executor, anthropic_executor]  # todo: wire up llama-cpp-python
-default_executor_string = Container().get('executor')
+default_executor_string = Container().get_config_variable('executor', 'LLMVM_EXECUTOR')
 default_executor = Helpers.first(lambda x: x.name() == default_executor_string, executors)
 if default_executor is None:
-    raise Exception(f'Executor {Container().get("executor")} not found')
+    raise Exception(f"Executor {Container().get_config_variable('executor', 'LLMVM_EXECUTOR')} not found")
 
 vector_store = VectorStore(
     token_calculator=default_executor.calculate_tokens,
@@ -111,7 +111,9 @@ anthropic_controller = StarlarkExecutionController(
     continuation_passing_style=False,
 )
 
-default_controller = openai_controller if default_executor_string == 'openai' else anthropic_controller
+default_controller = anthropic_controller if (
+    Container().get_config_variable('executor', 'LLMVM_EXECUTOR') == 'anthropic'
+) else openai_controller
 
 
 def __get_thread(id: int) -> SessionThread:
@@ -426,8 +428,14 @@ async def tools_completions(request: SessionThread):
     messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
     mode = thread.current_mode
     queue = asyncio.Queue()
-    model = thread.model
-    controller = openai_controller if thread.executor == 'openai' else anthropic_controller
+
+    # set the defaults
+    controller = default_controller
+    if thread.executor == 'anthropic':
+        controller = anthropic_controller
+    elif thread.executor == 'openai':
+        controller = openai_controller
+    model = thread.model if thread.model else controller.get_executor().get_default_model()
 
     logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
 

@@ -1,4 +1,5 @@
 import base64
+import importlib
 import os
 from abc import ABC, abstractmethod
 from typing import (Any, Awaitable, Callable, Dict, Generator, Generic, List,
@@ -303,10 +304,16 @@ class Content(AstNode):
     def __repr__(self):
         return f'Content({self.sequence})'
 
+    def get_text(self) -> str:
+        return str(self.sequence)
+
     def b64encode(self) -> str:
         if isinstance(self.sequence, bytes):
             return base64.b64encode(self.sequence).decode('utf-8')
-        raise ValueError('sequence is not bytes')
+        elif isinstance(self.sequence, str):
+            return base64.b64encode(self.sequence.encode('utf-8')).decode('utf-8')
+        else:
+            raise ValueError(f'unknown sequence: {self.sequence}')
 
     @staticmethod
     def decode(base64_str: str):
@@ -326,7 +333,7 @@ class ImageContent(Content):
 class PdfContent(Content):
     def __init__(
         self,
-        sequence: bytes,
+        sequence: bytes | str,
         url: str = '',
     ):
         super().__init__(sequence, 'pdf', url)
@@ -334,6 +341,34 @@ class PdfContent(Content):
 
     def __str__(self):
         return f'PdfContent({self.url})'
+
+    def is_local(self):
+        return os.path.isfile(self.url)
+
+    def is_text(self):
+        return isinstance(self.sequence, str)
+
+    def get_text(self) -> str:
+        def late_bind_pdf_parse(obj, method_name: str):
+            # hoooly crap this is a hack.
+            module = importlib.import_module('helpers.pdf')
+            cls = getattr(module, 'PdfHelpers')
+            method = getattr(cls, method_name)
+            return method(obj)
+
+        if self.is_text():
+            return str(self.sequence)
+        elif self.is_local():
+            self.sequence = late_bind_pdf_parse(self.url, 'parse_pdf')
+            return self.sequence
+        elif self.url:
+            self.sequence = late_bind_pdf_parse(self.url, 'parse_pdf')
+            return self.sequence
+        elif isinstance(self.sequence, bytes):
+            self.sequence = late_bind_pdf_parse(self.sequence, 'parse_pdf_bytes')
+            return self.sequence
+        else:
+            raise ValueError('cannot get text from pdf')
 
 
 class FileContent(Content):
@@ -350,6 +385,13 @@ class FileContent(Content):
 
     def __str__(self):
         return f'FileContent({self.url})'
+
+    def get_text(self):
+        if self.is_local():
+            with open(self.url, 'r') as f:
+                return f.read()
+        else:
+            return self.sequence
 
 
 class Message(AstNode):
@@ -388,27 +430,34 @@ class Message(AstNode):
             byte_content = base64.b64decode(message_content[0]['image_url']['url'].split(',')[1])
             content = ImageContent(byte_content, message_content[0]['image_url']['url'])
 
-        # todo: pdf parsing here
-        if role == 'user' and content_type == 'file':
+        elif content_type == 'pdf':
+            if url and not message_content:
+                with open(url, 'rb') as f:
+                    content = PdfContent(f.read(), url)
+            else:
+                content = PdfContent(FileContent.decode(str(message_content)), url)
+        elif content_type == 'file':
             # if there's a url here, but no content, then it's a file local to the server
             if url and not message_content:
                 with open(url, 'r') as f:
-                    return User(FileContent(f.read().encode('utf-8'), url))
+                    content = FileContent(f.read().encode('utf-8'), url)
+            # else, it's been transferred from the client to server via b64
             else:
-                return User(FileContent(FileContent.decode(str(message_content)), url))
+                content = FileContent(FileContent.decode(str(message_content)), url)
+
         if role == 'user':
             return User(content)
         elif role == 'system':
             return System(content)
         elif role == 'assistant':
             return Assistant(content)
-        raise ValueError('role not found supported')
+        raise ValueError(f'role not found or not supported: {message}')
 
     def __getitem__(self, key):
         return {'role': self.role(), 'content': self.message}
 
     @staticmethod
-    def to_dict(message: 'Message', add_metadata: bool = False) -> Dict[str, Any]:
+    def to_dict(message: 'Message', server_serialization: bool = False) -> Dict[str, Any]:
         # primarily to pass to Anthropic or OpenAI api
         if isinstance(message, User) and isinstance(message.message, ImageContent):
             return {
@@ -420,24 +469,29 @@ class Message(AstNode):
                         'detail': 'high'
                     }
                 }],
-                **({'url': message.message.url} if add_metadata else {}),
-                **({'content_type': 'image'} if add_metadata else {})
+                **({'url': message.message.url} if server_serialization else {}),
+                **({'content_type': 'image'} if server_serialization else {})
             }
         elif isinstance(message, User) and isinstance(message.message, PdfContent):
-            raise ValueError('pdf not supported')
+            return {
+                'role': message.role(),
+                'content': message.message.b64encode() if server_serialization else message.message.get_text(),
+                **({'url': message.message.url} if server_serialization else {}),
+                **({'content_type': 'pdf'} if server_serialization else {})
+            }
         elif isinstance(message, User) and isinstance(message.message, FileContent):
             return {
                 'role': message.role(),
-                'content': message.message.b64encode(),
-                **({'url': message.message.url} if add_metadata else {}),
-                **({'content_type': 'file'} if add_metadata else {})
+                'content': message.message.b64encode() if server_serialization else message.message.get_text(),
+                **({'url': message.message.url} if server_serialization else {}),
+                **({'content_type': 'file'} if server_serialization else {})
             }
         else:
             return {
                 'role': message.role(),
                 'content': str(message.message),
-                **({'url': message.message.url} if add_metadata else {}),
-                **({'content_type': ''} if add_metadata else {})
+                **({'url': message.message.url} if server_serialization else {}),
+                **({'content_type': ''} if server_serialization else {})
             }
 
 
@@ -784,14 +838,14 @@ class MessageModel(BaseModel):
 
     @staticmethod
     def from_message(message: Message) -> 'MessageModel':
-        return MessageModel(**Message.to_dict(message, True))
+        return MessageModel(**Message.to_dict(message, server_serialization=True))
 
 
 class SessionThread(BaseModel):
     id: int = -1
     executor: str = ''
     model: str = ''
-    current_mode: str = 'tool'
+    current_mode: str = 'auto'
     temperature: float = 0.0
     cookies: List[Dict[str, Any]] = []
     messages: List[MessageModel] = []
