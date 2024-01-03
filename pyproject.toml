@@ -47,6 +47,7 @@ sentence-transformers = "^2.2.2"
 faiss-cpu = "^1.7.4"
 prompt-toolkit = "^3.0.43"
 nest-asyncio = "^1.5.8"
+psutil = "^5.9.7"
 
 [build-system]
 requires = ["poetry-core"]
