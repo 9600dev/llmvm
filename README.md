@@ -9,9 +9,12 @@ LLMVM's features are best explored through examples:
 #### Tool Use: Controlling Firefox Browser
 
 ```$ python server.py```
+
 ```$ python client.py```
 
-> query>> Go to the https://ten13.vc/team website and extract the list of names
+```bash
+query>> Go to the https://ten13.vc/team website and extract the list of names
+```
 
 ![](docs/2024-01-02-13-21-01.png)
 
@@ -19,7 +22,10 @@ The LLMVM server is coordinating with the LLM to deconstruct the query into exec
 
 #### Tool Use: Finance and Searching
 
-> query>> I have 5 MSFT stocks and 10 NVDA stocks, what is my net worth in grams of gold?
+```bash
+query>> I have 5 MSFT stocks and 10 NVDA stocks, what is my net worth in grams of gold?
+```
+
 
 ![](docs/2024-01-02-13-27-43.png)
 
@@ -31,7 +37,9 @@ Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidi
 
 #### Tool Use: PDF Parsing and Understanding
 
-> query>> -p docs/turnbull-speech.pdf "what Malcolm Turnbull advocating for?"
+```bash
+query>> -p docs/turnbull-speech.pdf "what Malcolm Turnbull advocating for?"
+```
 
 ![](docs/2024-01-02-13-38-48.png)
 
@@ -210,7 +218,9 @@ Downloading web content (html, PDF's etc), and searching the web is done through
 
 For our first example:
 
-> query>> go to https://ten13.vc/team and extract all the names
+```bash
+query>> go to https://ten13.vc/team and extract all the names
+```
 
 Let's walk through each line of the generated Starlark:
 
@@ -301,11 +311,18 @@ A fun one is graphing "narrative extraction", which is useful for quickly summar
 
 Download two news articles and put them in the "Messages" stack:
 
-> url https://www.cnn.com/2023/08/27/football/what-happened-luis-rubiales-kiss-intl/index.html
-> url https://www.bbc.com/sport/football/66645618
+```bash
+url https://www.cnn.com/2023/08/27/football/what-happened-luis-rubiales-kiss-intl/index.html
+url https://www.bbc.com/sport/football/66645618
+```
 
-> act graph
-> "extract the narrative from the documents I sent you in the first two messages"
+```bash
+act graph
+```
+
+```bash
+"extract the narrative from the documents I sent you in the first two messages"
+```
 
 Gives us a GraphVis visualization (cut off to fit screen):
 

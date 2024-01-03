@@ -410,20 +410,21 @@ class Helpers():
 
     @staticmethod
     def find_closest_sections(query: str, sections: list[str]):
-        from sentence_transformers import SentenceTransformer, util
-        from torch import Tensor
+        raise NotImplementedError('This is not implemented yet')
+        # from sentence_transformers import SentenceTransformer, util
+        # from torch import Tensor
 
-        model = SentenceTransformer('all-mpnet-base-v2')
-        corpus_embeddings: List[Tensor] | Any = model.encode(sections, convert_to_tensor=True)
-        query_embedding: List[Tensor] | Any = model.encode([query], convert_to_tensor=True)
+        # model = SentenceTransformer('all-mpnet-base-v2')
+        # corpus_embeddings: List[Tensor] | Any = model.encode(sections, convert_to_tensor=True)
+        # query_embedding: List[Tensor] | Any = model.encode([query], convert_to_tensor=True)
 
-        cosine_scores = util.cos_sim(corpus_embeddings, query_embedding)  # type: ignore
+        # cosine_scores = util.cos_sim(corpus_embeddings, query_embedding)  # type: ignore
 
-        scored_sections = list(zip(sections, cosine_scores))
-        scored_sections = sorted(scored_sections, key=lambda x: x[1], reverse=True)  # type: ignore
+        # scored_sections = list(zip(sections, cosine_scores))
+        # scored_sections = sorted(scored_sections, key=lambda x: x[1], reverse=True)  # type: ignore
 
-        scores = [{'text': text, 'score': score.cpu().item()} for text, score in scored_sections]
-        return scores
+        # scores = [{'text': text, 'score': score.cpu().item()} for text, score in scored_sections]
+        # return scores
 
     @staticmethod
     def chunk_and_rank(query: str, data: str, max_chunk_length=400) -> List[str]:

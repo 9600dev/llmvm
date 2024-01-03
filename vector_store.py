@@ -3,7 +3,6 @@ import os
 import tempfile
 from typing import Callable, List, Optional, Tuple
 
-import torch
 from langchain.docstore.document import Document
 from langchain.document_loaders import TextLoader
 from langchain.embeddings.huggingface import HuggingFaceEmbeddings
@@ -41,7 +40,7 @@ class VectorStore():
         if not self._embeddings:
             self._embeddings = HuggingFaceEmbeddings(
                 model_name=self.embedding_model,
-                model_kwargs={'device': 'cuda:0'} if torch.cuda.is_available() else {'device': 'cpu'},
+                model_kwargs={'device': 'cpu'},
                 encode_kwargs={'normalize_embeddings': True}
             )
         return self._embeddings
