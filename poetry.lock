@@ -3190,11 +3190,6 @@ typing-extensions = "*"
 dynamo = ["jinja2"]
 opt-einsum = ["opt-einsum (>=3.3)"]
 
-[package.source]
-type = "legacy"
-url = "https://download.pytorch.org/whl/cpu"
-reference = "pytorch"
-
 [[package]]
 name = "torchvision"
 version = "0.16.2"
