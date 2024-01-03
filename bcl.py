@@ -185,7 +185,7 @@ class Searcher():
 
     def search_hook(self, url: str, query: str):
         write_client_stream(
-            Content("$SERP_API_KEY not found, using googlesearch-python to talk to Google Search.\n")
+            Content("$SERPAPI_API_KEY not found, using googlesearch-python to talk to Google Search.\n")
         )
 
         results = list(google_search(query, advanced=True))
@@ -200,13 +200,13 @@ class Searcher():
         return return_results
 
     def search_google_hook(self, query: str):
-        if not Container().get_config_variable('SERP_API_KEY'):
+        if not Container().get_config_variable('SERPAPI_API_KEY'):
             return self.search_hook('https://www.google.com/search?q=', query)
         else:
             return SerpAPISearcher().search_internet(query)
 
     def search_news_hook(self, query: str):
-        if not Container().get_config_variable('SERP_API_KEY'):
+        if not Container().get_config_variable('SERPAPI_API_KEY'):
             return self.search_hook('https://news.google.com/search?q=', query)
         else:
             return SerpAPISearcher().search_news(query)
