@@ -1,4 +1,5 @@
 import base64
+import datetime as dt
 import importlib
 import os
 from abc import ABC, abstractmethod
@@ -141,6 +142,17 @@ def coerce_types(a, b):
         return a, float(b)
     if isinstance(b, float) and isinstance(a, int):
         return float(a), b
+
+    if isinstance(a, dt.date):
+        a = dt.datetime(a.year, a.month, a.day)
+
+    if isinstance(b, dt.date):
+        b = dt.datetime(b.year, b.month, b.day)
+
+    if isinstance(a, dt.datetime) and isinstance(b, dt.timedelta):
+        return a, b
+    if isinstance(b, dt.datetime) and isinstance(a, dt.timedelta):
+        return a, b
 
     raise TypeError(f"Cannot coerce types {type(a)} and {type(b)} to a common type")
 

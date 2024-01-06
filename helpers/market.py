@@ -33,14 +33,14 @@ class MarketHelpers():
         date_only = adjust_weekend(date_only)
         result = pd.DataFrame()
 
-        result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5))
+        result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5), repair=True)
 
         if len(result) == 0:
             date_only = adjust_weekend(subtract_day(date_only))
-            result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5))
+            result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5), repair=True)
 
         if len(result) == 0:
-            raise ValueError(f'either the symbol {symbol} does not exist, or there is no price data for date {date_only}')
+            raise ValueError(f'either the symbol {symbol} does not exist, or there is no price data for date {date_only}.')
         close = result.head(1)['Close'].iloc[0]
         return float(close)
 
