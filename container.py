@@ -74,22 +74,30 @@ class Container(metaclass=Singleton):
             return self.type_instance_cache[t]
 
     @staticmethod
-    def get_config_variable(name: str, alternate_name: str = '', default: str = '') -> str:
-        if default.startswith('~'):
+    def get_config_variable(name: str, alternate_name: str = '', default: Any = '') -> Any:
+        def parse(value) -> Any:
+            if isinstance(value, str) and (value == 'true' or value == 'True'):
+                return True
+            elif isinstance(value, str) and (value == 'false' or value == 'False'):
+                return False
+            else:
+                return value
+
+        if isinstance(default, str) and default.startswith('~'):
             default = os.path.expanduser(default)
 
         if name in os.environ:
-            return os.environ.get(name, default)
+            return parse(os.environ.get(name, default))
 
         if alternate_name in os.environ:
-            return os.environ.get(alternate_name, default)
+            return parse(os.environ.get(alternate_name, default))
 
         config_file = os.environ.get('LLMVM_CONFIG', default='~/.config/llmvm/config.yaml')
         if config_file.startswith('~'):
             config_file = os.path.expanduser(config_file)
 
         if not os.path.exists(config_file):
-            return default
+            return parse(default)
 
         container = Container(config_file)
         if container.has(name.replace('LLMVM_', '').lower()):

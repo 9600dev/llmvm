@@ -7,6 +7,7 @@ from anthropic import AsyncAnthropic
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
+from perf import TokenPerf
 
 logging = setup_logging()
 
@@ -49,7 +50,7 @@ class AnthropicExecutor(Executor):
 
     def max_prompt_tokens(
         self,
-        completion_token_count: int = 2048,
+        completion_token_count: int = 4000,
         model: Optional[str] = None,
     ) -> int:
         return self.max_tokens(model) - completion_token_count
@@ -109,7 +110,7 @@ class AnthropicExecutor(Executor):
         messages: List[Dict[str, Any]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
-        max_completion_tokens: int = 2048,
+        max_completion_tokens: int = 4000,
         temperature: float = 0.2,
     ):
         model = model if model else self.default_model
@@ -162,12 +163,15 @@ class AnthropicExecutor(Executor):
     async def aexecute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 2048,
+        max_completion_tokens: int = 4000,
         temperature: float = 0.2,
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
+
+        perf = TokenPerf('anthropic_executor', self.name(), model)
+        perf.start()
 
         def last(predicate, iterable):
             result = [x for x in iterable if predicate(x)]
@@ -199,11 +203,17 @@ class AnthropicExecutor(Executor):
 
         async with await stream as stream_async:
             async for text in stream_async.text_stream:  # type: ignore
+                perf.tick()
                 await stream_handler(Content(text))
                 text_response += text
             await stream_handler(TokenStopNode())
 
         _ = await stream_async.get_final_message()
+
+        if perf.enabled:
+            message_tokens = self.calculate_tokens(messages)
+            total_time, prompt_time, avg_tok, avg_tok_sec, ticks = perf.stop()
+            logging.debug(f'Time: {total_time:.4}s Prompt time: {prompt_time:.3}s Prompt: {message_tokens} Sampled: {len(ticks)} Avg t: {avg_tok:.3}s Avg t/sec: {avg_tok_sec:.4}')
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
@@ -218,7 +228,7 @@ class AnthropicExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 2048,
+        max_completion_tokens: int = 4000,
         temperature: float = 0.2,
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,

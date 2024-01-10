@@ -11,9 +11,11 @@ from openai.types.chat import ChatCompletionMessageParam
 from openai.types.chat.completion_create_params import Function
 from PIL import Image
 
+from container import Container
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
+from perf import TokenPerf
 
 logging = setup_logging()
 aclient = AsyncOpenAI()
@@ -24,7 +26,7 @@ class OpenAIExecutor(Executor):
         api_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
         default_model: str = 'gpt-4-1106-preview',
         api_endpoint: str = 'https://api.openai.com/v1',
-        default_max_tokens: int = 8192,
+        default_max_tokens: int = 128000,
     ):
         self.openai_key = api_key
         self.default_model = default_model
@@ -166,7 +168,7 @@ class OpenAIExecutor(Executor):
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
-        max_completion_tokens: int = 2048,
+        max_completion_tokens: int = 4096,
         temperature: float = 0.2,
     ) -> Dict:
         model = model if model else self.default_model
@@ -205,12 +207,16 @@ class OpenAIExecutor(Executor):
     async def aexecute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 2048,
+        max_completion_tokens: int = 4096,
         temperature: float = 0.2,
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
+
+        # only works if profiling or LLMVM_PROFILING is set to true
+        perf = TokenPerf('openai_executor', self.name(), model)
+        perf.start()
 
         def last(predicate, iterable):
             result = [x for x in iterable if predicate(x)]
@@ -241,9 +247,15 @@ class OpenAIExecutor(Executor):
         text_response = ''
         async for chunk in await chat_response:  # type: ignore
             s = chunk.choices[0].delta.content or ''
+            perf.tick()
             await stream_handler(Content(s))
             text_response += s
         await stream_handler(TokenStopNode())
+
+        if perf.enabled:
+            message_tokens = self.calculate_tokens(messages)
+            total_time, prompt_time, avg_tok, avg_tok_sec, ticks = perf.stop()
+            logging.debug(f'Time: {total_time:.4}s Prompt time: {prompt_time:.3}s Prompt: {message_tokens} Sampled: {len(ticks)} Avg t: {avg_tok:.3}s Avg t/sec: {avg_tok_sec:.4}')
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]

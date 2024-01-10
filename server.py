@@ -253,6 +253,7 @@ async def download(
 
 @app.get('/v1/chat/get_thread')
 async def get_thread(id: int) -> SessionThread:
+    logging.debug(f'/v1/chat/get_thread?id={id}')
     thread = __get_thread(id)
     return thread
 
@@ -279,6 +280,7 @@ async def clear_threads() -> None:
 
 @app.get('/health')
 async def health():
+    logging.debug('/health')
     return {'status': 'ok'}
 
 @app.get('/firefox')
@@ -464,6 +466,7 @@ async def tools_completions(request: SessionThread):
 
         while True:
             data = await queue.get()
+
             if isinstance(data, StopNode):
                 break
             yield data
