@@ -531,6 +531,7 @@ def llm(
     model: str,
     context_messages: Sequence[Message] = [],
     cookies: List[Dict[str, Any]] = [],
+    trace: bool = False,
 ) -> SessionThread:
     user_message = User(Content(''))
     if isinstance(message, str):
@@ -1577,6 +1578,8 @@ def new(
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
+@click.option('--trace', '-t', type=bool, is_flag=True, required=False,
+              help='Output performance information to debug stream.')
 def message(
     message: Optional[str | bytes | Message],
     id: int,
@@ -1589,6 +1592,7 @@ def message(
     executor: str,
     model: str,
     suppress_role: bool,
+    trace: bool,
     context_messages: Sequence[Message] = [],
 ):
     global thread_id

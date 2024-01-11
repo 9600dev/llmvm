@@ -7,7 +7,7 @@ from anthropic import AsyncAnthropic
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
-from perf import TokenPerf
+from perf import MyAnthropicStream, TokenPerf
 
 logging = setup_logging()
 
@@ -118,8 +118,8 @@ class AnthropicExecutor(Executor):
         if functions:
             raise NotImplementedError('functions are not implemented for ClaudeExecutor')
 
-        message_tokens = self.calculate_tokens(messages)
-        if message_tokens > self.max_prompt_tokens(max_completion_tokens):
+        message_tokens = self.calculate_tokens(messages=messages, model=model)
+        if message_tokens > self.max_prompt_tokens(max_completion_tokens, model=model):
             raise Exception('Prompt too long, message tokens: {}, completion tokens: {} total tokens: {}, available tokens: {}'
                             .format(message_tokens,
                                     max_completion_tokens,
@@ -151,6 +151,9 @@ class AnthropicExecutor(Executor):
                     messages_list.append({'role': 'user', 'content': 'Thanks. I am ready for your next message.'})
             messages_list.append(messages[i])
 
+        token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
+        token_trace.start()
+
         stream = self.client.beta.messages.stream(
             max_tokens=max_completion_tokens,
             messages=messages_list,  # type: ignore
@@ -169,9 +172,6 @@ class AnthropicExecutor(Executor):
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
-
-        perf = TokenPerf('anthropic_executor', self.name(), model)
-        perf.start()
 
         def last(predicate, iterable):
             result = [x for x in iterable if predicate(x)]
@@ -203,17 +203,11 @@ class AnthropicExecutor(Executor):
 
         async with await stream as stream_async:
             async for text in stream_async.text_stream:  # type: ignore
-                perf.tick()
                 await stream_handler(Content(text))
                 text_response += text
             await stream_handler(TokenStopNode())
 
         _ = await stream_async.get_final_message()
-
-        if perf.enabled:
-            message_tokens = self.calculate_tokens(messages)
-            total_time, prompt_time, avg_tok, avg_tok_sec, ticks = perf.stop()
-            logging.debug(f'Time: {total_time:.4}s Prompt time: {prompt_time:.3}s Prompt: {message_tokens} Sampled: {len(ticks)} Avg t: {avg_tok:.3}s Avg t/sec: {avg_tok_sec:.4}')
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
