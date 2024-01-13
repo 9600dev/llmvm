@@ -169,6 +169,19 @@ export LLMVM_EXECUTOR='openai'
 python client.py "hello, who are you?"
 ```
 
+#### Performance Profiling
+
+* open `~/.config/llmvm/config.yaml` and change profiling to 'true' or 'false'.
+
+If server.py is running, profiling output will be emitted there, and if server.py is not running, client.py will emit profiling information to the debug stream:
+
+```bash
+export LLMVM_PROFILING="true"
+...
+DEBUG    total_time: 8.42 prompt_time: 0.55 sample_time: 7.87
+DEBUG    prompt_len: 28 sample_len: 194
+DEBUG    p_tok_sec 50.52 s_tok_sec: 23.15
+```
 
 ## Architecture
 
