@@ -7,7 +7,7 @@ from anthropic import AsyncAnthropic
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
-from perf import MyAnthropicStream, TokenPerf
+from perf import TokenPerf, TokenPerfWrapperAnthropic
 
 logging = setup_logging()
 
@@ -154,6 +154,7 @@ class AnthropicExecutor(Executor):
         token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
+        # AsyncStreamManager[AsyncMessageStream]
         stream = self.client.beta.messages.stream(
             max_tokens=max_completion_tokens,
             messages=messages_list,  # type: ignore
@@ -161,7 +162,8 @@ class AnthropicExecutor(Executor):
             system=system_message,
             temperature=temperature,
         )
-        return stream
+
+        return TokenPerfWrapperAnthropic(stream, token_trace)
 
     async def aexecute(
         self,

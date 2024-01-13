@@ -48,6 +48,7 @@ from objects import (AstNode, Content, DownloadItem, Executor, FileContent,
                      ImageContent, Message, MessageModel, PdfContent,
                      SessionThread, StreamNode, TokenStopNode, User)
 from openai_executor import OpenAIExecutor
+from perf import TokenPerfWrapperAnthropic
 
 nest_asyncio.apply()
 
@@ -263,12 +264,13 @@ def get_path_as_messages(
 async def stream_gpt_response(response, print_lambda: Callable):
     async with async_timeout.timeout(300):
         # anthropic new messages API
-        if isinstance(response, AsyncMessageStreamManager):
+        if isinstance(response, AsyncMessageStreamManager) or isinstance(response, TokenPerfWrapperAnthropic):
             async with response as stream_async:
                 async for text in stream_async.text_stream:  # type: ignore
                     print_lambda(text)
 
             _ = await stream_async.get_final_message()
+            print_lambda('\n')
             return
         try:
             async for chunk in response:
