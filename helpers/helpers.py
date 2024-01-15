@@ -267,6 +267,18 @@ class Helpers():
         return min(possibilities, key=len)
 
     @staticmethod
+    def extract_code_blocks(markdown_text):
+        # Pattern to match code blocks with or without specified language
+        pattern = r'```(\w+\n)?(.*?)```'
+
+        # Using re.DOTALL to make the '.' match also newlines
+        matches = re.findall(pattern, markdown_text, re.DOTALL)
+
+        # Extracting just the code part (ignoring the optional language part)
+        code_blocks = [match[1].strip() for match in matches]
+        return code_blocks
+
+    @staticmethod
     def extract_context(s, start, end, stop_tokens=['\n', '.', '?', '!']):
         def capture(s, stop_tokens, backwards=False):
             if backwards:

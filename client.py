@@ -5,6 +5,7 @@ import glob
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,6 +30,8 @@ from httpx import ConnectError
 from PIL import Image
 from prompt_toolkit import PromptSession
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.completion import Completer as PromptCompleter
+from prompt_toolkit.completion import Completion as PromptCompletion
 from prompt_toolkit.completion import (PathCompleter, WordCompleter,
                                        merge_completers)
 from prompt_toolkit.history import FileHistory
@@ -769,6 +772,22 @@ def invoke_context_wrapper(ctx):
     invoke_context = ctx
 
 
+class CustomCompleter(PromptCompleter):
+    def get_completions(self, document, complete_event):
+        # Your logic to compute completions
+        word = document.get_word_before_cursor()
+        current_dir = os.getcwd()
+        # get the files and directories recursively from the current directory
+        filter_out = ['.git', '.venv', '.vscode', '.pytest_cache', '__pycache__']
+        files_and_dirs = [os.path.relpath(f, current_dir)
+                          for f in glob.glob(f'{current_dir}/**', recursive=True)
+                          if f not in filter_out]
+
+        for completion in files_and_dirs:
+            if completion.startswith(word):
+                yield PromptCompletion(completion, start_position=-len(word))
+
+
 class Repl():
     def __init__(
         self,
@@ -824,6 +843,7 @@ class Repl():
         rich.print('[white](Ctrl-r search prompt history)[/white]')
         rich.print('[white](Ctrl-y+y yank the last message to the clipboard)[/white]')
         rich.print('[white](Ctrl-y+a yank entire message thread to clipboard)[/white]')
+        rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
         rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
         rich.print('')
         rich.print('[white](If the LLMVM server.py is not running, messages are executed directly)[/white]')
@@ -868,6 +888,22 @@ class Repl():
                 pyperclip.copy(str(whole_thread))
                 rich.print('Thread copied to clipboard.\n')
                 rich.print(f"[{thread_id}] query>> ", end="")
+
+        @kb.add('c-y', 'c')
+        def _(event):
+            if 'last_thread' in globals():
+                last_thread_t: SessionThread = last_thread
+                last_message = str(last_thread_t.messages[-1].content)
+
+                code_blocks = Helpers.extract_code_blocks(last_message)
+                if code_blocks:
+                    code = '\n\n'.join(code_blocks)
+                    pyperclip.copy(code)
+                    rich.print('Code blocks copied to clipboard.\n')
+                    rich.print(f"[{thread_id}] query>> ", end="")
+                else:
+                    rich.print('No code block found.\n')
+                    rich.print(f"[{thread_id}] query>> ", end="")
 
         async def __invoke_paste_image(thread: SessionThread, raw_data: bytes):
             global current_mode
@@ -982,8 +1018,10 @@ class Repl():
         }
 
         command_completer = WordCompleter(list(commands.keys()), ignore_case=True, display_dict=commands)
-        path_completer = PathCompleter()
-        combined_completer = merge_completers([command_completer, path_completer])
+        # path_completer = PathCompleter()
+        # combined_completer = merge_completers([command_completer, path_completer, custom_completer])
+        custom_completer = CustomCompleter()
+        combined_completer = merge_completers([custom_completer, command_completer])
 
         session = PromptSession(
             completer=combined_completer,
@@ -1029,6 +1067,7 @@ class Repl():
 
                 query = await session.prompt_async(
                     f'[{thread_id}] query>> ',
+                    complete_while_typing=True,
                 )
 
                 # there are a few special commands that aren't 'clickified'
@@ -1183,8 +1222,9 @@ def help():
 
 
 @cli.command('ls', hidden=True)
-def ls():
-    os.system('ls')
+@click.argument('args', type=str, required=False, default='')
+def ls(args):
+    os.system(f'ls --color {args}')
 
 @cli.command('cookies', help='Set cookies for a message thread so that the tooling is able to access authenticated content.')
 @click.option('--sqlite', '-s', type=str, required=False,
