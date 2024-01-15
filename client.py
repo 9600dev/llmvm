@@ -138,9 +138,6 @@ def parse_command_string(s, command):
 
 
 def parse_path(ctx, param, value) -> List[str]:
-    def is_glob_pattern(s):
-        return any(char in s for char in "*?[]")
-
     if not value:
         return []
 
@@ -153,8 +150,6 @@ def parse_path(ctx, param, value) -> List[str]:
 
     files = []
 
-    recursive = ctx.params.get('recursive', False)
-
     if not value:
         return files
 
@@ -163,6 +158,16 @@ def parse_path(ctx, param, value) -> List[str]:
 
     if isinstance(value, str):
         value = [value]
+
+    if isinstance(value, tuple):
+        value = list(value)
+
+    # see if there are any brace glob patterns, and if so, expand them
+    # and include them in the value array
+    if any('{' in item and '}' in item for item in value):
+        brace_globs = [Helpers.glob_brace(item) for item in value if '{' in item and '}' in item]
+        brace_globs = Helpers.flatten(brace_globs)
+        value += tuple(brace_globs)
 
     for item in value:
         # deal with ~
@@ -174,14 +179,14 @@ def parse_path(ctx, param, value) -> List[str]:
                 for filename in filenames:
                     files.append(os.path.join(dirpath, filename))
 
-                if not recursive:
+                if not Helpers.is_glob_recursive(item):
                     dirnames.clear()
         elif os.path.isfile(item):
             # If it's a file, add it to the list
             files.append(item)
         # check for glob
-        elif is_glob_pattern(item):
-            for filepath in glob.glob(item, recursive=recursive):
+        elif Helpers.is_glob_pattern(item):
+            for filepath in glob.glob(item, recursive=Helpers.is_glob_recursive(item)):
                 files.append(filepath)
         elif item.startswith('http'):
             files.append(item)
@@ -536,7 +541,6 @@ def llm(
     model: str,
     context_messages: Sequence[Message] = [],
     cookies: List[Dict[str, Any]] = [],
-    trace: bool = False,
 ) -> SessionThread:
     user_message = User(Content(''))
     if isinstance(message, str):
@@ -913,7 +917,6 @@ class Repl():
                 ctx.params['message'] = "I've just pasted you an image."
                 ctx.params['id'] = thread.id
                 ctx.params['path'] = ''
-                ctx.params['recursive'] = False
                 ctx.params['path'] = ''
                 ctx.params['upload'] = False
                 ctx.params['mode'] = current_mode
@@ -1365,7 +1368,6 @@ def act(
             ctx.params['message'] = prompt_result
             ctx.params['id'] = id
             ctx.params['path'] = ''
-            ctx.params['recursive'] = False
             ctx.params['upload'] = False
             ctx.params['mode'] = mode
             ctx.params['endpoint'] = endpoint
@@ -1448,41 +1450,17 @@ def search(
 
 
 @cli.command('ingest', help='Ingest a file into the LLMVM search engine.')
-@click.argument('filename', type=str, required=True)
-@click.option('--recursive', '-r', type=bool, required=False, is_flag=True, default=False,
-              help='Walk the directory recursively.')
-@click.option('--project', '-p', type=str, required=False, default='', help='Assign the ingested content to project.')
+@click.option('--path', '-p', callback=parse_path, required=True, multiple=True,
+              help='Path to a single file, glob, or url to add to LLMVM server.')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def ingest(
-    filename: str,
-    recursive: bool,
-    project: str,
+    path: List[str],
     endpoint: str,
 ):
-    files = []
-
-    # change all this to the path parsing stuff that def messages() uses
-    if filename.startswith('"') and filename.endswith('"'):
-        filename = filename[1:-1]
-
-    filename_directory = os.path.abspath(filename)
-
-    if not os.path.exists(filename_directory):
-        rich.print(f'File or directory {filename_directory} does not exist.')
-        return
-
-    if os.path.isdir(filename_directory):
-        if recursive:
-            for root, _, filenames in os.walk(filename_directory):
-                for filename in filenames:
-                    files.append(os.path.join(root, filename))
-        else:
-            files += [os.path.join(filename_directory, f)
-                      for f in os.listdir(filename_directory) if os.path.isfile(os.path.join(filename_directory, f))]
-    elif os.path.isfile(filename_directory):
-        files.append(filename_directory)
+    files = path
+    rich.print(f'Uploading {len(files)} files to {endpoint}/ingest')
 
     async def upload_helper():
         async with httpx.AsyncClient(timeout=300.0) as client:
@@ -1603,8 +1581,6 @@ def new(
               help='thread ID to send message to. Default is last thread.')
 @click.option('--path', '-p', callback=parse_path, required=False, multiple=True,
               help='Path to a single file, multiple files, directory of files, glob, or url to add to User message stack.')
-@click.option('--recursive', '-r', type=bool, required=False, default=False, is_flag=True,
-              help='When using the --path option, recursively walk any directories specified.')
 @click.option('--upload', '-u', is_flag=True, required=True, default=False,
               help='Upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
 @click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool', 'code'], case_sensitive=False),
@@ -1620,13 +1596,10 @@ def new(
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
-@click.option('--trace', '-t', type=bool, is_flag=True, required=False,
-              help='Output performance information to debug stream.')
 def message(
     message: Optional[str | bytes | Message],
     id: int,
     path: List[str],
-    recursive: bool,
     upload: bool,
     mode: str,
     endpoint: str,
@@ -1634,7 +1607,6 @@ def message(
     executor: str,
     model: str,
     suppress_role: bool,
-    trace: bool,
     context_messages: Sequence[Message] = [],
 ):
     global thread_id
@@ -1658,6 +1630,7 @@ def message(
     if path:
         allowed_extensions = ['.py', '.md', 'Dockerfile', '.sh', '.txt'] if mode == 'code' else []
         context_messages = get_path_as_messages(path, upload, allowed_extensions)
+        logging.debug(f'path: {path}')
 
     # if we have files, but no message, grab the last file and use it as the message
     if not message and context_messages:

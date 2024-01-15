@@ -344,8 +344,17 @@ async def code_completions(request: SessionThread):
     queue = asyncio.Queue()
 
     # set the defaults, or use what the SessionThread thread asks
-    controller = get_controller(thread.executor)
-    model = thread.model if thread.model else controller.get_executor().get_default_model()
+    if thread.executor and thread.model:
+        controller = get_controller(thread.executor)
+        model = thread.model if thread.model else controller.get_executor().get_default_model()
+    # either the executor or the model is not set, so use the defaults
+    # and update the thread
+    else:
+        logging.debug('Either the executor or the model is not set. Updating thread.')
+        controller = get_controller()
+        model = controller.get_executor().get_default_model()
+        thread.executor = controller.get_executor().name()
+        thread.model = model
 
     logging.debug(f'/v1/chat/code_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
 
@@ -428,8 +437,17 @@ async def tools_completions(request: SessionThread):
     queue = asyncio.Queue()
 
     # set the defaults, or use what the SessionThread thread asks
-    controller = get_controller(thread.executor)
-    model = thread.model if thread.model else controller.get_executor().get_default_model()
+    if thread.executor and thread.model:
+        controller = get_controller(thread.executor)
+        model = thread.model if thread.model else controller.get_executor().get_default_model()
+    # either the executor or the model is not set, so use the defaults
+    # and update the thread
+    else:
+        logging.debug('Either the executor or the model is not set. Updating thread.')
+        controller = get_controller()
+        model = controller.get_executor().get_default_model()
+        thread.executor = controller.get_executor().name()
+        thread.model = model
 
     logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
 

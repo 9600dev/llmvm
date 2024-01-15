@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import datetime as dt
+import glob
 import importlib
 import inspect
 import io
+import itertools
 import os
 import re
 import typing
@@ -41,6 +43,32 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def is_glob_pattern(s):
+        return any(char in s for char in "*?[]{}")
+
+    @staticmethod
+    def is_glob_recursive(s):
+        return '**' in s
+
+    @staticmethod
+    def glob_brace(pattern):
+        parts = pattern.split('{')
+        if len(parts) == 1:
+            # No brace found, use glob directly
+            return glob.glob(pattern)
+
+        pre = parts[0]
+        post = parts[1].split('}', 1)[1]
+        options = parts[1].split('}', 1)[0].split(',')
+
+        # Create individual patterns
+        patterns = [pre + option + post for option in options]
+
+        # Apply glob to each pattern and combine results
+        files = set(itertools.chain.from_iterable(glob.glob(pat) for pat in patterns))
+        return list(files)
+
     @staticmethod
     def late_bind(module_name, class_name, method_name, *args, **kwargs):
         try:
