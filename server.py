@@ -23,6 +23,7 @@ from container import Container
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
+from mistral_executor import MistralExecutor
 from objects import (Answer, Assistant, AstNode, Content, DownloadItem,
                      FileContent, MessageModel, SessionThread, Statement,
                      StopNode, User)
@@ -92,6 +93,20 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             continuation_passing_style=False,
         )
         return anthropic_controller
+    elif controller == 'mistral':
+        mistral_executor = MistralExecutor(
+            api_key=os.environ.get('MISTRAL_API_KEY', ''),
+            default_model=Container().get_config_variable('mistral_model', 'LLMVM_MODEL'),
+            default_max_tokens=int(Container().get('mistral_max_tokens')),
+        )
+        mistral_controller = StarlarkExecutionController(
+            executor=mistral_executor,
+            agents=agents,  # type: ignore
+            vector_search=vector_search,
+            edit_hook=None,
+            continuation_passing_style=False,
+        )
+        return mistral_controller
     else:
         openai_executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),

@@ -163,7 +163,7 @@ class Searcher():
         original_code: str,
         original_query: str,
         vector_search: VectorSearch,
-        total_links_to_return: int = 3,
+        total_links_to_return: int = 2,
     ):
         self.query = expr
         self.messages: List[Message] = messages
@@ -416,7 +416,7 @@ class Searcher():
                     parser_result = self.parser(result).strip()
                     if parser_result:
                         return_results.append(f"The following content is from: {result['link']} and has the title: {result['title']} \n\n{parser_result}")  # noqa:E501
-                    if len(return_results) >= 4:
+                    if len(return_results) >= self.total_links_to_return:
                         break
                 except Exception as e:
                     logging.error(e)

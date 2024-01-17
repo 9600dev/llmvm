@@ -47,6 +47,7 @@ from container import Container
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
+from mistral_executor import MistralExecutor
 from objects import (AstNode, Content, DownloadItem, Executor, FileContent,
                      ImageContent, Message, MessageModel, PdfContent,
                      SessionThread, StreamNode, TokenStopNode, User)
@@ -417,6 +418,11 @@ async def __execute_llm_call_direct(
             api_key=api_key,
             default_model=model_name,
         )
+    elif executor_name == 'mistral':
+        executor = MistralExecutor(
+            api_key=api_key,
+            default_model=model_name,
+        )
     else:
         raise ValueError('No executor specified.')
 
@@ -509,6 +515,14 @@ async def execute_llm_call(
                 model,
                 context_messages
             )
+        elif executor == 'mistral' and Container.get_config_variable('MISTRAL_API_KEY'):
+            return await __execute_llm_call_direct(
+                message,
+                Container.get_config_variable('MISTRAL_API_KEY'),
+                'mistral',
+                model,
+                context_messages
+            )
         else:
             raise ValueError(f'Executor {executor} and model {model} are set, but no API key is set.')
     elif Container.get_config_variable('OPENAI_API_KEY'):
@@ -527,9 +541,17 @@ async def execute_llm_call(
             'claude-2.1',
             context_messages
         )
+    elif os.environ.get('MISTRAL_API_KEY'):
+        return await __execute_llm_call_direct(
+            message,
+            Container.get_config_variable('MISTRAL_API_KEY'),
+            'mistral',
+            'mistral-medium',
+            context_messages
+        )
     else:
-        logging.warning('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
-        raise ValueError('Neither OPENAI_API_KEY or ANTHROPIC_API_KEY is set. Unable to execute direct call to LLM.')
+        logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')
+        raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')
 
 
 def llm(

@@ -523,10 +523,14 @@ class StarlarkExecutionController(Controller):
                 match = re.search(r'```python\n(.*?)```', assistant_response, re.DOTALL)
                 if match:
                     assistant_response = match.group(1)
-
             # openai can often embed the code in ```starlark blocks
-            if '```starlark' in assistant_response:
+            elif '```starlark' in assistant_response:
                 match = re.search(r'```starlark\n(.*?)```', assistant_response, re.DOTALL)
+                if match:
+                    assistant_response = match.group(1)
+            # mistral likes to embed the code in ``` blocks
+            elif '```' in assistant_response:
+                match = re.search(r'```(.*?)```', assistant_response, re.DOTALL)
                 if match:
                     assistant_response = match.group(1)
 
