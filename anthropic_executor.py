@@ -2,12 +2,12 @@ import asyncio
 import datetime as dt
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from anthropic import AsyncAnthropic
+from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
 
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
-from perf import TokenPerf, TokenPerfWrapperAnthropic
+from perf import TokenPerf, TokenPerfWrapper, TokenPerfWrapperAnthropic
 
 logging = setup_logging()
 
@@ -19,19 +19,30 @@ class AnthropicExecutor(Executor):
         default_model: str = 'claude-2.1',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_tokens: int = 200000,
+        beta: bool = False,
     ):
         self.default_max_tokens = default_max_tokens
         self.default_model = default_model
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
+        self.beta = beta
 
     def user_token(self):
-        return 'User'
+        if self.beta:
+            return 'User'
+        else:
+            return HUMAN_PROMPT.replace(':', '').replace('\n', '')
 
     def assistant_token(self) -> str:
-        return 'Assistant'
+        if self.beta:
+            return 'Assistant'
+        else:
+            return AI_PROMPT.replace(':', '').replace('\n', '')
 
     def append_token(self) -> str:
-        return ''
+        if self.beta:
+            return ''
+        else:
+            return AI_PROMPT
 
     def max_tokens(self, model: Optional[str]) -> int:
         model = model if model else self.default_model
@@ -105,6 +116,17 @@ class AnthropicExecutor(Executor):
     def name(self) -> str:
         return 'anthropic'
 
+    def __format_prompt(self, messages: List[Dict[str, str]]) -> str:
+        prompt = ''
+        for message in messages:
+            if message['role'] == 'assistant':
+                prompt += f"""{AI_PROMPT} {message['content']}\n\n"""
+            elif message['role'] == 'user':
+                prompt += f"""{HUMAN_PROMPT} {message['content']}\n\n"""
+
+        prompt += f"""{AI_PROMPT}"""
+        return prompt
+
     async def aexecute_direct(
         self,
         messages: List[Dict[str, Any]],
@@ -154,16 +176,25 @@ class AnthropicExecutor(Executor):
         token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
-        # AsyncStreamManager[AsyncMessageStream]
-        stream = self.client.beta.messages.stream(
-            max_tokens=max_completion_tokens,
-            messages=messages_list,  # type: ignore
-            model=model,
-            system=system_message,
-            temperature=temperature,
-        )
-
-        return TokenPerfWrapperAnthropic(stream, token_trace)
+        if self.beta:
+            # AsyncStreamManager[AsyncMessageStream]
+            stream = self.client.beta.messages.stream(
+                max_tokens=max_completion_tokens,
+                messages=messages_list,  # type: ignore
+                model=model,
+                system=system_message,
+                temperature=temperature,
+            )
+            return TokenPerfWrapperAnthropic(stream, token_trace)
+        else:
+            stream = await self.client.completions.create(
+                max_tokens_to_sample=max_completion_tokens,
+                model=model,
+                stream=True,
+                temperature=temperature,
+                prompt=self.__format_prompt(messages_list),
+            )
+            return TokenPerfWrapper(stream, token_trace)
 
     async def aexecute(
         self,
@@ -203,13 +234,20 @@ class AnthropicExecutor(Executor):
 
         text_response = ''
 
-        async with await stream as stream_async:
-            async for text in stream_async.text_stream:  # type: ignore
-                await stream_handler(Content(text))
-                text_response += text
-            await stream_handler(TokenStopNode())
+        if self.beta:
+            async with await stream as stream_async:
+                async for text in stream_async.text_stream:  # type: ignore
+                    await stream_handler(Content(text))
+                    text_response += text
+                await stream_handler(TokenStopNode())
 
-        _ = await stream_async.get_final_message()
+            _ = await stream_async.get_final_message()  # type: ignore
+        else:
+            async for completion in await stream:  # type: ignore
+                s = completion.completion
+                await stream_handler(Content(s))
+                text_response += s
+            await stream_handler(TokenStopNode())
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
