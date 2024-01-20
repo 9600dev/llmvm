@@ -208,7 +208,8 @@ def get_path_as_messages(
         result = urlparse(file_path)
 
         if (result.scheme == 'http' or result.scheme == 'https'):
-            download_request = requests.get(result.geturl())
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
+            download_request = requests.get(result.geturl(), headers=headers)
             if download_request.status_code == 200:
                 file_name = os.path.basename(result.path)
                 _, file_extension = os.path.splitext(file_name)
@@ -218,6 +219,8 @@ def get_path_as_messages(
                     temp_file.flush()
                     file_path = temp_file.name
                     result = urlparse(file_path)
+            else:
+                logging.debug(f'Unable to download {result.geturl()} as we got status code {download_request.status_code}')
 
         if allowed_file_types and not any(file_path.endswith(parsable_file_type) for parsable_file_type in allowed_file_types):
             continue
