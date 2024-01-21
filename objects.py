@@ -469,6 +469,9 @@ class Message(AstNode):
 
     @staticmethod
     def to_dict(message: 'Message', server_serialization: bool = False) -> Dict[str, Any]:
+        def file_wrap(message: FileContent | PdfContent):
+            return f'The following data is from this url: {message.url}\n\n{message.get_text()}'
+
         # primarily to pass to Anthropic or OpenAI api
         if isinstance(message, User) and isinstance(message.message, ImageContent):
             return {
@@ -486,14 +489,14 @@ class Message(AstNode):
         elif isinstance(message, User) and isinstance(message.message, PdfContent):
             return {
                 'role': message.role(),
-                'content': message.message.b64encode() if server_serialization else message.message.get_text(),
+                'content': message.message.b64encode() if server_serialization else file_wrap(message.message),
                 **({'url': message.message.url} if server_serialization else {}),
                 **({'content_type': 'pdf'} if server_serialization else {})
             }
         elif isinstance(message, User) and isinstance(message.message, FileContent):
             return {
                 'role': message.role(),
-                'content': message.message.b64encode() if server_serialization else message.message.get_text(),
+                'content': message.message.b64encode() if server_serialization else file_wrap(message.message),
                 **({'url': message.message.url} if server_serialization else {}),
                 **({'content_type': 'file'} if server_serialization else {})
             }

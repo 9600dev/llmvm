@@ -6,6 +6,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -108,7 +109,7 @@ def parse_message_thread(message: str):
 
 
 def parse_command_string(s, command):
-    parts = s.split()
+    parts = shlex.split(s)
     tokens = []
     skip_next = False
 
@@ -154,7 +155,7 @@ def parse_path(ctx, param, value) -> List[str]:
     if not value:
         return files
 
-    if isinstance(value, str) and ',' in value:
+    if isinstance(value, str) and not Helpers.is_glob_pattern(value) and ',' in value:
         value = value.split(',')
 
     if isinstance(value, str):
@@ -170,9 +171,16 @@ def parse_path(ctx, param, value) -> List[str]:
         brace_globs = Helpers.flatten(brace_globs)
         value += tuple(brace_globs)
 
+    # split by ' '
+    value = Helpers.flatten([item.split(' ') for item in value])
+
+    exclusions = []
+
     for item in value:
         # deal with ~
         item = os.path.expanduser(item)
+        # shell escaping
+        item = item.replace('\\', '')
 
         if os.path.isdir(item):
             # If it's a directory, add all files within
@@ -187,12 +195,23 @@ def parse_path(ctx, param, value) -> List[str]:
             files.append(item)
         # check for glob
         elif Helpers.is_glob_pattern(item):
-            for filepath in glob.glob(item, recursive=Helpers.is_glob_recursive(item)):
-                files.append(filepath)
+            # check for !
+            if item.startswith('!'):
+                for filepath in glob.glob(item[1:], recursive=Helpers.is_glob_recursive(item)):
+                    exclusions.append(filepath)
+            elif any('{' in item and '}' in item for item in value):
+                brace_items = Helpers.flatten([Helpers.glob_brace(item) for item in value if '{' in item and '}' in item])
+                files = files + brace_items
+            else:
+                for filepath in glob.glob(item, recursive=Helpers.is_glob_recursive(item)):
+                    files.append(filepath)
         elif item.startswith('http'):
             files.append(item)
         else:
             raise click.BadParameter(f'Path {item} is not a valid file, directory, glob, or url')
+
+    # deal with exclusions
+    files = [file for file in files if file not in exclusions]
     return files
 
 
@@ -1698,6 +1717,11 @@ def message(
             context_messages=context_messages,
             cookies=cookies_list
         )
+
+        if not thread.messages:
+            rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')
+            return
+
         if not suppress_role: StreamPrinter('').write_string('\n')
         print_response([MessageModel.to_message(thread.messages[-1])], suppress_role)
         if not suppress_role: StreamPrinter('').write_string('\n')

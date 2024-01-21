@@ -44,8 +44,19 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def glob_exclusions(pattern):
+        if not pattern.startswith('!'):
+            return []
+
+        pattern = pattern.replace('!', '')
+        # Find files matching exclusion patterns
+        excluded_files = set()
+        excluded_files.update(glob.glob(pattern, recursive=True))
+        return excluded_files
+
+    @staticmethod
     def is_glob_pattern(s):
-        return any(char in s for char in "*?[]{}")
+        return any(char in s for char in "*?[]{}!")
 
     @staticmethod
     def is_glob_recursive(s):
