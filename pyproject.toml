@@ -9,7 +9,7 @@ readme = "README.md"
 python = "^3.11"
 async-timeout = "^4.0.3"
 click = "^8.1.7"
-httpx = "^0.26.0"
+httpx = "^0.25.2"
 jsonpickle = "^3.0.2"
 pyperclip = "^1.8.2"
 requests = "^2.31.0"
@@ -48,6 +48,7 @@ faiss-cpu = "^1.7.4"
 prompt-toolkit = "^3.0.43"
 nest-asyncio = "^1.5.8"
 psutil = "^5.9.7"
+mistralai = "^0.0.11"
 
 [build-system]
 requires = ["poetry-core"]
