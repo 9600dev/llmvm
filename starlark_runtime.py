@@ -8,7 +8,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 import astunparse
-import pandas as pd
 
 from helpers.edgar import EdgarHelpers
 from helpers.firefox import FirefoxHelpers
@@ -376,6 +375,8 @@ class StarlarkRuntime:
         pass
 
     def pandas_bind(self, expr) -> PandasMeta:
+        import pandas as pd
+
         logging.debug('pandas_bind()')
 
         def bind_with_llm(expr_str: str) -> PandasMeta:

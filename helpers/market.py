@@ -1,7 +1,5 @@
 import datetime as dt
 
-import pandas as pd
-
 
 class MarketHelpers():
     @staticmethod
@@ -15,6 +13,7 @@ class MarketHelpers():
         :param symbol: The symbol of the stock
         :param date: The date and time to get the stock price
         """
+        import pandas as pd
         import yfinance as yf
 
         date_only = dt.datetime(date.year, date.month, date.day)

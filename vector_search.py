@@ -1,7 +1,6 @@
 import datetime as dt
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import pandas as pd
 from dateutil.parser import parse
 from langchain.text_splitter import TextSplitter
 
@@ -215,6 +214,8 @@ class VectorSearch():
         url: str,
         metadata: dict
     ) -> None:
+        import pandas as pd
+
         logging.debug(f'ingesting file: {filename} with url {url} into project: {project}')
 
         if filename.endswith('.pdf'):

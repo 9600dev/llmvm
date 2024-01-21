@@ -18,8 +18,6 @@ import nest_asyncio
 import psutil
 from docstring_parser import parse
 from PIL import Image
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 from objects import Content, Message, StreamNode, User
 
@@ -241,6 +239,9 @@ class Helpers():
         lowered_list = []
         for item in text_list:
             lowered_list.append(re.sub('[^a-zA-Z0-9\s]', '', item.lower()))  # noqa: W605 # type: ignore
+
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.metrics.pairwise import cosine_similarity
 
         tfidf_vectorizer = TfidfVectorizer()
         tfidf_matrix = tfidf_vectorizer.fit_transform(lowered_list)
