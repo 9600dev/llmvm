@@ -21,17 +21,8 @@ class Container(metaclass=Singleton):
         if os.getenv('LLMVM_CONFIG'):
             self.config_file = cast(str, os.getenv('LLMVM_CONFIG'))
 
-        # try finding the filename
-        def find_file(filename, search_path='.'):
-            for root, dir, files in os.walk(search_path):
-                if filename in files:
-                    return os.path.join(root, filename)
-            return None
-
-        self.config_file = find_file(self.config_file) or self.config_file  # type: ignore
-
-        if not os.path.exists(self.config_file) and not find_file(self.config_file):  # type: ignore
-            raise ValueError('configuration_file {} is not found, or LLMVM_CONFIG set incorrectly'.format(config_file))
+        if not os.path.exists(self.config_file):
+            raise ValueError('configuration_file {} is not found. Put config in ~/.config/llmvm or set LLMVM_CONFIG'.format(config_file))
 
         with open(self.config_file, 'r') as conf_file:
             self.configuration: Dict = yaml.load(conf_file, Loader=yaml.FullLoader)  # type: ignore
