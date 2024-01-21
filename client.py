@@ -108,38 +108,7 @@ def parse_message_thread(message: str):
     return messages
 
 
-def parse_command_string(s, command):
-    parts = shlex.split(s)
-    tokens = []
-    skip_next = False
-
-    for i, part in enumerate(parts):
-        if skip_next:
-            skip_next = False
-            continue
-
-        if i == 0 and part == command.name:
-            continue
-
-        # Check if this part is an option in the given click.Command
-        option = next((param for param in command.params if part in param.opts), None)
-
-        # If the option is found and it's not a flag, consume the next value.
-        if option and not option.is_flag:
-            tokens.append(part)
-            if i + 1 < len(parts):
-                tokens.append(parts[i + 1])
-                skip_next = True
-        elif option and option.is_flag:
-            tokens.append(part)
-        else:
-            message = '"' + ' '.join(parts[i:]) + '"'
-            tokens.append(message)
-            break
-    return tokens
-
-
-def parse_path(ctx, param, value) -> List[str]:
+def parse_path(ctx, param, value, raise_parse_exception=True) -> List[str]:
     if not value:
         return []
 
@@ -208,11 +177,68 @@ def parse_path(ctx, param, value) -> List[str]:
         elif item.startswith('http'):
             files.append(item)
         else:
-            raise click.BadParameter(f'Path {item} is not a valid file, directory, glob, or url')
+            if raise_parse_exception:
+                raise MissingParameter(f'Unable to parse path: {item}')
+            else:
+                return []
 
     # deal with exclusions
     files = [file for file in files if file not in exclusions]
     return files
+
+
+def parse_command_string(s, command):
+    def parse_option(part):
+        return next((param for param in command.params if part in param.opts), None)
+
+    parts = shlex.split(s)
+    tokens = []
+    skip_n = 0
+
+    for i, part in enumerate(parts):
+        if skip_n > 0:
+            skip_n -= 1
+            continue
+
+        if i == 0 and part == command.name:
+            continue
+
+        # Check if this part is an option in the given click.Command
+        option = parse_option(part)
+
+        # If the option is found and it's not a flag, consume the next value.
+        if option and not option.is_flag:
+            tokens.append(part)
+            path_part = ''
+            # special case path because of strange shell behavior with " "
+            if part == '-p' or part == '--path':
+                z = i
+                while (
+                    (z + 1 < len(parts))
+                    and (
+                        parse_path(None, None, parts[z + 1], raise_parse_exception=False)
+                        or Helpers.glob_brace(parts[z + 1])
+                        or parts[z + 1].startswith('!')
+                    )
+                ):
+                    path_part += parts[z + 1] + ' '
+                    # tokens.append(parts[z + 1])
+                    skip_n += 1
+                    z += 1
+                if path_part:
+                    path_part = path_part.strip()
+                    tokens.append(f'{path_part}')
+            else:
+                if i + 1 < len(parts):
+                    tokens.append(parts[i + 1])
+                    skip_n += 1
+        elif option and option.is_flag:
+            tokens.append(part)
+        else:
+            message = '"' + ' '.join(parts[i:]) + '"'
+            tokens.append(message)
+            break
+    return tokens
 
 
 def get_path_as_messages(
@@ -1157,7 +1183,7 @@ class Repl():
                         thread_id = thread.id
 
             except KeyboardInterrupt:
-                print("\nKeyboardInterrupt")
+                rich.print("\nKeyboardInterrupt")
                 if command_executing:
                     command_executing = False
                     continue
