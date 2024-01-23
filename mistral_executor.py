@@ -19,12 +19,15 @@ class MistralExecutor(Executor):
         api_key: str = cast(str, os.environ.get('MISTRAL_API_KEY')),
         default_model: str = 'mistral-medium',
         api_endpoint: str = '',
-        default_max_tokens: int = 32000,
+        default_max_token_len: int = 32000,
+        default_max_completion_len: int = 4096,
     ):
         self.api_key = api_key
         self.default_model = default_model
         self.api_endpoint = api_endpoint
-        self.default_max_tokens = default_max_tokens
+        self.default_max_token_len = default_max_token_len
+        self.default_max_completion_len = default_max_completion_len
+
         self.aclient = MistralAsyncClient(api_key=api_key)
 
     def user_token(self) -> str:
@@ -46,8 +49,8 @@ class MistralExecutor(Executor):
             case 'mistral-medium':
                 return 32000
             case _:
-                logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_tokens}')
-                return self.default_max_tokens
+                logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_token_len}')
+                return self.default_max_token_len
 
     def set_default_model(self, default_model: str):
         self.default_model = default_model
@@ -56,7 +59,7 @@ class MistralExecutor(Executor):
         return self.default_model
 
     def set_default_max_tokens(self, default_max_tokens: int):
-        self.default_max_tokens = default_max_tokens
+        self.default_max_token_len = default_max_tokens
 
     def max_prompt_tokens(
         self,
@@ -64,6 +67,12 @@ class MistralExecutor(Executor):
         model: Optional[str] = None,
     ) -> int:
         return self.max_tokens(model) - completion_token_count
+
+    def max_completion_tokens(
+        self,
+        model: Optional[str] = None,
+    ):
+        return self.max_tokens(model) - self.default_max_completion_len
 
     def calculate_tokens(
         self,

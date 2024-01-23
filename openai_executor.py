@@ -26,12 +26,14 @@ class OpenAIExecutor(Executor):
         api_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
         default_model: str = 'gpt-4-1106-preview',
         api_endpoint: str = 'https://api.openai.com/v1',
-        default_max_tokens: int = 128000,
+        default_max_token_len: int = 128000,
+        default_max_completion_len: int = 4096,
     ):
         self.openai_key = api_key
         self.default_model = default_model
         self.api_endpoint = api_endpoint
-        self.default_max_tokens = default_max_tokens
+        self.default_max_token_len = default_max_token_len
+        self.default_max_completion_len = default_max_completion_len
 
     def user_token(self) -> str:
         return 'User'
@@ -64,8 +66,8 @@ class OpenAIExecutor(Executor):
             case 'gpt-3.5-turbo-1106':
                 return 16385
             case _:
-                logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_tokens}')
-                return self.default_max_tokens
+                logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_token_len}')
+                return self.default_max_token_len
 
     def set_default_model(self, default_model: str):
         self.default_model = default_model
@@ -74,14 +76,20 @@ class OpenAIExecutor(Executor):
         return self.default_model
 
     def set_default_max_tokens(self, default_max_tokens: int):
-        self.default_max_tokens = default_max_tokens
+        self.default_max_token_len = default_max_tokens
 
     def max_prompt_tokens(
         self,
-        completion_token_count: int = 2048,
+        completion_token_len: Optional[int] = None,
         model: Optional[str] = None,
     ) -> int:
-        return self.max_tokens(model) - completion_token_count
+        return self.max_tokens(model) - (completion_token_len if completion_token_len else self.default_max_completion_len)
+
+    def max_completion_tokens(
+        self,
+        model: Optional[str] = None,
+    ):
+        return self.default_max_completion_len
 
     def __calculate_image_tokens(self, width: int, height: int):
         from math import ceil

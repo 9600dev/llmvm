@@ -23,7 +23,8 @@ from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
 from helpers.search import SerpAPISearcher
 from helpers.webhelpers import WebHelpers
-from objects import Assistant, Content, FunctionCall, Message, System, User
+from objects import (Assistant, Content, FunctionCall, LLMCall, Message,
+                     System, TokenCompressionMethod, User)
 from source import Source
 from starlark_runtime import StarlarkRuntime
 from vector_search import VectorSearch
@@ -110,14 +111,22 @@ class ContentDownloader():
         content = PdfHelpers.parse_pdf(filename)
 
         query_expander = self.starlark_runtime.controller.execute_llm_call(
-            message=Helpers.load_and_populate_message(
+            llm_call=LLMCall(
+                user_message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/pdf_content.prompt',
+                    template={},
+                    user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                    assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                    append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                ),
+                context_messages=[self.starlark_runtime.statement_to_message(content)],
+                executor=self.starlark_runtime.controller.get_executor(),
+                model=self.starlark_runtime.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
                 prompt_filename='prompts/starlark/pdf_content.prompt',
-                template={},
-                user_token=self.starlark_runtime.controller.get_executor().user_token(),
-                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
-                append_token=self.starlark_runtime.controller.get_executor().append_token(),
             ),
-            context_messages=[self.starlark_runtime.statement_to_message(content)],
             query=self.original_query,
             original_query=self.original_query,
         )
@@ -216,16 +225,24 @@ class Searcher():
     ) -> str:
         # todo: we should probably return the Search instance, so we can futz with it later on.
         query_expander = self.starlark_runtime.controller.execute_llm_call(
-            message=Helpers.load_and_populate_message(
+            llm_call=LLMCall(
+                user_message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/search_expander.prompt',
+                    template={
+                        'query': self.query,
+                    },
+                    user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                    assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                    append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                ),
+                context_messages=[],
+                executor=self.starlark_runtime.controller.get_executor(),
+                model=self.starlark_runtime.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
                 prompt_filename='prompts/starlark/search_expander.prompt',
-                template={
-                    'query': self.query,
-                },
-                user_token=self.starlark_runtime.controller.get_executor().user_token(),
-                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
-                append_token=self.starlark_runtime.controller.get_executor().append_token(),
             ),
-            context_messages=[],
             query=self.query,
             original_query=self.original_query,
         )
@@ -293,20 +310,29 @@ class Searcher():
 
         # classify the search engine
         engine_rank = self.starlark_runtime.controller.execute_llm_call(
-            message=Helpers.load_and_populate_message(
+            llm_call=LLMCall(
+                user_message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/search_classifier.prompt',
+                    template={
+                        'query': '\n'.join(queries),
+                        'engines': '\n'.join([f'* {key}: {value["description"]}' for key, value in engines.items()]),
+                    },
+                    user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                    assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                    append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                ),
+                context_messages=[],
+                executor=self.starlark_runtime.controller.get_executor(),
+                model=self.starlark_runtime.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
                 prompt_filename='prompts/starlark/search_classifier.prompt',
-                template={
-                    'query': '\n'.join(queries),
-                    'engines': '\n'.join([f'* {key}: {value["description"]}' for key, value in engines.items()]),
-                },
-                user_token=self.starlark_runtime.controller.get_executor().user_token(),
-                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
-                append_token=self.starlark_runtime.controller.get_executor().append_token(),
             ),
-            context_messages=[],
             query=self.query,
             original_query=self.original_query,
         )
+
         engine = str(engine_rank.message).split('\n')[0]
         searcher = self.search_google_hook
 
@@ -324,19 +350,27 @@ class Searcher():
         if 'Yelp' in engine:
             # take the first query, and figure out the location
             location = self.starlark_runtime.controller.execute_llm_call(
-                message=Helpers.load_and_populate_message(
+                llm_call=LLMCall(
+                    user_message=Helpers.load_and_populate_message(
+                        prompt_filename='prompts/starlark/search_location.prompt',
+                        template={
+                            'query': queries[0],
+                        },
+                        user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                        assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                        append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                    ),
+                    context_messages=[],
+                    executor=self.starlark_runtime.controller.get_executor(),
+                    model=self.starlark_runtime.controller.get_executor().get_default_model(),
+                    temperature=0.0,
+                    max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
+                    completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
                     prompt_filename='prompts/starlark/search_location.prompt',
-                    template={
-                        'query': queries[0],
-                    },
-                    user_token=self.starlark_runtime.controller.get_executor().user_token(),
-                    assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
-                    append_token=self.starlark_runtime.controller.get_executor().append_token(),
                 ),
-                context_messages=[],
                 query=self.query,
                 original_query=self.original_query,
-                prompt_filename='prompts/starlark/search_location.prompt',
+                token_compression_method=TokenCompressionMethod.SUMMARY,
             )
 
             query_result, location = eval(str(location.message))
@@ -362,21 +396,30 @@ class Searcher():
         }
 
         result_rank = self.starlark_runtime.controller.execute_llm_call(
-            message=Helpers.load_and_populate_message(
+            llm_call=LLMCall(
+                user_message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/search_ranker.prompt',
+                    template={
+                        'queries': '\n'.join(queries),
+                        'snippets': '\n'.join(
+                            [f'* {str(key)}: {value["title"]} {value["snippet"]}' for key, value in snippets.items()]
+                        ),
+                    },
+                    user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                    assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                    append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                ),
+                context_messages=[],
+                executor=self.starlark_runtime.controller.get_executor(),
+                model=self.starlark_runtime.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
                 prompt_filename='prompts/starlark/search_ranker.prompt',
-                template={
-                    'queries': '\n'.join(queries),
-                    'snippets': '\n'.join(
-                        [f'* {str(key)}: {value["title"]} {value["snippet"]}' for key, value in snippets.items()]
-                    ),
-                },
-                user_token=self.starlark_runtime.controller.get_executor().user_token(),
-                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
-                append_token=self.starlark_runtime.controller.get_executor().append_token(),
             ),
-            context_messages=[],
             query=self.query,
             original_query=self.original_query,
+            token_compression_method=TokenCompressionMethod.SUMMARY,
         )
 
         # double shot try
@@ -567,8 +610,16 @@ class FunctionBindable():
             while not bound and counter < 8:
 
                 llm_bind_result = self.starlark_runtime.controller.execute_llm_call(
-                    message=User(Content()),  # we can pass an empty message here and the context_messages contain everything
-                    context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
+                    llm_call=LLMCall(
+                        user_message=User(Content()),  # we can pass an empty message here and the context_messages contain everything  # noqa:E501
+                        context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
+                        executor=self.starlark_runtime.controller.get_executor(),
+                        model=self.starlark_runtime.controller.get_executor().get_default_model(),
+                        temperature=0.0,
+                        max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
+                        completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
+                        prompt_filename=''
+                    ),
                     query=self.original_query,
                     original_query=self.original_query,
                 )
@@ -760,17 +811,24 @@ class SourceProject:
 
                     # get the natural language definition
                     assistant = self.starlark_runtime.controller.execute_llm_call(
-                        message=Helpers.load_and_populate_message(
+                        llm_call=LLMCall(
+                            user_message=Helpers.load_and_populate_message(
+                                prompt_filename='prompts/starlark/code_method_definition.prompt',
+                                template={},
+                                user_token=self.starlark_runtime.controller.get_executor().user_token(),
+                                assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
+                                append_token=self.starlark_runtime.controller.get_executor().append_token(),
+                            ),
+                            context_messages=[User(Content(method_definition))],
+                            executor=self.starlark_runtime.controller.get_executor(),
+                            model=self.starlark_runtime.controller.get_executor().get_default_model(),
+                            temperature=0.0,
+                            max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
+                            completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
                             prompt_filename='prompts/starlark/code_method_definition.prompt',
-                            template={},
-                            user_token=self.starlark_runtime.controller.get_executor().user_token(),
-                            assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
-                            append_token=self.starlark_runtime.controller.get_executor().append_token(),
                         ),
-                        context_messages=[User(Content(method_definition))],
                         query='',
                         original_query='',
-                        completion_tokens=2048,
                     )
 
                     method_definition += str(assistant.message) + '\n\n'

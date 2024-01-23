@@ -1,8 +1,10 @@
 import base64
+import copy
 import datetime as dt
 import importlib
 import os
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
 from fastapi.responses import StreamingResponse
@@ -81,7 +83,14 @@ class Executor(ABC):
     @abstractmethod
     def max_prompt_tokens(
         self,
-        completion_token_count: int = 2048,
+        completion_token_len: Optional[int] = None,
+        model: Optional[str] = None,
+    ) -> int:
+        pass
+
+    @abstractmethod
+    def max_completion_tokens(
+        self,
         model: Optional[str] = None,
     ) -> int:
         pass
@@ -156,6 +165,51 @@ def coerce_types(a, b):
     raise TypeError(f"Cannot coerce types {type(a)} and {type(b)} to a common type")
 
 
+class TokenCompressionMethod(Enum):
+    AUTO = 0
+    LIFO = 1
+    SIMILARITY = 2
+    MAP_REDUCE = 3
+    SUMMARY = 4
+
+
+class LLMCall():
+    def __init__(
+        self,
+        user_message: 'Message',
+        context_messages: List['Message'],
+        executor: Executor,
+        model: str,
+        temperature: float,
+        max_prompt_len: int,
+        completion_tokens_len: int,
+        prompt_filename: str,
+        stream_handler: Callable[['AstNode'], Awaitable[None]] = awaitable_none
+    ):
+        self.user_message = user_message
+        self.context_messages = context_messages
+        self.executor = executor
+        self.model = model
+        self.temperature = temperature
+        self.max_prompt_len = max_prompt_len
+        self.completion_tokens_len = completion_tokens_len
+        self.prompt_filename = prompt_filename
+        self.stream_handler = stream_handler
+
+    def copy(self):
+        return LLMCall(
+            user_message=copy.deepcopy(self.user_message),
+            context_messages=copy.deepcopy(self.context_messages),
+            executor=self.executor,
+            model=self.model,
+            temperature=self.temperature,
+            max_prompt_len=self.max_prompt_len,
+            completion_tokens_len=self.completion_tokens_len,
+            prompt_filename=self.prompt_filename,
+            stream_handler=self.stream_handler,
+        )
+
+
 class Controller():
     def __init__(
         self,
@@ -165,32 +219,20 @@ class Controller():
     @abstractmethod
     def aexecute_llm_call(
         self,
-        message: 'Message',
-        context_messages: List['Message'],
+        llm_call: LLMCall,
         query: str,
         original_query: str,
-        prompt_filename: Optional[str] = None,
-        completion_tokens: int = 2048,
-        temperature: float = 0.0,
-        lifo: bool = False,
-        stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = awaitable_none,
-        model: Optional[str] = None,
+        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> 'Assistant':
         pass
 
     @abstractmethod
     def execute_llm_call(
         self,
-        message: 'Message',
-        context_messages: List['Message'],
+        llm_call: LLMCall,
         query: str,
         original_query: str,
-        prompt_filename: Optional[str] = None,
-        completion_tokens: int = 2048,
-        temperature: float = 0.0,
-        lifo: bool = False,
-        stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = awaitable_none,
-        model: Optional[str] = None,
+        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> 'Assistant':
         pass
 
@@ -314,8 +356,8 @@ class Content(AstNode):
     def __repr__(self):
         return f'Content({self.sequence})'
 
-    def get_text(self) -> str:
-        return str(self.sequence)
+    def get_content(self) -> str:
+        return self.__str__()
 
     def b64encode(self) -> str:
         if isinstance(self.sequence, bytes):
@@ -358,7 +400,7 @@ class PdfContent(Content):
     def is_text(self):
         return isinstance(self.sequence, str)
 
-    def get_text(self) -> str:
+    def get_content(self) -> str:
         def late_bind_pdf_parse(obj, method_name: str):
             # hoooly crap this is a hack.
             module = importlib.import_module('helpers.pdf')
@@ -396,7 +438,7 @@ class FileContent(Content):
     def __str__(self):
         return f'FileContent({self.url})'
 
-    def get_text(self):
+    def get_content(self):
         if self.is_local():
             with open(self.url, 'r') as f:
                 return f.read()
@@ -469,7 +511,7 @@ class Message(AstNode):
     @staticmethod
     def to_dict(message: 'Message', server_serialization: bool = False) -> Dict[str, Any]:
         def file_wrap(message: FileContent | PdfContent):
-            return f'The following data is from this url: {message.url}\n\n{message.get_text()}'
+            return f'The following data/content is from this url: {message.url}\n\n{message.get_content()}'
 
         # primarily to pass to Anthropic or OpenAI api
         if isinstance(message, User) and isinstance(message.message, ImageContent):

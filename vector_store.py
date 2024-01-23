@@ -134,13 +134,11 @@ class VectorStore():
         else:
             text_splitter = TokenTextSplitter(chunk_size=chunk_token_count, chunk_overlap=chunk_overlap)
 
-        logging.debug('VectorStore.chunk_and_rank splitting documents')
-
         split_texts = text_splitter.split_text(content)
 
         token_chunk_cost = token_calculator(split_texts[0])
 
-        logging.debug('VectorStore.chunk_and_rank document length: {} split_texts: {}'.format(len(content), len(split_texts)))
+        logging.debug(f'VectorStore.chunk_and_rank document length: {len(content)} split_texts: {len(split_texts)}, token_chunk_cost: {token_chunk_cost}, max_tokens: {max_tokens}')  # noqa
         chunk_faiss = FAISS.from_texts(split_texts, self.embeddings())
 
         chunk_k = math.floor(max_tokens / token_chunk_cost)

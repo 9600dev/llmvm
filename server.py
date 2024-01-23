@@ -83,7 +83,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=Container().get_config_variable('anthropic_model', 'LLMVM_MODEL'),
             api_endpoint=Container().get('anthropic_api_base'),
-            default_max_tokens=int(Container().get('anthropic_max_tokens')),
+            default_max_token_len=int(Container().get('anthropic_max_tokens')),
         )
         anthropic_controller = StarlarkExecutionController(
             executor=anthropic_executor,
@@ -97,7 +97,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
         mistral_executor = MistralExecutor(
             api_key=os.environ.get('MISTRAL_API_KEY', ''),
             default_model=Container().get_config_variable('mistral_model', 'LLMVM_MODEL'),
-            default_max_tokens=int(Container().get('mistral_max_tokens')),
+            default_max_token_len=int(Container().get('mistral_max_tokens')),
         )
         mistral_controller = StarlarkExecutionController(
             executor=mistral_executor,
@@ -112,7 +112,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             api_key=os.environ.get('OPENAI_API_KEY', ''),
             default_model=Container().get_config_variable('openai_model', 'LLMVM_MODEL'),
             api_endpoint=Container().get('openai_api_base'),
-            default_max_tokens=int(Container().get('openai_max_tokens')),
+            default_max_token_len=int(Container().get('openai_max_tokens')),
         )
 
         openai_controller = StarlarkExecutionController(

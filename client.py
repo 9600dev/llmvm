@@ -253,7 +253,7 @@ def get_path_as_messages(
         result = urlparse(file_path)
 
         if (result.scheme == 'http' or result.scheme == 'https'):
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'}  # noqa
             download_request = requests.get(result.geturl(), headers=headers)
             if download_request.status_code == 200:
                 file_name = os.path.basename(result.path)
@@ -598,8 +598,8 @@ async def execute_llm_call(
             context_messages
         )
     else:
-        logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')
-        raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')
+        logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
+        raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
 
 
 def llm(

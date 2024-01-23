@@ -4,19 +4,21 @@ import copy
 import math
 import random
 import re
+from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
-from helpers.helpers import Helpers
+from helpers.helpers import Helpers, write_client_stream
 from helpers.logging_helpers import (no_indent_debug, response_writer,
                                      role_debug, setup_logging)
 from helpers.pdf import PdfHelpers
 from objects import (Answer, Assistant, AstNode, Content, Controller, Executor,
-                     Message, PdfContent, Statement, System, User,
-                     awaitable_none)
+                     FileContent, LLMCall, Message, PdfContent, Statement,
+                     System, TokenCompressionMethod, User, awaitable_none)
 from starlark_runtime import StarlarkRuntime
 from vector_search import VectorSearch
 
 logging = setup_logging()
+
 
 class StarlarkExecutionController(Controller):
     def __init__(
@@ -35,6 +37,51 @@ class StarlarkExecutionController(Controller):
         self.edit_hook = edit_hook
         self.starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
         self.continuation_passing_style = continuation_passing_style
+
+    async def __llm_call(
+        self,
+        llm_call: LLMCall,
+    ) -> Assistant:
+        # execute the call to check to see if the Answer satisfies the original query
+        messages: List[Message] = copy.deepcopy(llm_call.context_messages)
+
+        # don't append the user message if it's empty
+        if llm_call.user_message.message.get_content().strip() != '':
+            messages.append(llm_call.user_message)
+
+        try:
+            assistant: Assistant = await llm_call.executor.aexecute(
+                messages,
+                max_completion_tokens=llm_call.completion_tokens_len,
+                temperature=llm_call.temperature,
+                stream_handler=llm_call.stream_handler,
+                model=llm_call.model,
+            )
+            role_debug(logging, llm_call.prompt_filename, 'User', str(llm_call.user_message.message))
+            role_debug(logging, llm_call.prompt_filename, 'Assistant', str(assistant.message))
+        except Exception as ex:
+            role_debug(logging, llm_call.prompt_filename, 'User', str(llm_call.user_message.message))
+            raise ex
+        response_writer(llm_call.prompt_filename, assistant)
+        return assistant
+
+    async def __llm_call_with_prompt(
+        self,
+        llm_call: LLMCall,
+        template: Dict[str, Any],
+    ) -> Assistant:
+        prompt = Helpers.load_and_populate_prompt(
+            prompt_filename=llm_call.prompt_filename,
+            template=template,
+            user_token=self.get_executor().user_token(),
+            assistant_token=self.get_executor().assistant_token(),
+            append_token=self.get_executor().append_token(),
+        )
+        llm_call.user_message = User(Content(prompt['user_message']))
+
+        return await self.__llm_call(
+            llm_call
+        )
 
     def get_executor(self) -> Executor:
         return self.executor
@@ -77,7 +124,7 @@ class StarlarkExecutionController(Controller):
             prompt_filename='prompts/starlark/query_understanding.prompt',
             template={
                 'functions': '\n'.join(function_list),
-                'user_input': str(message.message),
+                'user_input': message.message.get_content(),
             },
             user_token=self.get_executor().user_token(),
             assistant_token=self.get_executor().assistant_token(),
@@ -93,140 +140,269 @@ class StarlarkExecutionController(Controller):
             stream_handler=stream_handler,
             model=model,
         )
-        if assistant.error or not parse_result(str(assistant.message)):
+        if assistant.error or not parse_result(assistant.message.get_content()):
             return {'tool': 1.0}
-        return parse_result(str(assistant.message))
+        return parse_result(assistant.message.get_content())
+
+    async def __similarity(
+        self,
+        llm_call: LLMCall,
+        query: str,
+    ) -> Assistant:
+
+        tokens_per_message = (
+            math.floor((llm_call.max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+        )
+        write_client_stream(f'Performing context window compression type: similarity vector search with tokens per message {tokens_per_message}.\n')  # noqa E501
+
+        # for all messages, do a similarity search
+        similarity_messages = []
+        for i in range(len(llm_call.context_messages)):
+            prev_message = llm_call.context_messages[i]
+
+            similarity_chunks = self.vector_search.chunk_and_rank(
+                query=query,
+                token_calculator=self.executor.calculate_tokens,
+                content=prev_message.message.get_content(),
+                chunk_token_count=256,
+                chunk_overlap=0,
+                max_tokens=tokens_per_message - 32,
+            )
+            similarity_message: str = '\n\n'.join([content for content, _ in similarity_chunks])
+
+            # check for the header of a statement_to_message. We probably need to keep this
+            # todo: hack
+            if 'Result:\n' in prev_message.message.get_content():
+                similarity_message = prev_message.message.get_content()[0:prev_message.message.get_content().index('Result:\n')] + similarity_message  # noqa E501
+
+            similarity_messages.append(User(Content(similarity_message)))
+
+        assistant_result = await self.__llm_call(
+            llm_call=LLMCall(
+                user_message=llm_call.user_message,
+                context_messages=similarity_messages,
+                executor=llm_call.executor,
+                model=llm_call.model,
+                temperature=llm_call.temperature,
+                max_prompt_len=llm_call.max_prompt_len,
+                completion_tokens_len=llm_call.completion_tokens_len,
+                prompt_filename=llm_call.prompt_filename,
+                stream_handler=llm_call.stream_handler,
+            ),
+        )
+        return assistant_result
+
+    async def __map_reduce(
+        self,
+        query: str,
+        original_query: str,
+        llm_call: LLMCall,
+    ) -> Assistant:
+        prompt_len = self.executor.calculate_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
+        write_client_stream(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n')
+
+        # collapse the context messages into single message
+        context_message = User(Content('\n\n'.join([m.message.get_content() for m in llm_call.context_messages])))
+        chunk_results = []
+
+        # iterate over the data.
+        map_reduce_prompt_tokens = self.executor.calculate_tokens(
+            [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))],
+            model=llm_call.model,
+        )
+
+        chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
+        chunks = self.vector_search.chunk(
+            content=context_message.message.get_content(),
+            chunk_size=chunk_size,
+            overlap=0
+        )
+
+        for chunk in chunks:
+            chunk_assistant = await self.__llm_call_with_prompt(
+                llm_call=LLMCall(
+                    user_message=User(Content()),
+                    context_messages=[],
+                    executor=llm_call.executor,
+                    model=llm_call.model,
+                    temperature=llm_call.temperature,
+                    max_prompt_len=llm_call.max_prompt_len,
+                    completion_tokens_len=llm_call.completion_tokens_len,
+                    prompt_filename='prompts/map_reduce_map.prompt',
+                    stream_handler=llm_call.stream_handler,
+                ),
+                template={
+                    'original_query': original_query,
+                    'query': query,
+                    'data': chunk,
+                },
+            )
+            chunk_results.append(chunk_assistant.message.get_content())
+
+        # perform the reduce
+        map_results = '\n\n====\n\n' + '\n\n====\n\n'.join(chunk_results)
+
+        assistant_result = await self.__llm_call_with_prompt(
+            llm_call=LLMCall(
+                user_message=User(Content()),
+                context_messages=[],
+                executor=self.executor,
+                model=llm_call.model,
+                temperature=llm_call.temperature,
+                max_prompt_len=llm_call.max_prompt_len,
+                completion_tokens_len=llm_call.completion_tokens_len,
+                prompt_filename='prompts/map_reduce_reduce.prompt',
+                stream_handler=llm_call.stream_handler,
+            ),
+            template={
+                'original_query': original_query,
+                'query': query,
+                'map_results': map_results
+            },
+        )
+        return assistant_result
+
+    async def __summary_map_reduce(
+        self,
+        llm_call: LLMCall,
+    ) -> Assistant:
+
+        header_text_token_len = 60
+        # todo: this is a hack. we should check the length of all the messages, and if they're less
+        # than the tokens per message, then we can add more tokens to other messages.
+        tokens_per_message = (
+            math.floor((llm_call.max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+        )
+        tokens_per_message = tokens_per_message - header_text_token_len
+
+        write_client_stream(f'Performing context window compression type: summary map/reduce with tokens per message {tokens_per_message}.\n')  # noqa E501
+
+        llm_call_copy = llm_call.copy()
+
+        if llm_call.executor.calculate_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
+            logging.debug('__summary_map_reduce() user message is longer than the summary window, will try to cut.')
+            llm_call_copy.user_message = User(Content(llm_call.user_message.message.get_content()[0:tokens_per_message]))
+
+        # for all messages, do a similarity search
+        summary_messages = []
+        for i in range(len(llm_call.context_messages)):
+            current_message = llm_call.context_messages[i]
+
+            summary_str = ''
+            # we want to summarize the message into the appropriate 'tokens per message' size
+            if isinstance(current_message.message, PdfContent):
+                summary_str = f'This message contains a summary of the PDF document at: {current_message.message.url}.\n\n'
+            elif isinstance(current_message.message, FileContent):
+                summary_str = f'This message contains a summary of the file at: {current_message.message.url}.\n\n'
+            elif isinstance(current_message.message, Content):
+                summary_str = f'This message contains a summary of some arbitrary content. A future prompt will contain the full message.\n\n'  # noqa E501
+
+            summary_str += f'{current_message.message.get_content()[0:tokens_per_message]}'
+            summary_messages.append(User(Content(summary_str)))
+
+        # we should have all the same messages, but summarized.
+        llm_call_copy.context_messages = summary_messages
+
+        assistant_result = await self.__llm_call(
+            llm_call_copy,
+        )
+        return assistant_result
+
+    async def __lifo(
+        self,
+        llm_call: LLMCall
+    ) -> Assistant:
+        write_client_stream('Performing context window compression type: last-in-first-out.\n')
+        lifo_messages = copy.deepcopy(llm_call.context_messages)
+
+        prompt_context_messages = [llm_call.user_message]
+        current_tokens = self.executor.calculate_tokens(
+            llm_call.user_message.message.get_content(),
+            model=llm_call.model
+        ) + llm_call.completion_tokens_len
+
+        # reverse over the messages, last to first
+        for i in range(len(lifo_messages) - 1, -1, -1):
+            if (
+                current_tokens + self.executor.calculate_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+                < llm_call.max_prompt_len
+            ):
+                prompt_context_messages.append(lifo_messages[i])
+                current_tokens += self.executor.calculate_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+            else:
+                break
+
+        new_call = llm_call.copy()
+        new_call.context_messages = prompt_context_messages[::-1]
+
+        assistant_result = await self.__llm_call(
+            llm_call=new_call
+        )
+        return assistant_result
 
     async def aexecute_llm_call(
         self,
-        message: Message,
-        context_messages: List[Message],
+        llm_call: LLMCall,
         query: str,
         original_query: str,
-        prompt_filename: Optional[str] = None,
-        completion_tokens: int = 2048,
-        temperature: float = 0.0,
-        lifo: bool = False,
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
-        model: Optional[str] = None,
+        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> Assistant:
         '''
         Internal function to execute an LLM call with prompt template and context messages.
         Deals with chunking, map/reduce, and other logic if the message/context messages
         are too long for the context window.
         '''
-        model = model if model else self.executor.get_default_model()
-
-        async def __llm_call(
-            user_message: Message,
-            context_messages: List[Message],
-            executor: Executor,
-            prompt_filename: Optional[str] = None,
-        ) -> Assistant:
-            if not prompt_filename:
-                prompt_filename = ''
-            # execute the call to check to see if the Answer satisfies the original query
-            messages: List[Message] = copy.deepcopy(context_messages)
-
-            # don't append the user message if it's empty
-            if str(user_message.message).strip() != '':
-                messages.append(user_message)
-
-            try:
-                assistant: Assistant = await executor.aexecute(
-                    messages,
-                    max_completion_tokens=completion_tokens,
-                    temperature=temperature,
-                    stream_handler=stream_handler,
-                    model=model,
-                )
-                role_debug(logging, prompt_filename, 'User', str(user_message.message))
-                role_debug(logging, prompt_filename, 'Assistant', str(assistant.message))
-            except Exception as ex:
-                role_debug(logging, prompt_filename, 'User', str(user_message.message))
-                raise ex
-            response_writer(prompt_filename, assistant)
-            return assistant
-
-        async def __llm_call_prompt(
-            prompt_filename: str,
-            context_messages: List[Message],
-            executor: Executor,
-            template: Dict[str, Any],
-        ) -> Assistant:
-            prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=prompt_filename,
-                template=template,
-                user_token=self.get_executor().user_token(),
-                assistant_token=self.get_executor().assistant_token(),
-                append_token=self.get_executor().append_token(),
-            )
-            return await __llm_call(
-                User(Content(prompt['user_message'])),
-                context_messages,
-                executor,
-                prompt_filename=prompt_filename,
-            )
+        model = llm_call.model if llm_call.model else self.executor.get_default_model()
+        llm_call.model = model
 
         """
         Executes an LLM call on a prompt_message with a context of messages.
         Performs either a chunk_and_rank, or a map/reduce depending on the
         context relavence to the prompt_message.
         """
-        assistant_result: Assistant
 
         # If we have a PdfContent here, we need to convert it into the appropriate format
         # before firing off the call.
         # todo: this should probably use ContentDownloader.parse_pdf (so that context messages)
         # are included in the assessment of if the Pdf has been converted or not
-        for c_message in context_messages:
+        for c_message in llm_call.context_messages:
             if isinstance(c_message.message, PdfContent) and not c_message.message.is_text():
                 text_result = PdfHelpers.parse_pdf(c_message.message.url)
                 c_message.message.sequence = text_result
 
+        prompt_len = self.executor.calculate_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
+        max_prompt_len = self.executor.max_prompt_tokens(completion_token_len=llm_call.completion_tokens_len, model=model)
+
         # I have either a message, or a list of messages. They might need to be map/reduced.
         # todo: we usually have a prepended message of context to help the LLM figure out
         # what to do with the message at a later stage. This is getting removed right now.
-        if (
-            self.executor.calculate_tokens(context_messages + [message], model=model)
-            > self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model)
-        ):
+        if prompt_len <= max_prompt_len:
+            # straight call
+            return await self.__llm_call(llm_call=llm_call)
+        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.LIFO:
+            return await self.__lifo(llm_call)
+        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.SUMMARY:
+            return await self.__summary_map_reduce(llm_call)
+        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.MAP_REDUCE:
+            return await self.__map_reduce(query, original_query, llm_call)
+        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.SIMILARITY:
+            return await self.__similarity(llm_call, query)
+        else:
+            # let's figure out what method to use
+            write_client_stream(f'The prompt length: {prompt_len} is bigger than the max token count: {max_prompt_len} for executor {llm_call.executor.name()}.\n')  # noqa E501
+            write_client_stream(f'Token Compression: {token_compression_method.name}.\n')
             # check to see if we're simply lifo'ing the context messages (last in first out)
-            if lifo:
-                lifo_messages = copy.deepcopy(context_messages)
-                prompt_context_messages = [message]
-                current_tokens = self.executor.calculate_tokens(str(message.message), model=model) + completion_tokens
-
-                # reverse over the messages, last to first
-                for i in range(len(lifo_messages) - 1, -1, -1):
-                    if (
-                        current_tokens + self.executor.calculate_tokens(str(lifo_messages[i].message), model=model)
-                        < self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model)
-                    ):
-                        prompt_context_messages.append(lifo_messages[i])
-                        current_tokens += self.executor.calculate_tokens(str(lifo_messages[i].message), model=model)
-                    else:
-                        break
-
-                assistant_result = await __llm_call(
-                    user_message=cast(User, message),
-                    context_messages=prompt_context_messages[::-1],  # reversed, because of above
-                    executor=self.executor,
-                    prompt_filename=prompt_filename,
-                )
-                return assistant_result
-
-            # not lifo
-            context_message = User(Content('\n\n'.join([str(m.message) for m in context_messages])))
+            context_message = User(Content('\n\n'.join([m.message.get_content() for m in llm_call.context_messages])))
 
             # see if we can do a similarity search or not.
+            write_client_stream('Determining map/reduce approach of either similarity vectorsearch or full map/reduce.\n')
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
                 token_calculator=self.executor.calculate_tokens,
-                content=str(context_message.message),
+                content=context_message.message.get_content(),
                 chunk_token_count=256,
                 chunk_overlap=0,
-                max_tokens=self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model) - self.executor.calculate_tokens([message], model=model) - 32,  # noqa E501
+                max_tokens=max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=model) - 32,  # noqa E501
             )
 
             # randomize and sample from the similarity_chunks
@@ -235,163 +411,68 @@ class StarlarkExecutionController(Controller):
 
             decision_criteria: List[str] = []
             for chunk, _ in similarity_chunks[:5]:
-                assistant_similarity = await __llm_call_prompt(
-                    prompt_filename='prompts/document_chunk.prompt',
-                    context_messages=[],
-                    executor=self.executor,
+                assistant_similarity = await self.__llm_call_with_prompt(
+                    llm_call=LLMCall(
+                        user_message=User(Content()),
+                        context_messages=[],
+                        executor=llm_call.executor,
+                        model=llm_call.model,
+                        temperature=llm_call.temperature,
+                        max_prompt_len=llm_call.max_prompt_len,
+                        completion_tokens_len=llm_call.completion_tokens_len,
+                        prompt_filename='prompts/document_chunk.prompt',
+                    ),
                     template={
                         'query': str(query),
                         'document_chunk': chunk,
                     },
                 )
 
-                decision_criteria.append(str(assistant_similarity.message))
+                decision_criteria.append(assistant_similarity.message.get_content())
                 logging.debug('aexecute_llm_call() map_reduce_required, query_or_task: {}, response: {}'.format(
                     query,
                     assistant_similarity.message,
                 ))
-                if 'No' in str(assistant_similarity.message):
+                if 'No' in assistant_similarity.message.get_content():
                     # we can break early, as the 'map_reduced_required' flag will not be set below
                     break
 
             map_reduce_required = all(['Yes' in d for d in decision_criteria])
-
-            # either similarity search, or map reduce required
-            # here, we're not doing a map_reduce, we're simply populating the context window
-            # with the highest ranked chunks from each message.
-            if not map_reduce_required:
-                tokens_per_message = (
-                    math.floor((self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model) - self.executor.calculate_tokens([message], model=model))  # noqa E501
-                               / len(context_messages))
-                )
-
-                # for all messages, do a similarity search
-                similarity_messages = []
-                for i in range(len(context_messages)):
-                    prev_message = context_messages[i]
-
-                    similarity_chunks = self.vector_search.chunk_and_rank(
-                        query=query,
-                        token_calculator=self.executor.calculate_tokens,
-                        content=str(prev_message),
-                        chunk_token_count=256,
-                        chunk_overlap=0,
-                        max_tokens=tokens_per_message - 32,
-                    )
-                    similarity_message: str = '\n\n'.join([content for content, _ in similarity_chunks])
-
-                    # check for the header of a statement_to_message. We probably need to keep this
-                    # todo: hack
-                    if 'Result:\n' in str(prev_message):
-                        similarity_message = str(prev_message)[0:str(prev_message).index('Result:\n')] + similarity_message
-
-                    similarity_messages.append(User(Content(similarity_message)))
-
-                assistant_result = await __llm_call(
-                    user_message=message,
-                    context_messages=similarity_messages,
-                    executor=self.executor,
-                    prompt_filename=prompt_filename,
-                )
-
-            # do the map reduce instead of similarity
+            if map_reduce_required:
+                return await self.__map_reduce(query, original_query, llm_call)
             else:
-                # collapse the message
-                context_message = User(Content('\n\n'.join([str(m.message) for m in context_messages])))
-                chunk_results = []
-
-                # iterate over the data.
-                map_reduce_prompt_tokens = self.executor.calculate_tokens(
-                    [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))],
-                    model=model,
-                )
-                chunk_size = self.executor.max_prompt_tokens(completion_token_count=completion_tokens, model=model) - map_reduce_prompt_tokens - self.executor.calculate_tokens([message], model=model) - 32  # noqa E501
-
-                chunks = self.vector_search.chunk(
-                    content=str(context_message.message),
-                    chunk_size=chunk_size,
-                    overlap=0
-                )
-
-                for chunk in chunks:
-                    chunk_assistant = await __llm_call_prompt(
-                        prompt_filename='prompts/map_reduce_map.prompt',
-                        context_messages=[],
-                        executor=self.executor,
-                        template={
-                            'original_query': original_query,
-                            'query': query,
-                            'data': chunk,
-                        },
-                    )
-                    chunk_results.append(str(chunk_assistant.message))
-
-                # perform the reduce
-                map_results = '\n\n====\n\n' + '\n\n====\n\n'.join(chunk_results)
-
-                assistant_result = await __llm_call_prompt(
-                    prompt_filename='prompts/map_reduce_reduce.prompt',
-                    context_messages=[],
-                    executor=self.executor,
-                    template={
-                        'original_query': original_query,
-                        'query': query,
-                        'map_results': map_results
-                    },
-                )
-        else:
-            assistant_result = await __llm_call(
-                user_message=cast(User, message),
-                context_messages=context_messages,
-                executor=self.executor,
-                prompt_filename=prompt_filename,
-            )
-        return assistant_result
+                return await self.__similarity(llm_call, query)
 
     def execute_llm_call(
         self,
-        message: Message,
-        context_messages: List[Message],
+        llm_call: LLMCall,
         query: str,
         original_query: str,
-        prompt_filename: Optional[str] = None,
-        completion_tokens: int = 2048,
-        temperature: float = 0.0,
-        lifo: bool = False,
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
-        model: Optional[str] = None,
+        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> Assistant:
-        model = model if model else self.executor.get_default_model()
+        llm_call.model = llm_call.model if llm_call.model else self.executor.get_default_model()
 
         return asyncio.run(self.aexecute_llm_call(
-            message=message,
-            context_messages=context_messages,
+            llm_call=llm_call,
             query=query,
             original_query=original_query,
-            prompt_filename=prompt_filename,
-            completion_tokens=completion_tokens,
-            temperature=temperature,
-            model=model,
-            lifo=lifo,
-            stream_handler=stream_handler,
+            token_compression_method=token_compression_method,
         ))
 
     async def abuild_runnable_code_ast(
         self,
-        messages: List[Message],
+        llm_call: LLMCall,
         files: List[str],
-        temperature: float = 0.0,
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
-        model: Optional[str] = None,
     ) -> Assistant:
-        logging.debug('abuild_runnable_code_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
-        model = model if model else self.executor.get_default_model()
-        logging.debug('abuild_runnable_code_ast() model = {}, executor = {}'.format(model, self.executor.name()))
+        messages = llm_call.context_messages + [llm_call.user_message]
+
+        logging.debug(f'abuild_runnable_code_ast() user_message = {llm_call.user_message.message.get_content()[0:25]}')
+        logging.debug(f'abuild_runnable_code_ast() model = {llm_call.model}, executor = {llm_call.executor.name()}')
 
         tools_message = Helpers.load_and_populate_message(
             prompt_filename='prompts/starlark/starlark_code_insights.prompt',
             template={
-                'user_input': str(messages[-1].message),
+                'user_input': messages[-1].message.get_content(),
                 'files': '\n'.join(files),
             },
             user_token=self.get_executor().user_token(),
@@ -400,30 +481,30 @@ class StarlarkExecutionController(Controller):
         )
 
         llm_response = await self.aexecute_llm_call(
-            message=tools_message,
-            context_messages=messages[0:-1],
+            llm_call=LLMCall(
+                user_message=tools_message,
+                context_messages=llm_call.context_messages + [llm_call.user_message],
+                executor=llm_call.executor,
+                model=llm_call.model,
+                temperature=llm_call.temperature,
+                max_prompt_len=llm_call.max_prompt_len,
+                completion_tokens_len=llm_call.completion_tokens_len,
+                prompt_filename='prompts/starlark/starlark_code_insights.prompt',
+                stream_handler=llm_call.stream_handler,
+            ),
             query='',
             original_query='',
-            prompt_filename='prompts/starlark/starlark_code_insights.prompt',
-            completion_tokens=4096,
-            temperature=temperature,
-            lifo=False,
-            stream_handler=stream_handler,
-            model=model,
+            token_compression_method=TokenCompressionMethod.MAP_REDUCE,
         )
         return llm_response
 
     async def abuild_runnable_tools_ast(
         self,
-        messages: List[Message],
+        llm_call: LLMCall,
         agents: List[Callable],
-        temperature: float = 0.0,
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
-        model: Optional[str] = None,
     ) -> Assistant:
-        logging.debug('abuild_runnable_tools_ast() messages[-1] = {}'.format(str(messages[-1])[0:25]))
-        model = model if model else self.executor.get_default_model()
-        logging.debug('abuild_runnable_tools_ast() model = {}, executor = {}'.format(model, self.executor.name()))
+        logging.debug(f'abuild_runnable_tools_ast() user_message = {llm_call.user_message.message.get_content()[0:25]}')
+        logging.debug(f'abuild_runnable_tools_ast() model = {llm_call.model}, executor = {llm_call.executor.name()}')
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
 
@@ -431,7 +512,7 @@ class StarlarkExecutionController(Controller):
             prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
             template={
                 'functions': '\n'.join(functions),
-                'user_input': str(messages[-1].message),
+                'user_input': llm_call.user_message.message.get_content(),
             },
             user_token=self.get_executor().user_token(),
             assistant_token=self.get_executor().assistant_token(),
@@ -439,27 +520,30 @@ class StarlarkExecutionController(Controller):
         )
 
         llm_response = await self.aexecute_llm_call(
-            message=tools_message,
-            context_messages=messages[0:-1],
+            llm_call=LLMCall(
+                user_message=tools_message,
+                context_messages=llm_call.context_messages + [llm_call.user_message],
+                executor=llm_call.executor,
+                model=llm_call.model,
+                temperature=llm_call.temperature,
+                max_prompt_len=llm_call.max_prompt_len,
+                completion_tokens_len=llm_call.completion_tokens_len,
+                prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+                stream_handler=llm_call.stream_handler,
+            ),
             query='',
             original_query='',
-            prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
-            completion_tokens=2048,
-            temperature=temperature,
-            lifo=False,
-            stream_handler=stream_handler,
-            model=model,
+            token_compression_method=TokenCompressionMethod.SUMMARY,
         )
-
         return llm_response
 
     async def aexecute(
         self,
         messages: List[Message],
         temperature: float = 0.0,
-        mode: str = 'auto',
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
         model: Optional[str] = None,
+        mode: str = 'auto',
+        stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
         template_args: Optional[Dict[str, Any]] = None,
     ) -> List[Statement]:
         model = model if model else self.executor.get_default_model()
@@ -499,62 +583,76 @@ class StarlarkExecutionController(Controller):
 
             if 'tool' in classification:
                 response = await self.abuild_runnable_tools_ast(
-                    messages=messages,
+                    llm_call=LLMCall(
+                        user_message=messages[-1],
+                        context_messages=messages[0:-1],
+                        executor=self.executor,
+                        model=model,
+                        temperature=temperature,
+                        max_prompt_len=self.executor.max_prompt_tokens(),
+                        completion_tokens_len=self.executor.max_completion_tokens(),
+                        prompt_filename='',
+                        stream_handler=stream_handler
+                    ),
                     agents=self.agents,
-                    temperature=temperature,
-                    stream_handler=stream_handler,
-                    model=model,
                 )
             elif 'code' in classification:
                 files = template_args['files'] if template_args and 'files' in template_args else []
                 if files:
                     self.starlark_runtime.globals_dict['source_project'].set_files(files)
                 response = await self.abuild_runnable_code_ast(
-                    messages=messages,
+                    llm_call=LLMCall(
+                        user_message=messages[-1],
+                        context_messages=messages[0:-1],
+                        executor=self.executor,
+                        model=model,
+                        temperature=temperature,
+                        max_prompt_len=self.executor.max_prompt_tokens(),
+                        completion_tokens_len=self.executor.max_completion_tokens(),
+                        prompt_filename='',
+                        stream_handler=stream_handler
+                    ),
                     files=files,
-                    temperature=temperature,
-                    stream_handler=stream_handler,
-                    model=model,
                 )
-            assistant_response = str(response.message).replace('Assistant:', '').strip()
+            assistant_response_str = response.message.get_content().replace('Assistant:', '').strip()
 
             # anthropic can often embed the code in ```python blocks
-            if '```python' in assistant_response:
-                match = re.search(r'```python\n(.*?)```', assistant_response, re.DOTALL)
+            if '```python' in assistant_response_str:
+                match = re.search(r'```python\n(.*?)```', assistant_response_str, re.DOTALL)
                 if match:
-                    assistant_response = match.group(1)
+                    assistant_response_str = match.group(1)
             # openai can often embed the code in ```starlark blocks
-            elif '```starlark' in assistant_response:
-                match = re.search(r'```starlark\n(.*?)```', assistant_response, re.DOTALL)
+            elif '```starlark' in assistant_response_str:
+                match = re.search(r'```starlark\n(.*?)```', assistant_response_str, re.DOTALL)
                 if match:
-                    assistant_response = match.group(1)
+                    assistant_response_str = match.group(1)
             # mistral likes to embed the code in ``` blocks
-            elif '```' in assistant_response:
-                match = re.search(r'```(.*?)```', assistant_response, re.DOTALL)
+            elif '```' in assistant_response_str:
+                match = re.search(r'```(.*?)```', assistant_response_str, re.DOTALL)
                 if match:
-                    assistant_response = match.group(1)
+                    assistant_response_str = match.group(1)
 
             no_indent_debug(logging, '')
             no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')
             # debug out AST
-            lines = str(assistant_response).split('\n')
+            lines = assistant_response_str.split('\n')
             for line in lines:
-                no_indent_debug(logging, '  {}'.format(str(line).replace("[", "\\[")))
+                no_indent_debug(logging, '  {}'.format(line.replace("[", "\\[")))
             no_indent_debug(logging, '')
 
             # debug output
-            response_writer('llm_call', assistant_response)
+            response_writer('llm_call', assistant_response_str)
 
             if self.edit_hook:
-                assistant_response = self.edit_hook(assistant_response)
+                assistant_response_str = self.edit_hook(assistant_response_str)
 
                 # check to see if there is natural language in there or not
                 try:
-                    _ = ast.parse(str(assistant_response))
+                    _ = ast.parse(assistant_response_str)
                 except SyntaxError as ex:
-                    logging.debug('aexecute() SyntaxError: {}'.format(str(ex)))
-                    assistant_response = self.starlark_runtime.compile_error(
-                        starlark_code=str(assistant_response),
+                    logging.debug('aexecute() SyntaxError: {}'.format(ex))
+                    assistant_response_str = self.starlark_runtime.compile_error(
+                        starlark_code=assistant_response_str,
                         error=str(ex),
                     )
 
@@ -565,8 +663,8 @@ class StarlarkExecutionController(Controller):
                     self.starlark_runtime.controller.get_executor().set_default_model(model)
 
                 _ = self.starlark_runtime.run(
-                    starlark_code=assistant_response,
-                    original_query=str(messages[-1].message),
+                    starlark_code=assistant_response_str,
+                    original_query=messages[-1].message.get_content(),
                     messages=messages,
                 )
                 results.extend(self.starlark_runtime.answers)
@@ -577,21 +675,29 @@ class StarlarkExecutionController(Controller):
                 return results
             else:
                 _ = self.starlark_runtime.run_continuation_passing(
-                    starlark_code=assistant_response,
-                    original_query=str(messages[-1].message),
+                    starlark_code=assistant_response_str,
+                    original_query=messages[-1].message.get_content(),
                     messages=messages,
                 )
                 results.extend(self.starlark_runtime.answers)
                 return results
         else:
+            # classified or specified as 'direct'
             assistant_reply: Assistant = await self.aexecute_llm_call(
-                message=messages[-1],
-                context_messages=messages[0:-1],
-                query=str(messages[-1].message),
-                temperature=temperature,
+                llm_call=LLMCall(
+                    user_message=messages[-1],
+                    context_messages=messages[0:-1],
+                    executor=self.executor,
+                    model=model,
+                    temperature=temperature,
+                    max_prompt_len=self.executor.max_prompt_tokens(),
+                    completion_tokens_len=self.executor.max_completion_tokens(),
+                    prompt_filename='',
+                    stream_handler=stream_handler,
+                ),
+                query=messages[-1].message.get_content(),
                 original_query='',
-                stream_handler=stream_handler,
-                model=model,
+                token_compression_method=TokenCompressionMethod.AUTO,
             )
 
             results.append(Answer(

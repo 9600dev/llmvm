@@ -18,10 +18,12 @@ class AnthropicExecutor(Executor):
         api_key: str,
         default_model: str = 'claude-2.1',
         api_endpoint: str = 'https://api.anthropic.com',
-        default_max_tokens: int = 200000,
-        beta: bool = False,
+        default_max_token_len: int = 200000,
+        default_max_completion_len: int = 4096,
+        beta: bool = True,
     ):
-        self.default_max_tokens = default_max_tokens
+        self.default_max_token_len = default_max_token_len
+        self.default_max_completion_len = default_max_completion_len
         self.default_model = default_model
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
         self.beta = beta
@@ -47,8 +49,14 @@ class AnthropicExecutor(Executor):
     def max_tokens(self, model: Optional[str]) -> int:
         model = model if model else self.default_model
         match model:
+            case 'claude-2.1':
+                return 200000
+            case 'claude-2.0':
+                return 200000
+            case 'claude-instant-1.2':
+                return 100000
             case _:
-                return self.default_max_tokens
+                return 200000
 
     def set_default_model(self, default_model: str):
         self.default_model = default_model
@@ -57,14 +65,20 @@ class AnthropicExecutor(Executor):
         return self.default_model
 
     def set_default_max_tokens(self, default_max_tokens: int):
-        self.default_max_tokens = default_max_tokens
+        self.default_max_token_len = default_max_tokens
 
     def max_prompt_tokens(
         self,
-        completion_token_count: int = 4000,
+        completion_token_len: Optional[int] = None,
         model: Optional[str] = None,
     ) -> int:
-        return self.max_tokens(model) - completion_token_count
+        return self.max_tokens(model) - (completion_token_len if completion_token_len else self.default_max_completion_len)
+
+    def max_completion_tokens(
+        self,
+        model: Optional[str] = None,
+    ):
+        return self.default_max_completion_len
 
     def calculate_tokens(
         self,
@@ -235,7 +249,7 @@ class AnthropicExecutor(Executor):
         text_response = ''
 
         if self.beta:
-            async with await stream as stream_async:
+            async with await stream as stream_async:  # type: ignore
                 async for text in stream_async.text_stream:  # type: ignore
                     await stream_handler(Content(text))
                     text_response += text
