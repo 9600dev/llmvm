@@ -877,7 +877,6 @@ class Repl():
                 cmd = '{} -c "normal G" -c "normal A" {}'.format(editor, temp_file.name)
                 subprocess.run(cmd, text=True, shell=True, env=os.environ)
             else:
-                pass
                 subprocess.run([editor, temp_file.name], env=os.environ)
 
             temp_file.seek(0)

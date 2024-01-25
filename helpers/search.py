@@ -33,9 +33,6 @@ class SerpAPISearcher(Searcher):
         interval: int = 7,
         page_limit: int = 1,
     ):
-        if not api_key:
-            raise ValueError('SerpAPISearcher requires a valid api_key')
-
         self.api_key = api_key
         self.country_code = country_code
         self.location = location

@@ -56,6 +56,7 @@ class AnthropicExecutor(Executor):
             case 'claude-instant-1.2':
                 return 100000
             case _:
+                logging.debug('max_tokens() is not implemented for model {}, returning 200000'.format(model))
                 return 200000
 
     def set_default_model(self, default_model: str):
@@ -103,7 +104,7 @@ class AnthropicExecutor(Executor):
                 tokens_per_message = 3
                 tokens_per_name = 1
             else:
-                logging.error(f"""num_tokens_from_messages() is not implemented for model {model}.""")  # noqa: E501
+                logging.debug(f"num_tokens_from_messages() is not implemented for model {model}.") 
                 tokens_per_message = 3
                 tokens_per_name = 1
             num_tokens = 0

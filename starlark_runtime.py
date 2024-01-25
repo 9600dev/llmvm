@@ -395,17 +395,24 @@ class StarlarkRuntime:
 
         def bind_with_llm(expr_str: str) -> PandasMeta:
             assistant = self.controller.execute_llm_call(
-                message=Helpers.load_and_populate_message(
+                llm_call=LLMCall(
+                    user_message=Helpers.load_and_populate_message(
+                        prompt_filename='prompts/starlark/pandas_bind.prompt',
+                        template={},
+                        user_token=self.controller.get_executor().user_token(),
+                        assistant_token=self.controller.get_executor().assistant_token(),
+                        append_token=self.controller.get_executor().append_token(),
+                    ),
+                    context_messages=[self.statement_to_message(expr)],  # type: ignore
+                    executor=self.controller.get_executor(),
+                    model=self.controller.get_executor().get_default_model(),
+                    temperature=0.0,
+                    max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                    completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
                     prompt_filename='prompts/starlark/pandas_bind.prompt',
-                    template={},
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    append_token=self.controller.get_executor().append_token(),
                 ),
-                context_messages=[self.statement_to_message(expr)],  # type: ignore
                 query=self.original_query,
                 original_query=self.original_query,
-                prompt_filename='prompts/starlark/pandas_bind.prompt',
             )
             return PandasMeta(expr_str=expr_str, pandas_df=pd.DataFrame(str(assistant.message)))
 
@@ -524,7 +531,7 @@ class StarlarkRuntime:
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/llm_call.prompt',
+                    prompt_filename='prompts/starlark/llm_call.prompt',
                     template={
                         'llm_call_message': llm_instruction,
                     },
@@ -538,7 +545,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/llm_call.prompt',
+                prompt_filename='prompts/starlark/llm_call.prompt',
             ),
             query=llm_instruction,
             original_query=self.original_query,
@@ -551,7 +558,7 @@ class StarlarkRuntime:
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/llm_loop_bind.prompt',
+                    prompt_filename='prompts/starlark/llm_loop_bind.prompt',
                     template={
                         'goal': llm_instruction.replace('"', ''),
                         'context': str(expr),
@@ -566,7 +573,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/llm_call.prompt',
+                prompt_filename='prompts/starlark/llm_loop_bind.prompt',
             ),
             query=llm_instruction,
             original_query=self.original_query,
@@ -638,22 +645,29 @@ class StarlarkRuntime:
             or expr is None
         ):
             answer_assistant = self.controller.execute_llm_call(
-                message=Helpers.load_and_populate_message(
+                llm_call=LLMCall(
+                    user_message=Helpers.load_and_populate_message(
+                        prompt_filename='prompts/starlark/answer_primitive.prompt',
+                        template={
+                            'function_output': str(expr),
+                            'original_query': self.original_query,
+                        },
+                        user_token=self.controller.get_executor().user_token(),
+                        assistant_token=self.controller.get_executor().assistant_token(),
+                        append_token=self.controller.get_executor().append_token(),
+                    ),
+                    context_messages=[],  # type: ignore
+                    executor=self.controller.get_executor(),
+                    model=self.controller.get_executor().get_default_model(),
+                    temperature=0.0,
+                    max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                    completion_tokens_len=512,
                     prompt_filename='prompts/starlark/answer_primitive.prompt',
-                    template={
-                        'function_output': str(expr),
-                        'original_query': self.original_query,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    append_token=self.controller.get_executor().append_token(),
                 ),
-                context_messages=[],  # type: ignore
                 query=self.original_query,
                 original_query=self.original_query,
-                prompt_filename='prompts/starlark/answer_primitive.prompt',
-                completion_tokens=512,
             )
+
             answer = Answer(
                 conversation=self.messages_list,
                 result=str(answer_assistant.message),
@@ -665,20 +679,26 @@ class StarlarkRuntime:
             # todo: the 'rewriting' logic down below helps with the prettyness of
             # the output, and we're missing that here, but this is a nice shortcut.
             answer_assistant = self.controller.execute_llm_call(
-                message=Helpers.load_and_populate_message(
+                llm_call=LLMCall(
+                    user_message=Helpers.load_and_populate_message(
+                        prompt_filename='prompts/starlark/answer_nocontext.prompt',
+                        template={
+                            'original_query': self.original_query,
+                        },
+                        user_token=self.controller.get_executor().user_token(),
+                        assistant_token=self.controller.get_executor().assistant_token(),
+                        append_token=self.controller.get_executor().append_token(),
+                    ),
+                    context_messages=[self.statement_to_message(expr)],  # type: ignore
+                    executor=self.controller.get_executor(),
+                    model=self.controller.get_executor().get_default_model(),
+                    temperature=0.0,
+                    max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                    completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
                     prompt_filename='prompts/starlark/answer_nocontext.prompt',
-                    template={
-                        'original_query': self.original_query,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    append_token=self.controller.get_executor().append_token(),
                 ),
-                context_messages=[self.statement_to_message(expr)],  # type: ignore
                 query=self.original_query,
                 original_query=self.original_query,
-                prompt_filename='prompts/starlark/answer_nocontext.prompt',
-                completion_tokens=2048,
             )
 
             if 'None' not in str(answer_assistant.message) and "[##]" not in str(answer_assistant.message):
@@ -726,20 +746,26 @@ class StarlarkRuntime:
         context_messages.append(self.statement_to_message(expr))  # type: ignore
 
         answer_assistant = self.controller.execute_llm_call(
-            message=Helpers.load_and_populate_message(
+            llm_call=LLMCall(
+                user_message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/answer.prompt',
+                    template={
+                        'original_query': self.original_query,
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
+                context_messages=context_messages,
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
                 prompt_filename='prompts/starlark/answer.prompt',
-                template={
-                    'original_query': self.original_query,
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
             ),
-            context_messages=context_messages,
             query=self.original_query,
             original_query=self.original_query,
-            prompt_filename='prompts/starlark/answer.prompt',
-            completion_tokens=2048,
         )
 
         # check for comments
@@ -774,12 +800,20 @@ class StarlarkRuntime:
             '''
 
         assistant = self.controller.execute_llm_call(
-            message=User(Content(code_prompt)),
-            context_messages=[],
+            llm_call=LLMCall(
+                user_message=User(Content(code_prompt)),
+                context_messages=[],
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
+                prompt_filename='',
+            ),
             query=self.original_query,
             original_query=self.original_query,
-            model=None,
         )
+
         lines = str(assistant.message).split('\n')
         logging.debug('compile_error() Re-written Starlark code:')
         for line in lines:
@@ -811,20 +845,27 @@ class StarlarkRuntime:
             '''
 
         assistant = self.controller.execute_llm_call(
-            message=Helpers.load_and_populate_message(
+            llm_call=LLMCall(
+                user_message=Helpers.load_and_populate_message(
+                    prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+                    template={
+                        'functions': '\n'.join(function_list),
+                        'user_input': code_prompt,
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
+                context_messages=[],
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
                 prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
-                template={
-                    'functions': '\n'.join(function_list),
-                    'user_input': code_prompt,
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
             ),
-            context_messages=[],
             query=self.original_query,
             original_query=self.original_query,
-            prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
         )
         lines = str(assistant.message).split('\n')
         logging.debug('rewrite() Re-written Starlark code:')

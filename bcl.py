@@ -209,6 +209,7 @@ class Searcher():
         return return_results
 
     def search_google_hook(self, query: str):
+        print("asdf: " + Container().get_config_variable('SERPAPI_API_KEY'))
         if not Container().get_config_variable('SERPAPI_API_KEY'):
             return self.search_hook('https://www.google.com/search?q=', query)
         else:
@@ -253,7 +254,7 @@ class Searcher():
         try:
             queries = eval(str(query_expander.message))[:self.query_expansion]
         except SyntaxError as ex:
-            logging.debug(f"search() SyntaxError: {ex}")
+            logging.debug(f"search() query expansion parsing SyntaxError: {ex}")
             logging.debug("search() trying again with regex list extractor")
 
             # try and extract a list
