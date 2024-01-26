@@ -128,23 +128,32 @@ WORKDIR /home/llmvm/llmvm
 RUN pyenv local llmvm
 
 RUN python3 --version
-RUN pip install poetry
+# RUN pip install poetry
 
 # install poetry
 # RUN curl -sSL https://install.python-poetry.org | python3 -
 
 # pip install packages
-RUN poetry config virtualenvs.create false
-RUN poetry install
+# RUN poetry config virtualenvs.create false
+# RUN poetry install
+RUN pip install -r requirements.txt
 
 COPY ./config_example.yaml /home/llmvm/.config/llmvm/config.yaml
 
 # change this to GPU if you have a GPU
 RUN pip install faiss-cpu
 
+ARG OPENAI_API_KEY
+ARG ANTHROPIC_API_KEY
+ARG MISTRAL_API_KEY
+ARG GOOGLE_API_KEY
+ARG SEC_API_KEY
+ARG SERPAPI_API_KEY
+
 ENV OPENAI_API_KEY=$OPENAI_API_KEY
 ENV ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
 ENV MISTRAL_API_KEY=$MISTRAL_API_KEY
+ENV GOOGLE_API_KEY=$GOOGLE_API_KEY
 ENV SEC_API_KEY=$SEC_API_KEY
 ENV SERPAPI_API_KEY=$SERPAPI_API_KEY
 
@@ -153,6 +162,7 @@ RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SEC_API_KEY=$SEC_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "MISTRAL_API_KEY=$MISTRAL_API_KEY" >> /home/llmvm/.ssh/environment
+RUN echo "GOOGLE_API_KEY=$GOOGLE_API_KEY" >> /home/llmvm/.ssh/environment
 
 RUN playwright install firefox
 
