@@ -209,7 +209,6 @@ class Searcher():
         return return_results
 
     def search_google_hook(self, query: str):
-        print("asdf: " + Container().get_config_variable('SERPAPI_API_KEY'))
         if not Container().get_config_variable('SERPAPI_API_KEY'):
             return self.search_hook('https://www.google.com/search?q=', query)
         else:

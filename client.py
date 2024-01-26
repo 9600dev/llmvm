@@ -25,6 +25,7 @@ import requests
 import rich
 from anthropic.lib.streaming._messages import AsyncMessageStreamManager
 from anthropic.types.completion import Completion
+from google.generativeai.types import AsyncGenerateContentResponse 
 from click import MissingParameter
 from click_default_group import DefaultGroup
 from httpx import ConnectError
@@ -45,6 +46,7 @@ from rich.syntax import Syntax
 
 from anthropic_executor import AnthropicExecutor
 from container import Container
+from gemini_executor import GeminiExecutor
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from helpers.pdf import PdfHelpers
@@ -53,7 +55,7 @@ from objects import (AstNode, Content, DownloadItem, Executor, FileContent,
                      ImageContent, Message, MessageModel, PdfContent,
                      SessionThread, StreamNode, TokenStopNode, User)
 from openai_executor import OpenAIExecutor
-from perf import TokenPerfWrapperAnthropic
+from perf import TokenPerfWrapper, TokenPerfWrapperAnthropic
 
 nest_asyncio.apply()
 
@@ -329,6 +331,12 @@ async def stream_gpt_response(response, print_lambda: Callable):
             _ = await stream_async.get_final_message()
             print_lambda('\n')
             return
+        if isinstance(response, TokenPerfWrapper) and isinstance(response.stream, AsyncGenerateContentResponse):
+            async for chunk in response:
+                print_lambda(chunk.text)
+            print_lambda('\n')
+            return
+        # openai
         try:
             async for chunk in response:
                 # anthropic completion prior to messages API introduction
@@ -471,6 +479,11 @@ async def __execute_llm_call_direct(
             api_key=api_key,
             default_model=model_name,
         )
+    elif executor_name == 'gemini':
+        executor = GeminiExecutor(
+            api_key=api_key,
+            default_model=model_name,
+        )
     else:
         raise ValueError('No executor specified.')
 
@@ -571,6 +584,14 @@ async def execute_llm_call(
                 model,
                 context_messages
             )
+        elif executor == 'gemini' and Container.get_config_variable('GOOGLE_API_KEY'):
+            return await __execute_llm_call_direct(
+                message,
+                Container.get_config_variable('GOOGLE_API_KEY'),
+                'gemini',
+                model,
+                context_messages
+            )
         else:
             raise ValueError(f'Executor {executor} and model {model} are set, but no API key is set.')
     elif Container.get_config_variable('OPENAI_API_KEY'):
@@ -597,9 +618,17 @@ async def execute_llm_call(
             'mistral-medium',
             context_messages
         )
+    elif os.environ.get('GOOGLE_API_KEY'):
+        return await __execute_llm_call_direct(
+            message,
+            Container.get_config_variable('GOOGLE_API_KEY'),
+            'gemini',
+            'gemini-pro',
+            context_messages
+        )
     else:
-        logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
-        raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
+        logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
+        raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
 
 
 def llm(

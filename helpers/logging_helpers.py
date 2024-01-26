@@ -138,6 +138,7 @@ def setup_logging(
     logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
     logging.getLogger('PIL').setLevel(logging.WARNING)
     logging.getLogger('anthropic').setLevel(logging.WARNING)
+    logging.getLogger('grpc').setLevel(logging.WARNING)
 
     logger: Logger = logging.getLogger()
 

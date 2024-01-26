@@ -1,34 +1,34 @@
 import asyncio
 import os
-from typing import Awaitable, Callable, Dict, List, Optional, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 import tiktoken
-from mistralai.async_client import MistralAsyncClient
-from mistralai.models.chat_completion import ChatMessage
 
 from helpers.logging_helpers import setup_logging
 from objects import (Assistant, AstNode, Content, Executor, Message, System,
                      TokenStopNode, User, awaitable_none)
 from perf import TokenPerf, TokenPerfWrapper
+import google.generativeai as genai
 
 logging = setup_logging()
 
-class MistralExecutor(Executor):
+class GeminiExecutor(Executor):
     def __init__(
         self,
-        api_key: str = cast(str, os.environ.get('MISTRAL_API_KEY')),
-        default_model: str = 'mistral-medium',
+        api_key: str = cast(str, os.environ.get('GOOGLE_API_KEY')),
+        default_model: str = 'gemini-pro',
         api_endpoint: str = '',
-        default_max_token_len: int = 32000,
-        default_max_completion_len: int = 4096,
+        default_max_token_len: int = 34748,
+        default_max_completion_len: int = 2048,
     ):
         self.api_key = api_key
         self.default_model = default_model
         self.api_endpoint = api_endpoint
         self.default_max_token_len = default_max_token_len
         self.default_max_completion_len = default_max_completion_len
+        genai.configure(api_key=api_key)
 
-        self.aclient = MistralAsyncClient(api_key=api_key)
+        self.aclient = genai.GenerativeModel(self.default_model) 
 
     def user_token(self) -> str:
         return 'User'
@@ -42,12 +42,8 @@ class MistralExecutor(Executor):
     def max_tokens(self, model: Optional[str]) -> int:
         model = model if model else self.default_model
         match model:
-            case 'mistral-tiny':
-                return 32000
-            case 'mistral-small':
-                return 32000
-            case 'mistral-medium':
-                return 32000
+            case 'gemini-pro':
+                return 34748
             case _:
                 logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_token_len}')
                 return self.default_max_token_len
@@ -87,9 +83,7 @@ class MistralExecutor(Executor):
             """Return the number of tokens used by a list of messages."""
             encoding = tiktoken.get_encoding('cl100k_base')
             if model in {
-                "mistral-tiny",
-                "mistral-small",
-                "mistral-medium",
+                "gemini-pro",
             }:
                 tokens_per_message = 3
             else:
@@ -116,13 +110,20 @@ class MistralExecutor(Executor):
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
     def name(self) -> str:
-        return 'mistral'
+        return 'gemini'
 
-    def __dict_message_to_mistral_message(
+    def __dict_message_to_gemini_message(
         self,
         message: Dict[str, str]
-    ) -> ChatMessage:
-        return ChatMessage(role=message['role'], content=message['content'])
+    ) -> Dict:
+        role = 'user'
+        if message['role'] == 'assistant':
+            role = 'model'
+
+        return {
+            'role': role, 
+            'parts': [message['content']],
+        } 
 
     async def aexecute_direct(
         self,
@@ -142,14 +143,30 @@ class MistralExecutor(Executor):
                                     message_tokens + max_completion_tokens,
                                     self.max_tokens(model)))
 
-        token_trace = TokenPerf('aexecute_direct', 'mistral', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('aexecute_direct', 'gemini', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
-        response = self.aclient.chat_stream(
-            model=model if model else self.default_model,
-            temperature=temperature,
-            max_tokens=max_completion_tokens,
-            messages=[self.__dict_message_to_mistral_message(m) for m in messages],
+        gemini_messages = [self.__dict_message_to_gemini_message(m) for m in messages]
+
+        for message in gemini_messages:
+            if not message['parts'] or message['parts'] == '' or message['parts'] == b'':
+                gemini_messages.remove(message)
+
+        # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
+        # going to add an Assistant message in between two User messages, and a User message between two Assistant.
+        messages_list: List[Dict[str, Any]] = []
+
+        for i in range(len(gemini_messages)):
+            if i > 0 and gemini_messages[i]['role'] == gemini_messages[i - 1]['role']:
+                if gemini_messages[i]['role'] == 'user':
+                    messages_list.append({'role': 'model', 'parts': ['Thanks. I am ready for your next message.']})
+                elif gemini_messages[i]['role'] == 'model':
+                    messages_list.append({'role': 'user', 'parts': ['Thanks. I am ready for your next message.']})
+            messages_list.append(gemini_messages[i])
+
+        response = await self.aclient.generate_content_async(
+            contents=messages_list,
+            stream=True
         )
         return TokenPerfWrapper(response, token_trace)  # type: ignore
 
@@ -162,12 +179,6 @@ class MistralExecutor(Executor):
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
-
-        def last(predicate, iterable):
-            result = [x for x in iterable if predicate(x)]
-            if result:
-                return result[-1]
-            return None
 
         # fresh message list
         messages_list: List[Dict[str, str]] = []
@@ -183,8 +194,9 @@ class MistralExecutor(Executor):
         )
 
         text_response = ''
+
         async for chunk in await chat_response:  # type: ignore
-            s = chunk.choices[0].delta.content or ''
+            s = chunk.text or ''
             await stream_handler(Content(s))
             text_response += s
         await stream_handler(TokenStopNode())

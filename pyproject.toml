@@ -49,6 +49,7 @@ prompt-toolkit = "^3.0.43"
 nest-asyncio = "^1.5.8"
 psutil = "^5.9.7"
 mistralai = "^0.0.11"
+google-generativeai = "^0.3.2"
 
 [build-system]
 requires = ["poetry-core"]

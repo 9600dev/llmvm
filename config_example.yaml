@@ -26,6 +26,8 @@ anthropic_model: 'claude-2.1'
 anthropic_max_tokens: 200000
 mistral_model: 'mistral-medium'
 mistral_max_tokens: 32000
+gemini_model: 'gemini-pro'
+gemini_max_tokens: 34748
 local_api_base: 'http://localhost:8000/v1'
 local_model: 'llongorca.gguf'
 local_model_max_tokens: 16385

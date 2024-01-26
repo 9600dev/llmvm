@@ -24,6 +24,7 @@ from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from mistral_executor import MistralExecutor
+from gemini_executor import GeminiExecutor
 from objects import (Answer, Assistant, AstNode, Content, DownloadItem,
                      FileContent, MessageModel, SessionThread, Statement,
                      StopNode, User)
@@ -107,6 +108,20 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             continuation_passing_style=False,
         )
         return mistral_controller
+    elif controller == 'gemini':
+        gemini_executor = GeminiExecutor(
+            api_key=os.environ.get('GOOGLE_API_KEY', ''),
+            default_model=Container().get_config_variable('gemini_model', 'LLMVM_MODEL'),
+            default_max_token_len=int(Container().get('gemini_max_tokens')),
+        )
+        gemini_controller = StarlarkExecutionController(
+            executor=gemini_executor,
+            agents=agents,  # type: ignore
+            vector_search=vector_search,
+            edit_hook=None,
+            continuation_passing_style=False,
+        )
+        return gemini_controller 
     else:
         openai_executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),
