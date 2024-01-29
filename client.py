@@ -5,6 +5,7 @@ import glob
 import io
 import json
 import os
+import time
 import re
 import shlex
 import shutil
@@ -25,7 +26,7 @@ import requests
 import rich
 from anthropic.lib.streaming._messages import AsyncMessageStreamManager
 from anthropic.types.completion import Completion
-from google.generativeai.types import AsyncGenerateContentResponse 
+from google.generativeai.types import AsyncGenerateContentResponse
 from click import MissingParameter
 from click_default_group import DefaultGroup
 from httpx import ConnectError
@@ -887,7 +888,6 @@ class CustomCompleter(PromptCompleter):
                           if f not in filter_out]
 
         for completion in files_and_dirs:
-            if completion.startswith(word):
                 yield PromptCompletion(completion, start_position=-len(word))
 
 
@@ -898,18 +898,25 @@ class Repl():
         pass
 
     def open_editor(self, editor: str, initial_text: str) -> str:
-        with tempfile.NamedTemporaryFile(mode='w+') as temp_file:
+        temp_file_name = ''
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
             temp_file.write(initial_text)
             temp_file.flush()
+            temp_file_name = temp_file.name
 
             if editor == 'vim' or editor == 'nvim':
                 cmd = '{} -c "normal G" -c "normal A" {}'.format(editor, temp_file.name)
-                subprocess.run(cmd, text=True, shell=True, env=os.environ)
+                proc = subprocess.Popen(cmd, shell=True, env=os.environ)
             else:
-                subprocess.run([editor, temp_file.name], env=os.environ)
+                proc = subprocess.Popen([editor, temp_file.name], env=os.environ)
 
+            while proc.poll() is None:
+                time.sleep(0.2)
+
+        with open(temp_file_name, 'r') as temp_file:
             temp_file.seek(0)
             edited_text = temp_file.read()
+        os.remove(temp_file_name)
         return edited_text
 
     def open_default_editor(self, initial_text: str) -> str:
