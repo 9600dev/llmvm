@@ -2,7 +2,7 @@
 # or set LLMVM_CONFIG environment variable to this file
 server_host: '0.0.0.0'
 server_port: 8011
-profiling: false
+profiling: false 
 profiling_file: '~/.local/share/llmvm/trace.log'
 firefox_profile: '~/.mozilla/firefox/cp6sgb0s.selenium'
 firefox_download_directory: '~/.local/share/llmvm/download'
@@ -16,26 +16,22 @@ cache_directory: '~/.local/share/llmvm/cache'
 cdn_directory: '~/.local/share/llmvm/cdn'
 log_directory: '~/.local/share/llmvm/logs'
 vector_store_index_directory: '~/.local/share/llmvm/faiss'
-vector_store_embedding_model: 'BAAI/bge-base-en'
+vector_store_embedding_model: 'all-MiniLM-L6-v2' # 'BAAI/bge-base-en'
 vector_store_chunk_size: 500
 openai_api_base: 'https://api.openai.com/v1'
 openai_model: 'gpt-4-vision-preview'
 openai_max_tokens: 16384
 anthropic_api_base: 'https://api.anthropic.com'
 anthropic_model: 'claude-2.1'
-anthropic_max_tokens: 200000
-mistral_model: 'mistral-medium'
-mistral_max_tokens: 32000
-gemini_model: 'gemini-pro'
-gemini_max_tokens: 34748
+anthropic_max_tokens: 200000 
 local_api_base: 'http://localhost:8000/v1'
 local_model: 'llongorca.gguf'
 local_model_max_tokens: 16385
-executor: 'openai'  # openai, anthropic, local
+executor: 'openai'  # openai, anthropic, local 
 helper_functions:
-  - helpers.webhelpers.WebHelpers.search_linkedin_profile
-  - helpers.webhelpers.WebHelpers.get_linkedin_profile
-  - helpers.edgar.EdgarHelpers.get_report
-  - helpers.market.MarketHelpers.get_stock_price
-  - helpers.market.MarketHelpers.get_current_market_capitalization
-  - bcl.BCL.datetime
+  - llmvm.server.bcl.BCL.datetime
+  - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
+  - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
+  - llmvm.server.tools.edgar.EdgarHelpers.get_report
+  - llmvm.server.tools.market.MarketHelpers.get_stock_price
+  - llmvm.server.tools.market.MarketHelpers.get_current_market_capitalization
