@@ -20,11 +20,11 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from anthropic_executor import AnthropicExecutor
 from container import Container
+from gemini_executor import GeminiExecutor
 from helpers.firefox import FirefoxHelpers
 from helpers.helpers import Helpers
 from helpers.logging_helpers import setup_logging
 from mistral_executor import MistralExecutor
-from gemini_executor import GeminiExecutor
 from objects import (Answer, Assistant, AstNode, Content, DownloadItem,
                      FileContent, MessageModel, SessionThread, Statement,
                      StopNode, User)
@@ -121,7 +121,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             edit_hook=None,
             continuation_passing_style=False,
         )
-        return gemini_controller 
+        return gemini_controller
     else:
         openai_executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),
@@ -397,7 +397,7 @@ async def code_completions(request: SessionThread):
     async def stream():
         def handle_exception(task):
             if not task.cancelled() and task.exception() is not None:
-                logging.error(f'/v1/chat/code_completion threw an exception: {task.exception()}')
+                Helpers.log_exception(logging, task.exception())
                 queue.put_nowait(StopNode())
 
         async def execute_and_signal():
@@ -494,7 +494,7 @@ async def tools_completions(request: SessionThread):
     async def stream():
         def handle_exception(task):
             if not task.cancelled() and task.exception() is not None:
-                logging.error(f'/v1/chat/tools_completion threw an exception: {task.exception()}')
+                Helpers.log_exception(logging, task.exception())
                 queue.put_nowait(StopNode())
 
         async def execute_and_signal():

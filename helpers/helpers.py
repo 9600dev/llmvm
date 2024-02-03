@@ -42,6 +42,22 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def log_exception(logger, e, message=None):
+        exc_traceback = e.__traceback__
+
+        while exc_traceback.tb_next:
+            exc_traceback = exc_traceback.tb_next
+        frame = exc_traceback.tb_frame
+        lineno = exc_traceback.tb_lineno
+        filename = frame.f_code.co_filename
+
+        log_message = f"Exception: {e} at line {lineno} in {filename}"
+        if message:
+            log_message += f": {message}"
+
+        logger.error(log_message)
+
+    @staticmethod
     def glob_exclusions(pattern):
         if not pattern.startswith('!'):
             return []

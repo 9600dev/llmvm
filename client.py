@@ -5,7 +5,6 @@ import glob
 import io
 import json
 import os
-import time
 import re
 import shlex
 import shutil
@@ -13,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, cast
 from urllib.parse import urlparse
 
@@ -26,9 +26,9 @@ import requests
 import rich
 from anthropic.lib.streaming._messages import AsyncMessageStreamManager
 from anthropic.types.completion import Completion
-from google.generativeai.types import AsyncGenerateContentResponse
 from click import MissingParameter
 from click_default_group import DefaultGroup
+from google.generativeai.types import AsyncGenerateContentResponse
 from httpx import ConnectError
 from PIL import Image
 from prompt_toolkit import PromptSession
@@ -1063,18 +1063,6 @@ class Repl():
                             )
                         except Exception as ex:
                             pass
-
-                    if thread.executor != 'openai' and Container.get_config_variable('LLMVM_EXECUTOR') != 'openai':
-                        rich.print('Pasting images only works with OpenAI right now.')
-                        return
-
-                    if (
-                        (thread.model != 'gpt-4-vision-preview')
-                        and (Container.get_config_variable('LLMVM_MODEL') != 'gpt-4-vision-preview')
-                    ):
-                        rich.print('Pasting images only works with gpt-4-vision-preview right now.')
-                        rich.print('Set using `export LLMVM_MODEL=gpt-4-vision-preview`')
-                        return
 
                     asyncio.create_task(__invoke_paste_image(thread, raw_data))
 
