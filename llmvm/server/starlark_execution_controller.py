@@ -57,12 +57,12 @@ class StarlarkExecutionController(Controller):
                 stream_handler=llm_call.stream_handler,
                 model=llm_call.model,
             )
-            role_debug(logging, llm_call.prompt_filename, 'User', str(llm_call.user_message.message))
-            role_debug(logging, llm_call.prompt_filename, 'Assistant', str(assistant.message))
+            role_debug(logging, llm_call.prompt_name, 'User', str(llm_call.user_message.message))
+            role_debug(logging, llm_call.prompt_name, 'Assistant', str(assistant.message))
         except Exception as ex:
-            role_debug(logging, llm_call.prompt_filename, 'User', str(llm_call.user_message.message))
+            role_debug(logging, llm_call.prompt_name, 'User', str(llm_call.user_message.message))
             raise ex
-        response_writer(llm_call.prompt_filename, assistant)
+        response_writer(llm_call.prompt_name, assistant)
         return assistant
 
     async def __llm_call_with_prompt(
@@ -71,7 +71,7 @@ class StarlarkExecutionController(Controller):
         template: Dict[str, Any],
     ) -> Assistant:
         prompt = Helpers.load_and_populate_prompt(
-            prompt_filename=llm_call.prompt_filename,
+            prompt_name=llm_call.prompt_name,
             template=template,
             user_token=self.get_executor().user_token(),
             assistant_token=self.get_executor().assistant_token(),
@@ -121,7 +121,7 @@ class StarlarkExecutionController(Controller):
         function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
         # todo rip out the probability from here
         query_understanding = Helpers.load_and_populate_prompt(
-            prompt_filename='prompts/starlark/query_understanding.prompt',
+            prompt_name='query_understanding.prompt',
             template={
                 'functions': '\n'.join(function_list),
                 'user_input': message.message.get_content(),
@@ -186,7 +186,7 @@ class StarlarkExecutionController(Controller):
                 temperature=llm_call.temperature,
                 max_prompt_len=llm_call.max_prompt_len,
                 completion_tokens_len=llm_call.completion_tokens_len,
-                prompt_filename=llm_call.prompt_filename,
+                prompt_name=llm_call.prompt_name,
                 stream_handler=llm_call.stream_handler,
             ),
         )
@@ -207,7 +207,7 @@ class StarlarkExecutionController(Controller):
 
         # iterate over the data.
         map_reduce_prompt_tokens = self.executor.calculate_tokens(
-            [User(Content(open('prompts/map_reduce_map.prompt', 'r').read()))],
+            [User(Content(open('map_reduce_map.prompt', 'r').read()))],
             model=llm_call.model,
         )
 
@@ -228,7 +228,7 @@ class StarlarkExecutionController(Controller):
                     temperature=llm_call.temperature,
                     max_prompt_len=llm_call.max_prompt_len,
                     completion_tokens_len=llm_call.completion_tokens_len,
-                    prompt_filename='prompts/starlark/map_reduce_map.prompt',
+                    prompt_name='map_reduce_map.prompt',
                     stream_handler=llm_call.stream_handler,
                 ),
                 template={
@@ -251,7 +251,7 @@ class StarlarkExecutionController(Controller):
                 temperature=llm_call.temperature,
                 max_prompt_len=llm_call.max_prompt_len,
                 completion_tokens_len=llm_call.completion_tokens_len,
-                prompt_filename='prompts/starlark/map_reduce_reduce.prompt',
+                prompt_name='map_reduce_reduce.prompt',
                 stream_handler=llm_call.stream_handler,
             ),
             template={
@@ -420,7 +420,7 @@ class StarlarkExecutionController(Controller):
                         temperature=llm_call.temperature,
                         max_prompt_len=llm_call.max_prompt_len,
                         completion_tokens_len=llm_call.completion_tokens_len,
-                        prompt_filename='prompts/starlark/document_chunk.prompt',
+                        prompt_name='document_chunk.prompt',
                     ),
                     template={
                         'query': str(query),
@@ -469,8 +469,8 @@ class StarlarkExecutionController(Controller):
         logging.debug(f'abuild_runnable_code_ast() user_message = {llm_call.user_message.message.get_content()[0:25]}')
         logging.debug(f'abuild_runnable_code_ast() model = {llm_call.model}, executor = {llm_call.executor.name()}')
 
-        tools_message = Helpers.load_and_populate_message(
-            prompt_filename='prompts/starlark/starlark_code_insights.prompt',
+        tools_message = Helpers.prompt_message(
+            prompt_name='starlark_code_insights.prompt',
             template={
                 'user_input': messages[-1].message.get_content(),
                 'files': '\n'.join(files),
@@ -489,7 +489,7 @@ class StarlarkExecutionController(Controller):
                 temperature=llm_call.temperature,
                 max_prompt_len=llm_call.max_prompt_len,
                 completion_tokens_len=llm_call.completion_tokens_len,
-                prompt_filename='prompts/starlark/starlark_code_insights.prompt',
+                prompt_name='starlark_code_insights.prompt',
                 stream_handler=llm_call.stream_handler,
             ),
             query='',
@@ -508,8 +508,8 @@ class StarlarkExecutionController(Controller):
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
 
-        tools_message = Helpers.load_and_populate_message(
-            prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+        tools_message = Helpers.prompt_message(
+            prompt_name='starlark_tool_execution.prompt',
             template={
                 'functions': '\n'.join(functions),
                 'user_input': llm_call.user_message.message.get_content(),
@@ -528,7 +528,7 @@ class StarlarkExecutionController(Controller):
                 temperature=llm_call.temperature,
                 max_prompt_len=llm_call.max_prompt_len,
                 completion_tokens_len=llm_call.completion_tokens_len,
-                prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+                prompt_name='starlark_tool_execution.prompt',
                 stream_handler=llm_call.stream_handler,
             ),
             query='',
@@ -591,7 +591,7 @@ class StarlarkExecutionController(Controller):
                         temperature=temperature,
                         max_prompt_len=self.executor.max_prompt_tokens(),
                         completion_tokens_len=self.executor.max_completion_tokens(),
-                        prompt_filename='',
+                        prompt_name='',
                         stream_handler=stream_handler
                     ),
                     agents=self.agents,
@@ -609,7 +609,7 @@ class StarlarkExecutionController(Controller):
                         temperature=temperature,
                         max_prompt_len=self.executor.max_prompt_tokens(),
                         completion_tokens_len=self.executor.max_completion_tokens(),
-                        prompt_filename='',
+                        prompt_name='',
                         stream_handler=stream_handler
                     ),
                     files=files,
@@ -692,7 +692,7 @@ class StarlarkExecutionController(Controller):
                     temperature=temperature,
                     max_prompt_len=self.executor.max_prompt_tokens(),
                     completion_tokens_len=self.executor.max_completion_tokens(),
-                    prompt_filename='',
+                    prompt_name='',
                     stream_handler=stream_handler,
                 ),
                 query=messages[-1].message.get_content(),

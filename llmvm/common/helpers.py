@@ -6,10 +6,14 @@ import importlib
 import inspect
 import io
 import itertools
+import math
 import os
 import re
 import typing
+from collections import Counter
 from enum import Enum, IntEnum
+from functools import reduce
+from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional
@@ -247,27 +251,68 @@ class Helpers():
                 method = getattr(module, method_name, None)
 
             if method is None:
-                logging.error(f"Method '{method_name}' not found in {'class ' + class_name + ' in ' if len(parts) > 2 else ''}module '{module_name}'")
+                logging.error(f"Method '{method_name}' not found in {'class ' + class_name + ' in ' if len(parts) > 2 else ''}module '{module_name}'")  # noqa: E501
             return method
 
     @staticmethod
-    def tfidf_similarity(query: str, text_list: list[str]):
-        lowered_list = []
-        for item in text_list:
-            lowered_list.append(re.sub('[^a-zA-Z0-9\s]', '', item.lower()))  # noqa: W605 # type: ignore
+    def tfidf_similarity(query: str, text_list: list[str]) -> str:
+        def tokenize(text: str) -> List[str]:
+            # Simple tokenizer, can be enhanced
+            return text.lower().split()
 
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.metrics.pairwise import cosine_similarity
+        def compute_tf(text_tokens: List[str]) -> dict:
+            # Count the occurrences of each word in the text
+            tf = Counter(text_tokens)
+            # Divide by the total number of words for Term Frequency
+            tf = {word: count / len(text_tokens) for word, count in tf.items()}
+            return tf
 
-        tfidf_vectorizer = TfidfVectorizer()
-        tfidf_matrix = tfidf_vectorizer.fit_transform(lowered_list)
+        def compute_idf(documents: List[List[str]]) -> dict:
+            # Number of documents
+            N = len(documents)
+            # Count the number of documents that contain each word
+            idf = {}
+            for document in documents:
+                for word in set(document):
+                    idf[word] = idf.get(word, 0) + 1
+            # Calculate IDF
+            idf = {word: math.log(N / df) for word, df in idf.items()}
+            return idf
 
-        user_query_tfidf = tfidf_vectorizer.transform([query])
-        similarities = cosine_similarity(user_query_tfidf, tfidf_matrix)
-        most_similar_index = similarities.argmax()
-        # Get the most likely prompt match
-        most_likely = text_list[most_similar_index]
-        return most_likely
+        def compute_tfidf(tf: dict, idf: dict) -> dict:
+            # Multiply TF by IDF
+            tfidf = {word: tf_value * idf.get(word, 0) for word, tf_value in tf.items()}
+            return tfidf
+
+        def cosine_similarity(vec1: dict, vec2: dict) -> float:
+            # Compute the dot product
+            dot_product = sum(vec1.get(word, 0) * vec2.get(word, 0) for word in set(vec1.keys()) | set(vec2.keys()))
+            # Compute the magnitudes
+            mag1 = math.sqrt(sum(val**2 for val in vec1.values()))
+            mag2 = math.sqrt(sum(val**2 for val in vec2.values()))
+            # Compute cosine similarity
+            if mag1 * mag2 == 0:
+                return 0
+            else:
+                return dot_product / (mag1 * mag2)
+
+        # Tokenize and prepare documents
+        documents = [tokenize(text) for text in text_list]
+        query_tokens = tokenize(query)
+        documents.append(query_tokens)
+
+        # Compute IDF for the whole corpus
+        idf = compute_idf(documents)
+
+        # Compute TF-IDF for query and documents
+        query_tfidf = compute_tfidf(compute_tf(query_tokens), idf)
+        documents_tfidf = [compute_tfidf(compute_tf(doc), idf) for doc in documents[:-1]]  # Exclude query
+
+        # Compute similarity and find the most similar document
+        similarities = [cosine_similarity(query_tfidf, doc_tfidf) for doc_tfidf in documents_tfidf]
+        max_index = similarities.index(max(similarities))
+
+        return text_list[max_index]
 
     @staticmethod
     def flatten(lst):
@@ -703,15 +748,13 @@ class Helpers():
         return (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"]}')  # noqa: E501
 
     @staticmethod
-    def load_prompt(prompt_filename: str) -> Dict[str, Any]:
-        if not os.path.exists(prompt_filename):
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            prompt_filename = os.path.join(current_dir, prompt_filename)
+    def load_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.starlark') -> Dict[str, Any]:
+        if not prompt_name.endswith('.prompt'):
+            prompt_name += '.prompt'
 
-            if not os.path.exists(prompt_filename):
-                raise FileNotFoundError(f'Prompt file not found: {prompt_filename}')
+        prompt_file = resources.files(module) / prompt_name
 
-        with open(prompt_filename, 'r') as f:
+        with open(prompt_file, 'r') as f:  # type: ignore
             prompt = f.read()
 
             if '[system_message]' not in prompt:
@@ -737,13 +780,14 @@ class Helpers():
 
     @staticmethod
     def load_and_populate_prompt(
-        prompt_filename: str,
+        prompt_name: str,
         template: Dict[str, str],
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
         append_token: str = '',
+        module: str = 'llmvm.server.prompts.starlark'
     ) -> Dict[str, Any]:
-        prompt: Dict[str, Any] = Helpers.load_prompt(prompt_filename)
+        prompt: Dict[str, Any] = Helpers.load_prompt(prompt_name, module)
 
         if not template.get('user_token'):
             template['user_token'] = user_token
@@ -757,16 +801,17 @@ class Helpers():
             prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
 
         prompt['user_message'] += f'{append_token}'
-        prompt['prompt_filename'] = prompt_filename
+        prompt['prompt_name'] = prompt_name
         return prompt
 
     @staticmethod
-    def load_and_populate_message(
-        prompt_filename: str,
+    def prompt_message(
+        prompt_name: str,
         template: Dict[str, str],
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
         append_token: str = '',
+        module: str = 'llmvm.server.prompts.starlark'
     ) -> Message:
-        prompt = Helpers.load_and_populate_prompt(prompt_filename, template, user_token, assistant_token, append_token)
+        prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
         return User(Content(prompt['user_message']))

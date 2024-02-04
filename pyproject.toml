@@ -4,14 +4,16 @@ version = "0.1.0"
 description = "Command Line LLM with client side tools support."
 authors = ["Bilbo Baggins <contact@9600.dev>"]
 readme = "README.md"
+include = ["llmvm/client/awesome_prompts.csv", "llmvm/server/prompts/**/*", "config.yaml"]
 
 [tool.poetry.dependencies]
 python = "^3.11"
+
+# common dependencies
 async-timeout = "^4.0.3"
 click = "^8.1.7"
 jsonpickle = "^3.0.2"
 nest-asyncio = "^1.6.0"
-pyperclip = "^1.8.2"
 rich = "^13.7.0"
 openai = "^1.11.0"
 anthropic = "^0.15.0"
@@ -22,6 +24,8 @@ prompt-toolkit = "^3.0.43"
 tiktoken = "^0.5.2"
 psutil = "^5.9.8"
 docstring-parser = "^0.15"
+pillow = "^10.2.0"
+pyperclip = "^1.8.2"
 uvicorn = "^0.27.0.post1"
 fastapi = "^0.109.0"
 dill = "^0.3.8"
@@ -29,7 +33,6 @@ astunparse = "^1.6.3"
 bs4 = "^0.0.2"
 sec-api = "^1.0.17"
 markdownify = "^0.11.6"
-pillow = "^10.2.0"
 aiofiles = "^23.2.1"
 playwright = "^1.41.1"
 pdf2image = "^1.17.0"
@@ -43,7 +46,9 @@ python-multipart = "^0.0.6"
 langchain-community = "^0.0.17"
 python-dateutil = "^2.8.2"
 googlesearch-python = "^1.2.3"
-
+pandas = "^2.2.0"
+lxml = "^5.1.0"
+yfinance = "^0.2.36"
 
 [build-system]
 requires = ["poetry-core"]

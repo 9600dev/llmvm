@@ -7,7 +7,6 @@ mozilla.pdf
 faiss_index
 *.log
 download/
-config.yaml
 backup/
 logs/
 cache/

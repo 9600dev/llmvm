@@ -113,8 +113,8 @@ class ContentDownloader():
 
         query_expander = self.starlark_runtime.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/pdf_content.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='pdf_content.prompt',
                     template={},
                     user_token=self.starlark_runtime.controller.get_executor().user_token(),
                     assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
@@ -126,7 +126,7 @@ class ContentDownloader():
                 temperature=0.0,
                 max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/pdf_content.prompt',
+                prompt_name='pdf_content.prompt',
             ),
             query=self.original_query,
             original_query=self.original_query,
@@ -227,8 +227,8 @@ class Searcher():
         # todo: we should probably return the Search instance, so we can futz with it later on.
         query_expander = self.starlark_runtime.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/search_expander.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='search_expander.prompt',
                     template={
                         'query': self.query,
                     },
@@ -242,7 +242,7 @@ class Searcher():
                 temperature=0.0,
                 max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/search_expander.prompt',
+                prompt_name='search_expander.prompt',
             ),
             query=self.query,
             original_query=self.original_query,
@@ -312,8 +312,8 @@ class Searcher():
         # classify the search engine
         engine_rank = self.starlark_runtime.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/search_classifier.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='search_classifier.prompt',
                     template={
                         'query': '\n'.join(queries),
                         'engines': '\n'.join([f'* {key}: {value["description"]}' for key, value in engines.items()]),
@@ -328,7 +328,7 @@ class Searcher():
                 temperature=0.0,
                 max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/search_classifier.prompt',
+                prompt_name='search_classifier.prompt',
             ),
             query=self.query,
             original_query=self.original_query,
@@ -352,8 +352,8 @@ class Searcher():
             # take the first query, and figure out the location
             location = self.starlark_runtime.controller.execute_llm_call(
                 llm_call=LLMCall(
-                    user_message=Helpers.load_and_populate_message(
-                        prompt_filename='prompts/starlark/search_location.prompt',
+                    user_message=Helpers.prompt_message(
+                        prompt_name='search_location.prompt',
                         template={
                             'query': queries[0],
                         },
@@ -367,7 +367,7 @@ class Searcher():
                     temperature=0.0,
                     max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
                     completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
-                    prompt_filename='prompts/starlark/search_location.prompt',
+                    prompt_name='search_location.prompt',
                 ),
                 query=self.query,
                 original_query=self.original_query,
@@ -398,8 +398,8 @@ class Searcher():
 
         result_rank = self.starlark_runtime.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/search_ranker.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='search_ranker.prompt',
                     template={
                         'queries': '\n'.join(queries),
                         'snippets': '\n'.join(
@@ -416,7 +416,7 @@ class Searcher():
                 temperature=0.0,
                 max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/search_ranker.prompt',
+                prompt_name='search_ranker.prompt',
             ),
             query=self.query,
             original_query=self.original_query,
@@ -516,8 +516,8 @@ class FunctionBindable():
         function_callable = function_callable[0]
         function_definition = Helpers.get_function_description_flat_extra(cast(Callable, function_callable))
 
-        message = Helpers.load_and_populate_message(
-            prompt_filename='prompts/starlark/llm_bind_global.prompt',
+        message = Helpers.prompt_message(
+            prompt_name='llm_bind_global.prompt',
             template={
                 'function_definition': function_definition,
             },
@@ -619,7 +619,7 @@ class FunctionBindable():
                         temperature=0.0,
                         max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
                         completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
-                        prompt_filename=''
+                        prompt_name=''
                     ),
                     query=self.original_query,
                     original_query=self.original_query,
@@ -813,8 +813,8 @@ class SourceProject:
                     # get the natural language definition
                     assistant = self.starlark_runtime.controller.execute_llm_call(
                         llm_call=LLMCall(
-                            user_message=Helpers.load_and_populate_message(
-                                prompt_filename='prompts/starlark/code_method_definition.prompt',
+                            user_message=Helpers.prompt_message(
+                                prompt_name='code_method_definition.prompt',
                                 template={},
                                 user_token=self.starlark_runtime.controller.get_executor().user_token(),
                                 assistant_token=self.starlark_runtime.controller.get_executor().assistant_token(),
@@ -826,7 +826,7 @@ class SourceProject:
                             temperature=0.0,
                             max_prompt_len=self.starlark_runtime.controller.get_executor().max_prompt_tokens(),
                             completion_tokens_len=self.starlark_runtime.controller.get_executor().max_completion_tokens(),
-                            prompt_filename='prompts/starlark/code_method_definition.prompt',
+                            prompt_name='code_method_definition.prompt',
                         ),
                         query='',
                         original_query='',

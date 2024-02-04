@@ -182,7 +182,7 @@ class LLMCall():
         temperature: float,
         max_prompt_len: int,
         completion_tokens_len: int,
-        prompt_filename: str,
+        prompt_name: str,
         stream_handler: Callable[['AstNode'], Awaitable[None]] = awaitable_none
     ):
         self.user_message = user_message
@@ -192,7 +192,7 @@ class LLMCall():
         self.temperature = temperature
         self.max_prompt_len = max_prompt_len
         self.completion_tokens_len = completion_tokens_len
-        self.prompt_filename = prompt_filename
+        self.prompt_name = prompt_name
         self.stream_handler = stream_handler
 
     def copy(self):
@@ -204,7 +204,7 @@ class LLMCall():
             temperature=self.temperature,
             max_prompt_len=self.max_prompt_len,
             completion_tokens_len=self.completion_tokens_len,
-            prompt_filename=self.prompt_filename,
+            prompt_name=self.prompt_name,
             stream_handler=self.stream_handler,
         )
 

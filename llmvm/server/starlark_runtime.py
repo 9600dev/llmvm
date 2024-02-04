@@ -160,21 +160,21 @@ class StarlarkRuntime:
         context: Statement | str,
     ) -> User:
         statement_result_prompts = {
-            'answer': 'prompts/starlark/answer_result.prompt',
-            'assistant': 'prompts/starlark/assistant_result.prompt',
-            'function_call': 'prompts/starlark/function_call_result.prompt',
-            'function_meta': 'prompts/starlark/functionmeta_result.prompt',
-            'llm_call': 'prompts/starlark/llm_call_result.prompt',
-            'str': 'prompts/starlark/str_result.prompt',
-            'uncertain_or_error': 'prompts/starlark/uncertain_or_error_result.prompt',
-            'foreach': 'prompts/starlark/foreach_result.prompt',
-            'list': 'prompts/starlark/list_result.prompt',
+            'answer': 'answer_result.prompt',
+            'assistant': 'assistant_result.prompt',
+            'function_call': 'function_call_result.prompt',
+            'function_meta': 'functionmeta_result.prompt',
+            'llm_call': 'llm_call_result.prompt',
+            'str': 'str_result.prompt',
+            'uncertain_or_error': 'uncertain_or_error_result.prompt',
+            'foreach': 'foreach_result.prompt',
+            'list': 'list_result.prompt',
         }
         from bcl import FunctionBindable
 
         if isinstance(context, FunctionCall):
             result_prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=statement_result_prompts[context.token()],
+                prompt_name=statement_result_prompts[context.token()],
                 template={
                     'function_call': context.to_code_call(),
                     'function_signature': context.to_definition(),
@@ -188,7 +188,7 @@ class StarlarkRuntime:
 
         elif isinstance(context, FunctionCallMeta):
             result_prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=statement_result_prompts['function_meta'],
+                prompt_name=statement_result_prompts['function_meta'],
                 template={
                     'function_callsite': context.callsite,
                     'function_result': str(context.result()),
@@ -201,7 +201,7 @@ class StarlarkRuntime:
 
         elif isinstance(context, str):
             result_prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=statement_result_prompts['str'],
+                prompt_name=statement_result_prompts['str'],
                 template={
                     'str_result': context,
                 },
@@ -213,7 +213,7 @@ class StarlarkRuntime:
 
         elif isinstance(context, Assistant):
             result_prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=statement_result_prompts['assistant'],
+                prompt_name=statement_result_prompts['assistant'],
                 template={
                     'assistant_result': str(context.message),
                 },
@@ -225,7 +225,7 @@ class StarlarkRuntime:
 
         elif isinstance(context, list):
             result_prompt = Helpers.load_and_populate_prompt(
-                prompt_filename=statement_result_prompts['list'],
+                prompt_name=statement_result_prompts['list'],
                 template={
                     'list_result': '\n'.join([str(c) for c in context])
                 },
@@ -267,8 +267,8 @@ class StarlarkRuntime:
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/answer_error_correction.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='answer_error_correction.prompt',
                     template={
                         'task': query,
                         'code': starlark_code,
@@ -285,7 +285,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/answer_error_correction.prompt',
+                prompt_name='answer_error_correction.prompt',
             ),
             query=self.original_query,
             original_query=self.original_query,
@@ -342,8 +342,8 @@ class StarlarkRuntime:
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/starlark_error_correction.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='starlark_error_correction.prompt',
                     template={
                         'task': query,
                         'code': starlark_code,
@@ -360,7 +360,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/starlark_error_correction.prompt',
+                prompt_name='starlark_error_correction.prompt',
             ),
             query=self.original_query,
             original_query=self.original_query
@@ -396,8 +396,8 @@ class StarlarkRuntime:
         def bind_with_llm(expr_str: str) -> PandasMeta:
             assistant = self.controller.execute_llm_call(
                 llm_call=LLMCall(
-                    user_message=Helpers.load_and_populate_message(
-                        prompt_filename='prompts/starlark/pandas_bind.prompt',
+                    user_message=Helpers.prompt_message(
+                        prompt_name='pandas_bind.prompt',
                         template={},
                         user_token=self.controller.get_executor().user_token(),
                         assistant_token=self.controller.get_executor().assistant_token(),
@@ -409,7 +409,7 @@ class StarlarkRuntime:
                     temperature=0.0,
                     max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                     completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                    prompt_filename='prompts/starlark/pandas_bind.prompt',
+                    prompt_name='pandas_bind.prompt',
                 ),
                 query=self.original_query,
                 original_query=self.original_query,
@@ -498,8 +498,8 @@ class StarlarkRuntime:
         logging.debug(f'coerce({str(expr)[:20]}, {str(type_name)})')
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/coerce.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='coerce.prompt',
                     template={
                         'string': str(expr),
                         'type': type_name,
@@ -514,7 +514,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/coerce.prompt',
+                prompt_name='coerce.prompt',
             ),
             query='',
             original_query=self.original_query,
@@ -530,8 +530,8 @@ class StarlarkRuntime:
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/llm_call.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='llm_call.prompt',
                     template={
                         'llm_call_message': llm_instruction,
                     },
@@ -545,7 +545,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/llm_call.prompt',
+                prompt_name='llm_call.prompt',
             ),
             query=llm_instruction,
             original_query=self.original_query,
@@ -557,8 +557,8 @@ class StarlarkRuntime:
         logging.debug(f'llm_loop_bind({str(expr)[:20]}, {str(llm_instruction)})')
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/llm_loop_bind.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='llm_loop_bind.prompt',
                     template={
                         'goal': llm_instruction.replace('"', ''),
                         'context': str(expr),
@@ -573,7 +573,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/llm_loop_bind.prompt',
+                prompt_name='llm_loop_bind.prompt',
             ),
             query=llm_instruction,
             original_query=self.original_query,
@@ -646,8 +646,8 @@ class StarlarkRuntime:
         ):
             answer_assistant = self.controller.execute_llm_call(
                 llm_call=LLMCall(
-                    user_message=Helpers.load_and_populate_message(
-                        prompt_filename='prompts/starlark/answer_primitive.prompt',
+                    user_message=Helpers.prompt_message(
+                        prompt_name='answer_primitive.prompt',
                         template={
                             'function_output': str(expr),
                             'original_query': self.original_query,
@@ -662,7 +662,7 @@ class StarlarkRuntime:
                     temperature=0.0,
                     max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                     completion_tokens_len=512,
-                    prompt_filename='prompts/starlark/answer_primitive.prompt',
+                    prompt_name='answer_primitive.prompt',
                 ),
                 query=self.original_query,
                 original_query=self.original_query,
@@ -680,8 +680,8 @@ class StarlarkRuntime:
             # the output, and we're missing that here, but this is a nice shortcut.
             answer_assistant = self.controller.execute_llm_call(
                 llm_call=LLMCall(
-                    user_message=Helpers.load_and_populate_message(
-                        prompt_filename='prompts/starlark/answer_nocontext.prompt',
+                    user_message=Helpers.prompt_message(
+                        prompt_name='answer_nocontext.prompt',
                         template={
                             'original_query': self.original_query,
                         },
@@ -695,7 +695,7 @@ class StarlarkRuntime:
                     temperature=0.0,
                     max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                     completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                    prompt_filename='prompts/starlark/answer_nocontext.prompt',
+                    prompt_name='answer_nocontext.prompt',
                 ),
                 query=self.original_query,
                 original_query=self.original_query,
@@ -747,8 +747,8 @@ class StarlarkRuntime:
 
         answer_assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/answer.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='answer.prompt',
                     template={
                         'original_query': self.original_query,
                     },
@@ -762,7 +762,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/answer.prompt',
+                prompt_name='answer.prompt',
             ),
             query=self.original_query,
             original_query=self.original_query,
@@ -808,7 +808,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='',
+                prompt_name='',
             ),
             query=self.original_query,
             original_query=self.original_query,
@@ -846,8 +846,8 @@ class StarlarkRuntime:
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.load_and_populate_message(
-                    prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+                user_message=Helpers.prompt_message(
+                    prompt_name='starlark_tool_execution.prompt',
                     template={
                         'functions': '\n'.join(function_list),
                         'user_input': code_prompt,
@@ -862,7 +862,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_filename='prompts/starlark/starlark_tool_execution.prompt',
+                prompt_name='starlark_tool_execution.prompt',
             ),
             query=self.original_query,
             original_query=self.original_query,
