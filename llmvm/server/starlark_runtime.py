@@ -170,7 +170,7 @@ class StarlarkRuntime:
             'foreach': 'foreach_result.prompt',
             'list': 'list_result.prompt',
         }
-        from bcl import FunctionBindable
+        from llmvm.server.bcl import FunctionBindable
 
         if isinstance(context, FunctionCall):
             result_prompt = Helpers.load_and_populate_prompt(
@@ -442,7 +442,7 @@ class StarlarkRuntime:
 
     def llm_bind(self, expr, func: str):
         logging.debug(f'llm_bind({str(expr)[:20]}, {str(func)})')
-        from bcl import FunctionBindable
+        from llmvm.server.bcl import FunctionBindable
 
         bindable = FunctionBindable(
             expr=expr,
@@ -464,7 +464,8 @@ class StarlarkRuntime:
         expr: str,
     ) -> str:
         logging.debug(f'download({str(expr)})')
-        from bcl import ContentDownloader
+
+        from llmvm.server.bcl import ContentDownloader
 
         downloader = ContentDownloader(
             expr=expr,
@@ -481,7 +482,7 @@ class StarlarkRuntime:
         expr: str,
     ) -> str:
         logging.debug(f'search({str(expr)})')
-        from bcl import Searcher
+        from llmvm.server.bcl import Searcher
 
         searcher = Searcher(
             expr=expr,

@@ -138,8 +138,9 @@ class ContentDownloader():
             return PdfHelpers.parse_pdf_image(filename)
 
     def get(self) -> str:
-        logging.debug('ContentDownloader.download: {}'.format(self.expr))
+        logging.debug('ContentDownloader.get: {}'.format(self.expr))
 
+        # deal with files
         result = urlparse(self.expr)
         if result.scheme == '' or result.scheme == 'file':
             if '.pdf' in result.path:
@@ -147,6 +148,7 @@ class ContentDownloader():
             if '.htm' in result.path or '.html' in result.path:
                 return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
 
+        # deal with pdfs
         elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
             loop = asyncio.get_event_loop()
             task = loop.create_task(self.firefox_helper.pdf_url(self.expr))
@@ -154,6 +156,7 @@ class ContentDownloader():
             pdf_filename = loop.run_until_complete(task)
             return self.parse_pdf(pdf_filename)
 
+        # deal with websites
         elif result.scheme == 'http' or result.scheme == 'https':
             loop = asyncio.get_event_loop()
             task = loop.create_task(self.firefox_helper.get_url(self.expr))

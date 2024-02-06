@@ -49,10 +49,10 @@ from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.mistral_executor import MistralExecutor
-from llmvm.common.objects import (AstNode, Content, DownloadItem, Executor,
-                                  FileContent, ImageContent, Message,
+from llmvm.common.objects import (Assistant, AstNode, Content, DownloadItem,
+                                  Executor, FileContent, ImageContent, Message,
                                   MessageModel, PdfContent, SessionThread,
-                                  StreamNode, TokenStopNode, User)
+                                  StreamNode, System, TokenStopNode, User)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.common.perf import TokenPerfWrapper, TokenPerfWrapperAnthropic
 
@@ -72,6 +72,45 @@ current_mode = 'auto'
 suppress_role = False
 
 
+def parse_action(token) -> Content:
+    """
+    For a given [Action(...)] token, parse it into either
+    ImageContent, PdfContent, or FileContent
+    """
+    action_type = token[1:].split('(')[0]
+    action_data = Helpers.in_between(token, '(', ')')
+
+    if action_type == 'ImageContent':
+        with open(action_data, 'rb') as file_content:
+            return ImageContent(file_content.read(), url=action_data)
+    elif action_type == 'PdfContent':
+        with open(action_data, 'rb') as file_content:
+            return PdfContent(file_content.read(), url=action_data)
+    elif action_type == 'FileContent':
+        with open(action_data, 'r') as file_content:
+            return FileContent(file_content.read().encode('utf-8'), url=action_data)
+    else:
+        raise ValueError('Unknown action type')
+
+def parse_message_actions(role_type: type, message: str) -> list[Message]:
+    actions = ['[ImageContent(', '[PdfContent(', '[FileContent(']
+    accumulated_tokens = []
+    messages = []
+    # go through the message, create User() nodes for normal text content
+    # and for actions, create the appropriate action node
+    tokens = message.split(' ')
+    for token in tokens:
+        if any(token.startswith(action) for action in actions):
+            if accumulated_tokens:
+                messages.append(role_type(Content(' '.join(accumulated_tokens))))
+            messages.append(role_type(parse_action(token)))
+            accumulated_tokens = []
+        elif token:
+            accumulated_tokens.append(token)
+    if accumulated_tokens:
+        messages.append(role_type(Content(' '.join(accumulated_tokens))))
+    return messages
+
 def parse_message_thread(message: str):
     def create_message(type) -> Message:
         MessageClass = globals()[type]
@@ -83,29 +122,11 @@ def parse_message_thread(message: str):
     while any(message.startswith(role) for role in roles):
         role = next(role for role in roles if message.startswith(role))
         parsed_message = create_message(role.replace(': ', ''))
-        message_content = Helpers.in_between_ends(message, role, roles)
-        content = message_content
-
-        if 'ImageContent(' in content:
-            content = Helpers.in_between(content, 'ImageContent(', ')')
-            with open(content, 'rb') as file_content:
-                parsed_message.message = ImageContent(file_content.read(), url=content)
-                messages.append(parsed_message)
-        elif 'PdfContent(' in content:
-            content = Helpers.in_between(content, 'PdfContent(', ')')
-            with open(content, 'rb') as file_content:
-                parsed_message.message = PdfContent(file_content.read(), url=content)
-                messages.append(parsed_message)
-        elif 'FileContent(' in content:
-            content = Helpers.in_between(content, 'FileContent(', ')')
-            with open(content, 'r') as file_content:
-                parsed_message.message = FileContent(file_content.read().encode('utf-8'), url=content)
-                messages.append(parsed_message)
-        else:
-            parsed_message.message = Content(content)
-            messages.append(parsed_message)
-
-        message = message[len(role) + len(message_content):]
+        content = Helpers.in_between_ends(message, role, roles)
+        sub_messages = parse_message_actions(type(parsed_message), content)
+        for sub_message in sub_messages:
+            messages.append(sub_message)
+        message = message[len(role) + len(content):]
     return messages
 
 
@@ -192,7 +213,11 @@ def parse_command_string(s, command):
     def parse_option(part):
         return next((param for param in command.params if part in param.opts), None)
 
-    parts = shlex.split(s)
+    try:
+        parts = shlex.split(s)
+    except ValueError:
+        parts = s.split(' ')
+
     tokens = []
     skip_n = 0
 
@@ -505,7 +530,7 @@ async def execute_llm_call(
     mode: str,
     context_messages: Sequence[Message] = [],
     cookies: List[Dict[str, Any]] = [],
-    append_to_server_thread: bool = True,
+    clear_thread: bool = False,
 ) -> SessionThread:
 
     try:
@@ -515,9 +540,11 @@ async def execute_llm_call(
 
         thread = await get_thread(api_endpoint, id)
 
-        if append_to_server_thread:
-            for context_message in context_messages:
-                thread.messages.append(MessageModel.from_message(message=context_message))
+        if clear_thread:
+            thread.messages = []
+
+        for context_message in context_messages:
+            thread.messages.append(MessageModel.from_message(message=context_message))
 
         thread.messages.append(MessageModel.from_message(message=message))
         thread.current_mode = mode
@@ -669,15 +696,22 @@ def llm(
             else:
                 context_messages_list.insert(0, User(Content(bytes_buffer.read().decode('utf-8'))))
 
-    append_to_server_thread = True
-
+    clear_thread = False
     # if the incoming message is a thread, parse it and send it through
     role_strings = ['Assistant: ', 'System: ', 'User: ']
+    action_strings = ['ImageContent(', 'PdfContent(', 'FileContent(']
+
     if isinstance(message, str) and any(role_string in message for role_string in role_strings):
         all_messages = parse_message_thread(message)
         user_message = all_messages[-1]
         context_messages_list += all_messages[:-1]
-        append_to_server_thread = False
+        clear_thread = True
+    # if the incoming message has actions [ImageContent(...), PdfContent(...), FileContent(...)] etc
+    # parse those actions
+    elif isinstance(message, str) and any(action_string in message for action_string in action_strings):
+        all_messages = parse_message_actions(User, message)
+        user_message = all_messages[-1]
+        context_messages_list += all_messages[:-1]
 
     return asyncio.run(
         execute_llm_call(
@@ -689,7 +723,7 @@ def llm(
             mode,
             context_messages_list,
             cookies,
-            append_to_server_thread,
+            clear_thread,
         )
     )
 
@@ -721,6 +755,7 @@ class StreamPrinter():
                         and Helpers.is_running('kitty')
                     )
                 ):
+                    # kitty + tmux is a feature of later versions of kitty, this may not work
                     # Use kitty icat to save its output to the temporary file
                     cmd_path = shutil.which('kitty') or '/Applications/kitty.app/Contents/MacOS/kitty'
                     process = subprocess.Popen(
@@ -1012,12 +1047,12 @@ class Repl():
                     rich.print('No code block found.\n')
                     rich.print(f"[{thread_id}] query>> ", end="")
 
-        async def __invoke_paste_image(thread: SessionThread, raw_data: bytes):
+        async def __invoke_paste_image(thread: SessionThread, raw_data: bytes, current_text: str):
             global current_mode
 
             with click.Context(message) as ctx:
                 ctx.ensure_object(dict)
-                ctx.params['message'] = "I've just pasted you an image."
+                ctx.params['message'] = current_text
                 ctx.params['id'] = thread.id
                 ctx.params['path'] = ''
                 ctx.params['path'] = ''
@@ -1037,32 +1072,50 @@ class Repl():
             global last_thread
 
             from PIL import ImageGrab
-            im = ImageGrab.grabclipboard()
+            try:
+                im = ImageGrab.grabclipboard()
+            except Exception as ex:
+                im = None
 
             if im is not None:
                 with io.BytesIO() as output:
                     im.save(output, format='PNG')
                     raw_data = output.getvalue()
-                    rich.print('Pasting image into thread and calling LLM:')
                     StreamPrinter('user').display_image(raw_data)
 
-                    thread: SessionThread = SessionThread(id=-1)
+                    with tempfile.NamedTemporaryFile(mode='w+b', suffix='.jpg', delete=False) as temp_file:
+                        temp_file.write(raw_data)
+                        temp_file.flush()
 
-                    if 'last_thread' in globals():
-                        thread = last_thread
-                    else:
-                        try:
-                            thread = asyncio.run(
-                                get_thread(
-                                    Container.get_config_variable('LLMVM_ENDPOINT',
-                                                                  default='http://127.0.0.1:8011'),
-                                    thread_id
-                                )
-                            )
-                        except Exception as ex:
-                            pass
+                        # check to see if there is text already present in the query>>
+                        current_text = event.app.current_buffer.text
+                        if len(current_text) <= 0:
+                            event.app.current_buffer.text = f'[ImageContent({temp_file.name})] '
+                            event.app.current_buffer.cursor_position = len(event.app.current_buffer.text)
+                        else:
+                            event.app.current_buffer.text = current_text + f' [ImageContent({temp_file.name})] '
+                            event.app.current_buffer.cursor_position = len(event.app.current_buffer.text)
+                    # else:
+                    #     thread: SessionThread = SessionThread(id=-1)
 
-                    asyncio.create_task(__invoke_paste_image(thread, raw_data))
+                    #     if 'last_thread' in globals():
+                    #         thread = last_thread
+                    #     else:
+                    #         try:
+                    #             thread = asyncio.run(
+                    #                 get_thread(
+                    #                     Container.get_config_variable('LLMVM_ENDPOINT',
+                    #                                                   default='http://127.0.0.1:8011'),
+                    #                     thread_id
+                    #                 )
+                    #             )
+                    #         except Exception as ex:
+                    #             pass
+
+                    #     asyncio.create_task(__invoke_paste_image(thread, raw_data, current_text))
+            else:
+                rich.print('No image found in clipboard.\n')
+                rich.print(f"[{thread_id}] query>> ", end="")
 
         @kb.add('c-n')
         def _(event):
