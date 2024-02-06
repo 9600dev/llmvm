@@ -1,8 +1,8 @@
 # install in ~/.config/llmvm/config.yaml
 # or set LLMVM_CONFIG environment variable to this file
-server_host: '127.0.0.1'
+server_host: '0.0.0.0'
 server_port: 8011
-profiling: false 
+profiling: false
 profiling_file: '~/.local/share/llmvm/trace.log'
 firefox_profile: '~/.mozilla/firefox/cp6sgb0s.selenium'
 firefox_download_directory: '~/.local/share/llmvm/download'
@@ -23,11 +23,11 @@ openai_model: 'gpt-4-vision-preview'
 openai_max_tokens: 16384
 anthropic_api_base: 'https://api.anthropic.com'
 anthropic_model: 'claude-2.1'
-anthropic_max_tokens: 200000 
+anthropic_max_tokens: 200000
 local_api_base: 'http://localhost:8000/v1'
 local_model: 'llongorca.gguf'
 local_model_max_tokens: 16385
-executor: 'openai'  # openai, anthropic, local 
+executor: 'openai'  # openai, anthropic, local
 helper_functions:
   - llmvm.server.bcl.BCL.datetime
   - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile

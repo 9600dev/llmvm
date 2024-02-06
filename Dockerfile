@@ -165,4 +165,4 @@ USER root
 RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config
 
 WORKDIR /home/llmvm/llmvm
-ENTRYPOINT service ssh restart && sudo -Eu llmvm /usr/bin/python -m llmvm.server.server && tail -f /dev/null
+ENTRYPOINT service ssh restart && sudo -E -u llmvm bash -c 'source ~/.bashrc; cd /home/llmvm/llmvm; python -m llmvm.server.server' && tail -f /dev/null
