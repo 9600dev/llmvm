@@ -2,15 +2,17 @@
 
 LLMVM is a CLI based productivity tool that uses Large Language Models and local Python tools/helpers to reason about and execute your tasks. A CLI client (client.py) either connects directly to an LLM provider or will connect to a local server (server.py) that coordinates tool execution, [Retrieval Agumented Generation](https://blogs.nvidia.com/blog/what-is-retrieval-augmented-generation/), document search and more.
 
-It supports [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4.0/4 Turbo/Vision models from OpenAI, and [Claude 2.1](https://www.anthropic.com/index/claude-2) from [Anthropic](https://anthropic.com). It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images, and work directly with GPT 4.5 vision models.
+It supports [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4.0/4 Turbo/Vision models from OpenAI, and [Claude 2.1](https://www.anthropic.com/index/claude-2) from [Anthropic](https://anthropic.com). [Gemini](https://deepmind.google/technologies/gemini/) and [Mistral](https://deepmind.google/technologies/gemini/) are currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images and work directly with GPT 4.5 vision models.
 
 LLMVM's features are best explored through examples:
 
 #### Tool Use: Controlling Firefox Browser
 
-```$ python server.py```
+```$ pip install llmvm```
 
-```$ python client.py```
+```$ python -m llmvm.server.server```
+
+```$ python -m llmvm.client.client```
 
 ```bash
 query>> Go to the https://ten13.vc/team website and extract the list of names
@@ -49,7 +51,7 @@ LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extra
 
 I bash/fish alias llm:
 
-```alias llm=python3 client.py```
+```alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision" LLMVM_PROFILING="true" python llmvm.client.client```
 
 and then:
 
@@ -96,8 +98,10 @@ You'll need either an OpenAI API account (including access to the GPT 4.x API) o
 Ensure you have the following environment variables set:
 
 ```bash
-OPENAPI_API_KEY     # your openai API key, or ...
-ANTHROPIC_API_KEY   # your anthropic API key
+OPENAPI_API_KEY     # your Openai API key, or ...
+ANTHROPIC_API_KEY   # your Anthropic API key
+GOOGLE_API_KEY      # your Gemini API key
+MISTRAL_API_KEY     # your Mistral API key
 EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Starlark code before it gets executed etc.
 ```
 
@@ -115,8 +119,8 @@ One day I'll get around to building a "pip install llmvm", but for now:
 * Install [pyenv](https://github.com/pyenv/pyenv):
   * ```curl https://pyenv.run | bash```
 * Install Python 3.11.6 using pyenv and set a virtualenv:
-  * ```pyenv install 3.11.6```
-  * ```pyenv virtualenv 3.11.6 llmvm```
+  * ```pyenv install 3.11.7```
+  * ```pyenv virtualenv 3.11.7 llmvm```
   * ```pyenv local llmvm```
 * Install [poetry](https://python-poetry.org/):
   * ```curl -sSL https://install.python-poetry.org | python3 -```
@@ -129,11 +133,11 @@ One day I'll get around to building a "pip install llmvm", but for now:
   * ```sudo apt install poppler-utils```
   * ```brew install poppler```
 * Edit and save config.yaml into the config directory
-  * ```cp config_example.yaml ~/.config/llmvm/config.yaml```
+  * ```cp llmvm/config.yaml ~/.config/llmvm/config.yaml```
 
  Run the llmvm server and client:
-  * ```python server.py```
-  * ```python client.py```
+  * ```python -m llmvm.server.server```
+  * ```python -m llmvm.client.client```
 
 [Optional]
 
@@ -143,13 +147,13 @@ One day I'll get around to building a "pip install llmvm", but for now:
 #### Docker instructions:
 
 * run `docker.sh -g` (builds the image, deploys into a container and runs the container)
-* server.py will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
-* Use docker desktop to have a look at the running server.py logs; or you can ssh into the container, kill the server.py process, and restart from your own shell.
+* python -m llmvm.server.server will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
+* Use docker desktop to have a look at the running server logs; or you can ssh into the container, kill the server process, and restart from your own shell.
 
 With the docker container running, you can run client.py on your local machine:
 
 * export LLMVM_ENDPOINT="http://localhost:8011"
-* python client.py
+* python -m llmvm.client.client
 
 You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
@@ -164,16 +168,16 @@ executor: 'anthropic'  # or 'openai'
 or, you can set environment variables that specify the execution backend and the model you'd like to use:
 
 ```bash
-export LLMVM_MODEL='gpt-4-vision-preview'
 export LLMVM_EXECUTOR='openai'
-python client.py "hello, who are you?"
+export LLMVM_MODEL='gpt-4-vision-preview'
+python -m llmvm.client.client "hello, who are you?"
 ```
 
 #### Performance Profiling
 
 * open `~/.config/llmvm/config.yaml` and change profiling to 'true' or 'false'.
 
-If server.py is running, profiling output will be emitted there, and if server.py is not running, client.py will emit profiling information to the debug stream:
+If the LLMVM server is running, profiling output will be emitted there, and if the server is not running, the LLMVM client will emit profiling information to the debug stream:
 
 ```bash
 export LLMVM_PROFILING="true"

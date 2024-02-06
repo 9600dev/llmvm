@@ -1,5 +1,6 @@
 import asyncio
 import os
+import shutil
 import sys
 from typing import List, Optional, cast
 
@@ -10,6 +11,8 @@ from openai import AsyncOpenAI, OpenAI
 
 client = OpenAI()
 aclient = AsyncOpenAI()
+
+from importlib import resources
 
 import rich
 import uvicorn
@@ -560,6 +563,21 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == '__main__':
+    try:
+        Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
+    except ValueError:
+        rich.print('[cyan]Configuration file not found. Adding default config in ~/.config/llmvm/config.yaml[/cyan]')
+        os.makedirs(os.path.expanduser('~/.config/llmvm'), exist_ok=True)
+        os.makedirs(os.path.expanduser('~/.local/share/llmvm'), exist_ok=True)
+        os.makedirs(os.path.expanduser('~/.local/share/llmvm/cache'), exist_ok=True)
+        os.makedirs(os.path.expanduser('~/.local/share/llmvm/download'), exist_ok=True)
+        os.makedirs(os.path.expanduser('~/.local/share/llmvm/cdn'), exist_ok=True)
+        os.makedirs(os.path.expanduser('~/.local/share/llmvm/logs'), exist_ok=True)
+        os.makedirs(os.path.expanduser('~/.local/share/llmvm/faiss'), exist_ok=True)
+
+        config_file = resources.files('llmvm') / 'config.yaml'
+        shutil.copy(str(config_file), os.path.expanduser('~/.config/llmvm/config.yaml'))
+
     default_controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
     default_model_str = f'{default_controller}_model'
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')

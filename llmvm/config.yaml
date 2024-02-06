@@ -1,6 +1,6 @@
 # install in ~/.config/llmvm/config.yaml
 # or set LLMVM_CONFIG environment variable to this file
-server_host: '0.0.0.0'
+server_host: '127.0.0.1'
 server_port: 8011
 profiling: false 
 profiling_file: '~/.local/share/llmvm/trace.log'

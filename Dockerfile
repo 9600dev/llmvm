@@ -45,6 +45,7 @@ RUN apt-get install -y rsync
 RUN apt-get install -y iputils-ping
 RUN apt-get install -y lnav
 RUN apt-get install -y poppler-utils
+RUN apt-get install -y gosu
 
 # required for pyenv to build 3.10.11 properly
 RUN apt-get install -y libbz2-dev
@@ -90,7 +91,7 @@ RUN mkdir /home/llmvm/.ssh
 RUN chown -R llmvm:llmvm /home/llmvm
 RUN chsh -s /bin/bash llmvm
 
-# install all the python 3.11.4 runtimes and packages
+# install all the python 3.11.7 runtimes and packages
 USER llmvm
 
 ENV HOME /home/llmvm
@@ -121,41 +122,33 @@ RUN curl https://pyenv.run | bash
 
 WORKDIR /home/llmvm/llmvm
 
-RUN pyenv install 3.11.4
-RUN pyenv virtualenv 3.11.4 llmvm
+RUN pyenv install 3.11.7
+RUN pyenv virtualenv 3.11.7 llmvm
 ENV PYENV_VERSION llmvm
 WORKDIR /home/llmvm/llmvm
 RUN pyenv local llmvm
 
 RUN python3 --version
-# RUN pip install poetry
-
-# install poetry
-# RUN curl -sSL https://install.python-poetry.org | python3 -
-
-# pip install packages
-# RUN poetry config virtualenvs.create false
-# RUN poetry install
 RUN pip install -r requirements.txt
 
-COPY ./config_example.yaml /home/llmvm/.config/llmvm/config.yaml
+COPY ./llmvm/config.yaml /home/llmvm/.config/llmvm/config.yaml
 
 # change this to GPU if you have a GPU
 RUN pip install faiss-cpu
 
-ARG OPENAI_API_KEY
-ARG ANTHROPIC_API_KEY
-ARG MISTRAL_API_KEY
-ARG GOOGLE_API_KEY
-ARG SEC_API_KEY
-ARG SERPAPI_API_KEY
+# ARG OPENAI_API_KEY
+# ARG ANTHROPIC_API_KEY
+# ARG MISTRAL_API_KEY
+# ARG GOOGLE_API_KEY
+# ARG SEC_API_KEY
+# ARG SERPAPI_API_KEY
 
-ENV OPENAI_API_KEY=$OPENAI_API_KEY
-ENV ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
-ENV MISTRAL_API_KEY=$MISTRAL_API_KEY
-ENV GOOGLE_API_KEY=$GOOGLE_API_KEY
-ENV SEC_API_KEY=$SEC_API_KEY
-ENV SERPAPI_API_KEY=$SERPAPI_API_KEY
+# ENV OPENAI_API_KEY=$OPENAI_API_KEY
+# ENV ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
+# ENV MISTRAL_API_KEY=$MISTRAL_API_KEY
+# ENV GOOGLE_API_KEY=$GOOGLE_API_KEY
+# ENV SEC_API_KEY=$SEC_API_KEY
+# ENV SERPAPI_API_KEY=$SERPAPI_API_KEY
 
 RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /home/llmvm/.ssh/environment
@@ -172,5 +165,4 @@ USER root
 RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config
 
 WORKDIR /home/llmvm/llmvm
-# ENTRYPOINT service ssh restart && tail -f /dev/null
-ENTRYPOINT service ssh restart && python server.py && tail -f /dev/null
+ENTRYPOINT service ssh restart && sudo -Eu llmvm /usr/bin/python -m llmvm.server.server && tail -f /dev/null

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import textwrap
 import time
+from importlib import resources
 from typing import Any, Callable, Dict, List, Optional, Sequence, cast
 from urllib.parse import urlparse
 
@@ -1478,14 +1479,15 @@ def act(
     endpoint: str,
     suppress_role: bool,
 ):
-    client_directory = os.path.dirname(os.path.abspath(__file__))
-
+    prompt_file = resources.files('llmvm.client') / 'awesome_prompts.csv'
     rows = []
-    with open(f'{client_directory}/awesome_prompts.csv', 'r') as f:
+    with open(prompt_file, 'r') as f:  # type: ignore
         reader = csv.reader(f)
         rows = list(reader)
 
     column_names = rows[0]
+    if actor.startswith('"') and actor.endswith('"') or actor.startswith("'") and actor.endswith("'"):
+        actor = actor[1:-1]
 
     if not actor:
         from rich.console import Console
@@ -1499,7 +1501,7 @@ def act(
 
         console.print(table)
     else:
-        prompt_result = Helpers.tfidf_similarity(actor, [row[0] + ' ' + row[1] for row in rows])
+        prompt_result = Helpers.tfidf_similarity(actor, [row[0] + ' ' + row[1] for row in rows[1:]])
 
         rich.print()
         rich.print('[bold red]Setting actor mode.[/bold red]')
