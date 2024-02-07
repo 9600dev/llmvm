@@ -14,3 +14,4 @@ prompt_backup/
 faiss/
 geckodriver.log
 .llmvm.history
+dist/
