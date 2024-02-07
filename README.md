@@ -8,7 +8,7 @@ LLMVM's features are best explored through examples:
 
 #### Tool Use: Controlling Firefox Browser
 
-```$ pip install llmvm```
+```$ pip install llmvm-cli```
 
 ```$ python -m llmvm.server.server```
 
@@ -114,7 +114,7 @@ SEC_API_KEY         # if you want to use SEC's Edgar api to get 10K's and 10Q's 
 
 #### Manual Installation
 
-One day I'll get around to building a "pip install llmvm", but for now:
+If you don't want to do ```pip install llmvm-cli``` you can do:
 
 * Install [pyenv](https://github.com/pyenv/pyenv):
   * ```curl https://pyenv.run | bash```
