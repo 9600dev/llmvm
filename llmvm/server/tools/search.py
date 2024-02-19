@@ -180,6 +180,31 @@ class SerpAPISearcher(Searcher):
 
         return {}
 
+    def search_research(
+        self,
+        query: str,
+    ) -> Generator[Dict, None, None]:
+        logging.debug('SerpAPISearcher.search_research() query={}'.format(query))
+
+        params = {
+            'q': query,
+            'engine': 'google_scholar',
+        }
+
+        google_params = {
+            'hl': 'en',
+        }
+        params = {**params, **google_params}  # type: ignore
+        results = self.client.search(params)
+
+        if results.get('error'):
+            rich.print_json(json.dumps(results, default=str))
+            yield {}
+
+        organic_results = results.get('organic_results', [])
+        for result in organic_results:
+            yield result
+
     def search_news(
         self,
         query: str,

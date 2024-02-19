@@ -15,3 +15,16 @@ faiss/
 geckodriver.log
 .llmvm.history
 dist/
+package-lock.json
+package.json
+playwright.config.js
+example.spec.js
+demo-todo-app.spec.js
+.DS_Store
+/llmvm/.DS_Store
+pac
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
