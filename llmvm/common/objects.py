@@ -95,7 +95,7 @@ class Executor(ABC):
         pass
 
     @abstractmethod
-    def calculate_tokens(
+    def count_tokens(
         self,
         messages: List['Message'] | str,
         extra_str: str = '',

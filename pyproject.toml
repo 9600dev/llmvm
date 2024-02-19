@@ -5,7 +5,7 @@ description = "Command Line LLM with client-side tools support."
 authors = ["9600 devs <contact@9600.dev>"]
 readme = "README.md"
 packages = [ {include = "llmvm"} ]
-include = ["llmvm/client/awesome_prompts.csv", "llmvm/server/prompts/**/*", "llmvm/config.yaml"]
+include = ["llmvm/client/awesome_prompts.csv", "llmvm/common/model_prices_and_context_window.json", "llmvm/server/prompts/**/*", "llmvm/config.yaml"]
 homepage = "https://github.com/9600dev/llmvm"
 repository = "https://github.com/9600dev/llmvm"
 

@@ -151,7 +151,7 @@ class StarlarkExecutionController(Controller):
     ) -> Assistant:
 
         tokens_per_message = (
-            math.floor((llm_call.max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+            math.floor((llm_call.max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
         )
         write_client_stream(f'Performing context window compression type: similarity vector search with tokens per message {tokens_per_message}.\n')  # noqa E501
 
@@ -162,7 +162,7 @@ class StarlarkExecutionController(Controller):
 
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
-                token_calculator=self.executor.calculate_tokens,
+                token_calculator=self.executor.count_tokens,
                 content=prev_message.message.get_content(),
                 chunk_token_count=256,
                 chunk_overlap=0,
@@ -198,7 +198,7 @@ class StarlarkExecutionController(Controller):
         original_query: str,
         llm_call: LLMCall,
     ) -> Assistant:
-        prompt_len = self.executor.calculate_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
+        prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
         write_client_stream(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n')
 
         # collapse the context messages into single message
@@ -206,12 +206,12 @@ class StarlarkExecutionController(Controller):
         chunk_results = []
 
         # iterate over the data.
-        map_reduce_prompt_tokens = self.executor.calculate_tokens(
+        map_reduce_prompt_tokens = self.executor.count_tokens(
             [User(Content(open('map_reduce_map.prompt', 'r').read()))],
             model=llm_call.model,
         )
 
-        chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
+        chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - self.executor.count_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
         chunks = self.vector_search.chunk(
             content=context_message.message.get_content(),
             chunk_size=chunk_size,
@@ -271,7 +271,7 @@ class StarlarkExecutionController(Controller):
         # todo: this is a hack. we should check the length of all the messages, and if they're less
         # than the tokens per message, then we can add more tokens to other messages.
         tokens_per_message = (
-            math.floor((llm_call.max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+            math.floor((llm_call.max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
         )
         tokens_per_message = tokens_per_message - header_text_token_len
 
@@ -279,7 +279,7 @@ class StarlarkExecutionController(Controller):
 
         llm_call_copy = llm_call.copy()
 
-        if llm_call.executor.calculate_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
+        if llm_call.executor.count_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
             logging.debug('__summary_map_reduce() user message is longer than the summary window, will try to cut.')
             llm_call_copy.user_message = User(Content(llm_call.user_message.message.get_content()[0:tokens_per_message]))
 
@@ -316,7 +316,7 @@ class StarlarkExecutionController(Controller):
         lifo_messages = copy.deepcopy(llm_call.context_messages)
 
         prompt_context_messages = [llm_call.user_message]
-        current_tokens = self.executor.calculate_tokens(
+        current_tokens = self.executor.count_tokens(
             llm_call.user_message.message.get_content(),
             model=llm_call.model
         ) + llm_call.completion_tokens_len
@@ -324,11 +324,11 @@ class StarlarkExecutionController(Controller):
         # reverse over the messages, last to first
         for i in range(len(lifo_messages) - 1, -1, -1):
             if (
-                current_tokens + self.executor.calculate_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+                current_tokens + self.executor.count_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
                 < llm_call.max_prompt_len
             ):
                 prompt_context_messages.append(lifo_messages[i])
-                current_tokens += self.executor.calculate_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+                current_tokens += self.executor.count_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
             else:
                 break
 
@@ -370,7 +370,7 @@ class StarlarkExecutionController(Controller):
                 text_result = PdfHelpers.parse_pdf(c_message.message.url)
                 c_message.message.sequence = text_result
 
-        prompt_len = self.executor.calculate_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
+        prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
         max_prompt_len = self.executor.max_prompt_tokens(completion_token_len=llm_call.completion_tokens_len, model=model)
 
         # I have either a message, or a list of messages. They might need to be map/reduced.
@@ -398,11 +398,11 @@ class StarlarkExecutionController(Controller):
             write_client_stream('Determining map/reduce approach of either similarity vectorsearch or full map/reduce.\n')
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
-                token_calculator=self.executor.calculate_tokens,
+                token_calculator=self.executor.count_tokens,
                 content=context_message.message.get_content(),
                 chunk_token_count=256,
                 chunk_overlap=0,
-                max_tokens=max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=model) - 32,  # noqa E501
+                max_tokens=max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=model) - 32,  # noqa E501
             )
 
             # randomize and sample from the similarity_chunks
