@@ -172,6 +172,14 @@ class TokenCompressionMethod(Enum):
     SUMMARY = 4
 
 
+def compression_enum(input_str):
+    normalized_str = input_str.upper().replace('MAPREDUCE', 'MAP_REDUCE')
+    try:
+        return TokenCompressionMethod[normalized_str]
+    except KeyError:
+        raise ValueError(f"Unknown compression method: {input_str}")
+
+
 class LLMCall():
     def __init__(
         self,
@@ -900,6 +908,7 @@ class SessionThread(BaseModel):
     executor: str = ''
     model: str = ''
     current_mode: str = 'auto'
+    compression: str = 'auto'
     temperature: float = 0.0
     cookies: List[Dict[str, Any]] = []
     messages: List[MessageModel] = []

@@ -60,6 +60,8 @@ class OpenAIExecutor(Executor):
                 return 16385
             case 'gpt-3.5-turbo-16k':
                 return 16385
+            case 'gpt-3.5-turbo-0125':
+                return 16385
             case 'gpt-3.5-turbo':
                 return 4096
             case 'gpt-3.5-turbo-1106':
@@ -114,6 +116,9 @@ class OpenAIExecutor(Executor):
             if model in {
                 "gpt-3.5-turbo-0613",
                 "gpt-3.5-turbo-16k-0613",
+                "gpt-3.5-turbo-0125",
+                "gpt-3.5-turbo-1106",
+                "gpt-3.5-turbo",
                 "gpt-4",
                 "gpt-4-0314",
                 "gpt-4-vision-preview",
@@ -183,7 +188,7 @@ class OpenAIExecutor(Executor):
         # only works if profiling or LLMVM_PROFILING is set to true
         message_tokens = self.count_tokens(messages, model=model)
         if message_tokens > self.max_prompt_tokens(max_completion_tokens, model=model):
-            raise Exception('Prompt too long, message tokens: {}, completion tokens: {} total tokens: {}, available tokens: {}'
+            raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,
                                     max_completion_tokens,
                                     message_tokens + max_completion_tokens,
