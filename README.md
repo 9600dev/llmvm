@@ -10,9 +10,9 @@ LLMVM's features are best explored through examples:
 
 ```$ pip install llmvm-cli```
 
-```$ python -m llmvm.server.server```
+```$ python -m llmvm.server```
 
-```$ python -m llmvm.client.client```
+```$ python -m llmvm.client```
 
 ```bash
 query>> Go to the https://ten13.vc/team website and extract the list of names
@@ -49,9 +49,18 @@ LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extra
 
 #### As a Command Line Utility
 
-I bash/fish alias llm:
+I bash/fish/zsh alias llm:
 
-```alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision" LLMVM_PROFILING="true" python llmvm.client.client```
+```alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision-preview" LLMVM_PROFILING="true" python -m llmvm.client```
+
+or if you're using pyenv:
+
+```bash
+function llm() {
+    local pyenv_ver=$(cat ~/dev/llm/llmvm/.python-version)
+    $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.client "$@"
+}
+```
 
 and then:
 
@@ -93,7 +102,7 @@ You can even Ctrl-y + p to paste images into the Repl for upload and parsing by 
 
 ## Install
 
-You'll need either an OpenAI API account (including access to the GPT 4.x API) or an Anthropic API account. It's highly recommended to sign up for a free [SerpAPI](https://serpapi.com/) account to ensure that searches work. A [sec-api.io](https://sec-api.io) is optional to get public company 10K or 10Q filings.
+You'll need either an OpenAI API account (including access to the GPT 4.x API), an [Anthropic API account](https://docs.anthropic.com/claude/reference/getting-started-with-the-api), a Google [Gemini API account](https://ai.google.dev/) or a [Mistral AI API account](https://mistral.ai/). It's highly recommended to sign up for a free [SerpAPI](https://serpapi.com/) account to ensure that web searches (Google, News, Yelp and more) work. A [sec-api.io](https://sec-api.io) is optional so LLMVM can download public company 10-K or 10-Q filings.
 
 Ensure you have the following environment variables set:
 
@@ -136,8 +145,8 @@ If you don't want to do ```pip install llmvm-cli``` you can do:
   * ```cp llmvm/config.yaml ~/.config/llmvm/config.yaml```
 
  Run the llmvm server and client:
-  * ```python -m llmvm.server.server```
-  * ```python -m llmvm.client.client```
+  * ```python -m llmvm.server```
+  * ```python -m llmvm.client```
 
 [Optional]
 
@@ -147,13 +156,13 @@ If you don't want to do ```pip install llmvm-cli``` you can do:
 #### Docker instructions:
 
 * run `docker.sh -g` (builds the image, deploys into a container and runs the container)
-* python -m llmvm.server.server will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
+* python -m llmvm.server will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
 * Use docker desktop to have a look at the running server logs; or you can ssh into the container, kill the server process, and restart from your own shell.
 
 With the docker container running, you can run client.py on your local machine:
 
 * export LLMVM_ENDPOINT="http://localhost:8011"
-* python -m llmvm.client.client
+* python -m llmvm.client
 
 You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
@@ -170,7 +179,7 @@ or, you can set environment variables that specify the execution backend and the
 ```bash
 export LLMVM_EXECUTOR='openai'
 export LLMVM_MODEL='gpt-4-vision-preview'
-python -m llmvm.client.client "hello, who are you?"
+python -m llmvm.client "hello, who are you?"
 ```
 
 #### Performance Profiling
