@@ -12,9 +12,28 @@ LLMVM's features are best explored through examples:
 
 ```$ python -m llmvm.server```
 
+```bash
+Default executor is: anthropic
+Default model is: claude-2.1
+Loaded agent: datetime
+Loaded agent: search_linkedin_profile
+Loaded agent: get_linkedin_profile
+Loaded agent: get_report
+Loaded agent: get_stock_price
+Loaded agent: get_current_market_capitalization
+INFO:     Started server process [2773530]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8011 (Press CTRL+C to quit)
+```
+
 ```$ python -m llmvm.client```
 
 ```bash
+...
+I am a helpful assistant that has access to tools. Use "mode" to
+switch tools on and off.
+
 query>> Go to the https://ten13.vc/team website and extract the list of names
 ```
 
@@ -51,13 +70,15 @@ LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extra
 
 I bash/fish/zsh alias llm:
 
-```alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision-preview" LLMVM_PROFILING="true" python -m llmvm.client```
+```bash
+alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision-preview" LLMVM_PROFILING="true" python -m llmvm.client
+```
 
-or if you're using pyenv:
+or if you're using pyenv and want to hack on the source code:
 
 ```bash
 function llm() {
-    local pyenv_ver=$(cat ~/dev/llm/llmvm/.python-version)
+    local pyenv_ver=$(cat $HOME/llmvm/.python-version)
     $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.client "$@"
 }
 ```
