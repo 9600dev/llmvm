@@ -16,9 +16,11 @@ class GeminiExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('GOOGLE_API_KEY')),
+        # from the docs:
+        # Note: The vision model gemini-pro-vision is not optimized for multi-turn chat.
         default_model: str = 'gemini-pro',
         api_endpoint: str = '',
-        default_max_token_len: int = 34748,
+        default_max_token_len: int = 32768,
         default_max_completion_len: int = 2048,
     ):
         self.api_key = api_key
