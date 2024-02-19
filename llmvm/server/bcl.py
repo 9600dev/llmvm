@@ -224,6 +224,14 @@ class Searcher():
         else:
             return SerpAPISearcher().search_news(query)
 
+    def search_research_hook(self, query: str):
+        if not Container().get_config_variable('SERPAPI_API_KEY'):
+            return self.search_hook('https://news.google.com/search?q=', query)
+        else:
+            # likely want more thorough answers so we'll return more results
+            self.total_links_to_return = 10
+            return SerpAPISearcher().search_research(query)
+
     def search(
         self,
     ) -> str:
@@ -310,6 +318,7 @@ class Searcher():
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
+            'Google Scholar Search': {'searcher': self.search_research_hook, 'parser': url_to_text, 'description': 'Google Scholar Search is a search engine to help find and summarize academic papers, studies, and research about particular topics'},  # noqa:E501
         }  # noqa:E501
 
         # classify the search engine
