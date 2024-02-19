@@ -488,7 +488,7 @@ async def tools_completions(request: SessionThread):
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
+    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}&compression={thread.compression}')
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')
