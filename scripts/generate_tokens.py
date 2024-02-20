@@ -3,10 +3,11 @@ import sys
 
 import click
 
-from anthropic_executor import AnthropicExecutor
-from container import Container
-from objects import Content, Message, User
-from openai_executor import OpenAIExecutor
+sys.path.append('..')
+
+from llmvm.common.anthropic_executor import AnthropicExecutor
+from llmvm.common.objects import Content, User
+from llmvm.common.openai_executor import OpenAIExecutor
 
 
 def get_tokens(num_tokens: int, executor_name: str = 'openai'):
@@ -14,7 +15,7 @@ def get_tokens(num_tokens: int, executor_name: str = 'openai'):
     num_words = num_tokens * 1.3
     words = []
 
-    with open('docs/war_and_peace.txt', 'r') as f:
+    with open('../docs/war_and_peace.txt', 'r') as f:
         word_str = f.read().split(' ')
         word_str[:int(num_words)]
 
@@ -29,7 +30,7 @@ def get_tokens(num_tokens: int, executor_name: str = 'openai'):
     max_words = len(word_str)
 
     while True:
-        total_tokens = executor.calculate_tokens([User(Content(' '.join(words)))])
+        total_tokens = executor.count_tokens([User(Content(' '.join(words)))])
 
         if num_tokens * 0.96 <= total_tokens <= num_tokens * 1.04:
             break  # Desired range reached
@@ -49,7 +50,7 @@ def get_tokens(num_tokens: int, executor_name: str = 'openai'):
 
     # # while total_tokens is not within 4% of num_tokens, keep adding or subtracting words
     # while total_tokens < num_tokens * 0.96 or total_tokens > num_tokens * 1.04:
-    #     total_tokens = executor.calculate_tokens([User(Content(' '.join(words)))])
+    #     total_tokens = executor.count_tokens([User(Content(' '.join(words)))])
 
     #     if total_tokens < num_tokens * 0.96:
     #         words.append(word_str.pop(0))

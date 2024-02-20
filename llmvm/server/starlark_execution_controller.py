@@ -4,6 +4,7 @@ import copy
 import math
 import random
 import re
+from importlib import resources
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -152,7 +153,7 @@ class StarlarkExecutionController(Controller):
     ) -> Assistant:
 
         tokens_per_message = (
-            math.floor((llm_call.max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+            math.floor((llm_call.max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
         )
         write_client_stream(f'Performing context window compression type: similarity vector search with tokens per message {tokens_per_message}.\n')  # noqa E501
 
@@ -163,20 +164,25 @@ class StarlarkExecutionController(Controller):
 
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
-                token_calculator=self.executor.calculate_tokens,
+                token_calculator=self.executor.count_tokens,
                 content=prev_message.message.get_content(),
                 chunk_token_count=256,
                 chunk_overlap=0,
-                max_tokens=tokens_per_message - 32,
+                max_tokens=tokens_per_message - 16,
             )
             similarity_message: str = '\n\n'.join([content for content, _ in similarity_chunks])
 
             # check for the header of a statement_to_message. We probably need to keep this
-            # todo: hack
             if 'Result:\n' in prev_message.message.get_content():
-                similarity_message = prev_message.message.get_content()[0:prev_message.message.get_content().index('Result:\n')] + similarity_message  # noqa E501
+                # the following line of code was causing token count bugs
+                # similarity_message = prev_message.message.get_content()[0:prev_message.message.get_content().index('Result:\n')] + similarity_message  # noqa E501
+                similarity_message = 'Result:\n' + similarity_message
 
             similarity_messages.append(User(Content(similarity_message)))
+
+        total_similarity_tokens = sum([self.executor.count_tokens(m.message.get_content(), model=llm_call.model) for m in similarity_messages])
+        if total_similarity_tokens > llm_call.max_prompt_len:
+            logging.error(f'__similarity() total_similarity_tokens: {total_similarity_tokens} is greater than max_prompt_len: {llm_call.max_prompt_len}, will perform map/reduce.')  # noqa E501
 
         assistant_result = await self.__llm_call(
             llm_call=LLMCall(
@@ -199,7 +205,7 @@ class StarlarkExecutionController(Controller):
         original_query: str,
         llm_call: LLMCall,
     ) -> Assistant:
-        prompt_len = self.executor.calculate_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
+        prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
         write_client_stream(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n')
 
         # collapse the context messages into single message
@@ -207,13 +213,12 @@ class StarlarkExecutionController(Controller):
         chunk_results = []
 
         # iterate over the data.
-        prompt_file = resources.files('llmvm.server.prompts.starlark') / 'map_reduce_map.prompt'
-        map_reduce_prompt_tokens = self.executor.calculate_tokens(
-            [User(Content(open(prompt_file, 'r').read()))],
+        map_reduce_prompt_tokens = self.executor.count_tokens(
+            [User(Content(Helpers.load_prompt('map_reduce_map.prompt')['user_message']))],
             model=llm_call.model,
         )
 
-        chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
+        chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - self.executor.count_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
         chunks = self.vector_search.chunk(
             content=context_message.message.get_content(),
             chunk_size=chunk_size,
@@ -273,7 +278,7 @@ class StarlarkExecutionController(Controller):
         # todo: this is a hack. we should check the length of all the messages, and if they're less
         # than the tokens per message, then we can add more tokens to other messages.
         tokens_per_message = (
-            math.floor((llm_call.max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+            math.floor((llm_call.max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
         )
         tokens_per_message = tokens_per_message - header_text_token_len
 
@@ -281,7 +286,7 @@ class StarlarkExecutionController(Controller):
 
         llm_call_copy = llm_call.copy()
 
-        if llm_call.executor.calculate_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
+        if llm_call.executor.count_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
             logging.debug('__summary_map_reduce() user message is longer than the summary window, will try to cut.')
             llm_call_copy.user_message = User(Content(llm_call.user_message.message.get_content()[0:tokens_per_message]))
 
@@ -318,7 +323,7 @@ class StarlarkExecutionController(Controller):
         lifo_messages = copy.deepcopy(llm_call.context_messages)
 
         prompt_context_messages = [llm_call.user_message]
-        current_tokens = self.executor.calculate_tokens(
+        current_tokens = self.executor.count_tokens(
             llm_call.user_message.message.get_content(),
             model=llm_call.model
         ) + llm_call.completion_tokens_len
@@ -326,11 +331,11 @@ class StarlarkExecutionController(Controller):
         # reverse over the messages, last to first
         for i in range(len(lifo_messages) - 1, -1, -1):
             if (
-                current_tokens + self.executor.calculate_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+                current_tokens + self.executor.count_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
                 < llm_call.max_prompt_len
             ):
                 prompt_context_messages.append(lifo_messages[i])
-                current_tokens += self.executor.calculate_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+                current_tokens += self.executor.count_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
             else:
                 break
 
@@ -347,7 +352,7 @@ class StarlarkExecutionController(Controller):
         llm_call: LLMCall,
         query: str,
         original_query: str,
-        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
+        compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> Assistant:
         '''
         Internal function to execute an LLM call with prompt template and context messages.
@@ -372,7 +377,7 @@ class StarlarkExecutionController(Controller):
                 text_result = PdfHelpers.parse_pdf(c_message.message.url)
                 c_message.message.sequence = text_result
 
-        prompt_len = self.executor.calculate_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
+        prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
         max_prompt_len = self.executor.max_prompt_tokens(completion_token_len=llm_call.completion_tokens_len, model=model)
 
         # I have either a message, or a list of messages. They might need to be map/reduced.
@@ -381,30 +386,30 @@ class StarlarkExecutionController(Controller):
         if prompt_len <= max_prompt_len:
             # straight call
             return await self.__llm_call(llm_call=llm_call)
-        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.LIFO:
+        elif prompt_len > max_prompt_len and compression == TokenCompressionMethod.LIFO:
             return await self.__lifo(llm_call)
-        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.SUMMARY:
+        elif prompt_len > max_prompt_len and compression == TokenCompressionMethod.SUMMARY:
             return await self.__summary_map_reduce(llm_call)
-        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.MAP_REDUCE:
+        elif prompt_len > max_prompt_len and compression == TokenCompressionMethod.MAP_REDUCE:
             return await self.__map_reduce(query, original_query, llm_call)
-        elif prompt_len > max_prompt_len and token_compression_method == TokenCompressionMethod.SIMILARITY:
+        elif prompt_len > max_prompt_len and compression == TokenCompressionMethod.SIMILARITY:
             return await self.__similarity(llm_call, query)
         else:
             # let's figure out what method to use
-            write_client_stream(f'The prompt length: {prompt_len} is bigger than the max token count: {max_prompt_len} for executor {llm_call.executor.name()}.\n')  # noqa E501
-            write_client_stream(f'Token Compression: {token_compression_method.name}.\n')
+            write_client_stream(f'The message prompt length: {prompt_len} is bigger than the max prompt length: {max_prompt_len} for executor {llm_call.executor.name()}\n')  # noqa E501
+            write_client_stream(f'Context window compression strategy: {compression.name}.\n')
             # check to see if we're simply lifo'ing the context messages (last in first out)
             context_message = User(Content('\n\n'.join([m.message.get_content() for m in llm_call.context_messages])))
 
             # see if we can do a similarity search or not.
-            write_client_stream('Determining map/reduce approach of either similarity vectorsearch or full map/reduce.\n')
+            write_client_stream('Determining context window compression approach of either similarity vector search, or full map/reduce.\n')
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
-                token_calculator=self.executor.calculate_tokens,
+                token_calculator=self.executor.count_tokens,
                 content=context_message.message.get_content(),
                 chunk_token_count=256,
                 chunk_overlap=0,
-                max_tokens=max_prompt_len - self.executor.calculate_tokens([llm_call.user_message], model=model) - 32,  # noqa E501
+                max_tokens=max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=model) - 16,  # noqa E501
             )
 
             # randomize and sample from the similarity_chunks
@@ -450,7 +455,7 @@ class StarlarkExecutionController(Controller):
         llm_call: LLMCall,
         query: str,
         original_query: str,
-        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
+        compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> Assistant:
         llm_call.model = llm_call.model if llm_call.model else self.executor.get_default_model()
 
@@ -458,7 +463,7 @@ class StarlarkExecutionController(Controller):
             llm_call=llm_call,
             query=query,
             original_query=original_query,
-            token_compression_method=token_compression_method,
+            compression=compression,
         ))
 
     async def abuild_runnable_code_ast(
@@ -496,7 +501,7 @@ class StarlarkExecutionController(Controller):
             ),
             query='',
             original_query='',
-            token_compression_method=TokenCompressionMethod.MAP_REDUCE,
+            compression=TokenCompressionMethod.MAP_REDUCE,
         )
         return llm_response
 
@@ -535,7 +540,7 @@ class StarlarkExecutionController(Controller):
             ),
             query='',
             original_query='',
-            token_compression_method=TokenCompressionMethod.SUMMARY,
+            compression=TokenCompressionMethod.SUMMARY,
         )
         return llm_response
 
@@ -545,6 +550,7 @@ class StarlarkExecutionController(Controller):
         temperature: float = 0.0,
         model: Optional[str] = None,
         mode: str = 'auto',
+        compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
         template_args: Optional[Dict[str, Any]] = None,
     ) -> List[Statement]:
@@ -699,7 +705,7 @@ class StarlarkExecutionController(Controller):
                 ),
                 query=messages[-1].message.get_content(),
                 original_query='',
-                token_compression_method=TokenCompressionMethod.AUTO,
+                compression=compression
             )
 
             results.append(Answer(

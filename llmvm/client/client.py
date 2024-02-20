@@ -531,6 +531,7 @@ async def execute_llm_call(
     mode: str,
     context_messages: Sequence[Message] = [],
     cookies: List[Dict[str, Any]] = [],
+    compression: str = 'auto',
     clear_thread: bool = False,
 ) -> SessionThread:
 
@@ -552,6 +553,7 @@ async def execute_llm_call(
         thread.cookies = cookies
         thread.executor = executor
         thread.model = model
+        thread.compression = compression
 
         if mode == 'direct' or mode == 'tool' or mode == 'auto':
             endpoint = 'tools_completions'
@@ -667,6 +669,7 @@ def llm(
     model: str,
     context_messages: Sequence[Message] = [],
     cookies: List[Dict[str, Any]] = [],
+    compression: str = 'auto',
 ) -> SessionThread:
     user_message = User(Content(''))
     if isinstance(message, str):
@@ -724,6 +727,7 @@ def llm(
             mode,
             context_messages_list,
             cookies,
+            compression,
             clear_thread,
         )
     )
@@ -1062,6 +1066,7 @@ class Repl():
                 ctx.params['endpoint'] = Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
                 ctx.params['cookies'] = thread.cookies
                 ctx.params['executor'] = thread.executor
+                ctx.params['compression'] = thread.compression
                 ctx.params['model'] = thread.model
                 ctx.params['suppress_role'] = False
                 ctx.params['context_messages'] = [User(ImageContent(cast(bytes, raw_data), url=''))]
@@ -1504,7 +1509,7 @@ def act(
         prompt_result = Helpers.tfidf_similarity(actor, [row[0] + ' ' + row[1] for row in rows[1:]])
 
         rich.print()
-        rich.print('[bold red]Setting actor mode.[/bold red]')
+        rich.print('[bold green]Setting actor mode.[/bold green]')
         rich.print()
         rich.print('Prompt: {}'.format(prompt_result))
         rich.print()
@@ -1518,6 +1523,7 @@ def act(
             ctx.params['mode'] = mode
             ctx.params['endpoint'] = endpoint
             ctx.params['cookies'] = ''
+            ctx.params['compression'] = 'auto'
             ctx.params['executor'] = executor
             ctx.params['model'] = model
             ctx.params['suppress_role'] = suppress_role
@@ -1741,6 +1747,8 @@ def new(
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
+@click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
+              default='auto', help='Context window compression method if the message is too large. Default is "auto".')
 @click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
 def message(
     message: Optional[str | bytes | Message],
@@ -1752,6 +1760,7 @@ def message(
     cookies: str,
     executor: str,
     model: str,
+    compression: str,
     suppress_role: bool,
     context_messages: Sequence[Message] = [],
 ):
@@ -1772,6 +1781,10 @@ def message(
     if executor:
         if (executor.startswith('"') and executor.endswith('"')) or (executor.startswith("'") and executor.endswith("'")):
             executor = executor[1:-1]
+
+    if compression:
+        if (compression.startswith('"') and compression.endswith('"')) or (compression.startswith("'") and compression.endswith("'")):
+            compression = compression[1:-1]
 
     if path:
         allowed_extensions = ['.py', '.md', 'Dockerfile', '.sh', '.txt'] if mode == 'code' else []
@@ -1817,7 +1830,8 @@ def message(
             executor=executor,
             model=model,
             context_messages=context_messages,
-            cookies=cookies_list
+            cookies=cookies_list,
+            compression=compression,
         )
 
         if not thread.messages:

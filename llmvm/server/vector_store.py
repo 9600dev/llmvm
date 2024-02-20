@@ -3,6 +3,7 @@ import os
 import tempfile
 from typing import Callable, List, Optional, Tuple
 
+import numpy as np
 from langchain.docstore.document import Document
 from langchain.embeddings.huggingface import HuggingFaceEmbeddings
 from langchain.text_splitter import TextSplitter, TokenTextSplitter
@@ -32,8 +33,9 @@ class VectorStore():
             os.makedirs(self.store_directory)
 
         if not os.path.exists(os.path.join(self.store_directory, self.index_name + '.faiss')):
-            from langchain.vectorstores import FAISS
+            from langchain_community.vectorstores.faiss import FAISS
             self.store: FAISS = FAISS.from_texts([''], self.embeddings())
+            self.store.override_relevance_score_fn = self.__score_normalizer
             self.store.save_local(folder_path=self.store_directory, index_name=self.index_name)
 
     def embeddings(self):
@@ -55,14 +57,18 @@ class VectorStore():
         return f'{self.__metadata_str(document)} {document.page_content}'
 
     def __load_store(self):
-        from langchain.vectorstores import FAISS
+        from langchain_community.vectorstores.faiss import FAISS
         if not hasattr(self, 'store') or not self.store:
             self.store = FAISS.load_local(
                 folder_path=self.store_directory,
                 embeddings=self.embeddings(),
                 index_name=self.index_name
             )
+            self.store.override_relevance_score_fn = self.__score_normalizer
         return self.store
+
+    def __score_normalizer(self, val: float) -> float:
+        return 1 - 1 / (1 + np.exp(val))
 
     def ingest_documents(
         self,
@@ -118,10 +124,13 @@ class VectorStore():
         token_calculator: Callable[[str], int],
         chunk_token_count: int = 256,
         chunk_overlap: int = 0,
-        max_tokens: int = 8196,
+        max_tokens: int = 0,
         splitter: Optional[TextSplitter] = None,
     ) -> List[Tuple[str, float]]:
-        from langchain.vectorstores import FAISS
+        from langchain_community.vectorstores.faiss import FAISS
+
+        if max_tokens == 0:
+            raise ValueError('max_tokens must be greater than 0')
 
         if not content:
             return []
@@ -140,6 +149,7 @@ class VectorStore():
 
         logging.debug(f'VectorStore.chunk_and_rank document length: {len(content)} split_texts: {len(split_texts)}, token_chunk_cost: {token_chunk_cost}, max_tokens: {max_tokens}')  # noqa
         chunk_faiss = FAISS.from_texts(split_texts, self.embeddings())
+        chunk_faiss.override_relevance_score_fn = self.__score_normalizer
 
         chunk_k = math.floor(max_tokens / token_chunk_cost)
         result = chunk_faiss.similarity_search_with_relevance_scores(query, k=chunk_k * 5)
@@ -163,4 +173,5 @@ class VectorStore():
                 total_tokens += token_calculator(half_str(self.__document_str(doc)))
             else:
                 break
+
         return return_results

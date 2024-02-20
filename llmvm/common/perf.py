@@ -5,6 +5,7 @@ from typing import List
 
 from anthropic import AsyncMessageStream, AsyncMessageStreamManager
 
+from llmvm.common.calculator import TokenPriceCalculator
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
 
@@ -24,7 +25,7 @@ class TokenPerf:
                 'profiling_file',
                 'LLMVM_PROFILING_FILE',
                 default='~/.local/share/llmvm/trace.log'
-            )
+            ),
     ):
         self._name: str = name
         self._executor: str = executor_name
@@ -35,6 +36,7 @@ class TokenPerf:
         self._ticks: List[float] = []
         self.enabled = enabled
         self.log_file = log_file
+        self.calculator = TokenPriceCalculator()
 
     def start(self):
         if self.enabled:
@@ -76,6 +78,8 @@ class TokenPerf:
                 'sample_len': len(self._ticks),
                 's_tok_sec': s_tok_sec,
                 'p_tok_sec': p_tok_sec,
+                'p_cost': self._prompt_len * self.calculator.prompt_price(self._model, self._executor),
+                's_cost': len(self._ticks) * self.calculator.sample_price(self._model, self._executor),
                 'ticks': self.ticks()
             }
         else:
@@ -107,14 +111,15 @@ class TokenPerf:
             sys.stderr.write('\n')
             logging.debug(f"total_time: {res['total_time']:.2f} prompt_time: {res['prompt_time']:.2f} sample_time: {res['sample_time']:.2f}")
             logging.debug(f"prompt_len: {res['prompt_len']} sample_len: {len(res['ticks'])}")
-            logging.debug(f"p_tok_sec {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f}")
+            logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f}")
+            logging.debug(f"p_cost: ${res['p_cost']:.4f} s_cost: ${res['s_cost']:.4f}")
 
     def log(self):
         if self.enabled:
             self.debug()
             if not os.path.exists(os.path.expanduser(self.log_file)):
                 with open(os.path.expanduser(self.log_file), 'w') as f:
-                    f.write('name,executor,model,total_time,prompt_time,prompt_tokens,sample_time,prompt_len,sample_len,p_tok_sec,s_tok_sec,ticks\n')
+                    f.write('name,executor,model,total_time,prompt_time,prompt_tokens,sample_time,prompt_len,sample_len,p_tok_sec,s_tok_sec,p_cost,s_cost,ticks\n')
             with open(os.path.expanduser(self.log_file), 'a') as f:
                 result = str(self)
                 f.write(result + '\n')
@@ -130,6 +135,8 @@ class TokenPerf:
                 'sample_len': 0,
                 'p_tok_sec': 0.0,
                 's_tok_sec': 0.0,
+                'p_cost': 0.0,
+                's_cost': 0.0,
                 'ticks': []
             }
 

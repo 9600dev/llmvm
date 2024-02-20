@@ -4,18 +4,41 @@ LLMVM is a CLI based productivity tool that uses Large Language Models and local
 
 It supports [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4.0/4 Turbo/Vision models from OpenAI, and [Claude 2.1](https://www.anthropic.com/index/claude-2) from [Anthropic](https://anthropic.com). [Gemini](https://deepmind.google/technologies/gemini/) and [Mistral](https://deepmind.google/technologies/gemini/) are currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images and work directly with GPT 4.5 vision models.
 
-LLMVM's features are best explored through examples:
-
-#### Tool Use: Controlling Firefox Browser
+LLMVM's features are best explored through examples. Let's install, then go through some:
 
 ```$ pip install llmvm-cli```
 
-```$ python -m llmvm.server.server```
-
-```$ python -m llmvm.client.client```
+```$ python -m llmvm.server```
 
 ```bash
-query>> Go to the https://ten13.vc/team website and extract the list of names
+Default executor is: anthropic
+Default model is: claude-2.1
+Loaded agent: datetime
+Loaded agent: search_linkedin_profile
+Loaded agent: get_linkedin_profile
+Loaded agent: get_report
+Loaded agent: get_stock_price
+Loaded agent: get_current_market_capitalization
+INFO:     Started server process [2773530]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8011 (Press CTRL+C to quit)
+```
+
+```$ python -m llmvm.client```
+
+```bash
+...
+I am a helpful assistant that has access to tools. Use "mode" to
+switch tools on and off.
+
+query>>
+```
+
+#### Tool Use: Controlling Firefox Browser
+
+```bash
+query>> go to https://ten13.vc/team and get the names of the people that work there
 ```
 
 ![](docs/2024-01-02-13-21-01.png)
@@ -28,7 +51,6 @@ The LLMVM server is coordinating with the LLM to deconstruct the query into exec
 query>> I have 5 MSFT stocks and 10 NVDA stocks, what is my net worth in grams of gold?
 ```
 
-
 ![](docs/2024-01-02-13-27-43.png)
 
 ...
@@ -40,18 +62,37 @@ Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidi
 #### Tool Use: PDF Parsing and Understanding
 
 ```bash
-query>> -p docs/turnbull-speech.pdf "what Malcolm Turnbull advocating for?"
+query>> -p docs/turnbull-speech.pdf "what is Malcolm Turnbull advocating for?"
 ```
 
 ![](docs/2024-01-02-13-38-48.png)
 
 LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extract text properly) and supply the LLM with the text as content for queries.
 
+#### Tool Use: Code Understanding
+
+the ```-p``` path command can take shell globs, filenames and urls. Here's an example of collecting the entire llmvm codebase and passing it to LLMVM to build a tutorial in Markdown format:
+
+```bash
+query>> -p **/*.py !**/__init__.py !**/__main__.py "explain this codebase as a tutorial for a new person joining the team. Use markdown as the output"
+```
+
 #### As a Command Line Utility
 
-I bash/fish alias llm:
+I bash/fish/zsh alias llm:
 
-```alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision" LLMVM_PROFILING="true" python llmvm.client.client```
+```bash
+alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision-preview" LLMVM_PROFILING="true" python -m llmvm.client
+```
+
+or if you're using pyenv and want to hack on the source code:
+
+```bash
+function llm() {
+    local pyenv_ver=$(cat $HOME/llmvm/.python-version)
+    $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.client "$@"
+}
+```
 
 and then:
 
@@ -59,7 +100,7 @@ and then:
 cat somecode.py | llm -o direct "rewrite this code; make it cleaner and easier to read"
 ```
 
-Image understanding is supported via OpenAI's GPT 4.5 vision model:
+Image understanding is supported via OpenAI's GPT 4 turbo vision model and Google Gemini:
 
 ```bash
 cat docs/beach.jpg | llm "describe this image for me"
@@ -93,7 +134,7 @@ You can even Ctrl-y + p to paste images into the Repl for upload and parsing by 
 
 ## Install
 
-You'll need either an OpenAI API account (including access to the GPT 4.x API) or an Anthropic API account. It's highly recommended to sign up for a free [SerpAPI](https://serpapi.com/) account to ensure that searches work. A [sec-api.io](https://sec-api.io) is optional to get public company 10K or 10Q filings.
+You'll need either an OpenAI API account (including access to the GPT 4.x API), an [Anthropic API account](https://docs.anthropic.com/claude/reference/getting-started-with-the-api), a Google [Gemini API account](https://ai.google.dev/) or a [Mistral AI API account](https://mistral.ai/). It's highly recommended to sign up for a free [SerpAPI](https://serpapi.com/) account to ensure that web searches (Google, News, Yelp and more) work. A [sec-api.io](https://sec-api.io) is optional so LLMVM can download public company 10-K or 10-Q filings.
 
 Ensure you have the following environment variables set:
 
@@ -136,8 +177,8 @@ If you don't want to do ```pip install llmvm-cli``` you can do:
   * ```cp llmvm/config.yaml ~/.config/llmvm/config.yaml```
 
  Run the llmvm server and client:
-  * ```python -m llmvm.server.server```
-  * ```python -m llmvm.client.client```
+  * ```python -m llmvm.server```
+  * ```python -m llmvm.client```
 
 [Optional]
 
@@ -147,13 +188,13 @@ If you don't want to do ```pip install llmvm-cli``` you can do:
 #### Docker instructions:
 
 * run `docker.sh -g` (builds the image, deploys into a container and runs the container)
-* python -m llmvm.server.server will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
+* python -m llmvm.server will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
 * Use docker desktop to have a look at the running server logs; or you can ssh into the container, kill the server process, and restart from your own shell.
 
 With the docker container running, you can run client.py on your local machine:
 
 * export LLMVM_ENDPOINT="http://localhost:8011"
-* python -m llmvm.client.client
+* python -m llmvm.client
 
 You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
@@ -170,7 +211,7 @@ or, you can set environment variables that specify the execution backend and the
 ```bash
 export LLMVM_EXECUTOR='openai'
 export LLMVM_MODEL='gpt-4-vision-preview'
-python -m llmvm.client.client "hello, who are you?"
+python -m llmvm.client "hello, who are you?"
 ```
 
 #### Performance Profiling

@@ -3,7 +3,6 @@ import os
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 import google.generativeai as genai
-import tiktoken
 
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
@@ -16,9 +15,11 @@ class GeminiExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('GOOGLE_API_KEY')),
+        # from the docs:
+        # Note: The vision model gemini-pro-vision is not optimized for multi-turn chat.
         default_model: str = 'gemini-pro',
         api_endpoint: str = '',
-        default_max_token_len: int = 34748,
+        default_max_token_len: int = 32768,
         default_max_completion_len: int = 2048,
     ):
         self.api_key = api_key
@@ -70,7 +71,7 @@ class GeminiExecutor(Executor):
     ):
         return self.default_max_completion_len
 
-    def calculate_tokens(
+    def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
         extra_str: str = '',
@@ -80,8 +81,6 @@ class GeminiExecutor(Executor):
 
         # obtained from: https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
         def num_tokens_from_messages(messages, model: str):
-            """Return the number of tokens used by a list of messages."""
-            encoding = tiktoken.get_encoding('cl100k_base')
             if model in {
                 "gemini-pro",
             }:
@@ -92,9 +91,8 @@ class GeminiExecutor(Executor):
             num_tokens = 0
             for message in messages:
                 num_tokens += tokens_per_message
-
                 for _, value in message.items():
-                    num_tokens += len(encoding.encode(value))
+                    num_tokens += self.aclient.count_tokens(value).total_tokens
             num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
             return num_tokens
 
@@ -135,9 +133,9 @@ class GeminiExecutor(Executor):
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
-        message_tokens = self.calculate_tokens(messages, model=model)
+        message_tokens = self.count_tokens(messages, model=model)
         if message_tokens > self.max_prompt_tokens(max_completion_tokens, model=model):
-            raise Exception('Prompt too long, message tokens: {}, completion tokens: {} total tokens: {}, available tokens: {}'
+            raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,
                                     max_completion_tokens,
                                     message_tokens + max_completion_tokens,

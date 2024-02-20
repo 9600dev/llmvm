@@ -29,7 +29,9 @@ from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.mistral_executor import MistralExecutor
 from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
                                   DownloadItem, FileContent, MessageModel,
-                                  SessionThread, Statement, StopNode, User)
+                                  SessionThread, Statement, StopNode,
+                                  TokenCompressionMethod, User,
+                                  compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.persistent_cache import PersistentCache
 from llmvm.server.starlark_execution_controller import \
@@ -375,6 +377,7 @@ async def code_completions(request: SessionThread):
         thread.id = temp.id
 
     mode = thread.current_mode
+    compression = compression_enum(thread.compression)
     queue = asyncio.Queue()
 
     # set the defaults, or use what the SessionThread thread asks
@@ -411,6 +414,7 @@ async def code_completions(request: SessionThread):
                 mode='code',
                 stream_handler=callback,
                 model=model,
+                compression=compression,
                 template_args={'files': local_files}
             )
             queue.put_nowait(StopNode())
@@ -468,6 +472,7 @@ async def tools_completions(request: SessionThread):
 
     messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
     mode = thread.current_mode
+    compression = compression_enum(thread.compression)
     queue = asyncio.Queue()
 
     # set the defaults, or use what the SessionThread thread asks
@@ -483,7 +488,7 @@ async def tools_completions(request: SessionThread):
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}')
+    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}&compression={thread.compression}')
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')
@@ -509,6 +514,7 @@ async def tools_completions(request: SessionThread):
                 mode=mode,
                 stream_handler=callback,
                 model=model,
+                compression=compression,
             )
             queue.put_nowait(StopNode())
             return result

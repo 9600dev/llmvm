@@ -82,7 +82,7 @@ class AnthropicExecutor(Executor):
     ):
         return self.default_max_completion_len
 
-    def calculate_tokens(
+    def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
         extra_str: str = '',
@@ -91,7 +91,7 @@ class AnthropicExecutor(Executor):
         model_str = model if model else self.default_model
 
         async def tokenizer_len(text: str) -> int:
-            return len((await self.client.get_tokenizer()).encode(text))
+            return await self.client.count_tokens(text)
 
         def num_tokens_from_messages(messages, model: str):
             # this is inexact, but it's a reasonable approximation
@@ -156,9 +156,9 @@ class AnthropicExecutor(Executor):
         if functions:
             raise NotImplementedError('functions are not implemented for ClaudeExecutor')
 
-        message_tokens = self.calculate_tokens(messages=messages, model=model)
+        message_tokens = self.count_tokens(messages=messages, model=model)
         if message_tokens > self.max_prompt_tokens(max_completion_tokens, model=model):
-            raise Exception('Prompt too long, message tokens: {}, completion tokens: {} total tokens: {}, available tokens: {}'
+            raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,
                                     max_completion_tokens,
                                     message_tokens + max_completion_tokens,
