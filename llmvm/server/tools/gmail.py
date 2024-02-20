@@ -83,33 +83,24 @@ class GmailSearcher():
             with open('token.json', 'w') as token:
                 token.write(creds.to_json())
 
-        try:
-            return build('gmail', 'v1', credentials=creds)
-        except HttpError as error:
-            print(f'An error occurred: {error}')
+        return build('gmail', 'v1', credentials=creds)
 
     @staticmethod
     def list_messages(service, user_id):
-        try:
-            since_date = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y/%m/%d")
-            query = f'({" OR ".join("from:*" + domain for domain in GmailSearcher.NEWS_DOMAINS)}) after:{since_date} is:unread'
-            response = service.users().messages().list(userId=user_id, q=query).execute()
-            messages = []
-            if 'messages' in response:
-                messages.extend(response['messages'])
-            
-            while 'nextPageToken' in response:
-                page_token = response['nextPageToken']
-                response = service.users().messages().list(userId=user_id, q=query, 
-                                                        pageToken=page_token).execute()
-                messages.extend(response['messages'])
+        since_date = (datetime.datetime.now() - datetime.timedelta(days=1)).strftime("%Y/%m/%d")
+        query = f'({" OR ".join("from:*" + domain for domain in GmailSearcher.NEWS_DOMAINS)}) after:{since_date} is:unread'
+        response = service.users().messages().list(userId=user_id, q=query).execute()
+        messages = []
+        if 'messages' in response:
+            messages.extend(response['messages'])
+        
+        while 'nextPageToken' in response:
+            page_token = response['nextPageToken']
+            response = service.users().messages().list(userId=user_id, q=query, 
+                                                    pageToken=page_token).execute()
+            messages.extend(response['messages'])
 
-            # show oldest emails first
-            messages.reverse()
-            return messages
-        except HttpError as error:
-            print(f'An error occurred: {error}')
-            return []
+        return messages
 
     @staticmethod
     def decode_mime_header(s):
@@ -122,14 +113,10 @@ class GmailSearcher():
 
     @staticmethod
     def get_mime_message(service, user_id, message_id):
-        try:
-            message = service.users().messages().get(userId=user_id, id=message_id, format='raw').execute()
-            msg_str = urlsafe_b64decode(message['raw'].encode('ASCII'))
-            mime_msg = email.message_from_bytes(msg_str)
-            return mime_msg
-        except HttpError as error:
-            print(f'An error occurred: {error}')
-            return None
+        message = service.users().messages().get(userId=user_id, id=message_id, format='raw').execute()
+        msg_str = urlsafe_b64decode(message['raw'].encode('ASCII'))
+        mime_msg = email.message_from_bytes(msg_str)
+        return mime_msg
 
     @staticmethod
     def get_plain_body_from_mime(mime_msg):
