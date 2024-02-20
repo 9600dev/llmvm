@@ -5,6 +5,7 @@ import asyncio
 import datetime as dt
 import re
 import time
+import os
 from datetime import timedelta
 from typing import Any, Callable, Dict, Generator, List, Optional, cast
 from urllib.parse import urlparse
@@ -29,6 +30,7 @@ from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.tools.search import SerpAPISearcher
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
+from llmvm.server.tools.gmail import GmailSearcher
 
 logging = setup_logging()
 
@@ -232,6 +234,13 @@ class Searcher():
             self.total_links_to_return = 10
             return SerpAPISearcher().search_research(query)
 
+    def search_newsletter_hook(self, query: str):
+        credentials_file = os.path.expanduser('~/.config/llmvm/credentials.json')
+        if not os.path.exists(credentials_file):
+            return self.search_hook('https://news.google.com/search?q=', query)
+        else:
+            return GmailSearcher().search_newsletters(query)
+
     def search(
         self,
     ) -> str:
@@ -300,6 +309,17 @@ class Searcher():
             return_str += f"Snippet: \"{document['snippet']}\"\n"
             return return_str
 
+        def emails_to_text(emails: List[Dict[str, str]]) -> str:
+            return_str = 'The email newsletters are as follows:\n\n'
+            for email in emails:
+                return_str += f"Subject: \"{email['subject']}\".\n"
+                return_str += f"From: {email['from']}\n"
+                return_str += f"Date: {email['date_time']}\n"
+                return_str += '\n\n'
+                return_str += f"Body: \"{email['body']}\"\n"
+                return_str += '\n\n*********\n\n'
+            return return_str
+
         def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> str:
             if not results:
                 return ''
@@ -319,6 +339,7 @@ class Searcher():
             'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
             'Google Scholar Search': {'searcher': self.search_research_hook, 'parser': url_to_text, 'description': 'Google Scholar Search is a search engine to help find and summarize academic papers, studies, and research about particular topics'},  # noqa:E501
+            'Gmail Newsletter Search': {'searcher': self.search_newsletter_hook, 'parser': emails_to_text, 'description': 'GMail Newsletter Search is a search engine to help find and summarize newsletters delivered to the users email'},  # noqa:E501
         }  # noqa:E501
 
         # classify the search engine
@@ -393,6 +414,10 @@ class Searcher():
         if 'Hacker' in engine:
             result = SerpAPISearcher().search_hackernews_comments(queries[0])
             return hackernews_comments_to_text(result)
+
+        if 'Gmail' in engine:
+            result = GmailSearcher.search_newsletters(queries[0])
+            return emails_to_text(result)
 
         for query in queries:
             search_results.extend(list(searcher(query))[:10])

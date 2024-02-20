@@ -16,6 +16,7 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
 from llmvm.server.starlark_runtime import StarlarkRuntime
 from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.vector_search import VectorSearch
+from importlib import resources
 
 logging = setup_logging()
 
@@ -206,8 +207,9 @@ class StarlarkExecutionController(Controller):
         chunk_results = []
 
         # iterate over the data.
+        prompt_file = resources.files('llmvm.server.prompts.starlark') / 'map_reduce_map.prompt'
         map_reduce_prompt_tokens = self.executor.calculate_tokens(
-            [User(Content(open('map_reduce_map.prompt', 'r').read()))],
+            [User(Content(open(prompt_file, 'r').read()))],
             model=llm_call.model,
         )
 
