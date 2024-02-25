@@ -98,7 +98,6 @@ class Executor(ABC):
     def count_tokens(
         self,
         messages: List['Message'] | str,
-        extra_str: str = '',
         model: Optional[str] = None,
     ) -> int:
         pass
@@ -229,7 +228,7 @@ class Controller():
         llm_call: LLMCall,
         query: str,
         original_query: str,
-        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
+        compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> 'Assistant':
         pass
 
@@ -239,7 +238,7 @@ class Controller():
         llm_call: LLMCall,
         query: str,
         original_query: str,
-        token_compression_method: TokenCompressionMethod = TokenCompressionMethod.AUTO,
+        compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> 'Assistant':
         pass
 

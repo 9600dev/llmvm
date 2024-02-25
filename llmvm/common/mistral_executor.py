@@ -77,7 +77,6 @@ class MistralExecutor(Executor):
     def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
-        extra_str: str = '',
         model: Optional[str] = None,
     ) -> int:
         model_str = model if model else self.default_model
@@ -106,7 +105,6 @@ class MistralExecutor(Executor):
 
         if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
             dict_messages = [Message.to_dict(m) for m in messages]  # type: ignore
-            dict_messages.append(Message.to_dict(User(Content(extra_str))))
             return num_tokens_from_messages(dict_messages, model=model_str)
         elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
             return num_tokens_from_messages(messages, model=model_str)

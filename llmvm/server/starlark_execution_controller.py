@@ -528,7 +528,7 @@ class StarlarkExecutionController(Controller):
         llm_response = await self.aexecute_llm_call(
             llm_call=LLMCall(
                 user_message=tools_message,
-                context_messages=llm_call.context_messages + [llm_call.user_message],
+                context_messages=llm_call.context_messages,  # + [llm_call.user_message],
                 executor=llm_call.executor,
                 model=llm_call.model,
                 temperature=llm_call.temperature,

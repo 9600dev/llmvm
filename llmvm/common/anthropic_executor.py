@@ -1,11 +1,15 @@
 import asyncio
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+import base64
+import os
+from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
 
+from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
-                                  Message, System, TokenStopNode, User,
+                                  FileContent, ImageContent, Message,
+                                  PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
 from llmvm.common.perf import (TokenPerf, TokenPerfWrapper,
                                TokenPerfWrapperAnthropic)
@@ -28,6 +32,59 @@ class AnthropicExecutor(Executor):
         self.default_model = default_model
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
         self.beta = beta
+
+    def messages_trace(self, executor_name: str, message: List[Dict[str, str]]):
+        if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
+            with open(os.path.expanduser(Container.get_config_variable('LLMVM_EXECUTOR_TRACE')), 'a+') as f:
+                for m in message:
+                    f.write(f"{m['role'].capitalize()}: {m['content']}\n\n")
+
+    def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
+        def wrap_message(index: int, content: Content) -> str:
+            if isinstance(content, FileContent):
+                return f"<message number={index}><file url={content.url}>{content.get_content()}</file></message>"
+            elif isinstance(content, PdfContent):
+                return f"<message number={index}><pdf url={content.url}>{content.get_content()}</pdf></message>"
+            else:
+                return f"<message index={index}>{content.get_content()}</message>"
+
+        wrapped = []
+
+        # grab the last system message
+        system_messages = [m for m in messages if m.role() == 'system']
+        if len(system_messages) > 1:
+            logging.debug('More than one system message in the message list. Using the last one.')
+
+        system_message = ''
+        if len(system_messages) > 0:
+            system_message = system_messages[-1]
+            wrapped.append({'role': 'system', 'content': system_message.message.get_content()})
+
+        messages = [m for m in messages if m.role() != 'system']
+
+        counter = 1
+        for i in range(len(messages)):
+            if isinstance(messages[i], User) and isinstance(messages[i].message, ImageContent):
+                wrapped.append(Message.to_dict(message=messages[i], server_serialization=False))
+            elif isinstance(messages[i], User) and i < len(messages) - 1:  # is not last message, context messages
+                wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
+                counter += 1
+            elif isinstance(messages[i], User) and i == len(messages) - 1:  # is the last message
+                wrapped.append({'role': 'user', 'content': messages[i].message.get_content()})
+            else:
+                wrapped.append({'role': messages[i].role(), 'content': messages[i].message.get_content()})
+
+        messages_list = []
+
+        for i in range(len(wrapped)):
+            if i > 0 and wrapped[i]['role'] == wrapped[i - 1]['role']:
+                if wrapped[i]['role'] == 'user':
+                    messages_list.append({'role': 'assistant', 'content': 'Thanks. I am ready for your next message.'})
+                elif wrapped[i]['role'] == 'assistant':
+                    messages_list.append({'role': 'user', 'content': 'Thanks. I am ready for your next message.'})
+            messages_list.append(wrapped[i])
+
+        return messages_list
 
     def user_token(self):
         if self.beta:
@@ -85,7 +142,6 @@ class AnthropicExecutor(Executor):
     def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
-        extra_str: str = '',
         model: Optional[str] = None,
     ) -> int:
         model_str = model if model else self.default_model
@@ -119,13 +175,12 @@ class AnthropicExecutor(Executor):
             return num_tokens
 
         if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
-            dict_messages = [Message.to_dict(m) for m in messages]  # type: ignore
-            dict_messages.append(Message.to_dict(User(Content(extra_str))))
+            dict_messages = self.wrap_messages(cast(List[Message], messages))
             return num_tokens_from_messages(dict_messages, model=model_str)
         elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
             return num_tokens_from_messages(messages, model=model_str)
         elif isinstance(messages, str):
-            return num_tokens_from_messages([Message.to_dict(User(Content(messages)))], model=model_str)
+            return num_tokens_from_messages(self.wrap_messages([User(Content(messages))]), model=model_str)
         else:
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
@@ -189,6 +244,8 @@ class AnthropicExecutor(Executor):
                     messages_list.append({'role': 'user', 'content': 'Thanks. I am ready for your next message.'})
             messages_list.append(messages[i])
 
+        self.messages_trace(self.name(), messages_list)
+
         token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
@@ -235,11 +292,7 @@ class AnthropicExecutor(Executor):
             system_message = System(Content('You are a helpful assistant.'))
 
         # fresh message list
-        messages_list: List[Dict[str, str]] = []
-
-        messages_list.append(Message.to_dict(system_message))
-        for message in [m for m in messages if m.role() != 'system']:
-            messages_list.append(Message.to_dict(message))
+        messages_list: List[Dict[str, str]] = self.wrap_messages(messages)
 
         stream = self.aexecute_direct(
             messages_list,

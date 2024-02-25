@@ -383,7 +383,7 @@ class Searcher():
                 ),
                 query=self.query,
                 original_query=self.original_query,
-                token_compression_method=TokenCompressionMethod.SUMMARY,
+                compression=TokenCompressionMethod.SUMMARY,
             )
 
             query_result, location = eval(str(location.message))
@@ -405,7 +405,7 @@ class Searcher():
                 'snippet': result['snippet'] if 'snippet' in result else '',
                 'link': result['link']
             }
-            for result in search_results
+            for result in search_results if 'title' in result
         }
 
         result_rank = self.starlark_runtime.controller.execute_llm_call(
@@ -432,7 +432,7 @@ class Searcher():
             ),
             query=self.query,
             original_query=self.original_query,
-            token_compression_method=TokenCompressionMethod.SUMMARY,
+            compression=TokenCompressionMethod.SUMMARY,
         )
 
         # double shot try

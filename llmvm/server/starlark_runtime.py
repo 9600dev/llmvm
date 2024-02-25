@@ -612,11 +612,11 @@ class StarlarkRuntime:
         logging.debug(f'answer({str(expr)[:20]}')
         # if we have a list of answers, maybe just return them.
         if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
-            answer = Answer(
-                conversation=self.messages_list,
-                result='\n\n'.join([str(self.statement_to_message(assistant).message) for assistant in expr])
-            )
-            return answer
+            # collapse the assistant answers and continue
+            last = expr[-1]
+            for e in expr[0:-1]:
+                last.message = Content(f'{last.message}\n\n{e.message}')
+            expr = last
 
         snippet = str(expr).replace('\n', ' ')[:150]
         write_client_stream(Content(f'I think I have an answer, but I am double checking it: answer("{snippet} ...")\n'))
