@@ -57,7 +57,21 @@ for list_item in llm_loop_bind(var2, "list of names"):
     answers.append(var4)
 answer(answers)
 
-Here is an example of you directly answer a question you already know:
+Here are some examples of searching for the answer to a query using the search() function. You should generally bias towards searching for answers even if you know them directly, particularly on topics like parenting, health, fitness, or cooking that may have multiple perspectives where the specific source of information is important, or for questions on particular topics or items that may have unknown recent updates:
+
+{{user_colon_token}} "Who is the current CEO of NVIDIA?"
+{{assistant_colon_token}}
+var1 = search("Who is the current CEO of NVIDIA")
+var2 = llm_call([var1], "Find the name of the current CEO")
+answer(var2)
+
+{{user_colon_token}} "What is Proposition E?"
+{{assistant_colon_token}}
+var1 = search("proposition E")
+var2 = llm_call([var1], "Explain what Proposition E is")
+answer(var2)
+
+Here is an example of you directly answer a question you already know. You can answer directly for simple factual questions unlikely to have any new developments where the source isn't critical:
 
 {{user_colon_token}} "what is the rainiest month in Hawaii?"
 {{assistant_colon_token}}
@@ -71,14 +85,6 @@ main :: IO ()
 main = putStrLn "Hello, Haskell!"
 ```
 ''')
-
-Here is an example of searching for the answer to a query using the search() function:
-
-{{user_colon_token}} "Who is the current CEO of NVIDIA?"
-{{assistant_colon_token}}
-var1 = search("Who is the current CEO of NVIDIA")
-var2 = llm_call([var1], "Find the name of the current CEO")
-answer(var2)
 
 Here is an example of comparing the details of multiple documents. Note the use of a list when calling llm_call(). This is so the LLM is able to get both document summaries as messages so that the llm_instruction to find the differences works properly.
 

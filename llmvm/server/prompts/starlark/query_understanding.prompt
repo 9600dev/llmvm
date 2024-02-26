@@ -10,7 +10,7 @@ The "direct" category labels user queries that you are able to respond to and an
 
 "tool":
 
-The "tool" category classifies user queries as requiring the use of helper functions to complete the task or tasks in the query. {{user_token}} queries that require up to date information or data should use helper functions and be classified as "tool". Words in the query like "current", "today", "recent" and so on should generally be categorized as "tool". Here is the list of helper function definitions that are available as tools. You can use this list to help classify a query as "tool".
+The "tool" category classifies user queries as requiring the use of helper functions to complete the task or tasks in the query. {{user_token}} queries that require up to date information or data should use helper functions and be classified as "tool". Words in the query like "current", "today", "recent" and so on should generally be categorized as "tool". References to specific items or events that may potentially have recent updates should generally be classified as "tool". Questions around topics like parenting, health, or cooking that have many differing opinions and perspectives should be classified as "tool". Here is the list of helper function definitions that are available as tools. You can use this list to help classify a query as "tool".
 
 Helper functions: 
 
@@ -28,6 +28,9 @@ Here is a list of examples to help you complete the classification. It also demo
 
 {{assistant_colon_token}} direct, 0.85
 {{user_colon_token}} "What month has the largest rainfall in Hawaii?"
+
+{{assistant_colon_token}} tool, 0.85
+{{user_colon_token}} "What is proposition E?"
 
 {{user_colon_token}} Get the name of the current CEO of AMD
 {{assistant_colon_token}} tool, 1.0 

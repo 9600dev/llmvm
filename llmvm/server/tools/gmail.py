@@ -163,6 +163,7 @@ class GmailSearcher():
         service = GmailSearcher.get_gmail_service()
         messages = GmailSearcher.list_messages(service, 'me')
 
+        messages = messages[:10]
         emails = []
         for message in messages:
             details = GmailSearcher.get_message_details(service, 'me', message['id'])

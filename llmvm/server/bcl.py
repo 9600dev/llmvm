@@ -226,6 +226,12 @@ class Searcher():
         else:
             return SerpAPISearcher().search_news(query)
 
+    def news_headlines_hook(self, query: str):
+        if not Container().get_config_variable('SERPAPI_API_KEY'):
+            return self.search_hook('https://news.google.com/search?q=', query)
+        else:
+            return SerpAPISearcher().news_headlines(query)
+
     def search_research_hook(self, query: str):
         if not Container().get_config_variable('SERPAPI_API_KEY'):
             return self.search_hook('https://news.google.com/search?q=', query)
@@ -319,6 +325,17 @@ class Searcher():
                 return_str += f"Body: \"{email['body']}\"\n"
                 return_str += '\n\n*********\n\n'
             return return_str
+        
+        def news_dicts_to_text(results: List[Dict[str, str]]) -> str:
+            return_str = ''
+            for result in results:
+                return_str += f"position: {result['position']}.\n"
+                return_str += f"title: {result['title']}.\n"
+                return_str += f"source: {result['source']['name']}.\n"
+                return_str += f"link: {result['link']}.\n"
+                return_str += '\n\n*********\n\n'
+            print(f'news_dicts_to_text: {return_str}')
+            return return_str
 
         def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> str:
             if not results:
@@ -333,13 +350,14 @@ class Searcher():
 
         engines = {
             'Google Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
-            'Google News': {'searcher': self.search_news_hook, 'parser': url_to_text, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
+            # 'Google News Search': {'searcher': self.search_news_hook, 'parser': url_to_text, 'description': 'Google News Search is a news search engine used to search for news about specific topics, people, companies and entities.'},  # noqa:E501
+            'News Headlines': {'searcher': self.news_headlines_hook, 'parser': url_to_text, 'description': 'News Headlines is a news search engine used to find the latest news headlines. Rank this engine first if the search query specifically asks for "headlines"'},  # noqa:E501
             'Google Patent Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
             'Google Scholar Search': {'searcher': self.search_research_hook, 'parser': url_to_text, 'description': 'Google Scholar Search is a search engine to help find and summarize academic papers, studies, and research about particular topics'},  # noqa:E501
-            'Gmail Newsletter Search': {'searcher': self.search_newsletter_hook, 'parser': emails_to_text, 'description': 'GMail Newsletter Search is a search engine to help find and summarize newsletters delivered to the users email'},  # noqa:E501
+            'Gmail Newsletter Search': {'searcher': self.search_newsletter_hook, 'parser': emails_to_text, 'description': 'GMail Newsletter Search is a search engine to help find and summarize newsletters delivered to the users email. You should use this if the user asks to summarize their newsletters'},  # noqa:E501
         }  # noqa:E501
 
         # classify the search engine
@@ -404,7 +422,7 @@ class Searcher():
                 ),
                 query=self.query,
                 original_query=self.original_query,
-                token_compression_method=TokenCompressionMethod.SUMMARY,
+                compression=TokenCompressionMethod.SUMMARY,
             )
 
             query_result, location = eval(str(location.message))
@@ -418,6 +436,10 @@ class Searcher():
         if 'Gmail' in engine:
             result = GmailSearcher.search_newsletters(queries[0])
             return emails_to_text(result)
+
+        if 'Headlines' in engine:
+            result = SerpAPISearcher().news_headlines(queries[0])
+            return news_dicts_to_text(result)
 
         for query in queries:
             search_results.extend(list(searcher(query))[:10])
@@ -457,7 +479,7 @@ class Searcher():
             ),
             query=self.query,
             original_query=self.original_query,
-            token_compression_method=TokenCompressionMethod.SUMMARY,
+            compression=TokenCompressionMethod.SUMMARY,
         )
 
         # double shot try

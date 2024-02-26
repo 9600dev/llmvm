@@ -205,6 +205,42 @@ class SerpAPISearcher(Searcher):
         for result in organic_results:
             yield result
 
+    def news_headlines(
+        self,
+        query: str,
+    ) -> Generator[Dict, None, None]:
+        logging.debug('SerpAPISearcher.news_headlines() query={}'.format(query))
+        print(f'SerpAPISearcher.news_headlines() query={format(query)}')
+
+        params = {
+            'engine': 'google_news',
+        }
+
+        search_params = {
+            'gl': self.country_code,
+        }
+
+        params = {**params, **search_params}  # type: ignore
+
+        searches = [
+            'site:steelersdepot.com',
+            'site:economist.com',
+            'Technology',
+        ]
+
+        results = []
+        for search in searches:
+            yesterday = (dt.datetime.now() - dt.timedelta(days=1)).strftime('%Y-%m-%d')
+            params['q'] = f'{search} after:{yesterday}'
+            search_results = self.client.search(params)
+            
+            results.extend(search_results.get('news_results', [])[:3])
+
+        print(f'num results: {len(results)}')
+        print(f'results: {results}')
+        for result in results:
+            yield result
+
     def search_news(
         self,
         query: str,
