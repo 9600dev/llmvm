@@ -48,6 +48,8 @@ class MistralExecutor(Executor):
                 return 32000
             case 'mistral-medium':
                 return 32000
+            case 'mistral-large':
+                return 32000
             case _:
                 logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_token_len}')
                 return self.default_max_token_len

@@ -12,12 +12,12 @@ from llmvm.common.openai_executor import OpenAIExecutor
 
 def get_tokens(num_tokens: int, executor_name: str = 'openai'):
     # start with roughly 1.3x the number of tokens as words
-    num_words = num_tokens * 1.3
+    num_words = num_tokens * 0.80
     words = []
 
     with open('../docs/war_and_peace.txt', 'r') as f:
         word_str = f.read().split(' ')
-        word_str[:int(num_words)]
+        words = word_str[0:int(num_words)]
 
     executor = OpenAIExecutor('', 'gpt-4')
     if executor_name == 'openai':
@@ -26,23 +26,21 @@ def get_tokens(num_tokens: int, executor_name: str = 'openai'):
         executor = AnthropicExecutor('', 'claude-2.1')
 
     total_tokens = 0
-    min_words = 0
-    max_words = len(word_str)
 
     while True:
         total_tokens = executor.count_tokens([User(Content(' '.join(words)))])
 
-        if num_tokens * 0.96 <= total_tokens <= num_tokens * 1.04:
+        if num_tokens * 0.99 <= total_tokens <= num_tokens * 1.00:
             break  # Desired range reached
 
-        if total_tokens < num_tokens * 0.96:
+        if total_tokens < num_tokens:
             # Add words
-            additional_words = 4
+            additional_words = (num_tokens - total_tokens) // 2
             words.extend(word_str[:additional_words])
             word_str = word_str[additional_words:]
         else:
             # Remove words
-            words_to_remove = 4
+            words_to_remove = (total_tokens - num_tokens) // 2
             words = words[:-words_to_remove]
 
     return words

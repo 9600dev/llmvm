@@ -57,7 +57,7 @@ class TokenPerf:
 
         if self.enabled:
             total_time = self._stop - self._start
-            prompt_time = self._ticks[0] - self._start
+            prompt_time = self._ticks[0] - self._start if self._ticks else 0
             sample_time = total_time - prompt_time
             try:
                 s_tok_sec = len(self._ticks) / total_time
