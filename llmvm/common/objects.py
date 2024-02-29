@@ -868,30 +868,6 @@ class Answer(Statement):
         return 'answer'
 
 
-class UncertainOrError(Statement):
-    def __init__(
-        self,
-        error_message: Content,
-        supporting_conversation: List[AstNode] = [],
-        supporting_result: object = None,
-        supporting_error: object = None,
-    ):
-        super().__init__()
-        self.error_message = error_message,
-        self.supporting_conversation = supporting_conversation
-        self._result = supporting_result
-        self.supporting_error = supporting_error
-
-    def __str__(self):
-        ret_result = f'UncertainOrError({str(self.error_message)} {self.supporting_error}, {self.result})\n'
-        ret_result += '  Conversation:\n'
-        ret_result += '\n  '.join([str(n) for n in self.supporting_conversation])
-        return ret_result
-
-    def token(self):
-        return 'uncertain_or_error'
-
-
 class DownloadItem(BaseModel):
     id: int
     url: str
@@ -920,14 +896,3 @@ class SessionThread(BaseModel):
     temperature: float = 0.0
     cookies: List[Dict[str, Any]] = []
     messages: List[MessageModel] = []
-
-
-# class Response(BaseModel):
-#     def __init__(
-#         self,
-#         thread: Optional[SessionThread] = None,
-#         stream: Optional[StreamingResponse] = None,
-#     ):
-#         super().__init__()
-#         self.thread = thread
-#         self.response = stream

@@ -284,8 +284,13 @@ class Searcher():
             queries.insert(0, self.query)
             queries = queries[:self.query_expansion]
 
-        def url_to_text(result: Dict[Any, Any]) -> str:
-            return WebHelpers.get_url(result['link'])
+        def url_to_text(result: Dict[str, Any]) -> str:
+            if 'link' in result and isinstance(result['link'], Dict) and 'link' in result['link']:
+                return str(WebHelpers.get_url(result['link']['link']))
+            elif 'link' in result:
+                return str(WebHelpers.get_url(result['link']))  # type: ignore
+            else:
+                return ''
 
         def yelp_to_text(reviews: Dict[Any, Any]) -> str:
             return_str = f"{reviews['title']} in {reviews['neighborhood']}."
@@ -717,7 +722,6 @@ class FunctionBindable():
             # execute the function
             # todo: figure out what to do when you get back None, or ''
             starlark_code = bindable
-            globals_dict = self.scope_dict.copy()
             globals_result = {}
 
             try:
@@ -744,7 +748,7 @@ class FunctionBindable():
                     query=self.original_query,
                     starlark_code=starlark_code,
                     error=str(ex),
-                    globals_dictionary=globals_dict,
+                    locals_dictionary=self.scope_dict,
                 )
 
         # we should probably return uncertain_or_error here.

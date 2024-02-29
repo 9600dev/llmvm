@@ -166,7 +166,6 @@ class StarlarkRuntime:
             'function_meta': 'functionmeta_result.prompt',
             'llm_call': 'llm_call_result.prompt',
             'str': 'str_result.prompt',
-            'uncertain_or_error': 'uncertain_or_error_result.prompt',
             'foreach': 'foreach_result.prompt',
             'list': 'list_result.prompt',
         }
@@ -273,6 +272,7 @@ class StarlarkRuntime:
                         'task': query,
                         'code': starlark_code,
                         'error': error,
+                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
                         'dictionary': dictionary,
                     },
                     user_token=self.controller.get_executor().user_token(),
@@ -348,6 +348,7 @@ class StarlarkRuntime:
                         'task': query,
                         'code': starlark_code,
                         'error': error,
+                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
                         'dictionary': dictionary,
                     },
                     user_token=self.controller.get_executor().user_token(),
@@ -383,10 +384,6 @@ class StarlarkRuntime:
             except Exception as ex:
                 logging.debug('Second exception rewriting starlark code: {}'.format(ex))
                 return ''
-
-    def uncertain_or_error(self):
-        logging.debug('uncertain_or_error()')
-        pass
 
     def pandas_bind(self, expr) -> PandasMeta:
         import pandas as pd

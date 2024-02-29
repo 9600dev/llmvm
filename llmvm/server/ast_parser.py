@@ -1,7 +1,7 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple, cast
 
 from llmvm.common.helpers import Helpers
-from llmvm.common.objects import Content, FunctionCall, UncertainOrError
+from llmvm.common.objects import Content, FunctionCall
 
 # <program> ::= { <statement> }
 # <statement> ::= <llm_call> | <foreach> | <function_call> | <answer> | <set> | <get> | <uncertain_or_error>
@@ -29,7 +29,7 @@ class Parser():
         self.remainder: str = ''
         self.index = 0
         self.agents: List[Callable] = []
-        self.errors: List[UncertainOrError] = []
+        self.errors = []
 
     def __parse_string(
         self,
