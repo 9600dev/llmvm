@@ -597,8 +597,8 @@ if __name__ == '__main__':
     # uvicorn server:app --loop asyncio --workers 4 --log-level debug --host 0.0.0.0 --port 8011
     config = uvicorn.Config(
         app='llmvm.server.server:app',
-        host=Container().get('server_host'),
-        port=int(Container().get('server_port')),
+        host=Container().get_config_variable('server_host', 'LLMVM_SERVER_HOST'),
+        port=int(Container().get_config_variable('server_port', 'LLMVM_SERVER_PORT')),
         reload=False,
         loop='asyncio',
         log_level='debug',
