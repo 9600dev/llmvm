@@ -372,7 +372,7 @@ async def stream_response(response, print_lambda: Callable):
             return False
 
     response_objects = []
-    async with async_timeout.timeout(300):
+    async with async_timeout.timeout(400):
         try:
             buffer = ''
             async for raw_bytes in response.aiter_raw():
@@ -419,7 +419,7 @@ async def set_thread(
     api_endpoint: str,
     thread: SessionThread,
 ) -> SessionThread:
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    async with httpx.AsyncClient(timeout=400.0) as client:
         response = await client.post(
             f'{api_endpoint}/v1/chat/set_thread',
             json=thread.model_dump()
@@ -538,7 +538,7 @@ async def execute_llm_call(
         else:
             endpoint = 'code_completions'
 
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=400.0) as client:
             async with client.stream(
                 'POST',
                 f'{api_endpoint}/v1/chat/{endpoint}',
@@ -1429,7 +1429,7 @@ def cookies(
         cookies = Helpers.read_netscape_cookies(result.stdout)
 
     async def cookies_helper():
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=400.0) as client:
             response = await client.post(f'{endpoint}/v1/chat/cookies', json={'id': id, 'cookies': cookies})  # type: ignore
             session_thread = SessionThread.model_validate(response.json())
         return session_thread
@@ -1524,7 +1524,7 @@ def url(
     global thread_id
 
     async def download_helper():
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=400.0) as client:
             async with client.stream('POST', f'{endpoint}/download', json=item.model_dump()) as response:
                 objs = await stream_response(response, StreamPrinter('').write)
         await response.aclose()
@@ -1548,7 +1548,7 @@ def search(
 ):
     console = Console()
 
-    response: httpx.Response = httpx.get(f'{endpoint}/search/{query}', timeout=300.0)
+    response: httpx.Response = httpx.get(f'{endpoint}/search/{query}', timeout=400.0)
     if response.status_code == 200:
         results = response.json()
 
@@ -1593,7 +1593,7 @@ def ingest(
     rich.print(f'Uploading {len(files)} files to {endpoint}/ingest')
 
     async def upload_helper():
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=400.0) as client:
             responses = []
             for filename_str in files:
                 with open(filename_str, 'rb') as f:

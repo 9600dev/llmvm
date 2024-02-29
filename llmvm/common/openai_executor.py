@@ -48,6 +48,8 @@ class OpenAIExecutor(Executor):
         match model:
             case 'gpt-4-vision-preview':
                 return 128000
+            case 'gpt-4-turbo-preview':
+                return 128000
             case 'gpt-4-0125-preview':
                 return 128000
             case 'gpt-4-1106-preview':
