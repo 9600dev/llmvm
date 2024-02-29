@@ -121,7 +121,7 @@ class GeminiExecutor(Executor):
             'parts': [message['content']],
         }
 
-    async def aexecute_direct(
+    async def __aexecute_direct(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
@@ -139,7 +139,7 @@ class GeminiExecutor(Executor):
                                     message_tokens + max_completion_tokens,
                                     self.max_tokens(model)))
 
-        token_trace = TokenPerf('aexecute_direct', 'gemini', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('__aexecute_direct', 'gemini', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
         gemini_messages = [self.__dict_message_to_gemini_message(m) for m in messages]
@@ -183,7 +183,7 @@ class GeminiExecutor(Executor):
         for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
-        stream = self.aexecute_direct(
+        stream = self.__aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,

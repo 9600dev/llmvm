@@ -473,8 +473,6 @@ class Message(AstNode):
         url = message['url'] if 'url' in message else ''
         content_type = message['content_type'] if 'content_type' in message else ''
 
-        content = Content(message_content)
-
         # when converting from MessageModel, there can be an embedded image
         # in the content parameter that needs to be converted back to bytes
         if (
@@ -487,6 +485,15 @@ class Message(AstNode):
         ):
             byte_content = base64.b64decode(message_content[0]['image_url']['url'].split(',')[1])
             content = ImageContent(byte_content, message_content[0]['image_url']['url'])
+
+        elif (
+            isinstance(message_content, list)
+            and len(message_content) > 0
+            and 'type' in message_content[0]
+            and message_content[0]['type'] == 'image'
+        ):
+            byte_content = base64.b64decode(message_content[0]['source']['data'])
+            content = ImageContent(byte_content, message_content[0]['source']['data'])
 
         elif content_type == 'pdf':
             if url and not message_content:
@@ -502,6 +509,8 @@ class Message(AstNode):
             # else, it's been transferred from the client to server via b64
             else:
                 content = FileContent(FileContent.decode(str(message_content)), url)
+        else:
+            content = Content(message_content, content_type, url)
 
         if role == 'user':
             return User(content)

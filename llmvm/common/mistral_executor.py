@@ -18,7 +18,7 @@ class MistralExecutor(Executor):
         self,
         api_key: str = cast(str, os.environ.get('MISTRAL_API_KEY')),
         default_model: str = 'mistral-medium',
-        api_endpoint: str = '',
+        api_endpoint: str = 'https://api.mistral.ai',
         default_max_token_len: int = 32000,
         default_max_completion_len: int = 4096,
     ):
@@ -128,7 +128,7 @@ class MistralExecutor(Executor):
     ) -> ChatMessage:
         return ChatMessage(role=message['role'], content=message['content'])
 
-    async def aexecute_direct(
+    async def __aexecute_direct(
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
@@ -146,7 +146,7 @@ class MistralExecutor(Executor):
                                     message_tokens + max_completion_tokens,
                                     self.max_tokens(model)))
 
-        token_trace = TokenPerf('aexecute_direct', 'mistral', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('__aexecute_direct', 'mistral', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
         response = self.aclient.chat_stream(
@@ -179,7 +179,7 @@ class MistralExecutor(Executor):
         for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
-        stream = self.aexecute_direct(
+        stream = self.__aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,

@@ -342,14 +342,6 @@ def get_path_as_messages(
     return files
 
 
-async def stream_gpt_response(response, print_lambda: Callable):
-    async with async_timeout.timeout(300):
-        async with response as stream_async:
-            async for text in stream_async:
-                print_lambda(text)
-            print_lambda('\n')
-
-
 async def stream_response(response, print_lambda: Callable):
     def strip_string(str):
         if str.startswith('"'):
@@ -460,23 +452,33 @@ async def __execute_llm_call_direct(
         message_response += s
         printer.write(s)  # type: ignore
 
-    messages_list = [Message.to_dict(m, server_serialization=False) for m in list(context_messages) + [message]]
+    async def __stream_handler(node: AstNode):
+        if isinstance(node, Content):
+            chained_printer(str(node.get_content()))
+        elif isinstance(node, TokenStopNode):
+            chained_printer('\n')
+        else:
+            logging.error(f'Unknown node type: {node}')
+
     executor: Optional[Executor] = None
 
     if executor_name == 'openai':
         executor = OpenAIExecutor(
             api_key=api_key,
             default_model=model_name,
+            api_endpoint=Container.get_config_variable('LLMVM_API_BASE', default='https://api.openai.com/v1')
         )
     elif executor_name == 'anthropic':
         executor = AnthropicExecutor(
             api_key=api_key,
             default_model=model_name,
+            api_endpoint=Container.get_config_variable('LLMVM_API_BASE', default='https://api.anthropic.com')
         )
     elif executor_name == 'mistral':
         executor = MistralExecutor(
             api_key=api_key,
             default_model=model_name,
+            api_endpoint=Container.get_config_variable('LLMVM_API_BASE', default='https://api.mistral.ai')
         )
     elif executor_name == 'gemini':
         executor = GeminiExecutor(
@@ -486,12 +488,14 @@ async def __execute_llm_call_direct(
     else:
         raise ValueError('No executor specified.')
 
-    response: Dict = await executor.aexecute_direct(messages_list)  # type: ignore
-    asyncio.run(stream_gpt_response(response, chained_printer))
+    messages = list(context_messages) + [message]
+    assistant = await executor.aexecute(
+        messages=messages,
+        stream_handler=__stream_handler,
+    )
+    messages.append(assistant)
 
-    response_messages = list([MessageModel.from_message(m) for m in context_messages])
-    response_messages.append(MessageModel.from_message(message))
-    response_messages.append(MessageModel(role='assistant', content=message_response))
+    response_messages = list([MessageModel.from_message(m) for m in messages])
     result = SessionThread(id=-1, messages=response_messages)
     return result
 

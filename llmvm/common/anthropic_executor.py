@@ -38,6 +38,49 @@ class AnthropicExecutor(Executor):
                 for m in message:
                     f.write(f"{m['role'].capitalize()}: {m['content']}\n\n")
 
+    def from_dict(self, message: Dict[str, Any]) -> 'Message':
+        role = message['role']
+        message_content = message['content']
+
+        url = message['url'] if 'url' in message else ''
+        content_type = message['content_type'] if 'content_type' in message else ''
+
+        # when converting from MessageModel, there can be an embedded image
+        # in the content parameter that needs to be converted back to bytes
+        if (
+            isinstance(message_content, list)
+            and len(message_content) > 0
+            and 'type' in message_content[0]
+            and message_content[0]['type'] == 'image'
+        ):
+            byte_content = base64.b64decode(message_content[0]['source']['data'])
+            content = ImageContent(byte_content, message_content[0]['source']['data'])
+
+        elif content_type == 'pdf':
+            if url and not message_content:
+                with open(url, 'rb') as f:
+                    content = PdfContent(f.read(), url)
+            else:
+                content = PdfContent(FileContent.decode(str(message_content)), url)
+        elif content_type == 'file':
+            # if there's a url here, but no content, then it's a file local to the server
+            if url and not message_content:
+                with open(url, 'r') as f:
+                    content = FileContent(f.read().encode('utf-8'), url)
+            # else, it's been transferred from the client to server via b64
+            else:
+                content = FileContent(FileContent.decode(str(message_content)), url)
+        else:
+            content = Content(message_content)
+
+        if role == 'user':
+            return User(content)
+        elif role == 'system':
+            return System(content)
+        elif role == 'assistant':
+            return Assistant(content)
+        raise ValueError(f'role not found or not supported: {message}')
+
     def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
         def wrap_message(index: int, content: Content) -> str:
             if isinstance(content, FileContent):
@@ -64,7 +107,19 @@ class AnthropicExecutor(Executor):
         counter = 1
         for i in range(len(messages)):
             if isinstance(messages[i], User) and isinstance(messages[i].message, ImageContent):
-                wrapped.append(Message.to_dict(message=messages[i], server_serialization=False))
+                wrapped.append({
+                    'role': 'user',
+                    'content': [
+                        {
+                            'type': 'image',
+                            'source': {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": base64.b64encode(messages[i].message.sequence).decode('utf-8')  # type: ignore
+                            }
+                        }
+                    ]
+                })
             elif isinstance(messages[i], User) and i < len(messages) - 1:  # is not last message, context messages
                 wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
                 counter += 1
@@ -110,6 +165,8 @@ class AnthropicExecutor(Executor):
                 return 200000
             case 'claude-2.0':
                 return 200000
+            case str(model) if model.startswith('claude-3'):
+                return 200000
             case 'claude-instant-1.2':
                 return 100000
             case _:
@@ -145,8 +202,8 @@ class AnthropicExecutor(Executor):
     ) -> int:
         model_str = model if model else self.default_model
 
-        async def tokenizer_len(text: str) -> int:
-            return await self.client.count_tokens(text)
+        async def tokenizer_len(content: str | Dict) -> int:
+            return await self.client.count_tokens(str(content))
 
         def num_tokens_from_messages(messages, model: str):
             # this is inexact, but it's a reasonable approximation
@@ -157,6 +214,9 @@ class AnthropicExecutor(Executor):
                 'claude-instant-1.2',
                 'claude-instant-1',
             }:
+                tokens_per_message = 3
+                tokens_per_name = 1
+            elif model.startswith('claude-3'):
                 tokens_per_message = 3
                 tokens_per_name = 1
             else:
@@ -197,14 +257,14 @@ class AnthropicExecutor(Executor):
         prompt += f"""{AI_PROMPT}"""
         return prompt
 
-    async def aexecute_direct(
+    async def __aexecute_direct(
         self,
         messages: List[Dict[str, Any]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
         max_completion_tokens: int = 4000,
         temperature: float = 0.2,
-    ):
+    ) -> TokenStreamManager:
         model = model if model else self.default_model
 
         if functions:
@@ -245,12 +305,12 @@ class AnthropicExecutor(Executor):
 
         self.messages_trace(self.name(), messages_list)
 
-        token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
         if self.beta:
             # AsyncStreamManager[AsyncMessageStream]
-            stream = self.client.beta.messages.stream(
+            stream = self.client.messages.stream(
                 max_tokens=max_completion_tokens,
                 messages=messages_list,  # type: ignore
                 model=model,
@@ -293,7 +353,7 @@ class AnthropicExecutor(Executor):
         # fresh message list
         messages_list: List[Dict[str, str]] = self.wrap_messages(messages)
 
-        stream = self.aexecute_direct(
+        stream = self.__aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model,
@@ -318,7 +378,7 @@ class AnthropicExecutor(Executor):
             await stream_handler(TokenStopNode())
 
         messages_list.append({'role': 'assistant', 'content': text_response})
-        conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
+        conversation: List[Message] = [self.from_dict(m) for m in messages_list]
 
         messages_trace(messages_list)
 

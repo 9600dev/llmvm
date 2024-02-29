@@ -175,7 +175,7 @@ class OpenAIExecutor(Executor):
     def name(self) -> str:
         return 'openai'
 
-    async def aexecute_direct(
+    async def __aexecute_direct(
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
@@ -197,7 +197,7 @@ class OpenAIExecutor(Executor):
         messages_cast = cast(List[ChatCompletionMessageParam], messages)
         functions_cast = cast(List[Function], functions)
 
-        token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
         if functions:
@@ -250,7 +250,7 @@ class OpenAIExecutor(Executor):
         for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
-        stream = self.aexecute_direct(
+        stream = self.__aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,
