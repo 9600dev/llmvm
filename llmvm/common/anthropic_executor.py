@@ -6,13 +6,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
 
 from llmvm.common.container import Container
-from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
                                   FileContent, ImageContent, Message,
                                   PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
-from llmvm.common.perf import (TokenPerf, TokenPerfWrapper,
-                               TokenPerfWrapperAnthropic)
+from llmvm.common.perf import (TokenPerf, TokenStreamManager)
 
 logging = setup_logging()
 
@@ -258,7 +257,7 @@ class AnthropicExecutor(Executor):
                 system=system_message,
                 temperature=temperature,
             )
-            return TokenPerfWrapperAnthropic(stream, token_trace)
+            return TokenStreamManager(stream, token_trace)
         else:
             stream = await self.client.completions.create(
                 max_tokens_to_sample=max_completion_tokens,
@@ -267,7 +266,7 @@ class AnthropicExecutor(Executor):
                 temperature=temperature,
                 prompt=self.__format_prompt(messages_list),
             )
-            return TokenPerfWrapper(stream, token_trace)
+            return TokenStreamManager(stream, token_trace)
 
     async def aexecute(
         self,
@@ -303,13 +302,13 @@ class AnthropicExecutor(Executor):
 
         text_response = ''
 
-        if self.beta:
-            async with await stream as stream_async:  # type: ignore
-                async for text in stream_async.text_stream:  # type: ignore
-                    await stream_handler(Content(text))
-                    text_response += text
-                await stream_handler(TokenStopNode())
+        async with await stream as stream_async:  # type: ignore
+            async for text in stream_async:
+                await stream_handler(Content(text))
+                text_response += text
+            await stream_handler(TokenStopNode())
 
+        if self.beta:
             _ = await stream_async.get_final_message()  # type: ignore
         else:
             async for completion in await stream:  # type: ignore
@@ -320,6 +319,8 @@ class AnthropicExecutor(Executor):
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
+
+        messages_trace(messages_list)
 
         assistant = Assistant(
             message=conversation[-1].message,

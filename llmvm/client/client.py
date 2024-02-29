@@ -24,11 +24,8 @@ import nest_asyncio
 import pyperclip
 import requests
 import rich
-from anthropic.lib.streaming._messages import AsyncMessageStreamManager
-from anthropic.types.completion import Completion
 from click import MissingParameter
 from click_default_group import DefaultGroup
-from google.generativeai.types import AsyncGenerateContentResponse
 from httpx import ConnectError
 from PIL import Image
 from prompt_toolkit import PromptSession
@@ -55,7 +52,7 @@ from llmvm.common.objects import (Assistant, AstNode, Content, DownloadItem,
                                   MessageModel, PdfContent, SessionThread,
                                   StreamNode, System, TokenStopNode, User)
 from llmvm.common.openai_executor import OpenAIExecutor
-from llmvm.common.perf import TokenPerfWrapper, TokenPerfWrapperAnthropic
+from llmvm.common.perf import TokenStreamWrapper, TokenStreamManager
 
 nest_asyncio.apply()
 
@@ -347,33 +344,10 @@ def get_path_as_messages(
 
 async def stream_gpt_response(response, print_lambda: Callable):
     async with async_timeout.timeout(300):
-        # anthropic new messages API
-        if isinstance(response, AsyncMessageStreamManager) or isinstance(response, TokenPerfWrapperAnthropic):
-            async with response as stream_async:
-                async for text in stream_async.text_stream:  # type: ignore
-                    print_lambda(text)
-
-            _ = await stream_async.get_final_message()
+        async with response as stream_async:
+            async for text in stream_async:
+                print_lambda(text)
             print_lambda('\n')
-            return
-        if isinstance(response, TokenPerfWrapper) and isinstance(response.stream, AsyncGenerateContentResponse):
-            async for chunk in response:
-                print_lambda(chunk.text)
-            print_lambda('\n')
-            return
-        # openai
-        try:
-            async for chunk in response:
-                # anthropic completion prior to messages API introduction
-                if isinstance(chunk, Completion):
-                    print_lambda(chunk.completion)
-                else:
-                    if chunk.choices[0].delta.content:
-                        print_lambda(chunk.choices[0].delta.content)
-            print_lambda('\n')
-        except asyncio.TimeoutError as ex:
-            logging.exception(ex)
-            raise ex
 
 
 async def stream_response(response, print_lambda: Callable):

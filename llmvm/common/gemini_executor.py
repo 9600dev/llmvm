@@ -4,10 +4,10 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 import google.generativeai as genai
 
-from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
                                   Message, TokenStopNode, User, awaitable_none)
-from llmvm.common.perf import TokenPerf, TokenPerfWrapper
+from llmvm.common.perf import TokenPerf, TokenStreamManager
 
 logging = setup_logging()
 
@@ -161,10 +161,11 @@ class GeminiExecutor(Executor):
             messages_list.append(gemini_messages[i])
 
         response = await self.aclient.generate_content_async(
-            contents=messages_list,
+            contents=messages_list,  # type: ignore
             stream=True
         )
-        return TokenPerfWrapper(response, token_trace)  # type: ignore
+
+        return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(
         self,
@@ -182,7 +183,7 @@ class GeminiExecutor(Executor):
         for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
-        chat_response = self.aexecute_direct(
+        stream = self.aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,
@@ -191,11 +192,11 @@ class GeminiExecutor(Executor):
 
         text_response = ''
 
-        async for chunk in await chat_response:  # type: ignore
-            s = chunk.text or ''
-            await stream_handler(Content(s))
-            text_response += s
-        await stream_handler(TokenStopNode())
+        async with await stream as stream_async:  # type: ignore
+            async for text in stream_async:  # type: ignore
+                await stream_handler(Content(text))
+                text_response += text
+            await stream_handler(TokenStopNode())
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
@@ -204,6 +205,8 @@ class GeminiExecutor(Executor):
             message=conversation[-1].message,
             messages_context=conversation
         )
+
+        messages_trace(messages_list)
 
         return assistant
 

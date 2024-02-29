@@ -10,11 +10,11 @@ from openai.types.chat import ChatCompletionMessageParam
 from openai.types.chat.completion_create_params import Function
 from PIL import Image
 
-from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
                                   Message, System, TokenStopNode, User,
                                   awaitable_none)
-from llmvm.common.perf import TokenPerf, TokenPerfWrapper
+from llmvm.common.perf import TokenPerf, TokenStreamManager
 
 logging = setup_logging()
 aclient = AsyncOpenAI()
@@ -47,6 +47,8 @@ class OpenAIExecutor(Executor):
         model = model if model else self.default_model
         match model:
             case 'gpt-4-vision-preview':
+                return 128000
+            case 'gpt-4-0125-preview':
                 return 128000
             case 'gpt-4-1106-preview':
                 return 128000
@@ -180,7 +182,7 @@ class OpenAIExecutor(Executor):
         model: Optional[str] = None,
         max_completion_tokens: int = 4096,
         temperature: float = 0.2,
-    ):
+    ) -> TokenStreamManager:
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
@@ -207,7 +209,7 @@ class OpenAIExecutor(Executor):
                 messages=messages_cast,
                 stream=True
             )
-            return TokenPerfWrapper(response, token_trace)
+            return TokenStreamManager(response, token_trace) # type: ignore
         else:
             # for whatever reason, [] functions generates an InvalidRequestError
             response = await aclient.chat.completions.create(
@@ -217,7 +219,7 @@ class OpenAIExecutor(Executor):
                 messages=messages_cast,
                 stream=True
             )
-        return TokenPerfWrapper(response, token_trace)  # type: ignore
+        return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(
         self,
@@ -248,7 +250,7 @@ class OpenAIExecutor(Executor):
         for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
-        chat_response = self.aexecute_direct(
+        stream = self.aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,
@@ -256,11 +258,12 @@ class OpenAIExecutor(Executor):
         )
 
         text_response = ''
-        async for chunk in await chat_response:  # type: ignore
-            s = chunk.choices[0].delta.content or ''
-            await stream_handler(Content(s))
-            text_response += s
-        await stream_handler(TokenStopNode())
+
+        async with await stream as stream_async:  # type: ignore
+            async for text in stream_async:  # type: ignore
+                await stream_handler(Content(text))
+                text_response += text
+            await stream_handler(TokenStopNode())
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
@@ -269,6 +272,8 @@ class OpenAIExecutor(Executor):
             message=conversation[-1].message,
             messages_context=conversation
         )
+
+        messages_trace(messages_list)
 
         return assistant
 

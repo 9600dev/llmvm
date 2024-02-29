@@ -253,7 +253,7 @@ class StarlarkRuntime:
         query: str,
         starlark_code: str,
         error: str,
-        globals_dictionary: Dict[Any, Any],
+        locals_dictionary: Dict[Any, Any],
     ) -> str:
         '''
         This handles the case where an answer() is not correct and we need to
@@ -262,7 +262,7 @@ class StarlarkRuntime:
         '''
         logging.debug('rewrite_answer_error_correction()')
         dictionary = ''
-        for key, value in globals_dictionary.items():
+        for key, value in locals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
 
         assistant = self.controller.execute_llm_call(
@@ -333,11 +333,11 @@ class StarlarkRuntime:
         query: str,
         starlark_code: str,
         error: str,
-        globals_dictionary: Dict[Any, Any],
+        locals_dictionary: Dict[Any, Any],
     ) -> str:
         logging.debug('rewrite_starlark_error_correction()')
         dictionary = ''
-        for key, value in globals_dictionary.items():
+        for key, value in locals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
 
         assistant = self.controller.execute_llm_call(
@@ -377,7 +377,7 @@ class StarlarkRuntime:
                     query=query,
                     starlark_code=str(assistant.message),
                     error=str(ex),
-                    globals_dictionary=globals_dictionary,
+                    locals_dictionary=locals_dictionary,
                 )
                 return str(assistant.message)
             except Exception as ex:
@@ -600,7 +600,7 @@ class StarlarkRuntime:
                 query=llm_instruction,
                 starlark_code=str(assistant.message),
                 error=str(ex),
-                globals_dictionary=self.globals_dict,
+                locals_dictionary=self.locals_dict,
             )
             logging.debug('llm_loop_bind new_starlark_code: {}'.format(new_starlark_code))
             result = cast(list, eval(new_starlark_code))
@@ -724,7 +724,7 @@ class StarlarkRuntime:
                     query=self.original_query,
                     starlark_code=self.original_code,
                     error=str(expr),
-                    globals_dictionary=self.globals_dict,
+                    locals_dictionary=self.locals_dict,
                 )
 
                 if error_correction and 'None' not in error_correction:
@@ -742,7 +742,7 @@ class StarlarkRuntime:
         context_messages: List[Message] = [
             self.statement_to_message(
                 context=value,
-            ) for key, value in self.globals_dict.items() if key.startswith('var')
+            ) for key, value in self.locals_dict.items() if key.startswith('var')
         ]
         context_messages.append(self.statement_to_message(expr))  # type: ignore
 

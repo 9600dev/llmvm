@@ -89,7 +89,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
         anthropic_executor = AnthropicExecutor(
             api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=Container().get_config_variable('anthropic_model', 'LLMVM_MODEL'),
-            api_endpoint=Container().get('anthropic_api_base'),
+            api_endpoint=Container().get('anthropic_api_base', 'LLMVM_API_BASE'),
             default_max_token_len=int(Container().get('anthropic_max_tokens')),
         )
         anthropic_controller = StarlarkExecutionController(
@@ -132,7 +132,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
         openai_executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),
             default_model=Container().get_config_variable('openai_model', 'LLMVM_MODEL'),
-            api_endpoint=Container().get('openai_api_base'),
+            api_endpoint=Container().get('openai_api_base', 'LLMVM_API_BASE'),
             default_max_token_len=int(Container().get('openai_max_tokens')),
         )
 

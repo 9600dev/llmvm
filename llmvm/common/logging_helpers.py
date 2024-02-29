@@ -4,13 +4,25 @@ import os
 import sys
 import time
 from logging import Logger
-from typing import Dict
+from typing import Dict, List
 
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install
 
 from llmvm.common.container import Container
+
+
+def trace(content):
+    if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
+        with open(os.path.expanduser(Container.get_config_variable('LLMVM_EXECUTOR_TRACE')), 'a+') as f:
+            f.write(content)
+
+
+def messages_trace(messages: List[Dict[str, str]]):
+    if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
+        for m in messages:
+            trace(f"<{m['role'].capitalize()}:>{m['content']}</{m['role'].capitalize()}>\n\n")
 
 
 class TimedLogger(logging.Logger):
@@ -139,6 +151,7 @@ def setup_logging(
     logging.getLogger('PIL').setLevel(logging.WARNING)
     logging.getLogger('anthropic').setLevel(logging.WARNING)
     logging.getLogger('grpc').setLevel(logging.WARNING)
+    logging.getLogger('mistralai').setLevel(logging.WARNING)
 
     logger: Logger = logging.getLogger()
 

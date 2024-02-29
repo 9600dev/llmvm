@@ -6,10 +6,10 @@ import tiktoken
 from mistralai.async_client import MistralAsyncClient
 from mistralai.models.chat_completion import ChatMessage
 
-from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
                                   Message, TokenStopNode, User, awaitable_none)
-from llmvm.common.perf import TokenPerf, TokenPerfWrapper
+from llmvm.common.perf import TokenPerf, TokenStreamManager
 
 logging = setup_logging()
 
@@ -49,6 +49,8 @@ class MistralExecutor(Executor):
             case 'mistral-medium':
                 return 32000
             case 'mistral-large':
+                return 32000
+            case 'mistral-large-latest':
                 return 32000
             case _:
                 logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_token_len}')
@@ -91,6 +93,8 @@ class MistralExecutor(Executor):
                 "mistral-tiny",
                 "mistral-small",
                 "mistral-medium",
+                "mistral-large",
+                "mistral-large-latest"
             }:
                 tokens_per_message = 3
             else:
@@ -130,7 +134,7 @@ class MistralExecutor(Executor):
         model: Optional[str] = None,
         max_completion_tokens: int = 4096,
         temperature: float = 0.2,
-    ):
+    ) -> TokenStreamManager:
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
@@ -151,7 +155,7 @@ class MistralExecutor(Executor):
             max_tokens=max_completion_tokens,
             messages=[self.__dict_message_to_mistral_message(m) for m in messages],
         )
-        return TokenPerfWrapper(response, token_trace)  # type: ignore
+        return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(
         self,
@@ -175,7 +179,7 @@ class MistralExecutor(Executor):
         for message in [m for m in messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
-        chat_response = self.aexecute_direct(
+        stream = self.aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
             model=model if model else self.default_model,
@@ -183,11 +187,12 @@ class MistralExecutor(Executor):
         )
 
         text_response = ''
-        async for chunk in await chat_response:  # type: ignore
-            s = chunk.choices[0].delta.content or ''
-            await stream_handler(Content(s))
-            text_response += s
-        await stream_handler(TokenStopNode())
+
+        async with await stream as stream_async:  # type: ignore
+            async for text in stream_async:  # type: ignore
+                await stream_handler(Content(text))
+                text_response += text
+            await stream_handler(TokenStopNode())
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
@@ -196,6 +201,8 @@ class MistralExecutor(Executor):
             message=conversation[-1].message,
             messages_context=conversation
         )
+
+        messages_trace(messages_list)
 
         return assistant
 

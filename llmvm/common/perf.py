@@ -1,13 +1,21 @@
 import datetime as dt
 import os
 import time
-from typing import List
+import inspect
+import openai
+from typing import List, cast
 
-from anthropic import AsyncMessageStream, AsyncMessageStreamManager
+from anthropic import AsyncMessageStream, AsyncMessageStreamManager, AsyncStream as AnthropicAsyncStream
+from anthropic.types import Completion as AnthropicCompletion
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk as OAICompletion
+from mistralai.models.chat_completion import ChatCompletionStreamResponse as MistralCompletion
+from google.generativeai.types.generation_types import AsyncGenerateContentResponse as AsyncGeminiStream
+from google.generativeai.types.generation_types import GenerateContentResponse as GeminiCompletion
 
 from llmvm.common.calculator import TokenPriceCalculator
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.objects import Content
 
 logging = setup_logging()
 
@@ -146,27 +154,42 @@ class LoggingAsyncIterator:
         self.original_iterator = original_iterator.__aiter__()
         self.perf = token_perf
 
-    async def __anext__(self):
+    async def __anext__(self) -> str:
         try:
             result = await self.original_iterator.__anext__()
-            self.perf.tick()
-            return result
+
+            if self.perf.enabled:
+                self.perf.tick()
+
+            if isinstance(result, AnthropicCompletion):
+                return cast(str, result.completion or '')
+            elif isinstance(result, OAICompletion):
+                return cast(str, result.choices[0].delta.content or '')  # type: ignore
+            elif isinstance(result, MistralCompletion):
+                return cast(str, result.choices[0].delta.content or '')  # type: ignore
+            elif isinstance(result, GeminiCompletion):
+                return cast(str, result.text or '')
+            elif isinstance(result, str):
+                return result
+            else:
+                raise ValueError(f'Unknown completion type: {type(result)}, stream type: {type(self.original_iterator)}')
         except StopAsyncIteration:
-            self.perf.stop()
-            self.perf.log()
+            if self.perf.enabled:
+                self.perf.stop()
+                self.perf.log()
             raise
 
 
-class TokenPerfWrapper:
-    def __init__(self, original_stream, token_perf: 'TokenPerf'):
+class TokenStreamWrapper:
+    def __init__(self,
+            original_stream,
+            token_perf: 'TokenPerf'
+        ):
         self.stream = original_stream
         self.perf = token_perf
 
     def __aiter__(self):
-        if self.perf.enabled:
-            return LoggingAsyncIterator(self.stream, self.perf)
-        else:
-            return self.stream
+        return LoggingAsyncIterator(self.stream, self.perf)
 
     # act as a proxy to self.original_stream for any other methods that are called
     def __getattr__(self, name):
@@ -181,20 +204,45 @@ class TokenPerfWrapper:
         return ''
 
 
-class TokenPerfWrapperAnthropic:
-    def __init__(self, stream_manager: AsyncMessageStreamManager, token_perf: 'TokenPerf'):
-        self.stream_manager: AsyncMessageStreamManager = stream_manager
+class TokenStreamManager:
+    def __init__(
+            self,
+            stream: AsyncMessageStreamManager | AnthropicAsyncStream[AnthropicCompletion] | openai.AsyncStream, # type: ignore
+            token_perf: 'TokenPerf'
+        ):
+        self.stream = stream
         self.perf = token_perf
         self.token_perf_wrapper = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> TokenStreamWrapper:
         self.perf.start()
-        result: AsyncMessageStream = await self.stream_manager.__aenter__()
-        self.token_perf_wrapper = TokenPerfWrapper(result.text_stream, self.perf)
-        return self.token_perf_wrapper
+
+        if isinstance(self.stream, AsyncMessageStreamManager):
+            result: AsyncMessageStream = await self.stream.__aenter__()
+            self.token_perf_wrapper = TokenStreamWrapper(result.text_stream, self.perf)  # type: ignore
+            return self.token_perf_wrapper
+        elif isinstance(self.stream, openai.AsyncStream):
+            self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
+            return self.token_perf_wrapper
+        elif isinstance(self.stream, AsyncGeminiStream):
+            self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
+            return self.token_perf_wrapper
+        elif isinstance(self.stream, AnthropicAsyncStream):
+            self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
+            return self.token_perf_wrapper
+        elif inspect.isasyncgen(self.stream):
+            self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
+            return self.token_perf_wrapper
+
+        logging.error(f'Unknown stream type: {type(self.stream)}')
+        return TokenStreamWrapper(self.stream, self.perf)
 
     async def __aexit__(self, exc_type, exc, tb):
-        await self.stream_manager.__aexit__(exc_type, exc, tb)
+        if isinstance(self.stream, AsyncMessageStreamManager):
+            await self.stream.__aexit__(exc_type, exc, tb)
+
+    async def close(self):
+        return
 
     # act as a proxy to self.original_stream for any other methods that are called
     def __getattr__(self, name):
