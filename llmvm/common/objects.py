@@ -409,7 +409,7 @@ class PdfContent(Content):
     def get_content(self) -> str:
         def late_bind_pdf_parse(obj, method_name: str):
             # hoooly crap this is a hack.
-            module = importlib.import_module('helpers.pdf')
+            module = importlib.import_module('llmvm.server.tools.pdf')
             cls = getattr(module, 'PdfHelpers')
             method = getattr(cls, method_name)
             return method(obj)
