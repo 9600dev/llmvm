@@ -12,6 +12,7 @@ from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
                                   PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
 from llmvm.common.perf import (TokenPerf, TokenStreamManager)
+from llmvm.common.helpers import Helpers
 
 logging = setup_logging()
 
@@ -107,6 +108,7 @@ class AnthropicExecutor(Executor):
         counter = 1
         for i in range(len(messages)):
             if isinstance(messages[i], User) and isinstance(messages[i].message, ImageContent):
+                # figure out
                 wrapped.append({
                     'role': 'user',
                     'content': [
@@ -114,7 +116,7 @@ class AnthropicExecutor(Executor):
                             'type': 'image',
                             'source': {
                                 "type": "base64",
-                                "media_type": "image/png",
+                                "media_type": Helpers.classify_image(messages[i].message.sequence),
                                 "data": base64.b64encode(messages[i].message.sequence).decode('utf-8')  # type: ignore
                             }
                         }

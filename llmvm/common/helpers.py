@@ -46,6 +46,13 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def classify_image(data):
+        if data:
+            if data[:8] == b'\x89PNG\r\n\x1a\n': return 'image/png'
+            elif data[:2] == b'\xff\xd8': return 'image/jpeg'
+        return 'image/unknown'
+
+    @staticmethod
     def log_exception(logger, e, message=None):
         exc_traceback = e.__traceback__
 

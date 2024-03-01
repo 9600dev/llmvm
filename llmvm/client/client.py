@@ -128,7 +128,7 @@ def parse_message_thread(message: str):
     return messages
 
 
-def parse_path(ctx, param, value, raise_parse_exception=True) -> List[str]:
+def parse_path(ctx, param, value, raise_parse_exception=False) -> List[str]:
     if not value:
         return []
 
@@ -252,6 +252,12 @@ def parse_command_string(s, command):
                 if path_part:
                     path_part = path_part.strip()
                     tokens.append(f'{path_part}')
+                else:
+                    # couldn't find any path, so display that to the user
+                    logging.debug(f'Glob pattern not found for path: {parts[z + 1]}')
+                    z += 1
+                    skip_n += 1
+                    tokens.append('')
             else:
                 if i + 1 < len(parts):
                     tokens.append(parts[i + 1])
