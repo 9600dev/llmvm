@@ -202,7 +202,10 @@ class AnthropicExecutor(Executor):
     ) -> int:
         model_str = model if model else self.default_model
 
-        async def tokenizer_len(content: str | Dict) -> int:
+        async def tokenizer_len(content: str | List) -> int:
+            if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict) and 'source' in content[0]:
+                # todo not supported
+                return 0
             return await self.client.count_tokens(str(content))
 
         def num_tokens_from_messages(messages, model: str):
