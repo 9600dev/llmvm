@@ -682,7 +682,7 @@ def llm(
             elif Helpers.is_pdf(bytes_buffer):
                 context_messages_list.insert(0, User(PdfContent(bytes_buffer.read(), url='cli')))
             else:
-                context_messages_list.insert(0, User(Content(bytes_buffer.read().decode('utf-8'))))
+                context_messages_list.insert(0, User(Content(bytes_buffer.read().decode('utf-8', errors='ignore'))))
 
     clear_thread = False
     # if the incoming message is a thread, parse it and send it through

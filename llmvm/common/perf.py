@@ -23,17 +23,18 @@ logging = setup_logging()
 class TokenPerf:
     # class to measure time taken between start() and stop() for a given task
     def __init__(
-            self,
-            name: str,
-            executor_name: str,
-            model_name: str,
-            prompt_len: int = 0,
-            enabled: bool = Container.get_config_variable('profiling', 'LLMVM_PROFILING', default=False),
-            log_file: str = Container.get_config_variable(
-                'profiling_file',
-                'LLMVM_PROFILING_FILE',
-                default='~/.local/share/llmvm/trace.log'
-            ),
+        self,
+        name: str,
+        executor_name: str,
+        model_name: str,
+        prompt_len: int = 0,
+        enabled: bool = Container.get_config_variable('profiling', 'LLMVM_PROFILING', default=False),
+        log_file: str = Container.get_config_variable(
+            'profiling_file',
+            'LLMVM_PROFILING_FILE',
+            default='~/.local/share/llmvm/trace.log'
+        ),
+        request_id: str = ''
     ):
         self._name: str = name
         self._executor: str = executor_name
@@ -45,6 +46,7 @@ class TokenPerf:
         self.enabled = enabled
         self.log_file = log_file
         self.calculator = TokenPriceCalculator()
+        self.request_id = request_id
 
     def start(self):
         if self.enabled:
@@ -88,6 +90,7 @@ class TokenPerf:
                 'p_tok_sec': p_tok_sec,
                 'p_cost': self._prompt_len * self.calculator.prompt_price(self._model, self._executor),
                 's_cost': len(self._ticks) * self.calculator.sample_price(self._model, self._executor),
+                'request_id': self.request_id,
                 'ticks': self.ticks()
             }
         else:
@@ -106,7 +109,7 @@ class TokenPerf:
     def __str__(self):
         if self.enabled:
             res = self.result()
-            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["total_time"]},{res["prompt_time"]},{res["sample_time"]},{res["prompt_len"]},{res["sample_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
+            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["total_time"]},{res["prompt_time"]},{res["sample_time"]},{res["prompt_len"]},{res["sample_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{res["request_id"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
             return result
         else:
             return ''
@@ -120,14 +123,14 @@ class TokenPerf:
             logging.debug(f"total_time: {res['total_time']:.2f} prompt_time: {res['prompt_time']:.2f} sample_time: {res['sample_time']:.2f}")
             logging.debug(f"prompt_len: {res['prompt_len']} sample_len: {len(res['ticks'])}")
             logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f}")
-            logging.debug(f"p_cost: ${res['p_cost']:.4f} s_cost: ${res['s_cost']:.4f}")
+            logging.debug(f"p_cost: ${res['p_cost']:.4f} s_cost: ${res['s_cost']:.4f} request_id: {res['request_id']}")
 
     def log(self):
         if self.enabled:
             self.debug()
             if not os.path.exists(os.path.expanduser(self.log_file)):
                 with open(os.path.expanduser(self.log_file), 'w') as f:
-                    f.write('name,executor,model,total_time,prompt_time,prompt_tokens,sample_time,prompt_len,sample_len,p_tok_sec,s_tok_sec,p_cost,s_cost,ticks\n')
+                    f.write('name,executor,model,total_time,prompt_time,prompt_tokens,sample_time,prompt_len,sample_len,p_tok_sec,s_tok_sec,p_cost,s_cost,request_id,ticks\n')
             with open(os.path.expanduser(self.log_file), 'a') as f:
                 result = str(self)
                 f.write(result + '\n')
@@ -145,6 +148,7 @@ class TokenPerf:
                 's_tok_sec': 0.0,
                 'p_cost': 0.0,
                 's_cost': 0.0,
+                'request_id': '',
                 'ticks': []
             }
 
@@ -219,6 +223,7 @@ class TokenStreamManager:
 
         if isinstance(self.stream, AsyncMessageStreamManager):
             result: AsyncMessageStream = await self.stream.__aenter__()
+            self.perf.request_id = result.response.headers['request-id']
             self.token_perf_wrapper = TokenStreamWrapper(result.text_stream, self.perf)  # type: ignore
             return self.token_perf_wrapper
         elif isinstance(self.stream, openai.AsyncStream):

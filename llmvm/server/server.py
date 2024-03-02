@@ -9,9 +9,6 @@ import jsonpickle
 import nest_asyncio
 from openai import AsyncOpenAI, OpenAI
 
-client = OpenAI()
-aclient = AsyncOpenAI()
-
 from importlib import resources
 
 import rich
@@ -168,6 +165,9 @@ async def stream_response(response):
 
 @app.post('/v1/chat/completions')
 async def chat_completions(request: Request):
+    api_key = os.environ.get('OPENAI_API_KEY', default=''),
+    aclient = AsyncOpenAI(api_key=cast(str,api_key))
+
     try:
         # Construct the prompt from the messages
         data = await request.json()

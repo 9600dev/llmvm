@@ -17,7 +17,6 @@ from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
 from llmvm.common.perf import TokenPerf, TokenStreamManager
 
 logging = setup_logging()
-aclient = AsyncOpenAI()
 
 class OpenAIExecutor(Executor):
     def __init__(
@@ -33,6 +32,7 @@ class OpenAIExecutor(Executor):
         self.api_endpoint = api_endpoint
         self.default_max_token_len = default_max_token_len
         self.default_max_completion_len = default_max_completion_len
+        self.aclient = AsyncOpenAI(api_key=self.openai_key, base_url=self.api_endpoint)
 
     def user_token(self) -> str:
         return 'User'
@@ -203,7 +203,7 @@ class OpenAIExecutor(Executor):
         token_trace.start()
 
         if functions:
-            response = await aclient.chat.completions.create(
+            response = await self.aclient.chat.completions.create(
                 model=model,
                 temperature=temperature,
                 max_tokens=max_completion_tokens,
@@ -214,7 +214,7 @@ class OpenAIExecutor(Executor):
             return TokenStreamManager(response, token_trace) # type: ignore
         else:
             # for whatever reason, [] functions generates an InvalidRequestError
-            response = await aclient.chat.completions.create(
+            response = await self.aclient.chat.completions.create(
                 model=model if model else self.default_model,
                 temperature=temperature,
                 max_tokens=max_completion_tokens,
