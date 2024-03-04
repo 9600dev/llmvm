@@ -316,7 +316,7 @@ class AnthropicExecutor(Executor):
         if self.beta:
             # AsyncStreamManager[AsyncMessageStream]
             stream = self.client.messages.stream(
-                max_tokens=self.max_tokens_to_sample,
+                max_tokens=max_completion_tokens,
                 messages=messages_list,  # type: ignore
                 model=model,
                 system=system_message,
@@ -325,7 +325,7 @@ class AnthropicExecutor(Executor):
             return TokenStreamManager(stream, token_trace)
         else:
             stream = await self.client.completions.create(
-                max_tokens_to_sample=self.max_tokens_to_sample,
+                max_tokens_to_sample=max_completion_tokens,
                 model=model,
                 stream=True,
                 temperature=0.0,
