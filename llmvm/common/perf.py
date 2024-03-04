@@ -223,7 +223,11 @@ class TokenStreamManager:
 
         if isinstance(self.stream, AsyncMessageStreamManager):
             result: AsyncMessageStream = await self.stream.__aenter__()
+            # special anthropic debugging
             self.perf.request_id = result.response.headers['request-id']
+            if Container().get_config_variable('LLMVM_SHARE', default=''):
+                with open(os.path.expanduser(Container().get_config_variable('LLMVM_SHARE') + f'/{self.perf.request_id}.json'), 'w') as f:
+                    f.write(result.response._request._content.decode('utf-8'))  # type: ignore
             self.token_perf_wrapper = TokenStreamWrapper(result.text_stream, self.perf)  # type: ignore
             return self.token_perf_wrapper
         elif isinstance(self.stream, openai.AsyncStream):

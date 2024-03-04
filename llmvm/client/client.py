@@ -329,12 +329,13 @@ def get_path_as_messages(
                         files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
                 else:
                     files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
-            elif '.png' in result.path or '.jpg' in result.path or '.jpeg' in result.path:
+            elif Helpers.classify_image(open(file_path, 'rb').read()) in ['image/jpeg', 'image/png']:
                 if upload:
                     with open(file_path, 'rb') as f:
                         files.append(User(ImageContent(f.read(), url=os.path.abspath(file_path))))
                 else:
-                    files.append(User(ImageContent(b'', url=os.path.abspath(file_path))))
+                    raw_image_data = open(file_path, 'rb').read()
+                    files.append(User(ImageContent(Helpers.load_resize_save(raw_image_data), url=os.path.abspath(file_path))))
             else:
                 try:
                     with open(file_path, 'r') as f:
@@ -348,7 +349,7 @@ def get_path_as_messages(
     return files
 
 
-async def stream_response(response, print_lambda: Callable):
+async def stream_response(response, print_lambda: Callable) -> List[AstNode]:
     def strip_string(str):
         if str.startswith('"'):
             str = str[1:]
@@ -459,12 +460,7 @@ async def __execute_llm_call_direct(
         printer.write(s)  # type: ignore
 
     async def __stream_handler(node: AstNode):
-        if isinstance(node, Content):
-            chained_printer(str(node.get_content()))
-        elif isinstance(node, TokenStopNode):
-            chained_printer('\n')
-        else:
-            logging.error(f'Unknown node type: {node}')
+        printer.write(node)  # type: ignore
 
     executor: Optional[Executor] = None
 
@@ -673,14 +669,14 @@ def llm(
 
         with io.BytesIO(file_content) as bytes_buffer:
             if Helpers.is_image(bytes_buffer):
-                output = io.BytesIO()
-                with Image.open(io.BytesIO(bytes_buffer.read())) as img:
-                    img.save(output, format='JPEG')
-                    StreamPrinter('user').display_image(output.getvalue())
-                    bytes_buffer.seek(0)
-                context_messages_list.insert(0, User(ImageContent(bytes_buffer.read(), url='cli')))
+                image_bytes = Helpers.load_resize_save(bytes_buffer.getvalue(), 'PNG')
+                StreamPrinter('user').display_image(image_bytes)
+                context_messages_list.insert(0, User(ImageContent(image_bytes, url='cli')))
             elif Helpers.is_pdf(bytes_buffer):
-                context_messages_list.insert(0, User(PdfContent(bytes_buffer.read(), url='cli')))
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                    temp_file.write(bytes_buffer.read())
+                    temp_file.flush()
+                    context_messages_list.insert(0, User(PdfContent(bytes_buffer.read(), url=temp_file.name)))
             else:
                 context_messages_list.insert(0, User(Content(bytes_buffer.read().decode('utf-8', errors='ignore'))))
 
@@ -1070,39 +1066,29 @@ class Repl():
             if im is not None:
                 with io.BytesIO() as output:
                     im.save(output, format='PNG')
-                    raw_data = output.getvalue()
+                    output.seek(0)
+                    raw_data = Helpers.load_resize_save(output.read(), 'PNG')
+
                     StreamPrinter('user').display_image(raw_data)
 
-                    with tempfile.NamedTemporaryFile(mode='w+b', suffix='.jpg', delete=False) as temp_file:
+                    with tempfile.NamedTemporaryFile(mode='w+b', suffix='.png', delete=False) as temp_file:
                         temp_file.write(raw_data)
                         temp_file.flush()
 
                         # check to see if there is text already present in the query>>
                         current_text = event.app.current_buffer.text
+                        event.app.invalidate()
                         if len(current_text) <= 0:
                             event.app.current_buffer.text = f'[ImageContent({temp_file.name})] '
                             event.app.current_buffer.cursor_position = len(event.app.current_buffer.text)
+                            event.app.layout.focus(event.app.current_buffer)
                         else:
                             event.app.current_buffer.text = current_text + f' [ImageContent({temp_file.name})] '
                             event.app.current_buffer.cursor_position = len(event.app.current_buffer.text)
-                    # else:
-                    #     thread: SessionThread = SessionThread(id=-1)
-
-                    #     if 'last_thread' in globals():
-                    #         thread = last_thread
-                    #     else:
-                    #         try:
-                    #             thread = asyncio.run(
-                    #                 get_thread(
-                    #                     Container.get_config_variable('LLMVM_ENDPOINT',
-                    #                                                   default='http://127.0.0.1:8011'),
-                    #                     thread_id
-                    #                 )
-                    #             )
-                    #         except Exception as ex:
-                    #             pass
-
-                    #     asyncio.create_task(__invoke_paste_image(thread, raw_data, current_text))
+                            event.app.layout.focus(event.app.current_buffer)
+                        event.app.invalidate()
+                        event.app.renderer.reset()
+                        event.app._redraw()
             else:
                 rich.print('No image found in clipboard.\n')
                 rich.print(f"[{thread_id}] query>> ", end="")

@@ -24,7 +24,7 @@ class AnthropicExecutor(Executor):
         default_model: str = 'claude-2.1',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_token_len: int = 200000,
-        default_max_completion_len: int = 4096,
+        default_max_completion_len: int = 2048,
         beta: bool = True,
     ):
         self.default_max_token_len = default_max_token_len
@@ -85,11 +85,11 @@ class AnthropicExecutor(Executor):
     def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
         def wrap_message(index: int, content: Content) -> str:
             if isinstance(content, FileContent):
-                return f"<message number={index}><file url={content.url}>{content.get_content()}</file></message>"
+                return f"<file url={content.url}>{content.get_content()}</file>"
             elif isinstance(content, PdfContent):
-                return f"<message number={index}><pdf url={content.url}>{content.get_content()}</pdf></message>"
+                return f"<pdf url={content.url}>{content.get_content()}</pdf>"
             else:
-                return f"<message index={index}>{content.get_content()}</message>"
+                return f"{content.get_content()}"
 
         wrapped = []
 
@@ -267,8 +267,8 @@ class AnthropicExecutor(Executor):
         messages: List[Dict[str, Any]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
-        max_completion_tokens: int = 4000,
-        temperature: float = 0.2,
+        max_completion_tokens: int = 2048,
+        temperature: float = 0.0,
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
@@ -316,19 +316,19 @@ class AnthropicExecutor(Executor):
         if self.beta:
             # AsyncStreamManager[AsyncMessageStream]
             stream = self.client.messages.stream(
-                max_tokens=max_completion_tokens,
+                max_tokens=self.max_tokens_to_sample,
                 messages=messages_list,  # type: ignore
                 model=model,
                 system=system_message,
-                temperature=temperature,
+                temperature=0.0,
             )
             return TokenStreamManager(stream, token_trace)
         else:
             stream = await self.client.completions.create(
-                max_tokens_to_sample=max_completion_tokens,
+                max_tokens_to_sample=self.max_tokens_to_sample,
                 model=model,
                 stream=True,
-                temperature=temperature,
+                temperature=0.0,
                 prompt=self.__format_prompt(messages_list),
             )
             return TokenStreamManager(stream, token_trace)
@@ -336,8 +336,8 @@ class AnthropicExecutor(Executor):
     async def aexecute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 4000,
-        temperature: float = 0.2,
+        max_completion_tokens: int = 2048,
+        temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
@@ -397,8 +397,8 @@ class AnthropicExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 4000,
-        temperature: float = 0.2,
+        max_completion_tokens: int = 2048,
+        temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:

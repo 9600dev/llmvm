@@ -46,10 +46,44 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
-    def classify_image(data):
-        if data:
-            if data[:8] == b'\x89PNG\r\n\x1a\n': return 'image/png'
-            elif data[:2] == b'\xff\xd8': return 'image/jpeg'
+    def load_resize_save(raw_data: bytes, output_format='PNG', max_size=5 * 1024 * 1024) -> bytes:
+        if output_format not in ['PNG', 'JPEG']:
+            raise ValueError('Invalid output format')
+
+        temp_output = io.BytesIO()
+        result: bytes
+        with Image.open(io.BytesIO(raw_data)) as im:
+            # convert to the required format
+            im.save(temp_output, format=output_format)
+            temp_output.seek(0)
+            result = temp_output.getvalue()
+
+            # check to see if larger than 5MB
+            if len(raw_data) >= max_size:
+                # Reduce the image size
+                for quality in range(95, 10, -5):
+                    temp_output.seek(0)
+                    temp_output.truncate(0)
+                    im.save(temp_output, format=output_format, quality=quality)
+                    reduced_data = temp_output.getvalue()
+                    if len(reduced_data) <= 5 * 1024 * 1024:
+                        result = reduced_data
+                        break
+                else:
+                    # If the image is still too large, resize the image
+                    while len(raw_data) > max_size:
+                        im = im.resize((int(im.width * 0.9), int(im.height * 0.9)), Image.ANTIALIAS)
+                        temp_output.seek(0)
+                        temp_output.truncate(0)
+                        im.save(temp_output, format=output_format)
+                        result = temp_output.getvalue()
+        return result
+
+    @staticmethod
+    def classify_image(raw_data):
+        if raw_data:
+            if raw_data[:8] == b'\x89PNG\r\n\x1a\n': return 'image/png'
+            elif raw_data[:2] == b'\xff\xd8': return 'image/jpeg'
         return 'image/unknown'
 
     @staticmethod
