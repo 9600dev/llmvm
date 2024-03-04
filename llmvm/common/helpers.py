@@ -66,17 +66,19 @@ class Helpers():
                     temp_output.truncate(0)
                     im.save(temp_output, format=output_format, quality=quality)
                     reduced_data = temp_output.getvalue()
-                    if len(reduced_data) <= 5 * 1024 * 1024:
+                    if len(reduced_data) <= max_size:
                         result = reduced_data
+                        raw_data = result
                         break
                 else:
                     # If the image is still too large, resize the image
                     while len(raw_data) > max_size:
-                        im = im.resize((int(im.width * 0.9), int(im.height * 0.9)), Image.ANTIALIAS)
+                        im = im.resize((int(im.width * 0.9), int(im.height * 0.9)))
                         temp_output.seek(0)
                         temp_output.truncate(0)
                         im.save(temp_output, format=output_format)
                         result = temp_output.getvalue()
+                        raw_data = result
         return result
 
     @staticmethod

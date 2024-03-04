@@ -313,25 +313,29 @@ class AnthropicExecutor(Executor):
         token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
-        if self.beta:
-            # AsyncStreamManager[AsyncMessageStream]
-            stream = self.client.messages.stream(
-                max_tokens=max_completion_tokens,
-                messages=messages_list,  # type: ignore
-                model=model,
-                system=system_message,
-                temperature=0.0,
-            )
-            return TokenStreamManager(stream, token_trace)
-        else:
-            stream = await self.client.completions.create(
-                max_tokens_to_sample=max_completion_tokens,
-                model=model,
-                stream=True,
-                temperature=0.0,
-                prompt=self.__format_prompt(messages_list),
-            )
-            return TokenStreamManager(stream, token_trace)
+        try:
+            if self.beta:
+                # AsyncStreamManager[AsyncMessageStream]
+                stream = self.client.messages.stream(
+                    max_tokens=max_completion_tokens,
+                    messages=messages_list,  # type: ignore
+                    model=model,
+                    system=system_message,
+                    temperature=0.0,
+                )
+                return TokenStreamManager(stream, token_trace)
+            else:
+                stream = await self.client.completions.create(
+                    max_tokens_to_sample=max_completion_tokens,
+                    model=model,
+                    stream=True,
+                    temperature=0.0,
+                    prompt=self.__format_prompt(messages_list),
+                )
+                return TokenStreamManager(stream, token_trace)
+        except Exception as e:
+            print(e)
+            raise
 
     async def aexecute(
         self,
@@ -366,12 +370,14 @@ class AnthropicExecutor(Executor):
         )
 
         text_response = ''
+        perf = None
 
         async with await stream as stream_async:  # type: ignore
             async for text in stream_async:
                 await stream_handler(Content(text))
                 text_response += text
             await stream_handler(TokenStopNode())
+            perf = stream_async.perf
 
         if self.beta:
             _ = await stream_async.get_final_message()  # type: ignore
@@ -391,6 +397,9 @@ class AnthropicExecutor(Executor):
             message=conversation[-1].message,
             messages_context=conversation
         )
+        assistant.perf_trace = perf
+        if assistant.message.get_content() == '':
+            logging.error('Assistant message is empty. Returning empty message.')
 
         return assistant
 

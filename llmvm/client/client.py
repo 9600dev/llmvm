@@ -52,7 +52,6 @@ from llmvm.common.objects import (Assistant, AstNode, Content, DownloadItem,
                                   MessageModel, PdfContent, SessionThread,
                                   StreamNode, System, TokenStopNode, User)
 from llmvm.common.openai_executor import OpenAIExecutor
-from llmvm.common.perf import TokenStreamWrapper, TokenStreamManager
 
 nest_asyncio.apply()
 
@@ -443,21 +442,15 @@ async def get_threads(
     return thread
 
 
-async def __execute_llm_call_direct(
+async def execute_llm_call_direct(
     message: Message,
     api_key: str,
     executor_name: str,
     model_name: str,
     context_messages: Sequence[Message] = [],
-) -> SessionThread:
-
-    message_response = ''
+    api_endpoint: str = ''
+) -> Assistant:
     printer = StreamPrinter('')
-
-    def chained_printer(s: str):
-        nonlocal message_response
-        message_response += s
-        printer.write(s)  # type: ignore
 
     async def __stream_handler(node: AstNode):
         printer.write(node)  # type: ignore
@@ -468,19 +461,19 @@ async def __execute_llm_call_direct(
         executor = OpenAIExecutor(
             api_key=api_key,
             default_model=model_name,
-            api_endpoint=Container.get_config_variable('LLMVM_API_BASE', default='https://api.openai.com/v1')
+            api_endpoint=api_endpoint or Container.get_config_variable('LLMVM_API_BASE', default='https://api.openai.com/v1')
         )
     elif executor_name == 'anthropic':
         executor = AnthropicExecutor(
             api_key=api_key,
             default_model=model_name,
-            api_endpoint=Container.get_config_variable('LLMVM_API_BASE', default='https://api.anthropic.com')
+            api_endpoint=api_endpoint or Container.get_config_variable('LLMVM_API_BASE', default='https://api.anthropic.com')
         )
     elif executor_name == 'mistral':
         executor = MistralExecutor(
             api_key=api_key,
             default_model=model_name,
-            api_endpoint=Container.get_config_variable('LLMVM_API_BASE', default='https://api.mistral.ai')
+            api_endpoint=api_endpoint or Container.get_config_variable('LLMVM_API_BASE', default='https://api.mistral.ai')
         )
     elif executor_name == 'gemini':
         executor = GeminiExecutor(
@@ -495,11 +488,13 @@ async def __execute_llm_call_direct(
         messages=messages,
         stream_handler=__stream_handler,
     )
-    messages.append(assistant)
+    return assistant
 
-    response_messages = list([MessageModel.from_message(m) for m in messages])
-    result = SessionThread(id=-1, messages=response_messages)
-    return result
+    # messages.append(assistant)
+
+    # response_messages = list([MessageModel.from_message(m) for m in messages])
+    # result = SessionThread(id=-1, messages=response_messages)
+    # return result
 
 
 async def execute_llm_call(
@@ -570,71 +565,79 @@ async def execute_llm_call(
 
     if executor and model:
         if executor == 'openai' and Container.get_config_variable('OPENAI_API_KEY'):
-            return await __execute_llm_call_direct(
+            assistant = await execute_llm_call_direct(
                 message,
                 Container.get_config_variable('OPENAI_API_KEY'),
                 'openai',
                 model,
                 context_messages
             )
+            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
         elif executor == 'anthropic' and Container.get_config_variable('ANTHROPIC_API_KEY'):
-            return await __execute_llm_call_direct(
+            assistant = await execute_llm_call_direct(
                 message,
                 Container.get_config_variable('ANTHROPIC_API_KEY'),
                 'anthropic',
                 model,
                 context_messages
             )
+            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
         elif executor == 'mistral' and Container.get_config_variable('MISTRAL_API_KEY'):
-            return await __execute_llm_call_direct(
+            assistant = await execute_llm_call_direct(
                 message,
                 Container.get_config_variable('MISTRAL_API_KEY'),
                 'mistral',
                 model,
                 context_messages
             )
+            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
         elif executor == 'gemini' and Container.get_config_variable('GOOGLE_API_KEY'):
-            return await __execute_llm_call_direct(
+            assistant = await execute_llm_call_direct(
                 message,
                 Container.get_config_variable('GOOGLE_API_KEY'),
                 'gemini',
                 model,
                 context_messages
             )
+            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
         else:
             raise ValueError(f'Executor {executor} and model {model} are set, but no API key is set.')
     elif Container.get_config_variable('OPENAI_API_KEY'):
-        return await __execute_llm_call_direct(
+        assistant = await execute_llm_call_direct(
             message,
             Container.get_config_variable('OPENAI_API_KEY'),
             'openai',
             'gpt-4-vision-preview',
             context_messages
         )
+        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
     elif os.environ.get('ANTHROPIC_API_KEY'):
-        return await __execute_llm_call_direct(
+        assistant = await execute_llm_call_direct(
             message,
             Container.get_config_variable('ANTHROPIC_API_KEY'),
             'anthropic',
             'claude-2.1',
             context_messages
         )
+        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
     elif os.environ.get('MISTRAL_API_KEY'):
-        return await __execute_llm_call_direct(
+        assistant = await execute_llm_call_direct(
             message,
             Container.get_config_variable('MISTRAL_API_KEY'),
             'mistral',
             'mistral-medium',
             context_messages
         )
+        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
     elif os.environ.get('GOOGLE_API_KEY'):
-        return await __execute_llm_call_direct(
+        assistant = await execute_llm_call_direct(
             message,
             Container.get_config_variable('GOOGLE_API_KEY'),
             'gemini',
             'gemini-pro',
             context_messages
         )
+        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
     else:
         logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
         raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa

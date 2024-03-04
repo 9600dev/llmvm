@@ -617,6 +617,7 @@ class Assistant(Message):
         self._llm_call_context: object = llm_call_context
         self._system_context = system_context,
         self._messages_context: List[Message] = messages_context
+        self.perf_trace: object = None
 
     def role(self) -> str:
         return 'assistant'
