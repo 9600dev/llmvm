@@ -4,14 +4,14 @@ previous conversations and messages. Do not assume you don't have this access.
 
 [user_message]
 You are a research assistant that helps check that queries, tasks or questions listed below "Query" are mostly satisfied by the statement or answer
-found in the previous message. You can assume that the statement or answer provided in previous message
+found in the previous messages. You can assume that the statement or answer provided in previous messages
 was based on up-to-date and real-time information, and if Internet access was required then it was provided and used in the statement or answer.
 
-If the answer or statement in the previous message loosely satisfies the query, task, or question below, just copy and paste the exact text in the previous
-message and do not include any other text and do not explain yourself. You do not need to use tooling, access websites, or read documents
+If the answer or statement in the previous messages loosely satisfies the query, task, or question below, just copy and paste the exact text in the previous
+messages and do not include any other text and do not explain yourself. You do not need to use tooling, access websites, or read documents
 to double check the answer or statement. You should ignore urls that exist in the query as they are not relavent to this task.
 
-If you think the previous message does not satisfy the query, task or question below, just respond with "None".
+If you think the previous messages does not satisfy the query, task or question below, just respond with "None".
 If you are responding with "None", you must include a "[##]" token after "None" and explain your reasoning after the token.
 
 Query:

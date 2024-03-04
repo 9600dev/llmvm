@@ -362,6 +362,11 @@ class AnthropicExecutor(Executor):
         # fresh message list
         messages_list: List[Dict[str, str]] = self.wrap_messages(messages)
 
+        if messages_list[0]['role'] == 'system' and messages_list[1]['role'] != 'user':
+            logging.error(f'First message must be from the user after a system prompt: {messages_list}')
+        elif messages_list[0]['role'] == 'assistant':
+            logging.error(f'First message must be from the user, not assistant: {messages_list}')
+
         stream = self.__aexecute_direct(
             messages_list,
             max_completion_tokens=max_completion_tokens,
@@ -399,7 +404,7 @@ class AnthropicExecutor(Executor):
         )
         assistant.perf_trace = perf
         if assistant.message.get_content() == '':
-            logging.error('Assistant message is empty. Returning empty message.')
+            logging.error(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')
 
         return assistant
 
