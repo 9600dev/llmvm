@@ -463,6 +463,7 @@ class StarlarkRuntime:
         logging.debug(f'download({str(expr)})')
 
         from llmvm.server.bcl import ContentDownloader
+        cookies = self.locals_dict['cookies'] if 'cookies' in self.locals_dict else []
 
         downloader = ContentDownloader(
             expr=expr,
@@ -471,8 +472,9 @@ class StarlarkRuntime:
             starlark_runtime=self,
             original_code=self.original_code,
             original_query=self.original_query,
+            cookies=cookies
         )
-        return downloader.get()
+        return downloader.download()
 
     def search(
         self,
@@ -553,13 +555,15 @@ class StarlarkRuntime:
 
     def llm_loop_bind(self, expr, llm_instruction: str, count: int = sys.maxsize) -> List[Any]:
         logging.debug(f'llm_loop_bind({str(expr)[:20]}, {str(llm_instruction)})')
+        context = expr.message.get_content() if isinstance(expr, Message) else str(expr)
+
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
                     prompt_name='llm_loop_bind.prompt',
                     template={
                         'goal': llm_instruction.replace('"', ''),
-                        'context': str(expr),
+                        'context': context,
                     },
                     user_token=self.controller.get_executor().user_token(),
                     assistant_token=self.controller.get_executor().assistant_token(),
@@ -899,13 +903,14 @@ class StarlarkRuntime:
         starlark_code: str,
         original_query: str,
         messages: List[Message] = [],
+        locals_dict: Dict = {}
     ) -> Dict[Any, Any]:
         self.original_code = starlark_code
         self.original_query = original_query
         self.messages_list = messages
         # todo: why are we running setup again here?
         # self.setup()
-        self.locals_dict = {}
+        self.locals_dict = locals_dict
 
         return self.__compile_and_execute(starlark_code)
 

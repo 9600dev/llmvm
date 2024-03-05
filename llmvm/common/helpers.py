@@ -244,6 +244,14 @@ class Helpers():
                 try:
                     domain, _, path, secure, expires_value, name, value = line.strip().split('\t')
 
+                    if not expires_value.isnumeric():
+                        if expires_value == 'Session':
+                            expires_value = 1999999999
+                        else:
+                            import time
+                            expiration_datetime = dt.datetime.strptime(expires_value, '%Y-%m-%dT%H:%M:%S.%fZ')
+                            expires_value = int(time.mktime(expiration_datetime.timetuple()))
+
                     if int(expires_value) != -1 and int(expires_value) < 0:
                         continue  # Skip invalid cookies
 

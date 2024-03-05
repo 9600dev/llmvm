@@ -552,6 +552,7 @@ class StarlarkExecutionController(Controller):
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
         template_args: Optional[Dict[str, Any]] = None,
+        cookies: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Statement]:
         model = model if model else self.executor.get_default_model()
 
@@ -669,10 +670,12 @@ class StarlarkExecutionController(Controller):
                 if model:
                     self.starlark_runtime.controller.get_executor().set_default_model(model)
 
+                locals_dict = { 'cookies': cookies } if cookies else {}
                 _ = self.starlark_runtime.run(
                     starlark_code=assistant_response_str,
                     original_query=messages[-1].message.get_content(),
                     messages=messages,
+                    locals_dict=locals_dict
                 )
                 results.extend(self.starlark_runtime.answers)
 

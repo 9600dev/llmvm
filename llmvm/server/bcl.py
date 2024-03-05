@@ -95,6 +95,7 @@ class ContentDownloader():
         starlark_runtime: StarlarkRuntime,
         original_code: str,
         original_query: str,
+        cookies: List[Dict] = [],
     ):
         self.expr = expr
         self.agents = agents
@@ -102,7 +103,7 @@ class ContentDownloader():
         self.starlark_runtime = starlark_runtime
         self.original_code = original_code
         self.original_query = original_query
-        self.firefox_helper = FirefoxHelpers()
+        self.cookies = cookies
 
         # the client can often send through urls with quotes around them
         if self.expr.startswith('"') and self.expr.endswith('"'):
@@ -137,8 +138,8 @@ class ContentDownloader():
         else:
             return PdfHelpers.parse_pdf_image(filename)
 
-    def get(self) -> str:
-        logging.debug('ContentDownloader.get: {}'.format(self.expr))
+    def download(self) -> str:
+        logging.debug('ContentDownloader.download: {}'.format(self.expr))
 
         # deal with files
         result = urlparse(self.expr)
@@ -148,19 +149,25 @@ class ContentDownloader():
             if '.htm' in result.path or '.html' in result.path:
                 return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
 
+
         # deal with pdfs
         elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
+            firefox_helper = FirefoxHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
-            task = loop.create_task(self.firefox_helper.pdf_url(self.expr))
+            task = loop.create_task(firefox_helper.pdf_url(self.expr))
 
             pdf_filename = loop.run_until_complete(task)
+            _ = loop.run_until_complete(loop.create_task(firefox_helper.close()))
+
             return self.parse_pdf(pdf_filename)
 
         # deal with websites
         elif result.scheme == 'http' or result.scheme == 'https':
+            firefox_helper = FirefoxHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
-            task = loop.create_task(self.firefox_helper.get_url(self.expr))
+            task = loop.create_task(firefox_helper.get_url(self.expr))
             result = loop.run_until_complete(task)
+            _ = loop.run_until_complete(loop.create_task(firefox_helper.close()))
 
             return WebHelpers.convert_html_to_markdown(result)
         return ''

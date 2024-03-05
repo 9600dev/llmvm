@@ -249,6 +249,7 @@ async def download(
         async def execute_and_signal():
             stream_handler = callback
             from bcl import ContentDownloader
+            # todo thread cookies through here
             downloader = ContentDownloader(
                 expr=download_item.url,
                 agents=[],
@@ -257,7 +258,7 @@ async def download(
                 original_code='',
                 original_query=''
             )
-            content = downloader.get()
+            content = downloader.download()
             queue.put_nowait(StopNode())
 
             if content:
@@ -474,6 +475,7 @@ async def tools_completions(request: SessionThread):
     mode = thread.current_mode
     compression = compression_enum(thread.compression)
     queue = asyncio.Queue()
+    cookies = thread.cookies if thread.cookies else []
 
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:
@@ -488,7 +490,7 @@ async def tools_completions(request: SessionThread):
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}&compression={thread.compression}')
+    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}')
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')
@@ -515,6 +517,7 @@ async def tools_completions(request: SessionThread):
                 stream_handler=callback,
                 model=model,
                 compression=compression,
+                cookies=cookies
             )
             queue.put_nowait(StopNode())
             return result

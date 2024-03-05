@@ -5,7 +5,8 @@ import datetime as dt
 import os
 import threading
 import time
-from typing import List, cast
+from typing import Dict, List, cast
+from urllib.parse import urlparse
 
 import aiofiles
 import httpx
@@ -50,12 +51,12 @@ def read_netscape_cookies(cookies_txt_filename: str):
     return cookies
 
 
-class FirefoxHelpers(metaclass=Singleton):
-    def __init__(self):
+class FirefoxHelpers():
+    def __init__(self, cookies: List[Dict] = []):
         self.loop = asyncio.SelectorEventLoop()
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
-        self.firefox = FirefoxHelpersInternal()
+        self.firefox = FirefoxHelpersInternal(cookies=cookies)
 
     def _run_event_loop(self):
         asyncio.set_event_loop(self.loop)
@@ -73,6 +74,12 @@ class FirefoxHelpers(metaclass=Singleton):
 
         asyncio.run_coroutine_threadsafe(wrapped(), self.loop)
         return future
+
+    def set_cookies(self, cookies: List[Dict]):
+        self.firefox.set_cookies(cookies)
+
+    async def close(self) -> None:
+        return self.run_in_loop(self.firefox.close()).result()
 
     async def goto(self, url: str):
         return self.run_in_loop(self.firefox.goto(url)).result()
@@ -115,8 +122,8 @@ class FirefoxHelpers(metaclass=Singleton):
         return self.run_in_loop(self.firefox.click(element)).result()
 
 
-class FirefoxHelpersInternal(metaclass=Singleton):
-    def __init__(self):
+class FirefoxHelpersInternal():
+    def __init__(self, cookies: List[Dict] = []):
         self.prefs = {
             "print.always_print_silent": True,
             "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
@@ -130,12 +137,22 @@ class FirefoxHelpersInternal(metaclass=Singleton):
         if os.path.exists(profile_directory):
             self.prefs.update({"profile": profile_directory})
 
+        self.cookies = cookies
         self._context = None
         self._page = None
         self.playwright = None
         self.browser = None
+        self.wait_fors = {
+            'twitter.com': lambda page: self.wait(1500),
+            'techmeme.com': lambda page: self.wait(1500)
+        }
 
-    async def __new_page(self):
+
+
+    def set_cookies(self, cookies: List[Dict]):
+        self.cookies = cookies
+
+    async def __new_page(self, cookies: List[Dict] = []) -> Page:
         if self.playwright is None or self.browser is None:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.firefox.launch(
@@ -148,6 +165,9 @@ class FirefoxHelpersInternal(metaclass=Singleton):
         if os.path.exists(cookie_file):
             result = read_netscape_cookies(cookie_file)
             await self._context.add_cookies(result)
+
+        if self.cookies:
+            await self._context.add_cookies(self.cookies)  # type: ignore
         return await self._context.new_page()
 
     async def page(self) -> Page:
@@ -157,11 +177,23 @@ class FirefoxHelpersInternal(metaclass=Singleton):
         else:
             return cast(Page, self._page)
 
+    async def close(self) -> None:
+        if self._page is not None:
+            await (await self.page()).close()
+        if self.browser is not None:
+            await self.browser.close()
+
     async def goto(self, url: str):
         try:
             if (await self.page()).url != url:
                 await (await self.page()).goto(url)
-        except Error as ex:
+
+                domain = urlparse(url).netloc
+                if domain in self.wait_fors:
+                    wait_for_lambda = self.wait_fors[domain]
+                    await wait_for_lambda(await self.page())
+
+        except Error as _:
             # try new page
             self._page = await self.__new_page()
             await (await self.page()).goto(url)

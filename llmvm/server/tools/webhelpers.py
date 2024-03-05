@@ -20,7 +20,6 @@ class IgnoringScriptConverter(MarkdownConverter):
     def convert_script(self, el, text, convert_as_inline):
         return ''
 
-firefox_helpers = FirefoxHelpers()
 
 class WebHelpers():
     @staticmethod
@@ -103,18 +102,23 @@ class WebHelpers():
     @staticmethod
     def pdf_url_firefox(url: str) -> str:
         """Gets a pdf version of the url using the Firefox browser."""
-        return asyncio.run(firefox_helpers.pdf_url(url))
+        firefox_helpers = FirefoxHelpers()
+        result = asyncio.run(firefox_helpers.pdf_url(url))
+        asyncio.run(firefox_helpers.close())
+        return result
 
     @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:
         """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
 
+        firefox_helpers = FirefoxHelpers()
         asyncio.run(firefox_helpers.goto(linkedin_url))
         asyncio.run(firefox_helpers.wait_until_text('Experience'))
         pdf_file = asyncio.run(firefox_helpers.pdf())
         data = PdfHelpers.parse_pdf(pdf_file)
         os.remove(pdf_file)
+        asyncio.run(firefox_helpers.close())
         return data
 
     @staticmethod
@@ -167,6 +171,9 @@ class WebHelpers():
             return PdfHelpers.parse_pdf(url)
 
         elif result.scheme == 'http' or result.scheme == 'https':
-            return WebHelpers.convert_html_to_markdown(asyncio.run(firefox_helpers.get_url(url)))
+            firefox_helpers = FirefoxHelpers()
+            result = WebHelpers.convert_html_to_markdown(asyncio.run(firefox_helpers.get_url(url)))
+            asyncio.run(firefox_helpers.close())
+            return result
 
         return ''

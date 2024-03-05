@@ -53,10 +53,10 @@ Here is an example of using these special features to solve the user query: "ext
 ```starlark
 answers = []
 var1 = download("https://ten13.vc/team")
-var2 = llm_call([var1], "extract list of names")
+var2 = llm_call([var1], "extract list of names")  # perform the first task
 for list_item in llm_loop_bind(var2, "list of names"):
     var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")
-    var4 = llm_call([var3], "summarize career profile")
+    var4 = llm_call([var3], "summarize career profile")  # perform the second task
     answers.append(var4)
 answer(answers)
 ```
@@ -92,7 +92,7 @@ answer(var2)
 
 Here is an example of comparing the details of multiple documents. Note the use of a list when calling llm_call(). This is so the LLM is able to get both document summaries as messages so that the llm_instruction to find the differences works properly.
 
-{{user_colon_token}} "Find and summarize the differences of opinion between this paper: https://ceur-ws.org/Vol-3432/paper17.pdf and this paper: https://arxiv.org/pdf/2306.14077v1.pdf."
+{{user_colon_token}} "Summarize the differences of opinion between this paper: https://ceur-ws.org/Vol-3432/paper17.pdf and this paper: https://arxiv.org/pdf/2306.14077v1.pdf."
 {{assistant_colon_token}}
 ```starlark
 paper1_text = download("https://ceur-ws.org/Vol-3432/paper17.pdf")
@@ -202,6 +202,16 @@ var4 = llm_call([var3], "extract the list of open job titles")
 merged_list = llm_call([var2, var4], "merge the lists of job titles together")  # ask the LLM to perform general text transformation
 answer(merged_list)  # Step 5: Show the result to the use
 ```
+
+Another example: 
+
+{{user_colon_token}} "Get all the ads links from bbc.com"
+{{assistant_colon_token}}
+```starlark
+var1 = download("https://bbc.com")  # append https:// to the site requested
+var2 = llm_call([var1], "extract all the href links that look like Ads")
+answer(var2)  # show the a-href links to the user
+
 
 
 Rules:
