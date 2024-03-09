@@ -14,6 +14,7 @@ from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Answer, Assistant, Content, Controller,
                                   FunctionCall, FunctionCallMeta, LLMCall,
                                   Message, PandasMeta, Statement, User)
+from llmvm.server.starlark_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.tools.firefox import FirefoxHelpers
 from llmvm.server.tools.market import MarketHelpers
@@ -27,13 +28,13 @@ logging = setup_logging()
 class StarlarkRuntime:
     def __init__(
         self,
-        controller: Controller,
+        controller: ExecutionController,
         vector_search: VectorSearch,
         agents: List[Callable] = [],
     ):
         self.original_query = ''
         self.original_code = ''
-        self.controller: Controller = controller
+        self.controller: ExecutionController = controller
         self.vector_search = vector_search
         self.agents = agents
         self.locals_dict = {}
@@ -80,7 +81,8 @@ class StarlarkRuntime:
                         return wrapper
                 raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
-        from llmvm.server.bcl import BCL, SourceProject
+        from llmvm.server.base_library.source_project import SourceProject
+        from llmvm.server.bcl import BCL
 
         self.answers = []
         self.locals_dict = {}
@@ -116,274 +118,6 @@ class StarlarkRuntime:
         self.globals_dict['get_classes'] = source.get_classes
         self.globals_dict['get_methods'] = source.get_methods
         self.globals_dict['get_references'] = source.get_references
-
-    def __find_variable_assignment(
-        self,
-        var_name,
-        tree
-    ):
-        class AssignmentFinder(ast.NodeVisitor):
-            def __init__(self, var_name):
-                self.var_name = var_name
-                self.assignment_node = None
-
-            def visit_Assign(self, node):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id == self.var_name:
-                        self.assignment_node = node.value
-                self.generic_visit(node)
-
-        finder = AssignmentFinder(var_name)
-        finder.visit(tree)
-        return finder.assignment_node
-
-    def __get_assignment(
-        self,
-        variable_name,
-        code,
-    ) -> Optional[Tuple[ast.expr, ast.expr]]:
-        '''
-        Get's the right hand side of a variable assignment
-        by walking the abstract syntax tree
-        '''
-        tree = ast.parse(code)
-
-        assignment_node = self.__find_variable_assignment(variable_name, tree)
-        if assignment_node is None:
-            return None
-
-        var_node = ast.Name(variable_name, ctx=ast.Load())
-        return var_node, assignment_node
-
-    def statement_to_message(
-        self,
-        context: Statement | str,
-    ) -> User:
-        statement_result_prompts = {
-            'answer': 'answer_result.prompt',
-            'assistant': 'assistant_result.prompt',
-            'function_call': 'function_call_result.prompt',
-            'function_meta': 'functionmeta_result.prompt',
-            'llm_call': 'llm_call_result.prompt',
-            'str': 'str_result.prompt',
-            'foreach': 'foreach_result.prompt',
-            'list': 'list_result.prompt',
-        }
-        from llmvm.server.bcl import FunctionBindable
-
-        if isinstance(context, FunctionCall):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts[context.token()],
-                template={
-                    'function_call': context.to_code_call(),
-                    'function_signature': context.to_definition(),
-                    'function_result': str(context.result()),
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, FunctionCallMeta):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['function_meta'],
-                template={
-                    'function_callsite': context.callsite,
-                    'function_result': str(context.result()),
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, str):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['str'],
-                template={
-                    'str_result': context,
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, Assistant):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['assistant'],
-                template={
-                    'assistant_result': str(context.message),
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, list):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['list'],
-                template={
-                    'list_result': '\n'.join([str(c) for c in context])
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, PandasMeta):
-            return User(Content(context.df.to_csv()))
-
-        elif isinstance(context, FunctionBindable):
-            # todo
-            return User(Content(context._result.result()))  # type: ignore
-
-        elif isinstance(context, User):
-            return context
-
-        logging.debug('statement_to_message() unusual type, context is: {}'.format(context))
-        return User(Content(str(context)))
-
-    def rewrite_answer_error_correction(
-        self,
-        query: str,
-        starlark_code: str,
-        error: str,
-        locals_dictionary: Dict[Any, Any],
-    ) -> str:
-        '''
-        This handles the case where an answer() is not correct and we need to
-        identify the single place in the code where this may have occurred, and
-        see if we can manually patch it.
-        '''
-        logging.debug('rewrite_answer_error_correction()')
-        dictionary = ''
-        for key, value in locals_dictionary.items():
-            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
-
-        assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='answer_error_correction.prompt',
-                    template={
-                        'task': query,
-                        'code': starlark_code,
-                        'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
-                        'dictionary': dictionary,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=[],
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_name='answer_error_correction.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
-
-        line = str(assistant.message)
-
-        if line not in self.original_code and ' = ' in line:
-            var_binding = line.split(' = ')[0].strip()
-            # example:
-            # var3 = Assistant(To find the differences and similarities between the two papers, I would need the text or
-            # content of the two papers. Please provide the text or relevant information from the papers, and I will be
-            # able to analyze and compare them for you. False)
-            rhs: Optional[Tuple[ast.expr, ast.expr]] = self.__get_assignment(var_binding, starlark_code)
-            if (
-                rhs
-                and isinstance(rhs[1], ast.Call)
-                and hasattr(cast(ast.Call, rhs[1]).func, 'value')
-                and hasattr(cast(ast.Call, rhs[1]), 'attr')
-                and cast(ast.Call, rhs[1]).func.value.id == 'WebHelpers'  # type: ignore
-                and cast(ast.Call, rhs[1]).func.attr == 'get_url'  # type: ignore
-            ):
-                # we have a WebHelpers.get_url() call that looks like it failed,
-                # let's try with Firefox
-                # todo, now using firefox always
-                raise ValueError('gotta fix this code')
-                starlark_code = starlark_code.replace('WebHelpers.get_url', 'WebHelpers.get_url_firefox_via_pdf')
-                return starlark_code
-            elif (
-                rhs
-                and isinstance(rhs[1], ast.Call)
-                and hasattr(cast(ast.Call, rhs[1]).func, 'value')
-                and hasattr(cast(ast.Call, rhs[1]), 'attr')
-                and cast(ast.Call, rhs[1]).func.attr == 'llm_call'  # type: ignore
-            ):
-                starlark_code = line
-                return starlark_code
-            else:
-                return ''
-        else:
-            return ''
-
-    def rewrite_starlark_error_correction(
-        self,
-        query: str,
-        starlark_code: str,
-        error: str,
-        locals_dictionary: Dict[Any, Any],
-    ) -> str:
-        logging.debug('rewrite_starlark_error_correction()')
-        dictionary = ''
-        for key, value in locals_dictionary.items():
-            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
-
-        assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='starlark_error_correction.prompt',
-                    template={
-                        'task': query,
-                        'code': starlark_code,
-                        'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
-                        'dictionary': dictionary,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=[],
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_name='starlark_error_correction.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query
-        )
-
-        # double shot try
-        try:
-            _ = ast.parse(str(assistant.message))
-            return str(assistant.message)
-        except SyntaxError as ex:
-            logging.debug('SyntaxError: {}'.format(ex))
-            try:
-                _ = self.rewrite_starlark_error_correction(
-                    query=query,
-                    starlark_code=str(assistant.message),
-                    error=str(ex),
-                    locals_dictionary=locals_dictionary,
-                )
-                return str(assistant.message)
-            except Exception as ex:
-                logging.debug('Second exception rewriting starlark code: {}'.format(ex))
-                return ''
 
     def pandas_bind(self, expr) -> PandasMeta:
         import pandas as pd
@@ -430,7 +164,7 @@ class StarlarkRuntime:
         else:
             return bind_with_llm(expr)
 
-    def messages(self):
+    def messages(self) -> List[Message]:
         logging.debug('messages()')
         if len(self.messages_list) == 0:
             return []
@@ -438,9 +172,10 @@ class StarlarkRuntime:
         return [m for m in self.messages_list[:-1] if m.role() != 'system']
 
     def llm_bind(self, expr, func: str):
+        # todo circular import if put at the top
+        from llmvm.server.base_library.function_bindable import \
+            FunctionBindable
         logging.debug(f'llm_bind({str(expr)[:20]}, {str(func)})')
-        from llmvm.server.bcl import FunctionBindable
-
         bindable = FunctionBindable(
             expr=expr,
             func=func,
@@ -451,43 +186,38 @@ class StarlarkRuntime:
             scope_dict=self.globals_dict,
             original_code=self.original_code,
             original_query=self.original_query,
-            starlark_runtime=self,
+            controller=self.controller,
         )
         bindable.bind(expr, func)
         return bindable
 
-    def download(
-        self,
-        expr: str,
-    ) -> str:
+    def download(self, expr: str) -> str:
         logging.debug(f'download({str(expr)})')
 
-        from llmvm.server.bcl import ContentDownloader
+        from llmvm.server.base_library.content_downloader import \
+            ContentDownloader
         cookies = self.locals_dict['cookies'] if 'cookies' in self.locals_dict else []
 
         downloader = ContentDownloader(
             expr=expr,
             agents=self.agents,
             messages=[],
-            starlark_runtime=self,
+            controller=self.controller,
             original_code=self.original_code,
             original_query=self.original_query,
             cookies=cookies
         )
         return downloader.download()
 
-    def search(
-        self,
-        expr: str,
-    ) -> str:
+    def search(self, expr: str) -> str:
         logging.debug(f'search({str(expr)})')
-        from llmvm.server.bcl import Searcher
+        from llmvm.server.base_library.searcher import Searcher
 
         searcher = Searcher(
             expr=expr,
             agents=self.agents,
             messages=[],
-            starlark_runtime=self,
+            controller=self.controller,
             original_code=self.original_code,
             original_query=self.original_query,
             vector_search=self.vector_search,
@@ -781,6 +511,319 @@ class StarlarkRuntime:
         self.answers.append(answer)
         return answer
 
+    def __find_variable_assignment(
+        self,
+        var_name,
+        tree
+    ):
+        class AssignmentFinder(ast.NodeVisitor):
+            def __init__(self, var_name):
+                self.var_name = var_name
+                self.assignment_node = None
+
+            def visit_Assign(self, node):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == self.var_name:
+                        self.assignment_node = node.value
+                self.generic_visit(node)
+
+        finder = AssignmentFinder(var_name)
+        finder.visit(tree)
+        return finder.assignment_node
+
+    def __get_assignment(
+        self,
+        variable_name,
+        code,
+    ) -> Optional[Tuple[ast.expr, ast.expr]]:
+        '''
+        Get's the right hand side of a variable assignment
+        by walking the abstract syntax tree
+        '''
+        tree = ast.parse(code)
+
+        assignment_node = self.__find_variable_assignment(variable_name, tree)
+        if assignment_node is None:
+            return None
+
+        var_node = ast.Name(variable_name, ctx=ast.Load())
+        return var_node, assignment_node
+
+    def statement_to_message(
+        self,
+        context: Statement | str,
+    ) -> User:
+        statement_result_prompts = {
+            'answer': 'answer_result.prompt',
+            'assistant': 'assistant_result.prompt',
+            'function_call': 'function_call_result.prompt',
+            'function_meta': 'functionmeta_result.prompt',
+            'llm_call': 'llm_call_result.prompt',
+            'str': 'str_result.prompt',
+            'foreach': 'foreach_result.prompt',
+            'list': 'list_result.prompt',
+        }
+
+        if isinstance(context, FunctionCall):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts[context.token()],
+                template={
+                    'function_call': context.to_code_call(),
+                    'function_signature': context.to_definition(),
+                    'function_result': str(context.result()),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            )
+            return User(Content(result_prompt['user_message']))
+
+        elif isinstance(context, FunctionCallMeta):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['function_meta'],
+                template={
+                    'function_callsite': context.callsite,
+                    'function_result': str(context.result()),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            )
+            return User(Content(result_prompt['user_message']))
+
+        elif isinstance(context, str):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['str'],
+                template={
+                    'str_result': context,
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            )
+            return User(Content(result_prompt['user_message']))
+
+        elif isinstance(context, Assistant):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['assistant'],
+                template={
+                    'assistant_result': str(context.message),
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            )
+            return User(Content(result_prompt['user_message']))
+
+        elif isinstance(context, list):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['list'],
+                template={
+                    'list_result': '\n'.join([str(c) for c in context])
+                },
+                user_token=self.controller.get_executor().user_token(),
+                assistant_token=self.controller.get_executor().assistant_token(),
+                append_token=self.controller.get_executor().append_token(),
+            )
+            return User(Content(result_prompt['user_message']))
+
+        elif isinstance(context, PandasMeta):
+            return User(Content(context.df.to_csv()))
+
+        elif isinstance(context, FunctionBindable):
+            # todo
+            return User(Content(context._result.result()))  # type: ignore
+
+        elif isinstance(context, User):
+            return context
+
+        logging.debug('statement_to_message() unusual type, context is: {}'.format(context))
+        return User(Content(str(context)))
+
+    def rewrite_answer_error_correction(
+        self,
+        query: str,
+        starlark_code: str,
+        error: str,
+        locals_dictionary: Dict[Any, Any],
+    ) -> str:
+        '''
+        This handles the case where an answer() is not correct and we need to
+        identify the single place in the code where this may have occurred, and
+        see if we can manually patch it.
+        '''
+        logging.debug('rewrite_answer_error_correction()')
+        dictionary = ''
+        for key, value in locals_dictionary.items():
+            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
+
+        assistant = self.controller.execute_llm_call(
+            llm_call=LLMCall(
+                user_message=Helpers.prompt_message(
+                    prompt_name='answer_error_correction.prompt',
+                    template={
+                        'task': query,
+                        'code': starlark_code,
+                        'error': error,
+                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                        'dictionary': dictionary,
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
+                context_messages=[],
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
+                prompt_name='answer_error_correction.prompt',
+            ),
+            query=self.original_query,
+            original_query=self.original_query,
+        )
+
+        line = str(assistant.message)
+
+        if line not in self.original_code and ' = ' in line:
+            var_binding = line.split(' = ')[0].strip()
+            # example:
+            # var3 = Assistant(To find the differences and similarities between the two papers, I would need the text or
+            # content of the two papers. Please provide the text or relevant information from the papers, and I will be
+            # able to analyze and compare them for you. False)
+            rhs: Optional[Tuple[ast.expr, ast.expr]] = self.__get_assignment(var_binding, starlark_code)
+            if (
+                rhs
+                and isinstance(rhs[1], ast.Call)
+                and hasattr(cast(ast.Call, rhs[1]).func, 'value')
+                and hasattr(cast(ast.Call, rhs[1]), 'attr')
+                and cast(ast.Call, rhs[1]).func.value.id == 'WebHelpers'  # type: ignore
+                and cast(ast.Call, rhs[1]).func.attr == 'get_url'  # type: ignore
+            ):
+                # we have a WebHelpers.get_url() call that looks like it failed,
+                # let's try with Firefox
+                # todo, now using firefox always
+                raise ValueError('gotta fix this code')
+                starlark_code = starlark_code.replace('WebHelpers.get_url', 'WebHelpers.get_url_firefox_via_pdf')
+                return starlark_code
+            elif (
+                rhs
+                and isinstance(rhs[1], ast.Call)
+                and hasattr(cast(ast.Call, rhs[1]).func, 'value')
+                and hasattr(cast(ast.Call, rhs[1]), 'attr')
+                and cast(ast.Call, rhs[1]).func.attr == 'llm_call'  # type: ignore
+            ):
+                starlark_code = line
+                return starlark_code
+            else:
+                return ''
+        else:
+            return ''
+
+    def rewrite_starlark_error_correction(
+        self,
+        query: str,
+        starlark_code: str,
+        error: str,
+        locals_dictionary: Dict[Any, Any],
+    ) -> str:
+        logging.debug('rewrite_starlark_error_correction()')
+        dictionary = ''
+        for key, value in locals_dictionary.items():
+            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
+
+        assistant = self.controller.execute_llm_call(
+            llm_call=LLMCall(
+                user_message=Helpers.prompt_message(
+                    prompt_name='starlark_error_correction.prompt',
+                    template={
+                        'task': query,
+                        'code': starlark_code,
+                        'error': error,
+                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                        'dictionary': dictionary,
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
+                context_messages=[],
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
+                prompt_name='starlark_error_correction.prompt',
+            ),
+            query=self.original_query,
+            original_query=self.original_query
+        )
+
+        # double shot try
+        try:
+            _ = ast.parse(str(assistant.message))
+            return str(assistant.message)
+        except SyntaxError as ex:
+            logging.debug('SyntaxError: {}'.format(ex))
+            try:
+                _ = self.rewrite_starlark_error_correction(
+                    query=query,
+                    starlark_code=str(assistant.message),
+                    error=str(ex),
+                    locals_dictionary=locals_dictionary,
+                )
+                return str(assistant.message)
+            except Exception as ex:
+                logging.debug('Second exception rewriting starlark code: {}'.format(ex))
+                return ''
+
+    def __eval_with_error_wrapper(
+        self,
+        starlark_code: str,
+        retry_count: int = 2,
+    ):
+        counter = 0
+        while counter < retry_count:
+            try:
+                return eval(starlark_code, self.globals_dict, self.locals_dict)
+            except Exception as ex:
+                starlark_code = self.rewrite(starlark_code, str(ex))
+            counter += 1
+        return None
+
+    def __compile_and_execute(
+        self,
+        starlark_code: str,
+    ) -> Dict[Any, Any]:
+        logging.debug('__compile_and_execute()')
+        parsed_ast = ast.parse(starlark_code)
+        exec(compile(parsed_ast, filename="<ast>", mode="exec"), self.globals_dict, self.locals_dict)
+        return self.locals_dict
+
+    def __interpret(
+        self,
+        starlark_code: str,
+    ) -> Dict[Any, Any]:
+        parsed_ast = ast.parse(starlark_code)
+
+        for node in parsed_ast.body:
+            if isinstance(node, ast.Expr):
+                logging.debug(f'[eval] {astunparse.unparse(node)}')
+                result = eval(
+                    compile(ast.Expression(node.value), '<string>', 'eval'),
+                    {**self.globals_dict, **self.locals_dict}
+                )
+                logging.debug(f'[=>] {result}')
+            else:
+                logging.debug(f'[exec] {astunparse.unparse(node)}')
+                exec(
+                    compile(ast.Module(body=[node], type_ignores=[]), '<string>', 'exec'),
+                    self.globals_dict,
+                    self.locals_dict
+                )
+        return self.locals_dict
+
     def compile_error(
         self,
         starlark_code: str,
@@ -875,29 +918,6 @@ class StarlarkRuntime:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)
 
-    def __eval_with_error_wrapper(
-        self,
-        starlark_code: str,
-        retry_count: int = 2,
-    ):
-        counter = 0
-        while counter < retry_count:
-            try:
-                return eval(starlark_code, self.globals_dict, self.locals_dict)
-            except Exception as ex:
-                starlark_code = self.rewrite(starlark_code, str(ex))
-            counter += 1
-        return None
-
-    def __compile_and_execute(
-        self,
-        starlark_code: str,
-    ) -> Dict[Any, Any]:
-        logging.debug('__compile_and_execute()')
-        parsed_ast = ast.parse(starlark_code)
-        exec(compile(parsed_ast, filename="<ast>", mode="exec"), self.globals_dict, self.locals_dict)
-        return self.locals_dict
-
     def run(
         self,
         starlark_code: str,
@@ -913,29 +933,6 @@ class StarlarkRuntime:
         self.locals_dict = locals_dict
 
         return self.__compile_and_execute(starlark_code)
-
-    def __interpret(
-        self,
-        starlark_code: str,
-    ) -> Dict[Any, Any]:
-        parsed_ast = ast.parse(starlark_code)
-
-        for node in parsed_ast.body:
-            if isinstance(node, ast.Expr):
-                logging.debug(f'[eval] {astunparse.unparse(node)}')
-                result = eval(
-                    compile(ast.Expression(node.value), '<string>', 'eval'),
-                    {**self.globals_dict, **self.locals_dict}
-                )
-                logging.debug(f'[=>] {result}')
-            else:
-                logging.debug(f'[exec] {astunparse.unparse(node)}')
-                exec(
-                    compile(ast.Module(body=[node], type_ignores=[]), '<string>', 'exec'),
-                    self.globals_dict,
-                    self.locals_dict
-                )
-        return self.locals_dict
 
     def run_continuation_passing(
         self,

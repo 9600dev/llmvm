@@ -1,15 +1,46 @@
 import base64
 import copy
 import datetime as dt
+import functools
 import importlib
 import os
 from abc import ABC, abstractmethod
 from enum import Enum
+from importlib import resources
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
 from pydantic import BaseModel
 
 T = TypeVar('T')
+
+
+def bcl(module_or_path):
+    def decorator(cls):
+        class NewClass(cls):
+            def __init__(self, *args, **kwargs):
+                try:
+                    if '.' in module_or_path:
+                        # Treat it as a module name
+                        module = importlib.import_module(module_or_path)
+                        self.arg_string = getattr(module, 'arg_string', None)
+                    else:
+                        # Treat it as a file path
+                        self.arg_string = resources.files(module_or_path).read_text()
+                except (ImportError, AttributeError, FileNotFoundError):
+                    self.arg_string = None
+
+                super(NewClass, self).__init__(*args, **kwargs)
+
+            def print_arg_string(self):
+                if self.arg_string:
+                    print(f"Decorator argument: {self.arg_string}")
+                else:
+                    print("Decorator argument not found.")
+
+        NewClass.__name__ = cls.__name__
+        NewClass.__doc__ = cls.__doc__
+        return NewClass
+    return decorator
 
 
 async def awaitable_none(a: 'AstNode') -> None:

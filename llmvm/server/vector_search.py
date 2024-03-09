@@ -5,7 +5,7 @@ from langchain.text_splitter import TextSplitter
 
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Message
-from llmvm.server.source import Source
+from llmvm.server.base_library.source import Source
 from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_store import VectorStore

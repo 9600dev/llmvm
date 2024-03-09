@@ -17,9 +17,11 @@ from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional
+from zoneinfo import ZoneInfo
 
 import nest_asyncio
 import psutil
+from dateutil.relativedelta import relativedelta
 from docstring_parser import parse
 from PIL import Image
 
@@ -45,6 +47,51 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def last_day_of_quarter(year, quarter):
+        start_month = 3 * quarter - 2
+        end_month = start_month + 2
+
+        if end_month > 12:
+            end_month = 12
+
+        last_day = (dt.datetime(year, end_month, 1) + dt.timedelta(days=31)).replace(day=1) - dt.timedelta(days=1)
+        return last_day
+
+    @staticmethod
+    def parse_relative_datetime(relative_expression: str, timezone: Optional[str] = None) -> dt.datetime:
+        if relative_expression.startswith('Q'):
+            quarter = int(relative_expression[1:])
+            return Helpers.last_day_of_quarter(dt.datetime.now().year, quarter)
+
+        tz = dt.datetime.now().astimezone().tzinfo
+
+        if timezone:
+            tz = ZoneInfo(timezone)
+
+        if 'now' in relative_expression:
+            return dt.datetime.now(tz)
+
+        parts = relative_expression.split()
+
+        if len(parts) != 2:
+            return parse(relative_expression)  # type: ignore
+
+        value = int(parts[0])
+        unit = parts[1].lower()
+
+        if unit == "days":
+            return dt.datetime.now(tz) + dt.timedelta(days=value)
+        elif unit == "months":
+            return dt.datetime.now(tz) + relativedelta(months=value)
+        elif unit == "years":
+            return dt.datetime.now(tz) + relativedelta(years=value)
+        elif unit == "hours":
+            return dt.datetime.now(tz) + dt.timedelta(hours=value)
+        else:
+            return parse(relative_expression)  # type: ignore
+
+
     @staticmethod
     def load_resize_save(raw_data: bytes, output_format='PNG', max_size=5 * 1024 * 1024) -> bytes:
         if output_format not in ['PNG', 'JPEG']:
@@ -492,7 +539,7 @@ class Helpers():
         h_size = int(float(image.size[1]) * float(w_percent))
 
         # Resize the image
-        image = image.resize((base_width, h_size), Image.NEAREST)
+        image = image.resize((base_width, h_size), Image.NEAREST)  # type: ignore
 
         buffer = io.BytesIO()
         image.save(buffer, format="PNG")

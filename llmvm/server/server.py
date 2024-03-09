@@ -2,21 +2,19 @@ import asyncio
 import os
 import shutil
 import sys
+from importlib import resources
 from typing import List, Optional, cast
 
 import async_timeout
 import jsonpickle
 import nest_asyncio
-from openai import AsyncOpenAI, OpenAI
-
-from importlib import resources
-
 import rich
 import uvicorn
 from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request,
                      UploadFile)
 from fastapi.param_functions import File, Form
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from openai import AsyncOpenAI, OpenAI
 
 from llmvm.common.anthropic_executor import AnthropicExecutor
 from llmvm.common.container import Container
@@ -31,8 +29,7 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
                                   compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.persistent_cache import PersistentCache
-from llmvm.server.starlark_execution_controller import \
-    StarlarkExecutionController
+from llmvm.server.starlark_execution_controller import ExecutionController
 from llmvm.server.tools.firefox import FirefoxHelpers
 from llmvm.server.vector_search import VectorSearch
 from llmvm.server.vector_store import VectorStore
@@ -75,7 +72,7 @@ vector_store = VectorStore(
 vector_search = VectorSearch(vector_store=vector_store)
 
 
-def get_controller(controller: Optional[str] = None) -> StarlarkExecutionController:
+def get_controller(controller: Optional[str] = None) -> ExecutionController:
     if not controller:
         controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
 
@@ -89,7 +86,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'LLMVM_API_BASE'),
             default_max_token_len=int(Container().get_config_variable('anthropic_max_tokens')),
         )
-        anthropic_controller = StarlarkExecutionController(
+        anthropic_controller = ExecutionController(
             executor=anthropic_executor,
             agents=agents,  # type: ignore
             vector_search=vector_search,
@@ -103,7 +100,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             default_model=Container().get_config_variable('mistral_model', 'LLMVM_MODEL'),
             default_max_token_len=int(Container().get('mistral_max_tokens')),
         )
-        mistral_controller = StarlarkExecutionController(
+        mistral_controller = ExecutionController(
             executor=mistral_executor,
             agents=agents,  # type: ignore
             vector_search=vector_search,
@@ -117,7 +114,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             default_model=Container().get_config_variable('gemini_model', 'LLMVM_MODEL'),
             default_max_token_len=int(Container().get('gemini_max_tokens')),
         )
-        gemini_controller = StarlarkExecutionController(
+        gemini_controller = ExecutionController(
             executor=gemini_executor,
             agents=agents,  # type: ignore
             vector_search=vector_search,
@@ -133,7 +130,7 @@ def get_controller(controller: Optional[str] = None) -> StarlarkExecutionControl
             default_max_token_len=int(Container().get('openai_max_tokens')),
         )
 
-        openai_controller = StarlarkExecutionController(
+        openai_controller = ExecutionController(
             executor=openai_executor,
             agents=agents,  # type: ignore
             vector_search=vector_search,
@@ -249,6 +246,7 @@ async def download(
         async def execute_and_signal():
             stream_handler = callback
             from bcl import ContentDownloader
+
             # todo thread cookies through here
             downloader = ContentDownloader(
                 expr=download_item.url,

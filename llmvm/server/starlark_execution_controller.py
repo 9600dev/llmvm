@@ -14,14 +14,13 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
                                   Controller, Executor, FileContent, LLMCall,
                                   Message, PdfContent, Statement, System,
                                   TokenCompressionMethod, User, awaitable_none)
-from llmvm.server.starlark_runtime import StarlarkRuntime
 from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
 
 
-class StarlarkExecutionController(Controller):
+class ExecutionController(Controller):
     def __init__(
         self,
         executor: Executor,
@@ -36,7 +35,6 @@ class StarlarkExecutionController(Controller):
         self.agents = agents
         self.vector_search = vector_search
         self.edit_hook = edit_hook
-        self.starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
         self.continuation_passing_style = continuation_passing_style
 
     async def __llm_call(
@@ -84,67 +82,6 @@ class StarlarkExecutionController(Controller):
             llm_call
         )
 
-    def get_executor(self) -> Executor:
-        return self.executor
-
-    async def aclassify_tool_or_direct(
-        self,
-        message: User,
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
-        model: Optional[str] = None,
-    ) -> Dict[str, float]:
-        model = model if model else self.executor.get_default_model()
-
-        def parse_result(result: str) -> Dict[str, float]:
-            if ',' in result:
-                if result.startswith('Assistant: '):
-                    result = result[len('Assistant: '):].strip()
-
-                first = result.split(',')[0].strip()
-                second = result.split(',')[1].strip()
-
-                match = re.search(r"[-+]?[0-9]*\.?[0-9]+", second)
-                if match:
-                    second = match.group(0)
-
-                try:
-                    if first.startswith('tool') or first.startswith('"tool"'):
-                        return {'tool': float(second)}
-                    elif first.startswith('direct') or first.startswith('"direct"'):
-                        return {'direct': float(second)}
-                    else:
-                        return {'tool': 1.0}
-                except ValueError as ex:
-                    return {'tool': 1.0}
-            return {'tool': 1.0}
-
-        # assess the type of task
-        function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
-        # todo rip out the probability from here
-        query_understanding = Helpers.load_and_populate_prompt(
-            prompt_name='query_understanding.prompt',
-            template={
-                'functions': '\n'.join(function_list),
-                'user_input': message.message.get_content(),
-            },
-            user_token=self.get_executor().user_token(),
-            assistant_token=self.get_executor().assistant_token(),
-            append_token=self.get_executor().append_token(),
-        )
-
-        assistant: Assistant = await self.executor.aexecute(
-            messages=[
-                System(Content(query_understanding['system_message'])),
-                User(Content(query_understanding['user_message']))
-            ],
-            temperature=0.0,
-            stream_handler=stream_handler,
-            model=model,
-        )
-        if assistant.error or not parse_result(assistant.message.get_content()):
-            return {'tool': 1.0}
-        return parse_result(assistant.message.get_content())
-
     async def __similarity(
         self,
         llm_call: LLMCall,
@@ -179,7 +116,9 @@ class StarlarkExecutionController(Controller):
 
             similarity_messages.append(User(Content(similarity_message)))
 
-        total_similarity_tokens = sum([self.executor.count_tokens(m.message.get_content(), model=llm_call.model) for m in similarity_messages])
+        total_similarity_tokens = sum(
+            [self.executor.count_tokens(m.message.get_content(), model=llm_call.model) for m in similarity_messages]
+        )
         if total_similarity_tokens > llm_call.max_prompt_len:
             logging.error(f'__similarity() total_similarity_tokens: {total_similarity_tokens} is greater than max_prompt_len: {llm_call.max_prompt_len}, will perform map/reduce.')  # noqa E501
 
@@ -346,6 +285,67 @@ class StarlarkExecutionController(Controller):
         )
         return assistant_result
 
+    def get_executor(self) -> Executor:
+        return self.executor
+
+    async def aclassify_tool_or_direct(
+        self,
+        message: User,
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = awaitable_none,
+        model: Optional[str] = None,
+    ) -> Dict[str, float]:
+        model = model if model else self.executor.get_default_model()
+
+        def parse_result(result: str) -> Dict[str, float]:
+            if ',' in result:
+                if result.startswith('Assistant: '):
+                    result = result[len('Assistant: '):].strip()
+
+                first = result.split(',')[0].strip()
+                second = result.split(',')[1].strip()
+
+                match = re.search(r"[-+]?[0-9]*\.?[0-9]+", second)
+                if match:
+                    second = match.group(0)
+
+                try:
+                    if first.startswith('tool') or first.startswith('"tool"'):
+                        return {'tool': float(second)}
+                    elif first.startswith('direct') or first.startswith('"direct"'):
+                        return {'direct': float(second)}
+                    else:
+                        return {'tool': 1.0}
+                except ValueError as ex:
+                    return {'tool': 1.0}
+            return {'tool': 1.0}
+
+        # assess the type of task
+        function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+        # todo rip out the probability from here
+        query_understanding = Helpers.load_and_populate_prompt(
+            prompt_name='query_understanding.prompt',
+            template={
+                'functions': '\n'.join(function_list),
+                'user_input': message.message.get_content(),
+            },
+            user_token=self.get_executor().user_token(),
+            assistant_token=self.get_executor().assistant_token(),
+            append_token=self.get_executor().append_token(),
+        )
+
+        assistant: Assistant = await self.executor.aexecute(
+            messages=[
+                System(Content(query_understanding['system_message'])),
+                User(Content(query_understanding['user_message']))
+            ],
+            temperature=0.0,
+            stream_handler=stream_handler,
+            model=model,
+        )
+        if assistant.error or not parse_result(assistant.message.get_content()):
+            return {'tool': 1.0}
+        return parse_result(assistant.message.get_content())
+
     async def aexecute_llm_call(
         self,
         llm_call: LLMCall,
@@ -401,7 +401,9 @@ class StarlarkExecutionController(Controller):
             context_message = User(Content('\n\n'.join([m.message.get_content() for m in llm_call.context_messages])))
 
             # see if we can do a similarity search or not.
-            write_client_stream('Determining context window compression approach of either similarity vector search, or full map/reduce.\n')
+            write_client_stream(
+                'Determining context window compression approach of either similarity vector search, or full map/reduce.\n'
+            )
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
                 token_calculator=self.executor.count_tokens,
@@ -554,6 +556,9 @@ class StarlarkExecutionController(Controller):
         template_args: Optional[Dict[str, Any]] = None,
         cookies: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Statement]:
+        from llmvm.server.starlark_runtime import StarlarkRuntime
+        starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
+
         model = model if model else self.executor.get_default_model()
 
         def find_answers(d: Dict[Any, Any]) -> List[Statement]:
@@ -607,7 +612,7 @@ class StarlarkExecutionController(Controller):
             elif 'code' in classification:
                 files = template_args['files'] if template_args and 'files' in template_args else []
                 if files:
-                    self.starlark_runtime.globals_dict['source_project'].set_files(files)
+                    starlark_runtime.globals_dict['source_project'].set_files(files)
                 response = await self.abuild_runnable_code_ast(
                     llm_call=LLMCall(
                         user_message=messages[-1],
@@ -659,37 +664,37 @@ class StarlarkExecutionController(Controller):
                     _ = ast.parse(assistant_response_str)
                 except SyntaxError as ex:
                     logging.debug('aexecute() SyntaxError: {}'.format(ex))
-                    assistant_response_str = self.starlark_runtime.compile_error(
+                    assistant_response_str = starlark_runtime.compile_error(
                         starlark_code=assistant_response_str,
                         error=str(ex),
                     )
 
             if not self.continuation_passing_style:
-                old_model = self.starlark_runtime.controller.get_executor().get_default_model()
+                old_model = starlark_runtime.controller.get_executor().get_default_model()
 
                 if model:
-                    self.starlark_runtime.controller.get_executor().set_default_model(model)
+                    starlark_runtime.controller.get_executor().set_default_model(model)
 
-                locals_dict = { 'cookies': cookies } if cookies else {}
-                _ = self.starlark_runtime.run(
+                locals_dict = {'cookies': cookies} if cookies else {}
+                _ = starlark_runtime.run(
                     starlark_code=assistant_response_str,
                     original_query=messages[-1].message.get_content(),
                     messages=messages,
                     locals_dict=locals_dict
                 )
-                results.extend(self.starlark_runtime.answers)
+                results.extend(starlark_runtime.answers)
 
                 if model:
-                    self.starlark_runtime.controller.get_executor().set_default_model(old_model)
+                    starlark_runtime.controller.get_executor().set_default_model(old_model)
 
                 return results
             else:
-                _ = self.starlark_runtime.run_continuation_passing(
+                _ = starlark_runtime.run_continuation_passing(
                     starlark_code=assistant_response_str,
                     original_query=messages[-1].message.get_content(),
                     messages=messages,
                 )
-                results.extend(self.starlark_runtime.answers)
+                results.extend(starlark_runtime.answers)
                 return results
         else:
             # classified or specified as 'direct'
