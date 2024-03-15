@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import LLMCall, Message, User, bcl
+from llmvm.common.objects import Content, LLMCall, Message, User, bcl
 from llmvm.server.starlark_execution_controller import ExecutionController
 from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.tools.webhelpers import FirefoxHelpers, WebHelpers
@@ -47,7 +47,7 @@ class ContentDownloader():
                     assistant_token=self.controller.get_executor().assistant_token(),
                     append_token=self.controller.get_executor().append_token(),
                 ),
-                context_messages=[self.controller.starlark_runtime.statement_to_message(content)],
+                context_messages=self.controller.statement_to_message(content),
                 executor=self.controller.get_executor(),
                 model=self.controller.get_executor().get_default_model(),
                 temperature=0.0,
@@ -64,17 +64,16 @@ class ContentDownloader():
         else:
             return PdfHelpers.parse_pdf_image(filename)
 
-    def download(self) -> str:
+    def download(self) -> Content:
         logging.debug('ContentDownloader.download: {}'.format(self.expr))
 
         # deal with files
         result = urlparse(self.expr)
         if result.scheme == '' or result.scheme == 'file':
             if '.pdf' in result.path:
-                return self.parse_pdf(result.path)
+                return Content(self.parse_pdf(result.path))
             if '.htm' in result.path or '.html' in result.path:
-                return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
-
+                return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read(), url=self.expr)
 
         # deal with pdfs
         elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
@@ -85,7 +84,7 @@ class ContentDownloader():
             pdf_filename = loop.run_until_complete(task)
             _ = loop.run_until_complete(loop.create_task(firefox_helper.close()))
 
-            return self.parse_pdf(pdf_filename)
+            return Content(self.parse_pdf(pdf_filename))
 
         # deal with websites
         elif result.scheme == 'http' or result.scheme == 'https':
@@ -95,6 +94,6 @@ class ContentDownloader():
             result = loop.run_until_complete(task)
             _ = loop.run_until_complete(loop.create_task(firefox_helper.close()))
 
-            return WebHelpers.convert_html_to_markdown(result)
-        return ''
-
+            return WebHelpers.convert_html_to_markdown(result, url=self.expr)
+        # else, nothing
+        return Content()

@@ -10,6 +10,7 @@ from markdownify import MarkdownConverter
 
 from llmvm.common.helpers import write_client_stream
 from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.objects import Content, MarkdownContent
 from llmvm.server.tools.firefox import FirefoxHelpers
 from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.tools.search import SerpAPISearcher
@@ -23,7 +24,7 @@ class IgnoringScriptConverter(MarkdownConverter):
 
 class WebHelpers():
     @staticmethod
-    def convert_html_to_markdown(html: str) -> str:
+    def convert_html_to_markdown(html: str, url: str = '') -> MarkdownContent:
         def clean_markdown(markdown_text: str) -> str:
             lines = []
             blank_counter = 0
@@ -63,7 +64,7 @@ class WebHelpers():
 
         result = IgnoringScriptConverter().convert_soup(soup)
         cleaned_result = clean_markdown(result)
-        return unicodedata.normalize('NFKD', cleaned_result)
+        return MarkdownContent(sequence=unicodedata.normalize('NFKD', cleaned_result), url=url)
 
     @staticmethod
     def search_helper(
@@ -153,7 +154,7 @@ class WebHelpers():
         raise ValueError('Not implemented')
 
     @staticmethod
-    def get_url(url: str) -> str:
+    def get_url(url: str) -> Content:
         """
         Connects to and downloads the text content from a url and returns the text content.
         Url can be a http or https web url or a filename and directory location.
@@ -163,7 +164,7 @@ class WebHelpers():
         result = urlparse(url)
         if result.scheme == '' or result.scheme == 'file':
             if '.pdf' in result.path:
-                return PdfHelpers.parse_pdf(url)
+                return Content(PdfHelpers.parse_pdf(url))
             if '.htm' in result.path or '.html' in result.path:
                 return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
 

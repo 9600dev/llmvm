@@ -17,15 +17,18 @@ from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
+import httpx
 import nest_asyncio
 import psutil
 from dateutil.relativedelta import relativedelta
 from docstring_parser import parse
 from PIL import Image
 
-from llmvm.common.objects import Content, Message, StreamNode, User
+from llmvm.common.objects import (Content, ImageContent, MarkdownContent,
+                                  Message, StreamNode, User)
 
 
 def write_client_stream(obj):
@@ -47,6 +50,77 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    async def download(url):
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url)
+            return response.content
+
+    @staticmethod
+    async def get_image_fuzzy_url(logging, url: str, image_url: str, min_width: int, min_height: int) -> bytes:
+        parsed_url = urlparse(url)
+        path = parsed_url.path
+        without_file = parsed_url.scheme + "://" + parsed_url.netloc + os.path.dirname(path)
+
+        try:
+            if image_url.startswith('http'):
+                result = await Helpers.download(image_url)
+                width, height = Helpers.image_size(result)
+                if width >= min_width and height >= min_height:
+                    return result
+
+            elif image_url.startswith('/'):
+                result = await Helpers.download(parsed_url.scheme + "://" + parsed_url.netloc + image_url)
+                width, height = Helpers.image_size(result)
+                if width >= min_width and height >= min_height:
+                    return result
+
+            else:
+                result = await Helpers.download(without_file + image_url)
+                width, height = Helpers.image_size(result)
+                if width >= min_width and height >= min_height:
+                    return result
+        except Exception as e:
+            logging.debug(f"Error downloading image {url} {image_url}: {e}")
+            return b''
+
+        return b''
+
+    @staticmethod
+    async def markdown_content_to_messages(
+        logging,
+        markdown_content: MarkdownContent,
+        min_width: int,
+        min_height: int
+    ) -> List[Content]:
+        markdown_str = markdown_content.get_content()
+        tasks = []
+        pattern = r"!\[(.*?)\]\((.*?)\)|([^!]+)"
+
+        content_list: List[Content] = [Content()] * sum(1 for _ in re.finditer(pattern, markdown_str))
+
+        matches = re.finditer(pattern, markdown_str)
+
+        for idx, match in enumerate(matches):
+            if match.group(1) is not None:
+                # This is an image
+                image_url = str(match.group(2))
+                task = asyncio.create_task(
+                    Helpers.get_image_fuzzy_url(logging, markdown_content.url, image_url, min_width, min_height)
+                )
+                tasks.append((idx, task, image_url))
+            elif match.group(3) is not None:
+                # This is text
+                text = match.group(3).strip()
+                if text:
+                    content_list[idx] = Content(text)  # type: ignore
+
+        for idx, task, image_url in tasks:
+            image_bytes = await task
+            content_list[idx] = ImageContent(image_bytes, image_url)  # type: ignore
+
+        return content_list
+
     @staticmethod
     def last_day_of_quarter(year, quarter):
         start_month = 3 * quarter - 2
@@ -265,6 +339,17 @@ class Helpers():
                 return True
         except Exception:
             return False
+
+    @staticmethod
+    def image_size(byte_stream):
+        try:
+            if isinstance(byte_stream, io.BytesIO):
+                byte_stream = byte_stream.getvalue()
+
+            with Image.open(io.BytesIO(byte_stream)) as im:
+                return im.size
+        except Exception:
+            return (0, 0)
 
     @staticmethod
     def is_base64_encoded(s):

@@ -6,13 +6,13 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
 
 from llmvm.common.container import Container
+from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
                                   FileContent, ImageContent, Message,
                                   PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
-from llmvm.common.perf import (TokenPerf, TokenStreamManager)
-from llmvm.common.helpers import Helpers
+from llmvm.common.perf import TokenPerf, TokenStreamManager
 
 logging = setup_logging()
 
@@ -109,19 +109,18 @@ class AnthropicExecutor(Executor):
         for i in range(len(messages)):
             if isinstance(messages[i], User) and isinstance(messages[i].message, ImageContent):
                 # figure out
-                wrapped.append({
-                    'role': 'user',
-                    'content': [
-                        {
-                            'type': 'image',
-                            'source': {
-                                "type": "base64",
-                                "media_type": Helpers.classify_image(messages[i].message.sequence),
-                                "data": base64.b64encode(messages[i].message.sequence).decode('utf-8')  # type: ignore
-                            }
-                        }
-                    ]
-                })
+                if 'image/unknown' not in Helpers.classify_image(messages[i].message.sequence):
+                    wrapped.append({
+                        'role': 'user',
+                        'content': [{
+                                'type': 'image',
+                                'source': {
+                                    "type": "base64",
+                                    "media_type": Helpers.classify_image(messages[i].message.sequence),
+                                    "data": base64.b64encode(messages[i].message.sequence).decode('utf-8')  # type: ignore
+                                }
+                        }]
+                    })
             elif isinstance(messages[i], User) and i < len(messages) - 1:  # is not last message, context messages
                 wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
                 counter += 1
@@ -135,9 +134,9 @@ class AnthropicExecutor(Executor):
         for i in range(len(wrapped)):
             if i > 0 and wrapped[i]['role'] == wrapped[i - 1]['role']:
                 if wrapped[i]['role'] == 'user':
-                    messages_list.append({'role': 'assistant', 'content': 'Thanks. I am ready for your next message.'})
+                    messages_list.append({'role': 'assistant', 'content': 'Thanks. Ready for next message.'})
                 elif wrapped[i]['role'] == 'assistant':
-                    messages_list.append({'role': 'user', 'content': 'Thanks. I am ready for your next message.'})
+                    messages_list.append({'role': 'user', 'content': 'Thanks. Read for your next message.'})
             messages_list.append(wrapped[i])
 
         return messages_list

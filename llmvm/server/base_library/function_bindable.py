@@ -29,6 +29,7 @@ class FunctionBindable():
         original_code: str,
         original_query: str,
         controller: ExecutionController,
+        starlark_runtime: StarlarkRuntime,
     ):
         self.expr = expr
         self.expr_instantiation = expr_instantiation
@@ -41,6 +42,7 @@ class FunctionBindable():
         self.original_query = original_query
         self.controller = controller
         self.bound_function: Optional[Callable] = None
+        self.starlark_runtime = starlark_runtime
         self._result = None
 
     def __call__(self, *args, **kwargs):
@@ -129,7 +131,7 @@ class FunctionBindable():
             # context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
         ))
         # start with just the expression binding
-        messages.append(self.controller.starlark_runtime.statement_to_message(expr))
+        messages.extend(self.controller.statement_to_message(expr))
         # instantiation
         if str(expr_instantiation_message.message):
             messages.append(expr_instantiation_message)
@@ -261,7 +263,7 @@ class FunctionBindable():
                 globals_result = StarlarkRuntime(
                     controller=self.controller,
                     agents=self.agents,
-                    vector_search=self.controller.starlark_runtime.vector_search,
+                    vector_search=self.starlark_runtime.vector_search,
                 ).run(starlark_code, '')
 
                 self._result = globals_result[identifier]
@@ -275,7 +277,7 @@ class FunctionBindable():
             except Exception as ex:
                 logging.debug('Error executing function call: {}'.format(ex))
                 counter += 1
-                starlark_code = self.controller.starlark_runtime.rewrite_starlark_error_correction(
+                starlark_code = self.starlark_runtime.rewrite_starlark_error_correction(
                     query=self.original_query,
                     starlark_code=starlark_code,
                     error=str(ex),

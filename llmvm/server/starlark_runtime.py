@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import datetime as dt
 import inspect
 import os
@@ -13,7 +14,8 @@ from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Answer, Assistant, Content, Controller,
                                   FunctionCall, FunctionCallMeta, LLMCall,
-                                  Message, PandasMeta, Statement, User)
+                                  MarkdownContent, Message, PandasMeta,
+                                  Statement, User)
 from llmvm.server.starlark_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.tools.firefox import FirefoxHelpers
@@ -43,6 +45,9 @@ class StarlarkRuntime:
         self.messages_list: List[Message] = []
         self.answer_error_correcting = False
         self.setup()
+
+    def statement_to_message(self, statement: Any) -> List[Message]:
+        return self.controller.statement_to_message(statement)
 
     def setup(self):
         class CallWrapper:
@@ -134,7 +139,7 @@ class StarlarkRuntime:
                         assistant_token=self.controller.get_executor().assistant_token(),
                         append_token=self.controller.get_executor().append_token(),
                     ),
-                    context_messages=[self.statement_to_message(expr)],  # type: ignore
+                    context_messages=self.statement_to_message(expr),  # type: ignore
                     executor=self.controller.get_executor(),
                     model=self.controller.get_executor().get_default_model(),
                     temperature=0.0,
@@ -187,11 +192,12 @@ class StarlarkRuntime:
             original_code=self.original_code,
             original_query=self.original_query,
             controller=self.controller,
+            starlark_runtime=self,
         )
         bindable.bind(expr, func)
         return bindable
 
-    def download(self, expr: str) -> str:
+    def download(self, expr: str) -> Content:
         logging.debug(f'download({str(expr)})')
 
         from llmvm.server.base_library.content_downloader import \
@@ -269,7 +275,7 @@ class StarlarkRuntime:
                     assistant_token=self.controller.get_executor().assistant_token(),
                     append_token=self.controller.get_executor().append_token(),
                 ),
-                context_messages=[self.statement_to_message(expr) for expr in expr_list],
+                context_messages=self.statement_to_message(expr_list),
                 executor=self.controller.get_executor(),
                 model=self.controller.get_executor().get_default_model(),
                 temperature=0.0,
@@ -421,7 +427,7 @@ class StarlarkRuntime:
                         assistant_token=self.controller.get_executor().assistant_token(),
                         append_token=self.controller.get_executor().append_token(),
                     ),
-                    context_messages=[self.statement_to_message(expr)],  # type: ignore
+                    context_messages=self.statement_to_message(expr),  # type: ignore
                     executor=self.controller.get_executor(),
                     model=self.controller.get_executor().get_default_model(),
                     temperature=0.0,
@@ -447,7 +453,7 @@ class StarlarkRuntime:
                 # add the message to answers, just in case the user wants to see it.
                 self.answers.append(Answer(
                     conversation=self.messages_list,
-                    result=str(self.statement_to_message(expr).message)  # type: ignore
+                    result=self.statement_to_message(expr)[-1].message  # type: ignore
                 ))
 
                 self.answer_error_correcting = True
@@ -470,12 +476,12 @@ class StarlarkRuntime:
                     ).run(error_correction, self.original_query)
 
         # finally.
-        context_messages: List[Message] = [
+        context_messages: List[Message] = Helpers.flatten([
             self.statement_to_message(
                 context=value,
             ) for key, value in self.locals_dict.items() if key.startswith('var')
-        ]
-        context_messages.append(self.statement_to_message(expr))  # type: ignore
+        ])
+        context_messages.extend(self.statement_to_message(expr))  # type: ignore
 
         answer_assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -549,97 +555,6 @@ class StarlarkRuntime:
         var_node = ast.Name(variable_name, ctx=ast.Load())
         return var_node, assignment_node
 
-    def statement_to_message(
-        self,
-        context: Statement | str,
-    ) -> User:
-        statement_result_prompts = {
-            'answer': 'answer_result.prompt',
-            'assistant': 'assistant_result.prompt',
-            'function_call': 'function_call_result.prompt',
-            'function_meta': 'functionmeta_result.prompt',
-            'llm_call': 'llm_call_result.prompt',
-            'str': 'str_result.prompt',
-            'foreach': 'foreach_result.prompt',
-            'list': 'list_result.prompt',
-        }
-
-        if isinstance(context, FunctionCall):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts[context.token()],
-                template={
-                    'function_call': context.to_code_call(),
-                    'function_signature': context.to_definition(),
-                    'function_result': str(context.result()),
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, FunctionCallMeta):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['function_meta'],
-                template={
-                    'function_callsite': context.callsite,
-                    'function_result': str(context.result()),
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, str):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['str'],
-                template={
-                    'str_result': context,
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, Assistant):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['assistant'],
-                template={
-                    'assistant_result': str(context.message),
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, list):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['list'],
-                template={
-                    'list_result': '\n'.join([str(c) for c in context])
-                },
-                user_token=self.controller.get_executor().user_token(),
-                assistant_token=self.controller.get_executor().assistant_token(),
-                append_token=self.controller.get_executor().append_token(),
-            )
-            return User(Content(result_prompt['user_message']))
-
-        elif isinstance(context, PandasMeta):
-            return User(Content(context.df.to_csv()))
-
-        elif isinstance(context, FunctionBindable):
-            # todo
-            return User(Content(context._result.result()))  # type: ignore
-
-        elif isinstance(context, User):
-            return context
-
-        logging.debug('statement_to_message() unusual type, context is: {}'.format(context))
-        return User(Content(str(context)))
-
     def rewrite_answer_error_correction(
         self,
         query: str,
@@ -684,42 +599,7 @@ class StarlarkRuntime:
             original_query=self.original_query,
         )
 
-        line = str(assistant.message)
-
-        if line not in self.original_code and ' = ' in line:
-            var_binding = line.split(' = ')[0].strip()
-            # example:
-            # var3 = Assistant(To find the differences and similarities between the two papers, I would need the text or
-            # content of the two papers. Please provide the text or relevant information from the papers, and I will be
-            # able to analyze and compare them for you. False)
-            rhs: Optional[Tuple[ast.expr, ast.expr]] = self.__get_assignment(var_binding, starlark_code)
-            if (
-                rhs
-                and isinstance(rhs[1], ast.Call)
-                and hasattr(cast(ast.Call, rhs[1]).func, 'value')
-                and hasattr(cast(ast.Call, rhs[1]), 'attr')
-                and cast(ast.Call, rhs[1]).func.value.id == 'WebHelpers'  # type: ignore
-                and cast(ast.Call, rhs[1]).func.attr == 'get_url'  # type: ignore
-            ):
-                # we have a WebHelpers.get_url() call that looks like it failed,
-                # let's try with Firefox
-                # todo, now using firefox always
-                raise ValueError('gotta fix this code')
-                starlark_code = starlark_code.replace('WebHelpers.get_url', 'WebHelpers.get_url_firefox_via_pdf')
-                return starlark_code
-            elif (
-                rhs
-                and isinstance(rhs[1], ast.Call)
-                and hasattr(cast(ast.Call, rhs[1]).func, 'value')
-                and hasattr(cast(ast.Call, rhs[1]), 'attr')
-                and cast(ast.Call, rhs[1]).func.attr == 'llm_call'  # type: ignore
-            ):
-                starlark_code = line
-                return starlark_code
-            else:
-                return ''
-        else:
-            return ''
+        return str(assistant.message)
 
     def rewrite_starlark_error_correction(
         self,

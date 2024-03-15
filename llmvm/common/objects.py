@@ -419,6 +419,22 @@ class ImageContent(Content):
         self.sequence = sequence
 
 
+class MarkdownContent(Content):
+    def __init__(
+        self,
+        sequence: str,
+        url: str = '',
+    ):
+        super().__init__(sequence, 'markdown', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return f'MarkdownContent({self.url})'
+
+    def get_content(self) -> str:
+        return str(self.sequence)
+
+
 class PdfContent(Content):
     def __init__(
         self,

@@ -267,7 +267,7 @@ class VectorSearch():
         elif filename.endswith('.html') or filename.endswith('.htm'):
             with open(filename, 'r') as f:
                 html = f.read()
-                text = WebHelpers.convert_html_to_markdown(html)
+                text = WebHelpers.convert_html_to_markdown(html, url=url).get_content()
                 entity = self.parse_metadata(
                     content=text,
                     title='',

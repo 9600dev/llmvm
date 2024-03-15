@@ -7,12 +7,15 @@ import re
 from importlib import resources
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
+from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import (no_indent_debug, response_writer,
                                           role_debug, setup_logging)
 from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
-                                  Controller, Executor, FileContent, LLMCall,
-                                  Message, PdfContent, Statement, System,
+                                  Controller, Executor, FileContent,
+                                  FunctionCall, FunctionCallMeta, LLMCall,
+                                  MarkdownContent, Message, PandasMeta,
+                                  PdfContent, Statement, System,
                                   TokenCompressionMethod, User, awaitable_none)
 from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.vector_search import VectorSearch
@@ -284,6 +287,110 @@ class ExecutionController(Controller):
             llm_call=new_call
         )
         return assistant_result
+
+    def statement_to_message(
+        self,
+        context: List[Statement] | Statement | str,
+    ) -> List[Message]:
+        from llmvm.server.base_library.function_bindable import \
+            FunctionBindable
+
+        statement_result_prompts = {
+            'answer': 'answer_result.prompt',
+            'assistant': 'assistant_result.prompt',
+            'function_call': 'function_call_result.prompt',
+            'function_meta': 'functionmeta_result.prompt',
+            'llm_call': 'llm_call_result.prompt',
+            'str': 'str_result.prompt',
+            'foreach': 'foreach_result.prompt',
+            'list': 'list_result.prompt',
+        }
+
+        if isinstance(context, list):
+            return Helpers.flatten([self.statement_to_message(c) for c in context])
+
+        if isinstance(context, FunctionCall):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts[context.token()],
+                template={
+                    'function_call': context.to_code_call(),
+                    'function_signature': context.to_definition(),
+                    'function_result': str(context.result()),
+                },
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                append_token=self.get_executor().append_token(),
+            )
+            return [User(Content(result_prompt['user_message']))]
+
+        elif isinstance(context, FunctionCallMeta):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['function_meta'],
+                template={
+                    'function_callsite': context.callsite,
+                    'function_result': str(context.result()),
+                },
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                append_token=self.get_executor().append_token(),
+            )
+            return [User(Content(result_prompt['user_message']))]
+
+        elif isinstance(context, str):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['str'],
+                template={
+                    'str_result': context,
+                },
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                append_token=self.get_executor().append_token(),
+            )
+            return [User(Content(result_prompt['user_message']))]
+
+        elif isinstance(context, Assistant):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['assistant'],
+                template={
+                    'assistant_result': str(context.message),
+                },
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                append_token=self.get_executor().append_token(),
+            )
+            return [User(Content(result_prompt['user_message']))]
+
+        elif isinstance(context, list):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['list'],
+                template={
+                    'list_result': '\n'.join([str(c) for c in context])
+                },
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                append_token=self.get_executor().append_token(),
+            )
+            return [User(Content(result_prompt['user_message']))]
+
+        elif isinstance(context, PandasMeta):
+            return [User(Content(context.df.to_csv()))]
+
+        elif isinstance(context, Content):
+            if isinstance(context, MarkdownContent) and Container.get_config_variable('LLMVM_FULL_PROCESSING', default=False):
+                result = asyncio.run(Helpers.markdown_content_to_messages(logging, context, 150, 150))
+                return [User(content) for content in result]
+            elif isinstance(context, MarkdownContent):
+                return [User(context)]
+
+        elif isinstance(context, FunctionBindable):
+            # todo
+            return [User(Content(context._result.result()))]  # type: ignore
+
+        elif isinstance(context, User):
+            return [context]
+
+        logging.debug(f'statement_to_message() unusual type {type(context)}, context is: {str(context)}')
+        return [User(Content(str(context)))]
 
     def get_executor(self) -> Executor:
         return self.executor
