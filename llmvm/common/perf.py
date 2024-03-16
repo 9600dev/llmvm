@@ -1,16 +1,21 @@
 import datetime as dt
+import inspect
 import os
 import time
-import inspect
-import openai
 from typing import List, cast
 
-from anthropic import AsyncMessageStream, AsyncMessageStreamManager, AsyncStream as AnthropicAsyncStream
+import openai
+from anthropic import AsyncMessageStream, AsyncMessageStreamManager
+from anthropic import AsyncStream as AnthropicAsyncStream
 from anthropic.types import Completion as AnthropicCompletion
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk as OAICompletion
-from mistralai.models.chat_completion import ChatCompletionStreamResponse as MistralCompletion
-from google.generativeai.types.generation_types import AsyncGenerateContentResponse as AsyncGeminiStream
-from google.generativeai.types.generation_types import GenerateContentResponse as GeminiCompletion
+from google.generativeai.types.generation_types import \
+    AsyncGenerateContentResponse as AsyncGeminiStream
+from google.generativeai.types.generation_types import \
+    GenerateContentResponse as GeminiCompletion
+from mistralai.models.chat_completion import \
+    ChatCompletionStreamResponse as MistralCompletion
+from openai.types.chat.chat_completion_chunk import \
+    ChatCompletionChunk as OAICompletion
 
 from llmvm.common.calculator import TokenPriceCalculator
 from llmvm.common.container import Container
@@ -123,7 +128,7 @@ class TokenPerf:
             logging.debug(f"total_time: {res['total_time']:.2f} prompt_time: {res['prompt_time']:.2f} sample_time: {res['sample_time']:.2f}")
             logging.debug(f"prompt_len: {res['prompt_len']} sample_len: {len(res['ticks'])}")
             logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f}")
-            logging.debug(f"p_cost: ${res['p_cost']:.4f} s_cost: ${res['s_cost']:.4f} request_id: {res['request_id']}")
+            logging.debug(f"p_cost: ${res['p_cost']:.5f} s_cost: ${res['s_cost']:.5f} request_id: {res['request_id']}")
 
     def log(self):
         if self.enabled:
@@ -185,10 +190,11 @@ class LoggingAsyncIterator:
 
 
 class TokenStreamWrapper:
-    def __init__(self,
-            original_stream,
-            token_perf: 'TokenPerf'
-        ):
+    def __init__(
+        self,
+        original_stream,
+        token_perf: 'TokenPerf'
+    ):
         self.stream = original_stream
         self.perf = token_perf
 
@@ -210,10 +216,10 @@ class TokenStreamWrapper:
 
 class TokenStreamManager:
     def __init__(
-            self,
-            stream: AsyncMessageStreamManager | AnthropicAsyncStream[AnthropicCompletion] | openai.AsyncStream, # type: ignore
-            token_perf: 'TokenPerf'
-        ):
+        self,
+        stream: AsyncMessageStreamManager | AnthropicAsyncStream[AnthropicCompletion] | openai.AsyncStream,  # type: ignore
+        token_perf: 'TokenPerf'
+    ):
         self.stream = stream
         self.perf = token_perf
         self.token_perf_wrapper = None

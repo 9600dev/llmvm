@@ -2,7 +2,7 @@
 
 LLMVM is a CLI based productivity tool that uses Large Language Models and local Python tools/helpers to reason about and execute your tasks. A CLI client (client.py) either connects directly to an LLM provider or will connect to a local server (server.py) that coordinates tool execution, [Retrieval Agumented Generation](https://blogs.nvidia.com/blog/what-is-retrieval-augmented-generation/), document search and more.
 
-It supports [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4.0/4 Turbo/Vision models from OpenAI, and [Claude 2.1](https://www.anthropic.com/index/claude-2) from [Anthropic](https://anthropic.com). [Gemini](https://deepmind.google/technologies/gemini/) and [Mistral](https://deepmind.google/technologies/gemini/) are currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images and work directly with GPT 4.5 vision models.
+It supports [Anthropic's](https://www.anthropic.com) Claude 3 Opus, Sonnet and Haiku vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo and Vision models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) and [Mistral](https://deepmind.google/technologies/gemini/) are currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
 
 LLMVM's features are best explored through examples. Let's install, then go through some:
 
@@ -12,7 +12,7 @@ LLMVM's features are best explored through examples. Let's install, then go thro
 
 ```bash
 Default executor is: anthropic
-Default model is: claude-2.1
+Default model is: claude-3-haiku-20240307
 Loaded agent: datetime
 Loaded agent: search_linkedin_profile
 Loaded agent: get_linkedin_profile
@@ -139,8 +139,8 @@ You'll need either an OpenAI API account (including access to the GPT 4.x API), 
 Ensure you have the following environment variables set:
 
 ```bash
-OPENAPI_API_KEY     # your Openai API key, or ...
 ANTHROPIC_API_KEY   # your Anthropic API key
+OPENAPI_API_KEY     # your Openai API key, or ...
 GOOGLE_API_KEY      # your Gemini API key
 MISTRAL_API_KEY     # your Mistral API key
 EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Starlark code before it gets executed etc.
@@ -228,13 +228,22 @@ DEBUG    prompt_len: 28 sample_len: 194
 DEBUG    p_tok_sec 50.52 s_tok_sec: 23.15
 ```
 
+#### Extra PDF and Markdown Parsing and Extraction Performance
+
+You can use the "expensive" mode of PDF and Markdown extraction where images are included along with the text of PDF and Markdown documents. The LLM will be used to guide the extraction process, resulting in a few extra calls:
+
+```bash
+export LLMVM_FULL_PROCESSING='true'
+```
+
 ## Architecture
 
-![](docs/2023-10-11-13-24-31.png)
+![](docs/2024-03-16-12-16-18.png)
+
 
 #### You can:
 
-* Write arbitrary natural language queries that get translated into Starlark code and cooperatively executed
+* Write arbitrary natural language queries that get translated into Starlark code and cooperatively executed.
 * Upload .pdf, .txt, .csv and .html and have them ingested by FAISS and searchable by the LLMVM.
 * Add arbitrary Python helpers by modifying ~/.config/llmvm/config.yaml and adding your Python based helpers. Note: you may need to hook the helper in [starlark_runtime.py](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt). You may also need to show examples of its use in [prompts/starlark/starlark_tool_execution.prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt)
 * [server.py](https://github.com/9600dev/llmvm/blob/master/server.py) via /v1/chat/completions endpoint, mimics and forwards to OpenAI's /v1/chat/completions API.
@@ -243,7 +252,6 @@ DEBUG    p_tok_sec 50.52 s_tok_sec: 23.15
 * TODO: search is weak. Make it better.
 * TODO: all the threading and asyncio stuff is not great. Fix it. Might use RxPy.
 * TODO: local llama can work, but doesn't work well.
-* TODO: anthropic support [done]
 
 ## Advanced Architectural Details
 
