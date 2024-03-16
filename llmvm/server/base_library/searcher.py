@@ -19,8 +19,6 @@ class Searcher():
     def __init__(
         self,
         expr,
-        agents: List[Callable],
-        messages: List[Message],
         controller: ExecutionController,
         original_code: str,
         original_query: str,
@@ -28,8 +26,6 @@ class Searcher():
         total_links_to_return: int = 2,
     ):
         self.query = expr
-        self.messages: List[Message] = messages
-        self.agents = agents
         self.original_code = original_code
         self.original_query = original_query
         self.controller = controller
@@ -83,7 +79,7 @@ class Searcher():
 
     def search(
         self,
-    ) -> str:
+    ) -> List[Content]:
         # todo: we should probably return the Search instance, so we can futz with it later on.
         query_expander = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -133,37 +129,37 @@ class Searcher():
             queries.insert(0, self.query)
             queries = queries[:self.query_expansion]
 
-        def url_to_text(result: Dict[str, Any]) -> str:
+        def url_to_text(result: Dict[str, Any]) -> Content:
             if 'link' in result and isinstance(result['link'], Dict) and 'link' in result['link']:
-                return str(WebHelpers.get_url(result['link']['link']))
+                return WebHelpers.get_url(result['link']['link'])
             elif 'link' in result:
-                return str(WebHelpers.get_url(result['link']))  # type: ignore
+                return WebHelpers.get_url(result['link'])  # type: ignore
             else:
-                return ''
+                return Content()
 
-        def yelp_to_text(reviews: Dict[Any, Any]) -> str:
+        def yelp_to_text(reviews: Dict[Any, Any]) -> Content:
             return_str = f"{reviews['title']} in {reviews['neighborhood']}."
             return_str += '\n\n'
             return_str += f"{reviews['reviews']}\n"
-            return return_str
+            return Content(return_str)
 
-        def local_to_text(document: Dict[Any, Any]) -> str:
+        def local_to_text(document: Dict[Any, Any]) -> Content:
             return_str = f"Title: \"{document['title']}\".\n"
             return_str += f"Link: {document['link']}\n"
             return_str += '\n\n'
             return_str += f"Snippet: \"{document['snippet']}\"\n"
-            return return_str
+            return Content(return_str)
 
-        def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> str:
+        def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> Content:
             if not results:
-                return ''
+                return Content()
 
             title = results[0]['title']
             url = results[0]['url']
             return_str = f'For the Hacker News article: {title} which has a url of: {url}, the comments are as follows:\n\n'
             for comment in results[:num_comments]:
                 return_str += f"{comment['author']} said {comment['comment_text']}.\n"
-            return return_str
+            return Content(return_str)
 
         engines = {
             'Google Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
@@ -203,7 +199,7 @@ class Searcher():
         engine = str(engine_rank.message).split('\n')[0]
         searcher = self.search_google_hook
 
-        for key, value in engines.items():
+        for key, _ in engines.items():
             if key in engine:
                 self.parser = engines[key]['parser']
                 searcher = engines[key]['searcher']
@@ -242,11 +238,11 @@ class Searcher():
 
             query_result, location = eval(str(location.message))
             yelp_result = SerpAPISearcher().search_yelp(query_result, location)
-            return yelp_to_text(yelp_result)
+            return [yelp_to_text(yelp_result)]
 
         if 'Hacker' in engine:
             result = SerpAPISearcher().search_hackernews_comments(queries[0])
-            return hackernews_comments_to_text(result)
+            return [hackernews_comments_to_text(result)]
 
         for query in queries:
             search_results.extend(list(searcher(query))[:10])
@@ -314,22 +310,27 @@ class Searcher():
         for snippet in self.ordered_snippets[0:self.total_links_to_return]:
             write_client_stream(Content(f"{snippet['title']}\n{snippet['link']}\n\n"))
 
-        return self.result()
+        return self.results()
 
-    def result(self) -> str:
+    def results(self) -> List[Content]:
         return_results = []
 
         while len(return_results) < self.total_links_to_return and self.index < len(self.ordered_snippets):
             for result in self.ordered_snippets[self.index:]:
                 self.index += 1
                 try:
-                    parser_result = self.parser(result).strip()
-                    if parser_result:
-                        return_results.append(f"The following content is from: {result['link']} and has the title: {result['title']} \n\n{parser_result}")  # noqa:E501
+                    parser_content: Content = self.parser(result)
+                    # if parser_content:
+                    #   return_results.append(f"The following content is from: {result['link']} and has the title: {result['title']} \n\n{parser_content}")  # noqa:E501
+                    if parser_content:
+                        return_results.append(parser_content)
+
                     if len(return_results) >= self.total_links_to_return:
                         break
                 except Exception as e:
                     logging.error(e)
                     pass
-        return '\n\n\n'.join(return_results)
+        return return_results
 
+    def result(self) -> Content:
+        return Content('\n\n\n'.join([str(result) for result in self.results()]))

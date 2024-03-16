@@ -12,7 +12,6 @@ from llmvm.common.helpers import write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Content, MarkdownContent
 from llmvm.server.tools.firefox import FirefoxHelpers
-from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.tools.search import SerpAPISearcher
 
 logging = setup_logging()
@@ -67,49 +66,8 @@ class WebHelpers():
         return MarkdownContent(sequence=unicodedata.normalize('NFKD', cleaned_result), url=url)
 
     @staticmethod
-    def search_helper(
-        query: str,
-        searcher: Callable[[str], Generator[Dict[str, str], None, None]],
-        parser: Callable[[str], str],
-        total_links_to_return: int,
-    ) -> str:
-        return_results = []
-        search_results = searcher(query)
-
-        for result in search_results:
-            try:
-                parser_result = parser(result['link']).strip()
-                if parser_result:
-                    return_results.append(parser_result)
-
-                if len(return_results) >= total_links_to_return:
-                    break
-
-            except Exception as e:
-                logging.error(e)
-                pass
-
-        return ' '.join(return_results)
-
-    @staticmethod
-    def get_content_by_search(query: str, pages_to_include: int = 4) -> str:
-        '''
-        Searches the internet for a query and returns a string with the markdown text results.
-        Returns the top 'pages_to_include' results.
-        '''
-        searcher = SerpAPISearcher()
-        return WebHelpers.search_helper(query, searcher.search_internet, WebHelpers.get_url, pages_to_include)
-
-    @staticmethod
-    def pdf_url_firefox(url: str) -> str:
-        """Gets a pdf version of the url using the Firefox browser."""
-        firefox_helpers = FirefoxHelpers()
-        result = asyncio.run(firefox_helpers.pdf_url(url))
-        asyncio.run(firefox_helpers.close())
-        return result
-
-    @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:
+        from llmvm.common.pdf import PdfHelpers
         """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
 
@@ -148,33 +106,14 @@ class WebHelpers():
         return ''
 
     @staticmethod
-    def get_news_url(url: str) -> str:
-        """Extracts the news text from a given url"""
-        logging.debug('WebHelpers.get_news_url: {}'.format(url))
-        raise ValueError('Not implemented')
-
-    @staticmethod
     def get_url(url: str) -> Content:
         """
         Connects to and downloads the text content from a url and returns the text content.
         Url can be a http or https web url or a filename and directory location.
         """
+        # todo this is redundant with ContentDownloader
+        from llmvm.server.base_library.content_downloader import \
+            ContentDownloader
         logging.debug('WebHelpers.get_url: {}'.format(url))
-
-        result = urlparse(url)
-        if result.scheme == '' or result.scheme == 'file':
-            if '.pdf' in result.path:
-                return Content(PdfHelpers.parse_pdf(url))
-            if '.htm' in result.path or '.html' in result.path:
-                return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read())
-
-        elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
-            return PdfHelpers.parse_pdf(url)
-
-        elif result.scheme == 'http' or result.scheme == 'https':
-            firefox_helpers = FirefoxHelpers()
-            result = WebHelpers.convert_html_to_markdown(asyncio.run(firefox_helpers.get_url(url)))
-            asyncio.run(firefox_helpers.close())
-            return result
-
-        return ''
+        downloader = ContentDownloader(url)
+        return downloader.download()

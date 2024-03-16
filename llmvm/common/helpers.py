@@ -51,10 +51,74 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
-    async def download(url):
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url)
-            return response.content
+    def anthropic_image_tok_count(base64_encoded: str):
+        # go from base64 encoded to bytes
+        image = base64.b64decode(base64_encoded)
+        # open the image
+        img = Image.open(io.BytesIO(image))
+        return (img.width * img.height) // 750
+
+    @staticmethod
+    def anthropic_resize(image_bytes: bytes) -> bytes:
+        image_type = Helpers.classify_image(image_bytes)
+        pil_extension = 'JPEG'
+        if image_type == 'image/png': pil_extension = 'PNG'
+        if image_type == 'image/webp': pil_extension = 'WEBP'
+
+        image = Image.open(io.BytesIO(image_bytes))
+        original_width, original_height = image.size
+
+        # Determine the aspect ratio and corresponding max dimensions
+        aspect_ratio = original_width / original_height
+        max_dimensions = {
+            (1, 1): (1092, 1092),
+            (3, 4): (951, 1268),
+            (2, 3): (896, 1344),
+            (9, 16): (819, 1456),
+            (1, 2): (784, 1568)
+        }
+
+        # Find the closest aspect ratio and its max dimensions
+        closest_ratio = min(max_dimensions.keys(), key=lambda x: abs((x[0]/x[1]) - aspect_ratio))
+        max_width, max_height = max_dimensions[closest_ratio]
+
+        # Check if the image exceeds the maximum dimensions
+        if original_width > max_width or original_height > max_height:
+            # Resize the image
+            image.thumbnail((max_width, max_height), Image.LANCZOS)
+
+        # Save or return the image
+        resized = io.BytesIO()
+        image.save(resized, format=pil_extension)
+        return resized.getvalue()
+
+    @staticmethod
+    async def download_bytes(url_or_file: str) -> bytes:
+        url_result = urlparse(url_or_file)
+        headers = {  # type: ignore
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # NOQA
+        }
+        stream = b''
+
+        if url_result.scheme == 'http' or url_result.scheme == 'https':
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url_or_file, headers=headers, follow_redirects=True, timeout=10)
+                stream = io.BytesIO(response.content)
+        else:
+            try:
+                with open(url_or_file, 'rb') as file:
+                    stream = io.BytesIO(file.read())
+            except FileNotFoundError:
+                raise ValueError('The supplied argument url_or_file: {} is not a correct filename or url.'.format(url_or_file))
+
+        return stream.getvalue()
+
+    @staticmethod
+    async def download(url_or_file: str) -> str:
+        stream = await Helpers.download_bytes(url_or_file)
+        if stream:
+            return stream.decode('utf-8')
+        return ''
 
     @staticmethod
     async def get_image_fuzzy_url(logging, url: str, image_url: str, min_width: int, min_height: int) -> bytes:
@@ -64,19 +128,19 @@ class Helpers():
 
         try:
             if image_url.startswith('http'):
-                result = await Helpers.download(image_url)
+                result = await Helpers.download_bytes(image_url)
                 width, height = Helpers.image_size(result)
                 if width >= min_width and height >= min_height:
                     return result
 
             elif image_url.startswith('/'):
-                result = await Helpers.download(parsed_url.scheme + "://" + parsed_url.netloc + image_url)
+                result = await Helpers.download_bytes(parsed_url.scheme + "://" + parsed_url.netloc + image_url)
                 width, height = Helpers.image_size(result)
                 if width >= min_width and height >= min_height:
                     return result
 
             else:
-                result = await Helpers.download(without_file + image_url)
+                result = await Helpers.download_bytes(without_file + image_url)
                 width, height = Helpers.image_size(result)
                 if width >= min_width and height >= min_height:
                     return result
@@ -93,7 +157,7 @@ class Helpers():
         min_width: int,
         min_height: int
     ) -> List[Content]:
-        markdown_str = markdown_content.get_content()
+        markdown_str = markdown_content.get_str()
         tasks = []
         pattern = r"!\[(.*?)\]\((.*?)\)|([^!]+)"
 
@@ -165,10 +229,9 @@ class Helpers():
         else:
             return parse(relative_expression)  # type: ignore
 
-
     @staticmethod
     def load_resize_save(raw_data: bytes, output_format='PNG', max_size=5 * 1024 * 1024) -> bytes:
-        if output_format not in ['PNG', 'JPEG']:
+        if output_format not in ['PNG', 'JPEG', 'WEBP']:
             raise ValueError('Invalid output format')
 
         temp_output = io.BytesIO()
@@ -207,6 +270,7 @@ class Helpers():
         if raw_data:
             if raw_data[:8] == b'\x89PNG\r\n\x1a\n': return 'image/png'
             elif raw_data[:2] == b'\xff\xd8': return 'image/jpeg'
+            elif raw_data[:4] == b'RIFF' and raw_data[-4:] == b'WEBP': return 'image/webp'
         return 'image/unknown'
 
     @staticmethod
@@ -341,7 +405,7 @@ class Helpers():
             return False
 
     @staticmethod
-    def image_size(byte_stream):
+    def image_size(byte_stream: bytes) -> tuple[int, int]:
         try:
             if isinstance(byte_stream, io.BytesIO):
                 byte_stream = byte_stream.getvalue()

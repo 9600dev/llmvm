@@ -5,8 +5,8 @@ from langchain.text_splitter import TextSplitter
 
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Message
+from llmvm.common.pdf import PdfHelpers
 from llmvm.server.base_library.source import Source
-from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_store import VectorStore
 
@@ -267,7 +267,7 @@ class VectorSearch():
         elif filename.endswith('.html') or filename.endswith('.htm'):
             with open(filename, 'r') as f:
                 html = f.read()
-                text = WebHelpers.convert_html_to_markdown(html, url=url).get_content()
+                text = WebHelpers.convert_html_to_markdown(html, url=url).get_str()
                 entity = self.parse_metadata(
                     content=text,
                     title='',

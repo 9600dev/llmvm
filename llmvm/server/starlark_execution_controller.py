@@ -11,13 +11,13 @@ from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import (no_indent_debug, response_writer,
                                           role_debug, setup_logging)
+from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
                                   Controller, Executor, FileContent,
                                   FunctionCall, FunctionCallMeta, LLMCall,
                                   MarkdownContent, Message, PandasMeta,
                                   PdfContent, Statement, System,
                                   TokenCompressionMethod, User, awaitable_none)
-from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
@@ -48,7 +48,7 @@ class ExecutionController(Controller):
         messages: List[Message] = copy.deepcopy(llm_call.context_messages)
 
         # don't append the user message if it's empty
-        if llm_call.user_message.message.get_content().strip() != '':
+        if llm_call.user_message.message.get_str().strip() != '':
             messages.append(llm_call.user_message)
 
         try:
@@ -104,7 +104,7 @@ class ExecutionController(Controller):
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
                 token_calculator=self.executor.count_tokens,
-                content=prev_message.message.get_content(),
+                content=prev_message.message.get_str(),
                 chunk_token_count=256,
                 chunk_overlap=0,
                 max_tokens=tokens_per_message - 16,
@@ -112,7 +112,7 @@ class ExecutionController(Controller):
             similarity_message: str = '\n\n'.join([content for content, _ in similarity_chunks])
 
             # check for the header of a statement_to_message. We probably need to keep this
-            if 'Result:\n' in prev_message.message.get_content():
+            if 'Result:\n' in prev_message.message.get_str():
                 # the following line of code was causing token count bugs
                 # similarity_message = prev_message.message.get_content()[0:prev_message.message.get_content().index('Result:\n')] + similarity_message  # noqa E501
                 similarity_message = 'Result:\n' + similarity_message
@@ -150,7 +150,7 @@ class ExecutionController(Controller):
         write_client_stream(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n')
 
         # collapse the context messages into single message
-        context_message = User(Content('\n\n'.join([m.message.get_content() for m in llm_call.context_messages])))
+        context_message = User(Content('\n\n'.join([m.message.get_str() for m in llm_call.context_messages])))
         chunk_results = []
 
         # iterate over the data.
@@ -161,7 +161,7 @@ class ExecutionController(Controller):
 
         chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - self.executor.count_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
         chunks = self.vector_search.chunk(
-            content=context_message.message.get_content(),
+            content=context_message.message.get_str(),
             chunk_size=chunk_size,
             overlap=0
         )
@@ -185,7 +185,7 @@ class ExecutionController(Controller):
                     'data': chunk,
                 },
             )
-            chunk_results.append(chunk_assistant.message.get_content())
+            chunk_results.append(chunk_assistant.message.get_str())
 
         # perform the reduce
         map_results = '\n\n====\n\n' + '\n\n====\n\n'.join(chunk_results)
@@ -229,7 +229,7 @@ class ExecutionController(Controller):
 
         if llm_call.executor.count_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
             logging.debug('__summary_map_reduce() user message is longer than the summary window, will try to cut.')
-            llm_call_copy.user_message = User(Content(llm_call.user_message.message.get_content()[0:tokens_per_message]))
+            llm_call_copy.user_message = User(Content(llm_call.user_message.message.get_str()[0:tokens_per_message]))
 
         # for all messages, do a similarity search
         summary_messages = []
@@ -245,7 +245,7 @@ class ExecutionController(Controller):
             elif isinstance(current_message.message, Content):
                 summary_str = f'This message contains a summary of some arbitrary content. A future prompt will contain the full message.\n\n'  # noqa E501
 
-            summary_str += f'{current_message.message.get_content()[0:tokens_per_message]}'
+            summary_str += f'{current_message.message.get_str()[0:tokens_per_message]}'
             summary_messages.append(User(Content(summary_str)))
 
         # we should have all the same messages, but summarized.
@@ -265,18 +265,18 @@ class ExecutionController(Controller):
 
         prompt_context_messages = [llm_call.user_message]
         current_tokens = self.executor.count_tokens(
-            llm_call.user_message.message.get_content(),
+            llm_call.user_message.message.get_str(),
             model=llm_call.model
         ) + llm_call.completion_tokens_len
 
         # reverse over the messages, last to first
         for i in range(len(lifo_messages) - 1, -1, -1):
             if (
-                current_tokens + self.executor.count_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+                current_tokens + self.executor.count_tokens(lifo_messages[i].message.get_str(), model=llm_call.model)
                 < llm_call.max_prompt_len
             ):
                 prompt_context_messages.append(lifo_messages[i])
-                current_tokens += self.executor.count_tokens(lifo_messages[i].message.get_content(), model=llm_call.model)
+                current_tokens += self.executor.count_tokens(lifo_messages[i].message.get_str(), model=llm_call.model)
             else:
                 break
 
@@ -288,9 +288,16 @@ class ExecutionController(Controller):
         )
         return assistant_result
 
+    def statement_to_str(
+        self,
+        context: List[Statement] | Statement | str | List[Content] | Content,
+    ):
+        messages = self.statement_to_message(context)
+        return '\n\n'.join([message.message.get_str() for message in messages if isinstance(message.message, Content)])
+
     def statement_to_message(
         self,
-        context: List[Statement] | Statement | str,
+        context: List[Statement] | Statement | str | List[Content] | Content,
     ) -> List[Message]:
         from llmvm.server.base_library.function_bindable import \
             FunctionBindable
@@ -306,10 +313,29 @@ class ExecutionController(Controller):
             'list': 'list_result.prompt',
         }
 
-        if isinstance(context, list):
+        if (
+            isinstance(context, list)
+            and len(context) > 0
+            and (
+                isinstance(context[0], Content)
+                or isinstance(context[0], Message)
+            )
+        ):
             return Helpers.flatten([self.statement_to_message(c) for c in context])
 
-        if isinstance(context, FunctionCall):
+        if isinstance(context, str):
+            result_prompt = Helpers.load_and_populate_prompt(
+                prompt_name=statement_result_prompts['str'],
+                template={
+                    'str_result': context,
+                },
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                append_token=self.get_executor().append_token(),
+            )
+            return [User(Content(result_prompt['user_message']))]
+
+        elif isinstance(context, FunctionCall):
             result_prompt = Helpers.load_and_populate_prompt(
                 prompt_name=statement_result_prompts[context.token()],
                 template={
@@ -329,18 +355,6 @@ class ExecutionController(Controller):
                 template={
                     'function_callsite': context.callsite,
                     'function_result': str(context.result()),
-                },
-                user_token=self.get_executor().user_token(),
-                assistant_token=self.get_executor().assistant_token(),
-                append_token=self.get_executor().append_token(),
-            )
-            return [User(Content(result_prompt['user_message']))]
-
-        elif isinstance(context, str):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['str'],
-                template={
-                    'str_result': context,
                 },
                 user_token=self.get_executor().user_token(),
                 assistant_token=self.get_executor().assistant_token(),
@@ -375,15 +389,13 @@ class ExecutionController(Controller):
         elif isinstance(context, PandasMeta):
             return [User(Content(context.df.to_csv()))]
 
-        elif isinstance(context, Content):
-            if isinstance(context, MarkdownContent) and Container.get_config_variable('LLMVM_FULL_PROCESSING', default=False):
-                result = asyncio.run(Helpers.markdown_content_to_messages(logging, context, 150, 150))
-                return [User(content) for content in result]
-            elif isinstance(context, MarkdownContent):
-                return [User(context)]
+        elif isinstance(context, MarkdownContent):
+            return ObjectTransformers.transform_markdown_content(context, self.executor)
+
+        elif isinstance(context, PdfContent):
+            return ObjectTransformers.transform_pdf_content(context, self.executor)
 
         elif isinstance(context, FunctionBindable):
-            # todo
             return [User(Content(context._result.result()))]  # type: ignore
 
         elif isinstance(context, User):
@@ -433,7 +445,7 @@ class ExecutionController(Controller):
             prompt_name='query_understanding.prompt',
             template={
                 'functions': '\n'.join(function_list),
-                'user_input': message.message.get_content(),
+                'user_input': message.message.get_str(),
             },
             user_token=self.get_executor().user_token(),
             assistant_token=self.get_executor().assistant_token(),
@@ -449,9 +461,9 @@ class ExecutionController(Controller):
             stream_handler=stream_handler,
             model=model,
         )
-        if assistant.error or not parse_result(assistant.message.get_content()):
+        if assistant.error or not parse_result(assistant.message.get_str()):
             return {'tool': 1.0}
-        return parse_result(assistant.message.get_content())
+        return parse_result(assistant.message.get_str())
 
     async def aexecute_llm_call(
         self,
@@ -476,12 +488,7 @@ class ExecutionController(Controller):
 
         # If we have a PdfContent here, we need to convert it into the appropriate format
         # before firing off the call.
-        # todo: this should probably use ContentDownloader.parse_pdf (so that context messages)
-        # are included in the assessment of if the Pdf has been converted or not
-        for c_message in llm_call.context_messages:
-            if isinstance(c_message.message, PdfContent) and not c_message.message.is_text():
-                text_result = PdfHelpers.parse_pdf(c_message.message.url)
-                c_message.message.sequence = text_result
+        from llmvm.common.pdf import Pdf
 
         prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
         max_prompt_len = self.executor.max_prompt_tokens(completion_token_len=llm_call.completion_tokens_len, model=model)
@@ -505,7 +512,7 @@ class ExecutionController(Controller):
             write_client_stream(f'The message prompt length: {prompt_len} is bigger than the max prompt length: {max_prompt_len} for executor {llm_call.executor.name()}\n')  # noqa E501
             write_client_stream(f'Context window compression strategy: {compression.name}.\n')
             # check to see if we're simply lifo'ing the context messages (last in first out)
-            context_message = User(Content('\n\n'.join([m.message.get_content() for m in llm_call.context_messages])))
+            context_message = User(Content('\n\n'.join([m.message.get_str() for m in llm_call.context_messages])))
 
             # see if we can do a similarity search or not.
             write_client_stream(
@@ -514,7 +521,7 @@ class ExecutionController(Controller):
             similarity_chunks = self.vector_search.chunk_and_rank(
                 query=query,
                 token_calculator=self.executor.count_tokens,
-                content=context_message.message.get_content(),
+                content=context_message.message.get_str(),
                 chunk_token_count=256,
                 chunk_overlap=0,
                 max_tokens=max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=model) - 16,  # noqa E501
@@ -543,12 +550,12 @@ class ExecutionController(Controller):
                     },
                 )
 
-                decision_criteria.append(assistant_similarity.message.get_content())
+                decision_criteria.append(assistant_similarity.message.get_str())
                 logging.debug('aexecute_llm_call() map_reduce_required, query_or_task: {}, response: {}'.format(
                     query,
                     assistant_similarity.message,
                 ))
-                if 'No' in assistant_similarity.message.get_content():
+                if 'No' in assistant_similarity.message.get_str():
                     # we can break early, as the 'map_reduced_required' flag will not be set below
                     break
 
@@ -581,13 +588,13 @@ class ExecutionController(Controller):
     ) -> Assistant:
         messages = llm_call.context_messages + [llm_call.user_message]
 
-        logging.debug(f'abuild_runnable_code_ast() user_message = {llm_call.user_message.message.get_content()[0:25]}')
+        logging.debug(f'abuild_runnable_code_ast() user_message = {llm_call.user_message.message.get_str()[0:25]}')
         logging.debug(f'abuild_runnable_code_ast() model = {llm_call.model}, executor = {llm_call.executor.name()}')
 
         tools_message = Helpers.prompt_message(
             prompt_name='starlark_code_insights.prompt',
             template={
-                'user_input': messages[-1].message.get_content(),
+                'user_input': messages[-1].message.get_str(),
                 'files': '\n'.join(files),
             },
             user_token=self.get_executor().user_token(),
@@ -618,7 +625,7 @@ class ExecutionController(Controller):
         llm_call: LLMCall,
         agents: List[Callable],
     ) -> Assistant:
-        logging.debug(f'abuild_runnable_tools_ast() user_message = {llm_call.user_message.message.get_content()[0:25]}')
+        logging.debug(f'abuild_runnable_tools_ast() user_message = {llm_call.user_message.message.get_str()[0:25]}')
         logging.debug(f'abuild_runnable_tools_ast() model = {llm_call.model}, executor = {llm_call.executor.name()}')
 
         functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
@@ -627,7 +634,7 @@ class ExecutionController(Controller):
             prompt_name='starlark_tool_execution.prompt',
             template={
                 'functions': '\n'.join(functions),
-                'user_input': llm_call.user_message.message.get_content(),
+                'user_input': llm_call.user_message.message.get_str(),
             },
             user_token=self.get_executor().user_token(),
             assistant_token=self.get_executor().assistant_token(),
@@ -734,7 +741,7 @@ class ExecutionController(Controller):
                     ),
                     files=files,
                 )
-            assistant_response_str = response.message.get_content().replace('Assistant:', '').strip()
+            assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
 
             # anthropic can often embed the code in ```python blocks
             if '```python' in assistant_response_str:
@@ -785,7 +792,7 @@ class ExecutionController(Controller):
                 locals_dict = {'cookies': cookies} if cookies else {}
                 _ = starlark_runtime.run(
                     starlark_code=assistant_response_str,
-                    original_query=messages[-1].message.get_content(),
+                    original_query=messages[-1].message.get_str(),
                     messages=messages,
                     locals_dict=locals_dict
                 )
@@ -798,7 +805,7 @@ class ExecutionController(Controller):
             else:
                 _ = starlark_runtime.run_continuation_passing(
                     starlark_code=assistant_response_str,
-                    original_query=messages[-1].message.get_content(),
+                    original_query=messages[-1].message.get_str(),
                     messages=messages,
                 )
                 results.extend(starlark_runtime.answers)
@@ -817,7 +824,7 @@ class ExecutionController(Controller):
                     prompt_name='',
                     stream_handler=stream_handler,
                 ),
-                query=messages[-1].message.get_content(),
+                query=messages[-1].message.get_str(),
                 original_query='',
                 compression=compression
             )

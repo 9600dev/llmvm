@@ -8,10 +8,11 @@ from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import messages_trace, setup_logging
+from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
-                                  FileContent, ImageContent, Message,
-                                  PdfContent, System, TokenStopNode, User,
-                                  awaitable_none)
+                                  FileContent, ImageContent, MarkdownContent,
+                                  Message, PdfContent, System, TokenStopNode,
+                                  User, awaitable_none)
 from llmvm.common.perf import TokenPerf, TokenStreamManager
 
 logging = setup_logging()
@@ -85,11 +86,14 @@ class AnthropicExecutor(Executor):
     def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
         def wrap_message(index: int, content: Content) -> str:
             if isinstance(content, FileContent):
-                return f"<file url={content.url}>{content.get_content()}</file>"
+                return f"<file url={content.url}>{content.get_str()}</file>"
             elif isinstance(content, PdfContent):
-                return f"<pdf url={content.url}>{content.get_content()}</pdf>"
+                # return f"<pdf url={content.url}>{content.get_str()}</pdf>"
+                return f"<pdf url={content.url}>{ObjectTransformers.transform_pdf_content(content, self)}</pdf>"
+            elif isinstance(content, MarkdownContent):
+                return f"{ObjectTransformers.transform_markdown_content(content, self)}"
             else:
-                return f"{content.get_content()}"
+                return f"{content.get_str()}"
 
         wrapped = []
 
@@ -101,9 +105,34 @@ class AnthropicExecutor(Executor):
         system_message = ''
         if len(system_messages) > 0:
             system_message = system_messages[-1]
-            wrapped.append({'role': 'system', 'content': system_message.message.get_content()})
+            wrapped.append({'role': 'system', 'content': system_message.message.get_str()})
 
         messages = [m for m in messages if m.role() != 'system']
+
+        # check to see if there are more than 20 images in the message list
+        image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
+        if image_count > 20:
+            logging.debug(f'Image count is {image_count}, filtering.')
+
+            # get the top 20 ordered by size, then remove the rest
+            images = [m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)]
+            images.sort(key=lambda x: len(x.message.sequence), reverse=True)
+            smaller_images = images[20:]
+
+            # remove the images from the messages list and collapse the previous and next message
+            # if there is no other images in between
+            for image in smaller_images:
+                index = messages.index(image)
+                if (
+                    index > 0
+                    and not isinstance(messages[index - 1].message, ImageContent)
+                    and not isinstance(messages[index + 1].message, ImageContent)
+                ):
+                    previous = messages[index - 1]
+                    next = messages[index + 1]
+                    previous.message = Content(previous.message.get_str() + next.message.get_str())
+                    messages.remove(image)
+                    messages.remove(next)
 
         counter = 1
         for i in range(len(messages)):
@@ -117,7 +146,7 @@ class AnthropicExecutor(Executor):
                                 'source': {
                                     "type": "base64",
                                     "media_type": Helpers.classify_image(messages[i].message.sequence),
-                                    "data": base64.b64encode(messages[i].message.sequence).decode('utf-8')  # type: ignore
+                                    "data": base64.b64encode(Helpers.anthropic_resize(messages[i].message.sequence)).decode('utf-8')  # type: ignore
                                 }
                         }]
                     })
@@ -125,9 +154,9 @@ class AnthropicExecutor(Executor):
                 wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
                 counter += 1
             elif isinstance(messages[i], User) and i == len(messages) - 1:  # is the last message
-                wrapped.append({'role': 'user', 'content': messages[i].message.get_content()})
+                wrapped.append({'role': 'user', 'content': messages[i].message.get_str()})
             else:
-                wrapped.append({'role': messages[i].role(), 'content': messages[i].message.get_content()})
+                wrapped.append({'role': messages[i].role(), 'content': messages[i].message.get_str()})
 
         messages_list = []
 
@@ -204,10 +233,13 @@ class AnthropicExecutor(Executor):
         model_str = model if model else self.default_model
 
         async def tokenizer_len(content: str | List) -> int:
+            # image should have already been resized
             if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict) and 'source' in content[0]:
-                # todo not supported
-                return 0
-            return await self.client.count_tokens(str(content))
+                token_count = Helpers.anthropic_image_tok_count(content[0]['source']['data'])
+                return token_count
+
+            token_count = await self.client.count_tokens(str(content))
+            return token_count
 
         def num_tokens_from_messages(messages, model: str):
             # this is inexact, but it's a reasonable approximation
@@ -402,7 +434,7 @@ class AnthropicExecutor(Executor):
             messages_context=conversation
         )
         assistant.perf_trace = perf
-        if assistant.message.get_content() == '':
+        if assistant.message.get_str() == '':
             logging.error(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')
 
         return assistant

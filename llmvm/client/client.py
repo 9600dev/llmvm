@@ -328,7 +328,7 @@ def get_path_as_messages(
                         files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
                 else:
                     files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
-            elif Helpers.classify_image(open(file_path, 'rb').read()) in ['image/jpeg', 'image/png']:
+            elif Helpers.classify_image(open(file_path, 'rb').read()) in ['image/jpeg', 'image/png', 'image/webp']:
                 if upload:
                     with open(file_path, 'rb') as f:
                         files.append(User(ImageContent(f.read(), url=os.path.abspath(file_path))))
@@ -572,7 +572,10 @@ async def execute_llm_call(
                 model,
                 context_messages
             )
-            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+            return SessionThread(
+                id=-1,
+                messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+            )
         elif executor == 'anthropic' and Container.get_config_variable('ANTHROPIC_API_KEY'):
             assistant = await execute_llm_call_direct(
                 message,
@@ -581,7 +584,10 @@ async def execute_llm_call(
                 model,
                 context_messages
             )
-            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+            return SessionThread(
+                id=-1,
+                messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+            )
         elif executor == 'mistral' and Container.get_config_variable('MISTRAL_API_KEY'):
             assistant = await execute_llm_call_direct(
                 message,
@@ -590,7 +596,10 @@ async def execute_llm_call(
                 model,
                 context_messages
             )
-            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+            return SessionThread(
+                id=-1,
+                messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+            )
         elif executor == 'gemini' and Container.get_config_variable('GOOGLE_API_KEY'):
             assistant = await execute_llm_call_direct(
                 message,
@@ -599,7 +608,10 @@ async def execute_llm_call(
                 model,
                 context_messages
             )
-            return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+            return SessionThread(
+                id=-1,
+                messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+            )
         else:
             raise ValueError(f'Executor {executor} and model {model} are set, but no API key is set.')
     elif Container.get_config_variable('OPENAI_API_KEY'):
@@ -610,7 +622,10 @@ async def execute_llm_call(
             'gpt-4-vision-preview',
             context_messages
         )
-        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+        return SessionThread(
+            id=-1,
+            messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+        )
     elif os.environ.get('ANTHROPIC_API_KEY'):
         assistant = await execute_llm_call_direct(
             message,
@@ -619,7 +634,10 @@ async def execute_llm_call(
             'claude-2.1',
             context_messages
         )
-        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+        return SessionThread(
+            id=-1,
+            messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+        )
     elif os.environ.get('MISTRAL_API_KEY'):
         assistant = await execute_llm_call_direct(
             message,
@@ -628,7 +646,10 @@ async def execute_llm_call(
             'mistral-medium',
             context_messages
         )
-        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+        return SessionThread(
+            id=-1,
+            messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+        )
     elif os.environ.get('GOOGLE_API_KEY'):
         assistant = await execute_llm_call_direct(
             message,
@@ -637,7 +658,10 @@ async def execute_llm_call(
             'gemini-pro',
             context_messages
         )
-        return SessionThread(id=-1, messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]])
+        return SessionThread(
+            id=-1,
+            messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+        )
     else:
         logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
         raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
@@ -1756,7 +1780,7 @@ def message(
             executor = executor[1:-1]
 
     if compression:
-        if (compression.startswith('"') and compression.endswith('"')) or (compression.startswith("'") and compression.endswith("'")):
+        if (compression.startswith('"') and compression.endswith('"')) or (compression.startswith("'") and compression.endswith("'")):  # NOQA
             compression = compression[1:-1]
 
     if path:

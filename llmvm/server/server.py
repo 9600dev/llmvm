@@ -163,7 +163,8 @@ async def stream_response(response):
 @app.post('/v1/chat/completions')
 async def chat_completions(request: Request):
     api_key = os.environ.get('OPENAI_API_KEY', default=''),
-    aclient = AsyncOpenAI(api_key=cast(str,api_key))
+    aclient = AsyncOpenAI(api_key=cast(str, api_key))
+    client = OpenAI(api_key=cast(str, api_key))
 
     try:
         # Construct the prompt from the messages
@@ -238,6 +239,7 @@ async def download(
         thread.id = temp.id
 
     queue = asyncio.Queue()
+    controller = get_controller()
 
     async def callback(token: AstNode):
         queue.put_nowait(token)
@@ -245,25 +247,21 @@ async def download(
     async def stream():
         async def execute_and_signal():
             stream_handler = callback
-            from bcl import ContentDownloader
+            from llmvm.server.base_library.content_downloader import \
+                ContentDownloader
 
             # todo thread cookies through here
             downloader = ContentDownloader(
                 expr=download_item.url,
-                agents=[],
-                messages=[],
-                starlark_runtime=get_controller().starlark_runtime,
-                original_code='',
-                original_query=''
             )
-            content = downloader.download()
+            content: Content = downloader.download()
             queue.put_nowait(StopNode())
 
             if content:
                 background_tasks.add_task(
                     vector_search.ingest_text,
-                    content,
-                    content[:25],
+                    controller.statement_to_str(content),
+                    controller.statement_to_str(content)[:25],
                     download_item.url,
                     {}
                 )
@@ -488,7 +486,8 @@ async def tools_completions(request: SessionThread):
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}')
+    logging.debug(f'/v1/chat/tools_completions?id={thread.id}&mode={mode}&model={model} \
+                  &executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}')
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')

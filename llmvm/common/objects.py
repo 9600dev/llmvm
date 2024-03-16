@@ -1,7 +1,6 @@
 import base64
 import copy
 import datetime as dt
-import functools
 import importlib
 import os
 from abc import ABC, abstractmethod
@@ -351,7 +350,7 @@ class DebugNode(AstNode):
 class Content(AstNode):
     def __init__(
         self,
-        sequence: Optional[AstNode | List[AstNode] | str | bytes | Any] = None,
+        sequence: Optional[AstNode | List[AstNode] | List['Content'] | str | bytes | Any] = None,
         content_type: str = 'text',
         url: str = '',
     ):
@@ -361,6 +360,7 @@ class Content(AstNode):
 
         self.content_type = content_type
         self.url = url
+        self.original_sequence: object = None
 
         if isinstance(sequence, str):
             self.sequence = [sequence]
@@ -368,6 +368,8 @@ class Content(AstNode):
             self.sequence = sequence
         elif isinstance(sequence, Content):
             self.sequence = sequence.sequence  # type: ignore
+        elif isinstance(sequence, list) and len(sequence) > 0 and isinstance(sequence[0], Content):
+            self.sequence = sequence
         elif isinstance(sequence, AstNode):
             self.sequence = [sequence]
         elif isinstance(sequence, list) and len(sequence) > 0 and isinstance(sequence[0], AstNode):
@@ -393,7 +395,7 @@ class Content(AstNode):
     def __repr__(self):
         return f'Content({self.sequence})'
 
-    def get_content(self) -> str:
+    def get_str(self) -> str:
         return self.__str__()
 
     def b64encode(self) -> str:
@@ -401,6 +403,8 @@ class Content(AstNode):
             return base64.b64encode(self.sequence).decode('utf-8')
         elif isinstance(self.sequence, str):
             return base64.b64encode(self.sequence.encode('utf-8')).decode('utf-8')
+        elif isinstance(self.sequence, list) and len(self.sequence) > 0 and isinstance(self.sequence[0], Content):
+            return base64.b64encode(self.original).decode('utf-8')
         else:
             raise ValueError(f'unknown sequence: {self.sequence}')
 
@@ -418,11 +422,17 @@ class ImageContent(Content):
         super().__init__(sequence, 'image', url)
         self.sequence = sequence
 
+    def __str__(self):
+        return f'ImageContent({self.url})'
+
+    def __repr__(self):
+        return f'ImageContent({self.url})'
+
 
 class MarkdownContent(Content):
     def __init__(
         self,
-        sequence: str,
+        sequence: str | List[Content],
         url: str = '',
     ):
         super().__init__(sequence, 'markdown', url)
@@ -431,14 +441,14 @@ class MarkdownContent(Content):
     def __str__(self):
         return f'MarkdownContent({self.url})'
 
-    def get_content(self) -> str:
+    def get_str(self) -> str:
         return str(self.sequence)
 
 
 class PdfContent(Content):
     def __init__(
         self,
-        sequence: bytes | str,
+        sequence: bytes | List[Content],
         url: str = '',
     ):
         super().__init__(sequence, 'pdf', url)
@@ -450,48 +460,26 @@ class PdfContent(Content):
     def is_local(self):
         return os.path.isfile(self.url)
 
-    def is_text(self):
-        return isinstance(self.sequence, str)
-
-    def get_content(self) -> str:
-        def late_bind_pdf_parse(obj, method_name: str):
-            # hoooly crap this is a hack.
-            module = importlib.import_module('llmvm.server.tools.pdf')
-            cls = getattr(module, 'PdfHelpers')
-            method = getattr(cls, method_name)
-            return method(obj)
-
-        if self.is_text():
-            return str(self.sequence)
-        elif self.is_local():
-            self.sequence = late_bind_pdf_parse(self.url, 'parse_pdf')
-            return self.sequence
-        elif self.url:
-            self.sequence = late_bind_pdf_parse(self.url, 'parse_pdf')
-            return self.sequence
-        elif isinstance(self.sequence, bytes):
-            self.sequence = late_bind_pdf_parse(self.sequence, 'parse_pdf_bytes')
-            return self.sequence
-        else:
-            raise ValueError('cannot get text from pdf')
+    def get_str(self) -> str:
+        raise NotImplementedError('PdfContent.get_str() not implemented')
 
 
 class FileContent(Content):
     def __init__(
         self,
-        sequence: bytes,
+        sequence: bytes | List[Content],
         url: str = '',
     ):
         super().__init__(sequence, 'file', url)
         self.sequence = sequence
 
-    def is_local(self):
-        return os.path.isfile(self.url)
-
     def __str__(self):
         return f'FileContent({self.url})'
 
-    def get_content(self):
+    def is_local(self):
+        return os.path.isfile(self.url)
+
+    def get_str(self):
         if self.is_local():
             with open(self.url, 'r') as f:
                 return f.read()
@@ -573,7 +561,7 @@ class Message(AstNode):
     @staticmethod
     def to_dict(message: 'Message', server_serialization: bool = False) -> Dict[str, Any]:
         def file_wrap(message: FileContent | PdfContent):
-            return f'The following data/content is from this url: {message.url}\n\n{message.get_content()}'
+            return f'The following data/content is from this url: {message.url}\n\n{message.get_str()}'
 
         # primarily to pass to Anthropic or OpenAI api
         if isinstance(message, User) and isinstance(message.message, ImageContent):

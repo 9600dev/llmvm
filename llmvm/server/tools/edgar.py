@@ -128,7 +128,7 @@ class EdgarHelpers():
             # find the exhibit links
             hrefs = [full_ref + '/' + a['href'] for a in soup.find_all('a')]
             forms = [EdgarHelpers.get_form_filing(href) for href in hrefs]
-            parsed = [WebHelpers.convert_html_to_markdown(form, url=url).get_content() for form in forms]
+            parsed = [WebHelpers.convert_html_to_markdown(form, url=url).get_str() for form in forms]
             return '\n\n'.join(parsed)
         else:
             return ''

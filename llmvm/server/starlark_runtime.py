@@ -20,7 +20,6 @@ from llmvm.server.starlark_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.tools.firefox import FirefoxHelpers
 from llmvm.server.tools.market import MarketHelpers
-from llmvm.server.tools.pdf import PdfHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
 
@@ -105,7 +104,6 @@ class StarlarkRuntime:
         for agent in self.agents:
             self.globals_dict[agent.__name__] = agent
         self.globals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
-        self.globals_dict['PdfHelpers'] = CallWrapper(self, PdfHelpers)
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
         self.globals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
@@ -206,23 +204,16 @@ class StarlarkRuntime:
 
         downloader = ContentDownloader(
             expr=expr,
-            agents=self.agents,
-            messages=[],
-            controller=self.controller,
-            original_code=self.original_code,
-            original_query=self.original_query,
             cookies=cookies
         )
         return downloader.download()
 
-    def search(self, expr: str) -> str:
+    def search(self, expr: str) -> List[Content]:
         logging.debug(f'search({str(expr)})')
         from llmvm.server.base_library.searcher import Searcher
 
         searcher = Searcher(
             expr=expr,
-            agents=self.agents,
-            messages=[],
             controller=self.controller,
             original_code=self.original_code,
             original_query=self.original_query,
@@ -258,9 +249,14 @@ class StarlarkRuntime:
         return self.__eval_with_error_wrapper(str(assistant.message))
 
     def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
-        logging.debug(f'llm_call({str(expr_list)[:20]}, {str(llm_instruction)})')
+        logging.debug(f'llm_call({str(expr_list)[:20]}, {repr(llm_instruction)})')
+
         if not isinstance(expr_list, list):
             expr_list = [expr_list]
+
+        # search returns a list of MarkdownContent objects, and the llm_call is typically
+        # called with llm_call([var], ...), so we need to flatten
+        expr_list = Helpers.flatten(expr_list)
 
         write_client_stream(Content(f'Calling LLM with instruction: {llm_instruction} ...\n'))
 
@@ -290,8 +286,8 @@ class StarlarkRuntime:
         return assistant
 
     def llm_loop_bind(self, expr, llm_instruction: str, count: int = sys.maxsize) -> List[Any]:
-        logging.debug(f'llm_loop_bind({str(expr)[:20]}, {str(llm_instruction)})')
-        context = expr.message.get_content() if isinstance(expr, Message) else str(expr)
+        logging.debug(f'llm_loop_bind({str(expr)[:20]}, {repr(llm_instruction)})')
+        context = expr.message.get_str() if isinstance(expr, Message) else str(expr)
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -478,7 +474,7 @@ class StarlarkRuntime:
         # finally.
         context_messages: List[Message] = Helpers.flatten([
             self.statement_to_message(
-                context=value,
+                statement=value,
             ) for key, value in self.locals_dict.items() if key.startswith('var')
         ])
         context_messages.extend(self.statement_to_message(expr))  # type: ignore

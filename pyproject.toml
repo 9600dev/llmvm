@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "llmvm-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "Command Line LLM with client-side tools support."
 authors = ["9600 devs <contact@9600.dev>"]
 readme = "README.md"
@@ -54,6 +54,7 @@ lxml = "^5.1.0"
 yfinance = "^0.2.37"
 sentence-transformers = "^2.5.1"
 faiss-cpu = "^1.8.0"
+pdfplumber = "^0.11.0"
 
 [build-system]
 requires = ["poetry-core"]
