@@ -12,6 +12,7 @@ import astunparse
 
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Answer, Assistant, Content, Controller,
                                   FunctionCall, FunctionCallMeta, LLMCall,
                                   MarkdownContent, Message, PandasMeta,
@@ -172,7 +173,8 @@ class StarlarkRuntime:
         if len(self.messages_list) == 0:
             return []
 
-        return [m for m in self.messages_list[:-1] if m.role() != 'system']
+        # return [m for m in self.messages_list[:-1] if m.role() != 'system']
+        return [m for m in self.messages_list if m.role() != 'system']
 
     def llm_bind(self, expr, func: str):
         # todo circular import if put at the top
@@ -208,9 +210,12 @@ class StarlarkRuntime:
         )
         return downloader.download()
 
-    def search(self, expr: str) -> List[Content]:
+    def search(self, expr: str, total_links_to_return: int = 2) -> List[Content]:
         logging.debug(f'search({str(expr)})')
         from llmvm.server.base_library.searcher import Searcher
+
+        if isinstance(expr, User) and isinstance(expr.message, Content):
+            expr = ObjectTransformers.transform_str(expr.message, self.controller.get_executor())
 
         searcher = Searcher(
             expr=expr,
@@ -218,6 +223,7 @@ class StarlarkRuntime:
             original_code=self.original_code,
             original_query=self.original_query,
             vector_search=self.vector_search,
+            total_links_to_return=total_links_to_return
         )
         return searcher.search()
 
@@ -341,7 +347,7 @@ class StarlarkRuntime:
                 return []
             return result[:count]
 
-    def answer(self, expr) -> Answer:
+    def answer(self, expr, check_answer: bool = True) -> Answer:
         logging.debug(f'answer({str(expr)[:20]}')
         # if we have a list of answers, maybe just return them.
         if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
@@ -350,6 +356,17 @@ class StarlarkRuntime:
             for e in expr[0:-1]:
                 last.message = Content(f'{last.message}\n\n{e.message}')
             expr = last
+
+        # this typically won't be called, except when the user is passing in
+        # code directly and doesn't want the answer to be checked.
+        # (i.e. the last message is actually the input to the code)
+        if not check_answer:
+            answer = Answer(
+                conversation=self.messages_list,
+                result=str(expr)
+            )
+            self.answers.append(answer)
+            return answer
 
         snippet = str(expr).replace('\n', ' ')[:150]
         write_client_stream(Content(f'I think I have an answer, but I am double checking it: answer("{snippet} ...")\n'))
@@ -673,7 +690,13 @@ class StarlarkRuntime:
         starlark_code: str,
     ) -> Dict[Any, Any]:
         logging.debug('__compile_and_execute()')
-        parsed_ast = ast.parse(starlark_code)
+        try:
+            parsed_ast = ast.parse(starlark_code)
+        except Exception as ex:
+            logging.error(starlark_code)
+            logging.error(f'Error parsing starlark code: {ex}')
+            raise ex
+
         exec(compile(parsed_ast, filename="<ast>", mode="exec"), self.globals_dict, self.locals_dict)
         return self.locals_dict
 

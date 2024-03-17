@@ -236,6 +236,47 @@ You can use the "expensive" mode of PDF and Markdown extraction where images are
 export LLMVM_FULL_PROCESSING='true'
 ```
 
+As an example, the HTML page at [https://9600.dev/authors.html](https://9600.dev/authors.html) contains a table of best selling authors as an **image** (not a html table):
+
+![](docs/2024-03-16-20-27-22.png)
+
+Running this query with LLMVM_FULL_PROCESSING enabled:
+
+```bash
+query>> get https://9600.dev/authors.html and get all the author names
+```
+
+Produces:
+
+![](docs/2024-03-16-20-30-45.png)
+
+
+#### Specifying Code for Pipeline Building
+
+Instead of having the LLM generate the code for the task, it's possible to pass code directly to the server and have it execute for you. Simply pass a quoted starlark block directly:
+
+```starlark
+```starlark
+company = messages()[-1]
+answers = []
+search_results = search(company)
+company_summary = llm_call([search_results], "summarize what the company does and what products it sells")
+answers.append(company_summary)
+founder_search = search(f"{company} founders executive team", 3)
+for founder_result in founder_search:
+    founder = llm_call([founder_result], f"extract the names and positions of founders and executives that work at {company}")
+    answers.append(founder)
+result = llm_call(answers, "there is a company summary and then a list of people who are the founders and the executive team. Simplify this into a markdown doc with # Company Summary, then # Founders and Executives ## Person 1 ## Person 2 ...")
+answer(result, False)
+```
+```
+
+```bash
+python -m llmvm.client -p docs/get_company_summary.star "microsoft microsoft.com"
+```
+
+The `messages()[-1]` call gets the "microsoft microsoft.com" as message input to the pipeline.
+
 ## Architecture
 
 ![](docs/2024-03-16-12-16-18.png)

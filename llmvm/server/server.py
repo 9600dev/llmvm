@@ -463,7 +463,7 @@ async def code_completions(request: SessionThread):
 async def tools_completions(request: SessionThread):
     thread = request
 
-    if not cache_session.has_key(thread.id) or thread.id <= 0:
+    if not cache_session.has_key(thread.id) or thread.id == 0:
         temp = __get_thread(0)
         thread.id = temp.id
 

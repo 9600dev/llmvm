@@ -14,9 +14,9 @@ from llmvm.common.logging_helpers import (no_indent_debug, response_writer,
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
                                   Controller, Executor, FileContent,
-                                  FunctionCall, FunctionCallMeta, LLMCall,
-                                  MarkdownContent, Message, PandasMeta,
-                                  PdfContent, Statement, System,
+                                  FunctionCall, FunctionCallMeta, ImageContent,
+                                  LLMCall, MarkdownContent, Message,
+                                  PandasMeta, PdfContent, Statement, System,
                                   TokenCompressionMethod, User, awaitable_none)
 from llmvm.server.vector_search import VectorSearch
 
@@ -670,6 +670,7 @@ class ExecutionController(Controller):
         template_args: Optional[Dict[str, Any]] = None,
         cookies: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Statement]:
+
         from llmvm.server.starlark_runtime import StarlarkRuntime
         starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
 
@@ -690,6 +691,25 @@ class ExecutionController(Controller):
         last_message = Helpers.last(lambda m: isinstance(m, User), messages)
         if not last_message: return []
 
+        skip_generation = False
+        response: Assistant = Assistant(Content(''))
+
+        def find_starlark_message(message: User) -> bool:
+            return (
+                not isinstance(message.message, PdfContent)
+                and not isinstance(message.message, ImageContent)
+                and message.message.get_str().strip().startswith('```starlark')
+                and message.message.get_str().strip().endswith('```')
+            )
+
+        code_message = Helpers.first(find_starlark_message, messages)
+
+        if code_message:
+            skip_generation = True
+            mode = 'tool'
+            response.message = code_message.message
+            messages.remove(code_message)
+
         # either classify, or we're going direct
         if mode == 'auto':
             classification = await self.aclassify_tool_or_direct(
@@ -706,9 +726,7 @@ class ExecutionController(Controller):
 
         # if it requires tooling, hand it off to the AST execution engine
         if 'tool' in classification or 'code' in classification:
-            response: Assistant = Assistant(Content(''))
-
-            if 'tool' in classification:
+            if 'tool' in classification and not skip_generation:
                 response = await self.abuild_runnable_tools_ast(
                     llm_call=LLMCall(
                         user_message=messages[-1],
@@ -723,7 +741,7 @@ class ExecutionController(Controller):
                     ),
                     agents=self.agents,
                 )
-            elif 'code' in classification:
+            elif 'code' in classification and not skip_generation:
                 files = template_args['files'] if template_args and 'files' in template_args else []
                 if files:
                     starlark_runtime.globals_dict['source_project'].set_files(files)
@@ -741,6 +759,7 @@ class ExecutionController(Controller):
                     ),
                     files=files,
                 )
+
             assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
 
             # anthropic can often embed the code in ```python blocks

@@ -84,3 +84,13 @@ class ObjectTransformers():
             return [User(content) for content in result]
         else:
             return [User(Content(content.get_str()))]
+
+    @staticmethod
+    def transform_str(content: Content, executor: Executor) -> str:
+        if isinstance(content, PdfContent):
+            result = ObjectTransformers.transform_pdf_content(cast(PdfContent, content), executor)
+            '\n'.join([c.message.get_str() for c in result])
+        if isinstance(content, MarkdownContent):
+            result = ObjectTransformers.transform_markdown_content(cast(MarkdownContent, content), executor)
+            '\n'.join([c.message.get_str() for c in result])
+        return content.get_str()
