@@ -58,6 +58,17 @@ class FirefoxHelpers():
         self.thread.start()
         self.firefox = FirefoxHelpersInternal(cookies=cookies)
 
+    @staticmethod
+    async def check_installed() -> bool:
+        try:
+            playwright = await async_playwright().start()
+            browser = await playwright.firefox.launch(headless=True)
+            await browser.close()
+            return True
+        except Exception as ex:
+            logging.debug(f'FirefoxHelpers.check_installed() failed with: {ex}')
+            return False
+
     def _run_event_loop(self):
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()

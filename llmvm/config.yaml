@@ -23,7 +23,7 @@ openai_api_base: 'https://api.openai.com/v1'
 openai_model: 'gpt-4-vision-preview'
 openai_max_tokens: 16384
 anthropic_api_base: 'https://api.anthropic.com'
-anthropic_model: 'claude-2.1'
+anthropic_model: 'claude-3-sonnet-20240229'
 anthropic_max_tokens: 200000
 local_api_base: 'http://localhost:8000/v1'
 local_model: 'llongorca.gguf'
