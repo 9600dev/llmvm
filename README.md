@@ -256,7 +256,7 @@ Produces:
 Instead of having the LLM generate the code for the task, it's possible to pass code directly to the server and have it execute for you. Simply pass a quoted starlark block directly:
 
 ```starlark
-```starlark
+(```starlark) <-- remove the ()
 company = messages()[-1]
 answers = []
 search_results = search(company)
@@ -268,8 +268,10 @@ for founder_result in founder_search:
     answers.append(founder)
 result = llm_call(answers, "there is a company summary and then a list of people who are the founders and the executive team. Simplify this into a markdown doc with # Company Summary, then # Founders and Executives ## Person 1 ## Person 2 ...")
 answer(result, False)
+(```)
 ```
-```
+
+And then:
 
 ```bash
 python -m llmvm.client -p docs/get_company_summary.star "microsoft microsoft.com"
@@ -450,3 +452,48 @@ And related narrative extraction + code:
 * Playwright integration with LLM -- it should be straight forward to have cooperative execution for the task of proceeding through web app flows (login, do stuff, extract info, logout).
 * Fix bugs and refactor. The code is pretty hacky.
 * Write some docs.
+
+
+## How I run LLMVM
+
+These days, I mostly run Anthropic's models. Their super fast, cheap, and smart. In my .zshrc, I have aliases for servers and clients, with full performance tracing and debugging enabled:
+
+```bash
+OPUS="claude-3-opus-20240229"
+SONNET="claude-3-sonnet-20240229"
+HAIKU="claude-3-haiku-20240307"
+
+# servers
+alias sopus='LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm_serve'
+alias ssonnet='LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm_serve'
+alias shaiku='LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm_serve'
+
+# clients
+alias sonnet='LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LMMVM_API_BASE="https://api.anthropic.com" llm'
+alias haiku='ANTHROPIC_API_KEY=$STAGING_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm'
+alias opus='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" llm'
+
+alias h=haiku
+```
+
+And the zsh functions:
+
+```bash
+function llm() {
+    local pyenv_ver=$(cat $HOME/dev/llmvm/.python-version)
+    PYTHONPATH=$PYTHONPATH:$HOME/dev/llmvm $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.client "$@"
+}
+
+function llm_serve() {
+    local pyenv_ver=$(cat $HOME/dev/llmvm/.python-version)
+    PYTHONPATH=$PYTHONPATH:$HOME/dev/llmvm $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.server
+}
+```
+
+And then it's as simple as:
+
+```bash
+$ h "hello world"
+
+Assistant: Hello! I'm an AI assistant created by Anthropic. How can I help you today?
+```
