@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "llmvm-cli"
-version = "0.2.2"
+version = "0.2.3"
 description = "Command Line LLM with client-side tools support."
 authors = ["9600 devs <contact@9600.dev>"]
 readme = "README.md"
@@ -10,7 +10,7 @@ homepage = "https://github.com/9600dev/llmvm"
 repository = "https://github.com/9600dev/llmvm"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.10"
 
 # common dependencies
 async-timeout = "^4.0.3"
