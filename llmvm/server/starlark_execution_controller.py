@@ -374,18 +374,6 @@ class ExecutionController(Controller):
             )
             return [User(Content(result_prompt['user_message']))]
 
-        elif isinstance(context, list):
-            result_prompt = Helpers.load_and_populate_prompt(
-                prompt_name=statement_result_prompts['list'],
-                template={
-                    'list_result': '\n'.join([str(c) for c in context])
-                },
-                user_token=self.get_executor().user_token(),
-                assistant_token=self.get_executor().assistant_token(),
-                append_token=self.get_executor().append_token(),
-            )
-            return [User(Content(result_prompt['user_message']))]
-
         elif isinstance(context, PandasMeta):
             return [User(Content(context.df.to_csv()))]
 
@@ -400,6 +388,31 @@ class ExecutionController(Controller):
 
         elif isinstance(context, User):
             return [context]
+
+        elif isinstance(context, list):
+            def is_node(n: Any) -> bool:
+                return (
+                    isinstance(n, AstNode)
+                    or isinstance(n, Statement)
+                    or isinstance(n, Content)
+                    or isinstance(n, Message)
+                    or isinstance(n, FunctionBindable)
+                )
+            # lists can either be native lists, or they can be lists with
+            # AstNodes, Content nodes, or Message nodes
+            if all([is_node(c) for c in context]):
+                return Helpers.flatten([self.statement_to_message(c) for c in context])
+            else:
+                result_prompt = Helpers.load_and_populate_prompt(
+                    prompt_name=statement_result_prompts['list'],
+                    template={
+                        'list_result': '\n'.join([str(c) for c in context])
+                    },
+                    user_token=self.get_executor().user_token(),
+                    assistant_token=self.get_executor().assistant_token(),
+                    append_token=self.get_executor().append_token(),
+                )
+                return [User(Content(result_prompt['user_message']))]
 
         logging.debug(f'statement_to_message() unusual type {type(context)}, context is: {str(context)}')
         return [User(Content(str(context)))]
@@ -694,15 +707,7 @@ class ExecutionController(Controller):
         skip_generation = False
         response: Assistant = Assistant(Content(''))
 
-        def find_starlark_message(message: User) -> bool:
-            return (
-                not isinstance(message.message, PdfContent)
-                and not isinstance(message.message, ImageContent)
-                and message.message.get_str().strip().startswith('```starlark')
-                and message.message.get_str().strip().endswith('```')
-            )
-
-        code_message = Helpers.first(find_starlark_message, messages)
+        code_message = Helpers.first(lambda m: StarlarkRuntime.get_code_blocks(m.message.get_str()), messages)
 
         if code_message:
             skip_generation = True
@@ -762,21 +767,9 @@ class ExecutionController(Controller):
 
             assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
 
-            # anthropic can often embed the code in ```python blocks
-            if '```python' in assistant_response_str:
-                match = re.search(r'```python\n(.*?)```', assistant_response_str, re.DOTALL)
-                if match:
-                    assistant_response_str = match.group(1)
-            # openai can often embed the code in ```starlark blocks
-            elif '```starlark' in assistant_response_str:
-                match = re.search(r'```starlark\n(.*?)```', assistant_response_str, re.DOTALL)
-                if match:
-                    assistant_response_str = match.group(1)
-            # mistral likes to embed the code in ``` blocks
-            elif '```' in assistant_response_str:
-                match = re.search(r'```(.*?)```', assistant_response_str, re.DOTALL)
-                if match:
-                    assistant_response_str = match.group(1)
+            code_blocks = StarlarkRuntime.get_code_blocks(assistant_response_str)
+            # todo for now, just join them
+            assistant_response_str = '\n'.join(code_blocks)
 
             no_indent_debug(logging, '')
             no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')

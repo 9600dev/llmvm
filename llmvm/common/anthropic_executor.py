@@ -111,7 +111,7 @@ class AnthropicExecutor(Executor):
 
         # check to see if there are more than 20 images in the message list
         image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
-        if image_count > 20:
+        if image_count >= 20:
             logging.debug(f'Image count is {image_count}, filtering.')
 
             # get the top 20 ordered by size, then remove the rest
@@ -133,6 +133,8 @@ class AnthropicExecutor(Executor):
                     previous.message = Content(previous.message.get_str() + next.message.get_str())
                     messages.remove(image)
                     messages.remove(next)
+                else:
+                    messages.remove(image)
 
         counter = 1
         for i in range(len(messages)):
@@ -338,6 +340,11 @@ class AnthropicExecutor(Executor):
                 elif messages[i]['role'] == 'assistant':
                     messages_list.append({'role': 'user', 'content': 'Thanks. I am ready for your next message.'})
             messages_list.append(messages[i])
+
+        # todo, this is a busted hack. if a helper function returns nothing, then usually that
+        # message get stripped away
+        if messages_list[0]['role'] != 'system' and messages_list[0]['role'] != 'user':
+            messages_list.insert(0, {'role': 'user', 'content': 'None.'})
 
         self.messages_trace(self.name(), messages_list)
 

@@ -85,8 +85,6 @@ class FunctionBindable():
         bound = False
         global_counter = 0
         messages: List[Message] = []
-        extra: List[str] = []
-        goal = ''
         bindable = ''
         function_call: Optional[FunctionCall] = None
 
@@ -97,13 +95,13 @@ class FunctionBindable():
                 # Check for direct assignment
                 if isinstance(node, ast.Assign):
                     for target in node.targets:
-                        if isinstance(target, ast.Name) and isinstance(node.value, ast.Str):
-                            if node.value.s == target_string:
+                        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
+                            if target_string in node.value.s:
                                 return (node, None)
                         # Check for string instantiation in a list
                         elif isinstance(node.value, ast.List):
                             for element in node.value.elts:
-                                if isinstance(element, ast.Str) and element.s == target_string:
+                                if isinstance(element, ast.Constant) and target_string in element.s:
                                     return (element, node)
             return None, None
 
@@ -128,7 +126,6 @@ class FunctionBindable():
         # get the binder prompt message
         messages.append(self.__bind_helper(
             func=func,
-            # context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
         ))
         # start with just the expression binding
         messages.extend(self.controller.statement_to_message(expr))
@@ -142,8 +139,16 @@ class FunctionBindable():
         messages.append(User(Content(
             f"""The Starlark code that is currently being executed is: {self.original_code}"""
         )))
+
         # program scope
-        scope = '\n'.join(['{} = "{}"'.format(key, value) for key, value in self.scope_dict.items() if key.startswith('var')])
+        def expand_str(value):
+            if isinstance(value, str):
+                return value
+            if hasattr(value, 'get_str'):
+                return value.get_str()
+            return str(value)
+
+        scope = '\n'.join(['{} = "{}"'.format(key, expand_str(value)) for key, value in self.scope_dict.items()])
         messages.append(User(Content(
             f"""The Starlark program's running global scope for all variables is:
 
@@ -153,10 +158,11 @@ class FunctionBindable():
             """
         )))
 
-        counter = 3  # we start at 3 because we've already added the system, expr and the function definition prompt
+        counter = 5  # expr, overall goal, starlark code being executed
+        # counter = 6  # program scope, including all variables
         assistant_counter = 0
 
-        while global_counter < 3:
+        while global_counter < 2:
             # try and bind the callsite without executing
             while not bound and counter < 8:
 
@@ -242,7 +248,9 @@ class FunctionBindable():
             # to call get_linkedin_profile.
 
             if not function_call:
-                raise ValueError('couldn\'t bind function call for func: {}, expr: {}'.format(func, expr))
+                logging.error(f'could not bind function call for func: {func}, expr: {expr}')
+                self._result = f'could not bind and or execute the function: {func} expr: {expr}'
+                yield self
 
             # todo need to properly parse this.
             if ' = ' not in bindable:
@@ -255,18 +263,16 @@ class FunctionBindable():
             # execute the function
             # todo: figure out what to do when you get back None, or ''
             starlark_code = bindable
-            globals_result = {}
+            locals_result = {}
 
             try:
-                global_counter += 1
-
-                globals_result = StarlarkRuntime(
+                locals_result = StarlarkRuntime(
                     controller=self.controller,
                     agents=self.agents,
                     vector_search=self.starlark_runtime.vector_search,
                 ).run(starlark_code, '')
 
-                self._result = globals_result[identifier]
+                self._result = locals_result[identifier]
                 yield self
 
                 # if we're here, it's because we've been next'ed() and it was the wrong binding
@@ -275,7 +281,7 @@ class FunctionBindable():
                 bound = False
 
             except Exception as ex:
-                logging.debug('Error executing function call: {}'.format(ex))
+                logging.error('Error executing function call: {}'.format(ex))
                 counter += 1
                 starlark_code = self.starlark_runtime.rewrite_starlark_error_correction(
                     query=self.original_query,
@@ -286,7 +292,7 @@ class FunctionBindable():
 
         # we should probably return uncertain_or_error here.
         # raise ValueError('could not bind and or execute the function: {} expr: {}'.format(func, expr))
-        self._result = 'could not bind and or execute the function: {} expr: {}'.format(func, expr)
+        self._result = f'could not bind and or execute the function: {func} expr: {expr}'
         yield self
 
     def bind(

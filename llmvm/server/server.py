@@ -1,7 +1,6 @@
 import asyncio
 import os
 import shutil
-import subprocess
 import sys
 from importlib import resources
 from typing import List, Optional, cast
@@ -54,10 +53,6 @@ except ValueError:
 
     config_file = resources.files('llmvm') / 'config.yaml'
     shutil.copy(str(config_file), os.path.expanduser('~/.config/llmvm/config.yaml'))
-
-if not asyncio.run(FirefoxHelpers.check_installed()):
-    rich.print('[cyan]Installing playwright Firefox[/cyan]')
-    subprocess.check_call(["playwright", "install", "firefox"])
 
 
 app = FastAPI()
@@ -596,6 +591,7 @@ if __name__ == '__main__':
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
     rich.print(f'[cyan]Default executor is: {default_controller}[/cyan]')
     rich.print(f'[cyan]Default model is: {default_model}[/cyan]')
+    rich.print(f'[cyan]Make sure to `playwright install firefox`.[/cyan]')
 
     for agent in agents:
         rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore

@@ -158,8 +158,6 @@ class FirefoxHelpersInternal():
             'techmeme.com': lambda page: self.wait(1500)
         }
 
-
-
     def set_cookies(self, cookies: List[Dict]):
         self.cookies = cookies
 
@@ -223,8 +221,11 @@ class FirefoxHelpersInternal():
         return await (await self.page()).content()
 
     async def screenshot(self) -> bytes:
-        screenshot_data = await (await self.page()).screenshot(type='png')
-        return screenshot_data
+        try:
+            return await asyncio.wait_for((await self.page()).screenshot(type='png'), timeout=2)
+        except asyncio.TimeoutError as ex:
+            logging.debug(f'screenshot timed out with: {ex}')
+            return b''
 
     async def get_url(self, url: str):
         await self.goto(url)

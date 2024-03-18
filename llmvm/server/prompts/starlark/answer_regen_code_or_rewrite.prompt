@@ -2,11 +2,25 @@
 You are a helpful assistant.
 
 [user_message]
-You are a Starlark code emitter and debugger. You help me re-write buggy Starlark code that is intended to solve the following task:
+The answer that was generated, which you helpfully identified as not satisfying the query/task/question was generated from code that may have executed incorrectly. 
 
-Task: {{task}}
+I will show you the code that was executed, and an explanation of the helper methods that were used, and then I will ask you to choose to either:
 
-There are also 9 special features that I've added to our Starlark implementation that you should know about:
+a) re-write the Answer to satisfy the query/task/question only using the data in previous messages above, or 
+
+b) re-write the code to hopefully solve the query/question/task and I'll execute the re-written code on your behalf.
+
+c) respond with the token "false" as you cannot do either (a) or (b)
+
+Here is the code that was executed: 
+
+Starlark Code:
+
+```starlark
+{{code}}
+```
+
+Here is an explanation of the helper methods:
 
 1. llm_call(expression_list: List, instruction: str) -> str. Allows you to call yourself from my Starlark execution engine to perform arbitrary computation, text analysis, text translation, text transformation, or question answering for us. You return a string result. Use it by emitting: llm_call([variable1, "expression2"], "instruction to large language model"). If the Starlark execution engine sees this call, it will send whatever values are in "expression_list" along with the natural language instruction message specified in the "instruction" argument, and capture whatever is returned as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expression_list has a text size limit, so if you think the expression_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized result to llm_call instead.
 2. llm_bind(expression, function_call_str: str) -> Any. Allows you to bind data supplied in the expression to function call arguments and then execute the function, returning the whatever the function call returns. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind and call to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and it will bind and call the function WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
@@ -18,24 +32,20 @@ There are also 9 special features that I've added to our Starlark implementation
 8. coerce(expression, type_name: str) -> Any. Takes any value in expression and coerces it to specified Python type in type_name. Valid type_names are float, int, str, list[float | int | str].
 9. answer(expression) -> Answer. Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the human user. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Starlark code.
 
-There are starlark helper functions that are available to be called that you should know about:
+Here are Starlark helper functions that are available to be called:
 
 {{functions}}
 
-Here is the possibly buggy Starlark code. I'll show the problem, error, or exception after the code:
-
-Starlark Code:
-
-{{code}}
-
-Possible Error:
-
-{{error}}
-
-I'll summarize the content/data of each of the variables that have been executed in the program so far. For brevity, I summarize and cut off long strings.
+Here is a summary of the content/data of each of the variables that have been executed in the program so far. For brevity, I summarize and cut off long strings.
 
 Variables:
 
 {{dictionary}}
 
-Look at the "Starlark Code", look at the "Possible Error", look at the summary of "Variables" that have been run so far and then if you think there's a problem, find the single line of code that will fix the problem and re-write and emit that single line. If you don't think there is an error, just emit "false" and do not emit any explaination.
+Now, your task. Perform either (a) or (b) or (c). Do not explain yourself. Just perform either emit your re-written answer for (a) or re-write the code for (b), or just emit "false" for (c) without explanation:
+
+a) re-write the Answer to satisfy the query/task/question only using the data in previous messages above, or 
+
+b) re-write the code to hopefully solve the query/question/task and I'll execute the re-written code on your behalf. Embed the code in ```starlark markdown code block. 
+
+c) respond with the token "false" as you cannot do either (a) or (b). Do not include an explanation.

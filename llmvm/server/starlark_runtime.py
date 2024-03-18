@@ -33,6 +33,7 @@ class StarlarkRuntime:
         controller: ExecutionController,
         vector_search: VectorSearch,
         agents: List[Callable] = [],
+        answer_error_correcting: bool = False,
     ):
         self.original_query = ''
         self.original_code = ''
@@ -43,7 +44,7 @@ class StarlarkRuntime:
         self.globals_dict = {}
         self.answers: List[Answer] = []
         self.messages_list: List[Message] = []
-        self.answer_error_correcting = False
+        self.answer_error_correcting = answer_error_correcting
         self.setup()
 
     def statement_to_message(self, statement: Any) -> List[Message]:
@@ -123,6 +124,33 @@ class StarlarkRuntime:
         self.globals_dict['get_methods'] = source.get_methods
         self.globals_dict['get_references'] = source.get_references
 
+    @staticmethod
+    def get_code_blocks(code: str) -> List[str]:
+        code = code.strip()
+        ordered_blocks = []
+
+        # Pattern to match starlark, python, and unnamed code blocks, as well as inline code snippets
+        pattern = r'```(starlark|python)?\n(.*?)```|`(.*?)`'
+        matches = re.findall(pattern, code, re.DOTALL)
+
+        for match in matches:
+            _, block, single_block = match
+
+            if block:
+                try:
+                    ast.parse(block)
+                    ordered_blocks.append(block)
+                except SyntaxError:
+                    pass
+            elif single_block:
+                try:
+                    ast.parse(single_block)
+                    ordered_blocks.append(single_block)
+                except SyntaxError:
+                    pass
+
+        return ordered_blocks
+
     def pandas_bind(self, expr) -> PandasMeta:
         import pandas as pd
 
@@ -188,7 +216,7 @@ class StarlarkRuntime:
             messages=[],
             lineno=inspect.currentframe().f_back.f_lineno,  # type: ignore
             expr_instantiation=inspect.currentframe().f_back.f_locals,  # type: ignore
-            scope_dict=self.globals_dict,
+            scope_dict=self.locals_dict,
             original_code=self.original_code,
             original_query=self.original_query,
             controller=self.controller,
@@ -264,7 +292,7 @@ class StarlarkRuntime:
         # called with llm_call([var], ...), so we need to flatten
         expr_list = Helpers.flatten(expr_list)
 
-        write_client_stream(Content(f'Calling LLM with instruction: {llm_instruction} ...\n'))
+        write_client_stream(Content(f'Calling LLM with instruction: "{llm_instruction}"\n'))
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -347,148 +375,86 @@ class StarlarkRuntime:
                 return []
             return result[:count]
 
-    def answer(self, expr, check_answer: bool = True) -> Answer:
-        logging.debug(f'answer({str(expr)[:20]}')
-        # if we have a list of answers, maybe just return them.
-        if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
-            # collapse the assistant answers and continue
-            last = expr[-1]
-            for e in expr[0:-1]:
-                last.message = Content(f'{last.message}\n\n{e.message}')
-            expr = last
+    def __rewrite_answer_error_correction(
+        self,
+        query: str,
+        starlark_code: str,
+        error: str,
+        locals_dictionary: Dict[Any, Any],
+    ) -> str:
+        '''
+        This handles the case where an answer() is not correct and we need to
+        identify the single place in the code where this may have occurred, and
+        see if we can manually patch it.
+        '''
+        logging.debug('__rewrite_answer_error_correction()')
+        dictionary = ''
+        for key, value in locals_dictionary.items():
+            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
 
-        # this typically won't be called, except when the user is passing in
-        # code directly and doesn't want the answer to be checked.
-        # (i.e. the last message is actually the input to the code)
-        if not check_answer:
-            answer = Answer(
-                conversation=self.messages_list,
-                result=str(expr)
-            )
-            self.answers.append(answer)
-            return answer
+        assistant = self.controller.execute_llm_call(
+            llm_call=LLMCall(
+                user_message=Helpers.prompt_message(
+                    prompt_name='answer_error_correction.prompt',
+                    template={
+                        'task': query,
+                        'code': starlark_code,
+                        'error': error,
+                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                        'dictionary': dictionary,
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
+                context_messages=[],
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
+                prompt_name='answer_error_correction.prompt',
+            ),
+            query=self.original_query,
+            original_query=self.original_query,
+        )
 
-        snippet = str(expr).replace('\n', ' ')[:150]
-        write_client_stream(Content(f'I think I have an answer, but I am double checking it: answer("{snippet} ...")\n'))
+        return str(assistant.message)
 
-        # if the original query is referring to an image, it's because we were in tool mode
-        # so this is a todo: hack to fix answers() so that it works for images
-        if "I've just pasted you an image." in self.original_query:
-            answer = Answer(
-                conversation=self.messages_list,
-                result=str(expr)
-            )
-            self.answers.append(answer)
-            return answer
-
-        # if we have a FunctionCallMeta object, it's likely we've called a helper function
-        # and we're just keen to return that.
-        # Handing this to the LLM means that call results that are larger than the context window
-        # will end up being lost or transformed into the smaller output context window.
-        # deal with base types
-        if (
-            isinstance(expr, FunctionCallMeta)
-            or isinstance(expr, float)
-            or isinstance(expr, int)
-            or isinstance(expr, str)
-            or isinstance(expr, bool)
-            or isinstance(expr, dict)
-            or expr is None
-        ):
-            answer_assistant = self.controller.execute_llm_call(
-                llm_call=LLMCall(
-                    user_message=Helpers.prompt_message(
-                        prompt_name='answer_primitive.prompt',
-                        template={
-                            'function_output': str(expr),
-                            'original_query': self.original_query,
-                        },
-                        user_token=self.controller.get_executor().user_token(),
-                        assistant_token=self.controller.get_executor().assistant_token(),
-                        append_token=self.controller.get_executor().append_token(),
-                    ),
-                    context_messages=[],  # type: ignore
-                    executor=self.controller.get_executor(),
-                    model=self.controller.get_executor().get_default_model(),
-                    temperature=0.0,
-                    max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
-                    completion_tokens_len=512,
+    def __generate_primitive_answer(self, expr) -> Answer:
+        answer_assistant = self.controller.execute_llm_call(
+            llm_call=LLMCall(
+                user_message=Helpers.prompt_message(
                     prompt_name='answer_primitive.prompt',
+                    template={
+                        'function_output': str(expr),
+                        'original_query': self.original_query,
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
                 ),
-                query=self.original_query,
-                original_query=self.original_query,
-            )
+                context_messages=[],  # type: ignore
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=512,
+                prompt_name='answer_primitive.prompt',
+            ),
+            query=self.original_query,
+            original_query=self.original_query,
+        )
 
-            answer = Answer(
-                conversation=self.messages_list,
-                result=str(answer_assistant.message),
-            )
-            self.answers.append(answer)
-            return answer
+        answer = Answer(
+            conversation=self.messages_list,
+            result=str(answer_assistant.message),
+        )
+        self.answers.append(answer)
+        return answer
 
-        if not self.answer_error_correcting:
-            # todo: the 'rewriting' logic down below helps with the prettyness of
-            # the output, and we're missing that here, but this is a nice shortcut.
-            answer_assistant = self.controller.execute_llm_call(
-                llm_call=LLMCall(
-                    user_message=Helpers.prompt_message(
-                        prompt_name='answer_nocontext.prompt',
-                        template={
-                            'original_query': self.original_query,
-                        },
-                        user_token=self.controller.get_executor().user_token(),
-                        assistant_token=self.controller.get_executor().assistant_token(),
-                        append_token=self.controller.get_executor().append_token(),
-                    ),
-                    context_messages=self.statement_to_message(expr),  # type: ignore
-                    executor=self.controller.get_executor(),
-                    model=self.controller.get_executor().get_default_model(),
-                    temperature=0.0,
-                    max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
-                    completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                    prompt_name='answer_nocontext.prompt',
-                ),
-                query=self.original_query,
-                original_query=self.original_query,
-            )
-
-            if 'None' not in str(answer_assistant.message) and "[##]" not in str(answer_assistant.message):
-                answer = Answer(
-                    conversation=[],
-                    result=str(answer_assistant.message)
-                )
-                self.answers.append(answer)
-                return answer
-
-            elif 'None' in str(answer_assistant.message) and "[##]" in str(answer_assistant.message):
-                logging.debug("Found comment in answer_nocontext: {}".format(answer_assistant.message))
-
-                # add the message to answers, just in case the user wants to see it.
-                self.answers.append(Answer(
-                    conversation=self.messages_list,
-                    result=self.statement_to_message(expr)[-1].message  # type: ignore
-                ))
-
-                self.answer_error_correcting = True
-                error_correction = self.rewrite_answer_error_correction(
-                    query=self.original_query,
-                    starlark_code=self.original_code,
-                    error=str(expr),
-                    locals_dictionary=self.locals_dict,
-                )
-
-                if error_correction and 'None' not in error_correction:
-                    # try and perform the error correction
-                    self.setup()
-                    # results_dict = self.compile_and_execute(error_correction)
-
-                    _ = StarlarkRuntime(
-                        controller=self.controller,
-                        agents=self.agents,
-                        vector_search=self.vector_search,
-                    ).run(error_correction, self.original_query)
-
-        # finally.
+    def __single_shot_answer(self, expr) -> Answer:
+        # if we're here, we're in the error correction mode
         context_messages: List[Message] = Helpers.flatten([
             self.statement_to_message(
                 statement=value,
@@ -518,7 +484,6 @@ class StarlarkRuntime:
             query=self.original_query,
             original_query=self.original_query,
         )
-
         # check for comments
         if "[##]" in str(answer_assistant.message):
             answer_assistant.message = Content(str(answer_assistant.message).split("[##]")[0].strip())
@@ -529,6 +494,187 @@ class StarlarkRuntime:
         )
         self.answers.append(answer)
         return answer
+
+    def answer(self, expr, check_answer: bool = True) -> Answer:
+        logging.debug(f'answer({str(expr)[:20]}')
+        # if we have a list of answers, maybe just return them.
+        if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
+            # collapse the assistant answers and continue
+            last = expr[-1]
+            for e in expr[0:-1]:
+                last.message = Content(f'{last.message}\n\n{e.message}')
+            expr = last
+
+        # this typically won't be called, except when the user is passing in
+        # code directly and doesn't want the answer to be checked.
+        # (i.e. the last message is actually the input to the code)
+        if not check_answer:
+            answer = Answer(
+                conversation=self.messages_list,
+                result=str(expr)
+            )
+            self.answers.append(answer)
+            return answer
+
+        snippet = str(expr).replace('\n', ' ')[:150]
+
+        # let's check the answer
+        if not self.answer_error_correcting:
+            write_client_stream(Content(f'I am double checking an answer: answer("{snippet} ...")\n'))
+        else:
+            write_client_stream(Content(f'I have a new answer, double checking it: answer("{snippet} ...")\n'))
+
+        # if the original query is referring to an image, it's because we were in tool mode
+        # so this is a todo: hack to fix answers() so that it works for images
+        if "I've just pasted you an image." in self.original_query:
+            answer = Answer(
+                conversation=self.messages_list,
+                result=str(expr)
+            )
+            self.answers.append(answer)
+            return answer
+
+        # if we have a FunctionCallMeta object, it's likely we've called a helper function
+        # and we're just keen to return that.
+        # Handing this to the LLM means that call results that are larger than the context window
+        # will end up being lost or transformed into the smaller output context window.
+        # deal with base types
+        if (
+            isinstance(expr, FunctionCallMeta)
+            or isinstance(expr, float)
+            or isinstance(expr, int)
+            or isinstance(expr, str)
+            or isinstance(expr, bool)
+            or isinstance(expr, dict)
+            or expr is None
+        ):
+            return self.__generate_primitive_answer(expr)
+
+        if self.answer_error_correcting:
+            return self.__single_shot_answer(expr)
+
+        # put the original answer on the answers stack, because we might fail to
+        # correct it, and we want to return it if we do.
+        answer = Answer(
+            conversation=self.messages_list,
+            result=str(expr)
+        )
+        self.answers.append(answer)
+
+        # todo: the 'rewriting' logic down below helps with the prettyness of
+        # the output, and we're missing that here, but this is a nice shortcut.
+        answer_assistant = self.controller.execute_llm_call(
+            llm_call=LLMCall(
+                user_message=Helpers.prompt_message(
+                    prompt_name='answer_nocontext.prompt',
+                    template={
+                        'original_query': self.original_query,
+                    },
+                    user_token=self.controller.get_executor().user_token(),
+                    assistant_token=self.controller.get_executor().assistant_token(),
+                    append_token=self.controller.get_executor().append_token(),
+                ),
+                context_messages=self.statement_to_message(expr),  # type: ignore
+                executor=self.controller.get_executor(),
+                model=self.controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
+                prompt_name='answer_nocontext.prompt',
+            ),
+            query=self.original_query,
+            original_query=self.original_query,
+        )
+
+        # answer satisfies the query/task/question
+        if 'true' in str(answer_assistant.message):
+            return self.answers[-1]
+
+        # answer doesn't satisfy the query/task/question
+        elif 'false' in str(answer_assistant.message) and "[##]" in str(answer_assistant.message):
+            logging.debug(
+                f"Answer deemed unsatisfactory; comment from answer_nocontext.prompt: {answer_assistant.message}"
+            )
+
+            # add the message to answers, just in case the user wants to see it.
+            self.answers.append(Answer(
+                conversation=self.messages_list,
+                result=self.statement_to_message(expr)[-1].message  # type: ignore
+            ))
+
+            # try and perform the error correction
+            dictionary = ''
+            for key, value in self.locals_dict.items():
+                dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
+
+            rewriter_assistant = self.controller.execute_llm_call(
+                llm_call=LLMCall(
+                    user_message=Helpers.prompt_message(
+                        prompt_name='answer_regen_code_or_rewrite.prompt',
+                        template={
+                            'original_query': self.original_query,
+                            'code': self.original_code,
+                            'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                            'dictionary': dictionary,
+                        },
+                        user_token=self.controller.get_executor().user_token(),
+                        assistant_token=self.controller.get_executor().assistant_token(),
+                        append_token=self.controller.get_executor().append_token(),
+                    ),
+                    context_messages=self.messages_list + self.statement_to_message(expr) + [answer_assistant],
+                    executor=self.controller.get_executor(),
+                    model=self.controller.get_executor().get_default_model(),
+                    temperature=0.0,
+                    max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
+                    completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
+                    prompt_name='answer_regen_code_or_rewrite.prompt',
+                ),
+                query=self.original_query,
+                original_query=self.original_query,
+            )
+
+            # determine if the assistant has given us a new code snippet or a re-written answer
+            if StarlarkRuntime.get_code_blocks(rewriter_assistant.message.get_str()):
+                # re-written code
+                logging.debug(f'Answer() re-written code: {rewriter_assistant.message}')
+                re_written_code_blocks = StarlarkRuntime.get_code_blocks(str(rewriter_assistant.message))
+                self.setup()
+                locals_dict = self.locals_dict
+                # the re-written code will likely call answer() again, so we need to
+                # set the error_correcting flag to False to prevent it getting into
+                # a loop
+                try:
+                    for block in re_written_code_blocks:
+                        runtime = StarlarkRuntime(
+                            controller=self.controller,
+                            agents=self.agents,
+                            vector_search=self.vector_search,
+                            answer_error_correcting=True,
+                        )
+                        runtime.run(block, self.original_query, locals_dict=locals_dict)
+                        # we will have a new answer on the runtime.answers list
+                        self.answers.extend(runtime.answers)
+                        return self.answers[-1]
+                except Exception as ex:
+                    logging.debug(f'Error running re-written code: {ex}, returning original answer')
+                    return self.answers[-1]
+            elif rewriter_assistant.message.get_str().startswith('false'):
+                logging.debug('Answer() is unlikely correct, but nothing can be done')
+                return self.answers[-1]
+            else:
+                # LLM gave us a re-written answer, hopefully it's good:
+                new_answer = str(rewriter_assistant.message)
+                logging.debug(f'Answer() re-written answer: {new_answer}')
+                answer = Answer(
+                    conversation=self.messages_list,
+                    result=f"{answer_assistant.message.get_str()}"
+                )
+                self.answers.append(answer)
+                return answer
+        else:
+            # LLM didn't give us a clear answer, so we'll just return the original
+            # answer and hope for the best.
+            return self.answers[-1]
 
     def __find_variable_assignment(
         self,
@@ -567,52 +713,6 @@ class StarlarkRuntime:
 
         var_node = ast.Name(variable_name, ctx=ast.Load())
         return var_node, assignment_node
-
-    def rewrite_answer_error_correction(
-        self,
-        query: str,
-        starlark_code: str,
-        error: str,
-        locals_dictionary: Dict[Any, Any],
-    ) -> str:
-        '''
-        This handles the case where an answer() is not correct and we need to
-        identify the single place in the code where this may have occurred, and
-        see if we can manually patch it.
-        '''
-        logging.debug('rewrite_answer_error_correction()')
-        dictionary = ''
-        for key, value in locals_dictionary.items():
-            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
-
-        assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='answer_error_correction.prompt',
-                    template={
-                        'task': query,
-                        'code': starlark_code,
-                        'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
-                        'dictionary': dictionary,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=[],
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
-                prompt_name='answer_error_correction.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
-
-        return str(assistant.message)
 
     def rewrite_starlark_error_correction(
         self,

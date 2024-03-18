@@ -749,6 +749,8 @@ class StreamPrinter():
         self.started = False
 
     def display_image(self, image_bytes):
+        if len(image_bytes) < 10:
+            return
         try:
             # Create a temporary file to store the output from kitty icat
             with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
