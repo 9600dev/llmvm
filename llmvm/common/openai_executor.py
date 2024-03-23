@@ -25,13 +25,15 @@ class OpenAIExecutor(Executor):
         default_model: str = 'gpt-4-1106-preview',
         api_endpoint: str = 'https://api.openai.com/v1',
         default_max_token_len: int = 128000,
-        default_max_completion_len: int = 4096,
+        default_max_output_len: int = 4096,
     ):
+        super().__init__(
+            default_model=default_model,
+            api_endpoint=api_endpoint,
+            default_max_token_len=default_max_token_len,
+            default_max_output_len=default_max_output_len,
+        )
         self.openai_key = api_key
-        self.default_model = default_model
-        self.api_endpoint = api_endpoint
-        self.default_max_token_len = default_max_token_len
-        self.default_max_completion_len = default_max_completion_len
         self.aclient = AsyncOpenAI(api_key=self.openai_key, base_url=self.api_endpoint)
 
     def user_token(self) -> str:
@@ -42,59 +44,6 @@ class OpenAIExecutor(Executor):
 
     def append_token(self) -> str:
         return ''
-
-    def max_tokens(self, model: Optional[str]) -> int:
-        model = model if model else self.default_model
-        match model:
-            case 'gpt-4-vision-preview':
-                return 128000
-            case 'gpt-4-turbo-preview':
-                return 128000
-            case 'gpt-4-0125-preview':
-                return 128000
-            case 'gpt-4-1106-preview':
-                return 128000
-            case 'gpt-4-0613':
-                return 8192
-            case 'gpt-4-32k':
-                return 32768
-            case 'gpt-4':
-                return 8192
-            case 'gpt-3.5-turbo-16k-1106':
-                return 16385
-            case 'gpt-3.5-turbo-16k':
-                return 16385
-            case 'gpt-3.5-turbo-0125':
-                return 16385
-            case 'gpt-3.5-turbo':
-                return 4096
-            case 'gpt-3.5-turbo-1106':
-                return 16385
-            case _:
-                logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_token_len}')
-                return self.default_max_token_len
-
-    def set_default_model(self, default_model: str):
-        self.default_model = default_model
-
-    def get_default_model(self):
-        return self.default_model
-
-    def set_default_max_tokens(self, default_max_tokens: int):
-        self.default_max_token_len = default_max_tokens
-
-    def max_prompt_tokens(
-        self,
-        completion_token_len: Optional[int] = None,
-        model: Optional[str] = None,
-    ) -> int:
-        return self.max_tokens(model) - (completion_token_len if completion_token_len else self.default_max_completion_len)
-
-    def max_completion_tokens(
-        self,
-        model: Optional[str] = None,
-    ):
-        return self.default_max_completion_len
 
     def __calculate_image_tokens(self, width: int, height: int):
         from math import ceil
@@ -183,13 +132,13 @@ class OpenAIExecutor(Executor):
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
         max_completion_tokens: int = 4096,
-        temperature: float = 0.2,
+        temperature: float = 0.0,
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
         message_tokens = self.count_tokens(messages, model=model)
-        if message_tokens > self.max_prompt_tokens(max_completion_tokens, model=model):
+        if message_tokens > self.max_input_tokens(max_completion_tokens, model=model):
             raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,
                                     max_completion_tokens,
@@ -227,7 +176,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: List[Message],
         max_completion_tokens: int = 4096,
-        temperature: float = 0.2,
+        temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
@@ -283,7 +232,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: List[Message],
         max_completion_tokens: int = 2048,
-        temperature: float = 0.2,
+        temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:

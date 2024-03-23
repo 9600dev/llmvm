@@ -54,7 +54,7 @@ class ExecutionController(Controller):
         try:
             assistant: Assistant = await llm_call.executor.aexecute(
                 messages,
-                max_completion_tokens=llm_call.completion_tokens_len,
+                max_output_tokens=llm_call.completion_tokens_len,
                 temperature=llm_call.temperature,
                 stream_handler=llm_call.stream_handler,
                 model=llm_call.model,
@@ -504,7 +504,7 @@ class ExecutionController(Controller):
         from llmvm.common.pdf import Pdf
 
         prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
-        max_prompt_len = self.executor.max_prompt_tokens(completion_token_len=llm_call.completion_tokens_len, model=model)
+        max_prompt_len = self.executor.max_input_tokens(output_token_len=llm_call.completion_tokens_len, model=model)
 
         # I have either a message, or a list of messages. They might need to be map/reduced.
         # todo: we usually have a prepended message of context to help the LLM figure out
@@ -739,8 +739,8 @@ class ExecutionController(Controller):
                         executor=self.executor,
                         model=model,
                         temperature=temperature,
-                        max_prompt_len=self.executor.max_prompt_tokens(),
-                        completion_tokens_len=self.executor.max_completion_tokens(),
+                        max_prompt_len=self.executor.max_input_tokens(),
+                        completion_tokens_len=self.executor.max_output_tokens(),
                         prompt_name='',
                         stream_handler=stream_handler
                     ),
@@ -757,8 +757,8 @@ class ExecutionController(Controller):
                         executor=self.executor,
                         model=model,
                         temperature=temperature,
-                        max_prompt_len=self.executor.max_prompt_tokens(),
-                        completion_tokens_len=self.executor.max_completion_tokens(),
+                        max_prompt_len=self.executor.max_input_tokens(),
+                        completion_tokens_len=self.executor.max_output_tokens(),
                         prompt_name='',
                         stream_handler=stream_handler
                     ),
@@ -831,8 +831,8 @@ class ExecutionController(Controller):
                     executor=self.executor,
                     model=model,
                     temperature=temperature,
-                    max_prompt_len=self.executor.max_prompt_tokens(),
-                    completion_tokens_len=self.executor.max_completion_tokens(),
+                    max_prompt_len=self.executor.max_input_tokens(),
+                    completion_tokens_len=self.executor.max_output_tokens(),
                     prompt_name='',
                     stream_handler=stream_handler,
                 ),

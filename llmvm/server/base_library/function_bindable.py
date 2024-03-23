@@ -173,8 +173,8 @@ class FunctionBindable():
                         executor=self.controller.get_executor(),
                         model=self.controller.get_executor().get_default_model(),
                         temperature=0.0,
-                        max_prompt_len=self.controller.get_executor().max_prompt_tokens(),
-                        completion_tokens_len=self.controller.get_executor().max_completion_tokens(),
+                        max_prompt_len=self.controller.get_executor().max_input_tokens(),
+                        completion_tokens_len=self.controller.get_executor().max_output_tokens(),
                         prompt_name=''
                     ),
                     query=self.original_query,

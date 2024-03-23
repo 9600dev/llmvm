@@ -22,15 +22,18 @@ class AnthropicExecutor(Executor):
     def __init__(
         self,
         api_key: str,
-        default_model: str = 'claude-2.1',
+        default_model: str = 'claude-3-sonnet-20240229',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_token_len: int = 200000,
-        default_max_completion_len: int = 2048,
+        default_max_output_len: int = 4096,
         beta: bool = True,
     ):
-        self.default_max_token_len = default_max_token_len
-        self.default_max_completion_len = default_max_completion_len
-        self.default_model = default_model
+        super().__init__(
+            default_model=default_model,
+            api_endpoint=api_endpoint,
+            default_max_token_len=default_max_token_len,
+            default_max_output_len=default_max_output_len,
+        )
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
         self.beta = beta
 
@@ -190,50 +193,11 @@ class AnthropicExecutor(Executor):
         else:
             return AI_PROMPT
 
-    def max_tokens(self, model: Optional[str]) -> int:
-        model = model if model else self.default_model
-        match model:
-            case 'claude-2.1':
-                return 200000
-            case 'claude-2.0':
-                return 200000
-            case str(model) if model.startswith('claude-3'):
-                return 200000
-            case 'claude-instant-1.2':
-                return 100000
-            case _:
-                logging.debug('max_tokens() is not implemented for model {}, returning 200000'.format(model))
-                return 200000
-
-    def set_default_model(self, default_model: str):
-        self.default_model = default_model
-
-    def get_default_model(self):
-        return self.default_model
-
-    def set_default_max_tokens(self, default_max_tokens: int):
-        self.default_max_token_len = default_max_tokens
-
-    def max_prompt_tokens(
-        self,
-        completion_token_len: Optional[int] = None,
-        model: Optional[str] = None,
-    ) -> int:
-        return self.max_tokens(model) - (completion_token_len if completion_token_len else self.default_max_completion_len)
-
-    def max_completion_tokens(
-        self,
-        model: Optional[str] = None,
-    ):
-        return self.default_max_completion_len
-
     def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
         model: Optional[str] = None,
     ) -> int:
-        model_str = model if model else self.default_model
-
         async def tokenizer_len(content: str | List) -> int:
             # image should have already been resized
             if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict) and 'source' in content[0]:
@@ -243,41 +207,23 @@ class AnthropicExecutor(Executor):
             token_count = await self.client.count_tokens(str(content))
             return token_count
 
-        def num_tokens_from_messages(messages, model: str):
+        def num_tokens_from_messages(messages):
             # this is inexact, but it's a reasonable approximation
-            if model in {
-                'claude-2',
-                'claude-2.0',
-                'claude-2.1',
-                'claude-instant-1.2',
-                'claude-instant-1',
-            }:
-                tokens_per_message = 3
-                tokens_per_name = 1
-            elif model.startswith('claude-3'):
-                tokens_per_message = 3
-                tokens_per_name = 1
-            else:
-                logging.debug(f"num_tokens_from_messages() is not implemented for model {model}.")
-                tokens_per_message = 3
-                tokens_per_name = 1
             num_tokens = 0
+            tokens_per_message = 4
             for message in messages:
                 num_tokens += tokens_per_message
-                for key, value in message.items():
+                for _, value in message.items():
                     num_tokens += asyncio.run(tokenizer_len(value))
-                    if key == "name":
-                        num_tokens += tokens_per_name
-            num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
             return num_tokens
 
         if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
             dict_messages = self.wrap_messages(cast(List[Message], messages))
-            return num_tokens_from_messages(dict_messages, model=model_str)
+            return num_tokens_from_messages(dict_messages)
         elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
-            return num_tokens_from_messages(messages, model=model_str)
+            return num_tokens_from_messages(messages)
         elif isinstance(messages, str):
-            return num_tokens_from_messages(self.wrap_messages([User(Content(messages))]), model=model_str)
+            return num_tokens_from_messages(self.wrap_messages([User(Content(messages))]))
         else:
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
@@ -300,7 +246,7 @@ class AnthropicExecutor(Executor):
         messages: List[Dict[str, Any]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
-        max_completion_tokens: int = 2048,
+        max_output_tokens: int = 2048,
         temperature: float = 0.0,
     ) -> TokenStreamManager:
         model = model if model else self.default_model
@@ -309,11 +255,11 @@ class AnthropicExecutor(Executor):
             raise NotImplementedError('functions are not implemented for ClaudeExecutor')
 
         message_tokens = self.count_tokens(messages=messages, model=model)
-        if message_tokens > self.max_prompt_tokens(max_completion_tokens, model=model):
-            raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
+        if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
+            raise Exception('Prompt too long. input tokens: {}, output tokens: {}, total: {}, max sontext window: {}'
                             .format(message_tokens,
-                                    max_completion_tokens,
-                                    message_tokens + max_completion_tokens,
+                                    max_output_tokens,
+                                    message_tokens + max_output_tokens,
                                     self.max_tokens(model)))
 
         # the messages API does not accept System messages, only User and Assistant messages.
@@ -327,6 +273,7 @@ class AnthropicExecutor(Executor):
         # anthropic disallows empty messages, so we're going to remove any Message that doesn't contain content
         for message in messages:
             if not message['content'] or message['content'] == '' or message['content'] == b'':
+                logging.warning(f"Removing empty message: {message}")
                 messages.remove(message)
 
         # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
@@ -355,30 +302,30 @@ class AnthropicExecutor(Executor):
             if self.beta:
                 # AsyncStreamManager[AsyncMessageStream]
                 stream = self.client.messages.stream(
-                    max_tokens=max_completion_tokens,
+                    max_tokens=max_output_tokens,
                     messages=messages_list,  # type: ignore
                     model=model,
                     system=system_message,
-                    temperature=0.0,
+                    temperature=temperature,
                 )
                 return TokenStreamManager(stream, token_trace)
             else:
                 stream = await self.client.completions.create(
-                    max_tokens_to_sample=max_completion_tokens,
+                    max_tokens_to_sample=max_output_tokens,
                     model=model,
                     stream=True,
-                    temperature=0.0,
+                    temperature=temperature,
                     prompt=self.__format_prompt(messages_list),
                 )
                 return TokenStreamManager(stream, token_trace)
         except Exception as e:
-            print(e)
+            logging.error(e)
             raise
 
     async def aexecute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 2048,
+        max_output_tokens: int = 2048,
         temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
@@ -407,7 +354,7 @@ class AnthropicExecutor(Executor):
 
         stream = self.__aexecute_direct(
             messages_list,
-            max_completion_tokens=max_completion_tokens,
+            max_output_tokens=max_output_tokens,
             model=model,
             temperature=temperature,
         )
@@ -449,7 +396,7 @@ class AnthropicExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 2048,
+        max_output_tokens: int = 2048,
         temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
@@ -458,4 +405,4 @@ class AnthropicExecutor(Executor):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_completion_tokens, temperature, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, model, stream_pipe))

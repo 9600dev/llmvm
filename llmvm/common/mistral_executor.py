@@ -20,14 +20,14 @@ class MistralExecutor(Executor):
         default_model: str = 'mistral-medium',
         api_endpoint: str = 'https://api.mistral.ai',
         default_max_token_len: int = 32000,
-        default_max_completion_len: int = 4096,
+        default_max_output_len: int = 4096,
     ):
-        self.api_key = api_key
-        self.default_model = default_model
-        self.api_endpoint = api_endpoint
-        self.default_max_token_len = default_max_token_len
-        self.default_max_completion_len = default_max_completion_len
-
+        super().__init__(
+            default_model=default_model,
+            api_endpoint=api_endpoint,
+            default_max_token_len=default_max_token_len,
+            default_max_output_len=default_max_output_len,
+        )
         self.aclient = MistralAsyncClient(api_key=api_key)
 
     def user_token(self) -> str:
@@ -38,45 +38,6 @@ class MistralExecutor(Executor):
 
     def append_token(self) -> str:
         return ''
-
-    def max_tokens(self, model: Optional[str]) -> int:
-        model = model if model else self.default_model
-        match model:
-            case 'mistral-tiny':
-                return 32000
-            case 'mistral-small':
-                return 32000
-            case 'mistral-medium':
-                return 32000
-            case 'mistral-large':
-                return 32000
-            case 'mistral-large-latest':
-                return 32000
-            case _:
-                logging.warning(f'max_tokens() is not implemented for model {model}. Returning {self.default_max_token_len}')
-                return self.default_max_token_len
-
-    def set_default_model(self, default_model: str):
-        self.default_model = default_model
-
-    def get_default_model(self):
-        return self.default_model
-
-    def set_default_max_tokens(self, default_max_tokens: int):
-        self.default_max_token_len = default_max_tokens
-
-    def max_prompt_tokens(
-        self,
-        completion_token_len: Optional[int] = None,
-        model: Optional[str] = None,
-    ) -> int:
-        return self.max_tokens(model) - (completion_token_len if completion_token_len else self.default_max_completion_len)
-
-    def max_completion_tokens(
-        self,
-        model: Optional[str] = None,
-    ):
-        return self.default_max_completion_len
 
     def count_tokens(
         self,
@@ -132,18 +93,18 @@ class MistralExecutor(Executor):
         self,
         messages: List[Dict[str, str]],
         model: Optional[str] = None,
-        max_completion_tokens: int = 4096,
-        temperature: float = 0.2,
+        max_output_tokens: int = 4096,
+        temperature: float = 0.0,
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
         message_tokens = self.count_tokens(messages, model=model)
-        if message_tokens > self.max_prompt_tokens(max_completion_tokens, model=model):
-            raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
+        if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
+            raise Exception('Prompt too long. prompt tokens: {}, output tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,
-                                    max_completion_tokens,
-                                    message_tokens + max_completion_tokens,
+                                    max_output_tokens,
+                                    message_tokens + max_output_tokens,
                                     self.max_tokens(model)))
 
         token_trace = TokenPerf('__aexecute_direct', 'mistral', model, prompt_len=message_tokens)  # type: ignore
@@ -152,7 +113,7 @@ class MistralExecutor(Executor):
         response = self.aclient.chat_stream(
             model=model if model else self.default_model,
             temperature=temperature,
-            max_tokens=max_completion_tokens,
+            max_tokens=max_output_tokens,
             messages=[self.__dict_message_to_mistral_message(m) for m in messages],
         )
         return TokenStreamManager(response, token_trace)  # type: ignore
@@ -160,8 +121,8 @@ class MistralExecutor(Executor):
     async def aexecute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 4096,
-        temperature: float = 0.2,
+        max_output_tokens: int = 4096,
+        temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
@@ -181,7 +142,7 @@ class MistralExecutor(Executor):
 
         stream = self.__aexecute_direct(
             messages_list,
-            max_completion_tokens=max_completion_tokens,
+            max_output_tokens=max_output_tokens,
             model=model if model else self.default_model,
             temperature=temperature,
         )
@@ -209,8 +170,8 @@ class MistralExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 2048,
-        temperature: float = 0.2,
+        max_output_tokens: int = 2048,
+        temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:
@@ -218,4 +179,4 @@ class MistralExecutor(Executor):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_completion_tokens, temperature, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, model, stream_pipe))

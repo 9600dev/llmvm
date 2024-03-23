@@ -2,6 +2,7 @@ import base64
 import copy
 import datetime as dt
 import importlib
+import json
 import os
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -11,6 +12,65 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 from pydantic import BaseModel
 
 T = TypeVar('T')
+
+
+class TokenPriceCalculator():
+    def __init__(
+        self,
+        price_file: str = 'model_prices_and_context_window.json',
+    ):
+        self.price_file = resources.files('llmvm') / price_file
+        self.prices = self.__load_prices()
+
+    def __load_prices(self):
+        with open(self.price_file, 'r') as f:  # type: ignore
+            json_prices = json.load(f)
+            return json_prices
+
+    def get(self, model: str, key: str, executor: Optional[str] = None) -> Optional[Any]:
+        if model in self.prices and key in self.prices[model]:
+            return self.prices[model][key]
+        elif executor and f'{executor}/{model}' in self.prices and key in self.prices[f'{executor}/{model}']:
+            return self.prices[f'{executor}/{model}'][key]
+        return None
+
+    def input_price(
+        self,
+        model: str,
+        executor: Optional[str] = None
+    ) -> float:
+        return self.get(model, 'input_cost_per_token', executor) or 0.0
+
+    def output_price(
+        self,
+        model: str,
+        executor: Optional[str] = None
+    ) -> float:
+        return self.get(model, 'output_cost_per_token', executor) or 0.0
+
+    def max_tokens(
+        self,
+        model: str,
+        executor: Optional[str] = None,
+        default: int = 0
+    ) -> int:
+        return self.get(model, 'max_tokens', executor) or default
+
+    def max_input_tokens(
+        self,
+        model: str,
+        executor: Optional[str] = None,
+        default: int = 0
+    ) -> int:
+        return self.get(model, 'max_input_tokens', executor) or default
+
+    def max_output_tokens(
+        self,
+        model: str,
+        executor: Optional[str] = None,
+        default: int = 0
+    ) -> int:
+        return self.get(model, 'max_output_tokens', executor) or default
 
 
 def bcl(module_or_path):
@@ -57,11 +117,23 @@ class Visitor(ABC):
 
 
 class Executor(ABC):
+    def __init__(
+        self,
+        default_model: str,
+        api_endpoint: str,
+        default_max_token_len: int,
+        default_max_output_len: int,
+    ):
+        self.default_model = default_model
+        self.api_endpoint = api_endpoint
+        self.default_max_token_len = default_max_token_len
+        self.default_max_output_len = default_max_output_len
+
     @abstractmethod
     async def aexecute(
         self,
         messages: List['Message'],
-        max_completion_tokens: int = 2048,
+        max_output_tokens: int = 2048,
         temperature: float = 1.0,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
         model: Optional[str] = None,
@@ -69,11 +141,50 @@ class Executor(ABC):
     ) -> 'Assistant':
         pass
 
+    def set_default_max_tokens(
+        self,
+        default_max_token_len: int,
+    ) -> None:
+        self.default_max_token_len = default_max_token_len
+
+    def set_default_model(
+        self,
+        default_model: str,
+    ) -> None:
+        self.default_model = default_model
+
+    def get_default_model(
+        self,
+    ) -> str:
+        return self.default_model
+
+    def max_tokens(self, model: Optional[str]) -> int:
+        return TokenPriceCalculator().max_tokens(model or self.default_model, default=self.default_max_token_len)
+
+    def max_input_tokens(
+        self,
+        output_token_len: Optional[int] = None,
+        model: Optional[str] = None,
+    ) -> int:
+        return TokenPriceCalculator().max_input_tokens(
+            model or self.default_model,
+            default=self.default_max_token_len - self.default_max_output_len
+        )
+
+    def max_output_tokens(
+        self,
+        model: Optional[str] = None,
+    ) -> int:
+        return TokenPriceCalculator().max_output_tokens(
+            model or self.default_model,
+            default=self.default_max_output_len
+        )
+
     @abstractmethod
     def execute(
         self,
         messages: List['Message'],
-        max_completion_tokens: int = 2048,
+        max_output_tokens: int = 2048,
         temperature: float = 1.0,
         stream_handler: Optional[Callable[['AstNode'], None]] = None,
         model: Optional[str] = None,
@@ -82,46 +193,7 @@ class Executor(ABC):
         pass
 
     @abstractmethod
-    def set_default_max_tokens(
-        self,
-        default_max_tokens: int,
-    ):
-        pass
-
-    @abstractmethod
-    def set_default_model(
-        self,
-        default_model: str,
-    ):
-        pass
-
-    @abstractmethod
-    def get_default_model(
-        self,
-    ) -> str:
-        pass
-
-    @abstractmethod
     def name(self) -> str:
-        pass
-
-    @abstractmethod
-    def max_tokens(self, model: Optional[str]) -> int:
-        pass
-
-    @abstractmethod
-    def max_prompt_tokens(
-        self,
-        completion_token_len: Optional[int] = None,
-        model: Optional[str] = None,
-    ) -> int:
-        pass
-
-    @abstractmethod
-    def max_completion_tokens(
-        self,
-        model: Optional[str] = None,
-    ) -> int:
         pass
 
     @abstractmethod

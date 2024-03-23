@@ -17,10 +17,9 @@ from mistralai.models.chat_completion import \
 from openai.types.chat.chat_completion_chunk import \
     ChatCompletionChunk as OAICompletion
 
-from llmvm.common.calculator import TokenPriceCalculator
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Content
+from llmvm.common.objects import TokenPriceCalculator
 
 logging = setup_logging()
 
@@ -93,8 +92,8 @@ class TokenPerf:
                 'sample_len': len(self._ticks),
                 's_tok_sec': s_tok_sec,
                 'p_tok_sec': p_tok_sec,
-                'p_cost': self._prompt_len * self.calculator.prompt_price(self._model, self._executor),
-                's_cost': len(self._ticks) * self.calculator.sample_price(self._model, self._executor),
+                'p_cost': self._prompt_len * self.calculator.input_price(self._model, self._executor),
+                's_cost': len(self._ticks) * self.calculator.output_price(self._model, self._executor),
                 'request_id': self.request_id,
                 'ticks': self.ticks()
             }
