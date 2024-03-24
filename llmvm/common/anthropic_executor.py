@@ -37,12 +37,6 @@ class AnthropicExecutor(Executor):
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
         self.beta = beta
 
-    def messages_trace(self, executor_name: str, message: List[Dict[str, str]]):
-        if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
-            with open(os.path.expanduser(Container.get_config_variable('LLMVM_EXECUTOR_TRACE')), 'a+') as f:
-                for m in message:
-                    f.write(f"{m['role'].capitalize()}: {m['content']}\n\n")
-
     def from_dict(self, message: Dict[str, Any]) -> 'Message':
         role = message['role']
         message_content = message['content']
@@ -165,15 +159,15 @@ class AnthropicExecutor(Executor):
 
         messages_list = []
 
-        for i in range(len(wrapped)):
-            if i > 0 and wrapped[i]['role'] == wrapped[i - 1]['role']:
-                if wrapped[i]['role'] == 'user':
-                    messages_list.append({'role': 'assistant', 'content': 'Thanks. Ready for next message.'})
-                elif wrapped[i]['role'] == 'assistant':
-                    messages_list.append({'role': 'user', 'content': 'Thanks. Read for your next message.'})
-            messages_list.append(wrapped[i])
+        # for i in range(len(wrapped)):
+        #     if i > 0 and wrapped[i]['role'] == wrapped[i - 1]['role']:
+        #         if wrapped[i]['role'] == 'user':
+        #             messages_list.append({'role': 'assistant', 'content': 'Thanks. Ready for next message.'})
+        #         elif wrapped[i]['role'] == 'assistant':
+        #             messages_list.append({'role': 'user', 'content': 'Thanks. Read for your next message.'})
+        #     messages_list.append(wrapped[i])
 
-        return messages_list
+        return wrapped
 
     def user_token(self):
         if self.beta:
@@ -276,6 +270,22 @@ class AnthropicExecutor(Executor):
                 logging.warning(f"Removing empty message: {message}")
                 messages.remove(message)
 
+        collapsed_messages = []
+        accumulator = ''
+        for i in range(len(messages)):
+            if messages[i]['role'] == 'user' and not isinstance(messages[i]['content'], list):
+                accumulator += messages[i]['content'] + '\n\n'
+            elif messages[i]['role'] == 'user' and isinstance(messages[i]['content'], list) and accumulator:
+                collapsed_messages.append({'role': 'user', 'content': accumulator})
+                collapsed_messages.append(messages[i])
+                accumulator = ''
+            else:
+                collapsed_messages.append(messages[i])
+        if accumulator:
+            collapsed_messages.append({'role': 'user', 'content': accumulator})
+
+        messages = collapsed_messages
+
         # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
         # going to add an Assistant message in between two User messages, and a User message between two Assistant.
         messages_list: List[Dict[str, str]] = []
@@ -293,7 +303,7 @@ class AnthropicExecutor(Executor):
         if messages_list[0]['role'] != 'system' and messages_list[0]['role'] != 'user':
             messages_list.insert(0, {'role': 'user', 'content': 'None.'})
 
-        self.messages_trace(self.name(), messages_list)
+        messages_trace(messages_list)
 
         token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
@@ -380,8 +390,6 @@ class AnthropicExecutor(Executor):
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [self.from_dict(m) for m in messages_list]
-
-        messages_trace(messages_list)
 
         assistant = Assistant(
             message=conversation[-1].message,
