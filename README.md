@@ -82,10 +82,10 @@ query>> -p **/*.py !**/__init__.py !**/__main__.py "explain this codebase as a t
 I bash/fish/zsh alias llm:
 
 ```bash
-alias llm=LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4-vision-preview" LLMVM_PROFILING="true" python -m llmvm.client
+alias llm=LLMVM_EXECUTOR="anthopic" LLMVM_MODEL="claude-3-haiku-20240307" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" python -m llmvm.client
 ```
 
-or if you're using pyenv and want to hack on the source code:
+or if you're using pyenv and want to hack on the source code and have your changes instantly reflected in the command line call:
 
 ```bash
 function llm() {
@@ -100,10 +100,14 @@ and then:
 cat somecode.py | llm -o direct "rewrite this code; make it cleaner and easier to read"
 ```
 
-Image understanding is supported via OpenAI's GPT 4 turbo vision model and Google Gemini:
+```bash
+llm -p a.py -p b.py -p c.py "find bugs in the code supplied. be careful and specific"
+```
+
+Image understanding is supported on Anthropic Claude 3 models and OpenAI's GPT 4 turbo vision preview model.
 
 ```bash
-cat docs/beach.jpg | llm "describe this image for me"
+cat docs/beach.jpg | llm "generate a dalle prompt for the exact inverse of this image"
 ```
 
 ![](docs/2023-11-11-12-59-39.png)
@@ -130,7 +134,7 @@ llm "create a nice html file to display the content" > output.html
 
 It integrates well with [vim](https://neovim.io/) or your favorite editor to build multiline queries, or edit long message threads.
 
-You can even Ctrl-y + p to paste images into the Repl for upload and parsing by OpenAI's vision models.
+You can even Ctrl-y + p to paste images into the REPL for upload and parsing by Anthropic Claude 3 multimodal, or OpenAI's vision models.
 
 ## Install
 
@@ -222,10 +226,11 @@ If the LLMVM server is running, profiling output will be emitted there, and if t
 
 ```bash
 export LLMVM_PROFILING="true"
-...
-DEBUG    total_time: 8.42 prompt_time: 0.55 sample_time: 7.87
-DEBUG    prompt_len: 28 sample_len: 194
-DEBUG    p_tok_sec 50.52 s_tok_sec: 23.15
+
+DEBUG    total_time: 0.59 prompt_time: 0.43 sample_time: 0.15             perf.py:127
+DEBUG    prompt_len: 7 sample_len: 18                                     perf.py:128
+DEBUG    p_tok_sec: 16.14 s_tok_sec: 32.37                                perf.py:129
+DEBUG    p_cost: $0.00000 s_cost: $0.00002 request_id:                    perf.py:130
 ```
 
 #### Extra PDF and Markdown Parsing and Extraction Performance
@@ -233,10 +238,10 @@ DEBUG    p_tok_sec 50.52 s_tok_sec: 23.15
 You can use the "expensive" mode of PDF and Markdown extraction where images are included along with the text of PDF and Markdown documents. The LLM will be used to guide the extraction process, resulting in a few extra calls:
 
 ```bash
-export LLMVM_FULL_PROCESSING='true'
+export LLMVM_FULL_PROCESSING="true"
 ```
 
-As an example, the HTML page at [https://9600.dev/authors.html](https://9600.dev/authors.html) contains a table of best selling authors as an **image** (not a html table):
+As an example of full processing, the HTML page at [https://9600.dev/authors.html](https://9600.dev/authors.html) contains a table of best selling authors as an **image** (and not a html table):
 
 ![](docs/2024-03-16-20-27-22.png)
 
@@ -290,8 +295,12 @@ I want to loosely compare the language outputs of two LLM calls, I can embed the
 > Ignore formatting and line breaks as differences. You can explain your reasoning for your choice after the # character, so: true # explanation
 
 ```bash
-haiku -s -t \"$(haiku -s generate two sentences about prime ministers)\" -t \"$(haiku -s generate two sentences about prime ministers)\" -p scripts/compare.prompt
+haiku -s -t \"$(haiku -s generate two sentences about prime ministers)\" -t \"$(haiku -s generate two sentences about presidents)\" -p scripts/compare.prompt
 ```
+
+gives:
+
+> false # The two messages have different content. The first message is about the role and position of the prime minister in various countries, while the second message is about the role and position of the President of the United States. The context and subject matter of the two messages are different.
 
 ## Architecture
 
