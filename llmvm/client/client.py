@@ -930,6 +930,43 @@ def invoke_context_wrapper(ctx):
     invoke_context = ctx
 
 
+def call_click_message(
+    user_message: Optional[str | bytes | Message],
+    id: int,
+    path: List[str],
+    context: List[str],
+    mode: str,
+    endpoint: str,
+    cookies: str,
+    executor: str,
+    model: str,
+    upload: bool = False,
+    compression: str = 'auto',
+    escape: bool = False,
+    context_messages: list[str] = []
+):
+    params = {
+        'message': user_message,
+        'id': id,
+        'path': path,
+        'context': context,
+        'upload': upload,
+        'mode': mode,
+        'endpoint': endpoint,
+        'cookies': cookies,
+        'executor': executor,
+        'model': model,
+        'compression': compression,
+        'escape': escape,
+        'context_messages': context_messages
+    }
+
+    with click.Context(message) as ctx:
+        ctx.ensure_object(dict)
+        ctx.params = {k: v for k, v in params.items() if v is not None}
+        return message.invoke(ctx)
+
+
 class CustomCompleter(PromptCompleter):
     def get_completions(self, document, complete_event):
         # Your logic to compute completions
@@ -1015,6 +1052,11 @@ class Repl():
         rich.print('[bold]I am a helpful assistant that has access to tools. Use "mode" to switch tools on and off.[/bold]')
         rich.print()
 
+    def __redraw(self, event):
+        event.app.invalidate()
+        event.app.renderer.reset()
+        event.app._redraw()
+
     async def repl(
         self,
     ):
@@ -1040,8 +1082,11 @@ class Repl():
             if 'last_thread' in globals():
                 last_thread_t: SessionThread = last_thread
                 pyperclip.copy(str(last_thread_t.messages[-1].content))
-                rich.print('Last message copied to clipboard.\n')
-                rich.print(f"[{thread_id}] query>> ", end="")
+                rich.print('Last message copied to clipboard.')
+                self.__redraw(event)
+            else:
+                rich.print('No message to copy to clipboard.')
+                self.__redraw(event)
 
         @kb.add('c-y', 'a')
         def _(event):
@@ -1049,8 +1094,11 @@ class Repl():
                 last_thread_t: SessionThread = last_thread
                 whole_thread = get_string_thread_with_roles(last_thread_t)
                 pyperclip.copy(str(whole_thread))
-                rich.print('Thread copied to clipboard.\n')
-                rich.print(f"[{thread_id}] query>> ", end="")
+                rich.print('Thread copied to clipboard.')
+                self.__redraw(event)
+            else:
+                rich.print("No thread to copy to clipboard.")
+                self.__redraw(event)
 
         @kb.add('c-y', 'c')
         def _(event):
@@ -1062,31 +1110,14 @@ class Repl():
                 if code_blocks:
                     code = '\n\n'.join(code_blocks)
                     pyperclip.copy(code)
-                    rich.print('Code blocks copied to clipboard.\n')
-                    rich.print(f"[{thread_id}] query>> ", end="")
+                    rich.print('Code blocks copied to clipboard.')
+                    self.__redraw(event)
                 else:
-                    rich.print('No code block found.\n')
-                    rich.print(f"[{thread_id}] query>> ", end="")
-
-        async def __invoke_paste_image(thread: SessionThread, raw_data: bytes, current_text: str):
-            global current_mode
-
-            with click.Context(message) as ctx:
-                ctx.ensure_object(dict)
-                ctx.params['message'] = current_text
-                ctx.params['id'] = thread.id
-                ctx.params['path'] = ''
-                ctx.params['context'] = ''
-                ctx.params['upload'] = False
-                ctx.params['mode'] = current_mode
-                ctx.params['endpoint'] = Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
-                ctx.params['cookies'] = thread.cookies
-                ctx.params['executor'] = thread.executor
-                ctx.params['compression'] = thread.compression
-                ctx.params['model'] = thread.model
-                ctx.params['escape'] = False
-                ctx.params['context_messages'] = [User(ImageContent(cast(bytes, raw_data), url=''))]
-                return message.invoke(ctx)
+                    rich.print('No code block found.')
+                    self.__redraw(event)
+            else:
+                rich.print('No code block found.')
+                self.__redraw(event)
 
         @kb.add('c-y', 'p')
         def _(event):
@@ -1122,12 +1153,10 @@ class Repl():
                             event.app.current_buffer.text = current_text + f' [ImageContent({temp_file.name})] '
                             event.app.current_buffer.cursor_position = len(event.app.current_buffer.text)
                             event.app.layout.focus(event.app.current_buffer)
-                        event.app.invalidate()
-                        event.app.renderer.reset()
-                        event.app._redraw()
+                        self.__redraw(event)
             else:
-                rich.print('No image found in clipboard.\n')
-                rich.print(f"[{thread_id}] query>> ", end="")
+                rich.print('No image found in clipboard.')
+                self.__redraw(event)
 
         @kb.add('c-n')
         def _(event):
@@ -1138,7 +1167,7 @@ class Repl():
             rich.print('New thread created.')
             event.app.current_buffer.text = ''
             event.app.current_buffer.cursor_position = 0
-            rich.print(f"[{thread_id}] query>> ", end="")
+            self.__redraw(event)
 
         @kb.add('c-g')
         def _(event):
@@ -1471,10 +1500,10 @@ def cookies(
 @click.argument('actor', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to retrieve.')
-@click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
-              help='mode to use "auto", "tool" or "direct". Default is "auto".')
+@click.option('--mode', '-o', type=click.Choice(['direct', 'auto', 'tool'], case_sensitive=False), required=False, default='direct',
+              help='mode to use "auto", "tool" or "direct". Default is "direct".')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
-              help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
+              help='executor to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--endpoint', '-e', type=str, required=False,
@@ -1500,6 +1529,9 @@ def act(
     if actor.startswith('"') and actor.endswith('"') or actor.startswith("'") and actor.endswith("'"):
         actor = actor[1:-1]
 
+    if mode.startswith('"') and mode.endswith('"') or mode.startswith("'") and mode.endswith("'"):
+        mode = mode[1:-1]
+
     if not actor:
         from rich.console import Console
         from rich.table import Table
@@ -1520,21 +1552,7 @@ def act(
         rich.print('Prompt: {}'.format(prompt_result))
         rich.print()
 
-        with click.Context(message) as ctx:
-            ctx.ensure_object(dict)
-            ctx.params['message'] = prompt_result
-            ctx.params['id'] = id
-            ctx.params['path'] = ''
-            ctx.params['context'] = ''
-            ctx.params['upload'] = False
-            ctx.params['mode'] = mode
-            ctx.params['endpoint'] = endpoint
-            ctx.params['cookies'] = ''
-            ctx.params['compression'] = 'auto'
-            ctx.params['executor'] = executor
-            ctx.params['model'] = model
-            ctx.params['escape'] = escape
-            return message.invoke(ctx)
+        call_click_message(prompt_result, id, [], [], mode, endpoint, '', executor, model, escape)
 
 
 @cli.command('url', help='download a url and insert the content into the message thread.')
@@ -1551,20 +1569,52 @@ def url(
 ):
     item = DownloadItem(url=url, id=id)
     global thread_id
+    global last_thread
+
+    if url.startswith('"') and url.endswith('"') or url.startswith("'") and url.endswith("'"):
+        url = url[1:-1]
 
     async def download_helper():
-        async with httpx.AsyncClient(timeout=400.0) as client:
-            async with client.stream('POST', f'{endpoint}/download', json=item.model_dump()) as response:
-                objs = await stream_response(response, StreamPrinter('').write)
-        await response.aclose()
+        global last_thread
 
-        session_thread = SessionThread.model_validate(objs[-1])
-        return session_thread
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f'{endpoint}/health')
+                response.raise_for_status()
+
+            async with httpx.AsyncClient(timeout=400.0) as client:
+                async with client.stream('POST', f'{endpoint}/download', json=item.model_dump()) as response:
+                    objs = await stream_response(response, StreamPrinter('').write)
+            await response.aclose()
+
+            session_thread = SessionThread.model_validate(objs[-1])
+            return session_thread
+
+        except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
+            if 'last_thread' not in globals():
+
+                with click.Context(new) as ctx:
+                    ctx.ensure_object(dict)
+                    ctx.params['endpoint'] = endpoint
+                    new.invoke(ctx)
+
+            message = get_path_as_messages([url])[0]
+            rich.print(f'Downloaded content from {url}.')
+
+            new_thread = SessionThread(
+                id=-1,
+                executor=last_thread.executor,
+                model=last_thread.model,
+                current_mode=last_thread.current_mode,
+                cookies=last_thread.cookies,
+                messages=last_thread.messages + [MessageModel.from_message(message)],
+            )
+            last_thread = new_thread
+            return new_thread
 
     thread: SessionThread = asyncio.run(download_helper())
     thread_id = thread.id
     return thread
-
 
 @cli.command('search', help='perform a search on ingested content using the LLMVM search engine.')
 @click.argument('query', type=str, required=False, default='')
@@ -1722,8 +1772,8 @@ def new(
         thread_id = thread.id
         last_thread = thread
     except ConnectError:
+        rich.print('LLMVM server not available. Creating new local thread.')
         if 'last_thread' in globals():
-            rich.print('LLMVM server not available. Creating new local thread.')
             new_thread = SessionThread(
                 id=-1,
                 executor=last_thread.executor,
@@ -1732,6 +1782,8 @@ def new(
                 cookies=last_thread.cookies,
             )
             last_thread = new_thread
+        else:
+           last_thread = SessionThread(id=-1)
 
 
 @cli.command('message')
@@ -1759,6 +1811,7 @@ def new(
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
               default='auto', help='context window compression method if the message is too large. Default is "auto".')
 @click.option('--escape', '-s', type=bool, is_flag=True, required=False)
+@click.option('--context_messages', required=False, multiple=True, hidden=True)
 def message(
     message: Optional[str | bytes | Message],
     id: int,

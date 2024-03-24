@@ -305,7 +305,7 @@ class AnthropicExecutor(Executor):
 
         messages_trace(messages_list)
 
-        token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('__aexecute_direct', 'anthropic', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
         try:

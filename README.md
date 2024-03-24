@@ -7,6 +7,7 @@ It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and 
 LLMVM's features are best explored through examples. Let's install, then go through some:
 
 ```$ pip install llmvm-cli```
+```$ playwright install firefox```
 
 ```$ python -m llmvm.server```
 
@@ -151,6 +152,13 @@ These are optional:
 ```bash
 SERPAPI_API_KEY     # https://serpapi.com/ API key for web and news searches.
 SEC_API_KEY         # if you want to use SEC's Edgar api to get 10K's and 10Q's etc, get an account at https://sec-api.io/
+```
+
+and then:
+
+```bash
+pip install llmvm-cli
+playwright install firefox
 ```
 
 #### Manual Installation
