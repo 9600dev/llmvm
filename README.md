@@ -279,6 +279,20 @@ python -m llmvm.client -p docs/get_company_summary.star "microsoft microsoft.com
 
 The `messages()[-1]` call gets the "microsoft microsoft.com" as message input to the pipeline.
 
+#### Using LLMVM as a message stack to run "programs"
+
+I want to loosely compare the language outputs of two LLM calls, I can embed the result of an LLMVM call into the input of another using the -s (escape the result) and -t (add a string as a context message). An example:
+
+[scripts/compare.prompt](https://github.com/9600dev/llmvm/blob/master/scripts/compare.prompt)
+> [user_message]
+> I want to compare the previous two messages. If they're loosely the same text or image, you can reply with "true". If they're different, reply with "false". "true" and "false" replies are case sensitive. You should focus on comparing context rather than word for word differences. If you're comparing images, they should be mostly the same image to return "true".
+>
+> Ignore formatting and line breaks as differences. You can explain your reasoning for your choice after the # character, so: true # explanation
+
+```bash
+haiku -s -t \"$(haiku -s generate two sentences about prime ministers)\" -t \"$(haiku -s generate two sentences about prime ministers)\" -p scripts/compare.prompt
+```
+
 ## Architecture
 
 ![](docs/2024-03-16-12-16-18.png)

@@ -270,21 +270,21 @@ class AnthropicExecutor(Executor):
                 logging.warning(f"Removing empty message: {message}")
                 messages.remove(message)
 
-        collapsed_messages = []
-        accumulator = ''
-        for i in range(len(messages)):
-            if messages[i]['role'] == 'user' and not isinstance(messages[i]['content'], list):
-                accumulator += messages[i]['content'] + '\n\n'
-            elif messages[i]['role'] == 'user' and isinstance(messages[i]['content'], list) and accumulator:
+        if Container().get_config_variable('ANTHROPIC_COLLAPSE_MESSAGES', default=False):
+            collapsed_messages = []
+            accumulator = ''
+            for i in range(len(messages)):
+                if messages[i]['role'] == 'user' and not isinstance(messages[i]['content'], list):
+                    accumulator += messages[i]['content'] + '\n\n'
+                elif messages[i]['role'] == 'user' and isinstance(messages[i]['content'], list) and accumulator:
+                    collapsed_messages.append({'role': 'user', 'content': accumulator})
+                    collapsed_messages.append(messages[i])
+                    accumulator = ''
+                else:
+                    collapsed_messages.append(messages[i])
+            if accumulator:
                 collapsed_messages.append({'role': 'user', 'content': accumulator})
-                collapsed_messages.append(messages[i])
-                accumulator = ''
-            else:
-                collapsed_messages.append(messages[i])
-        if accumulator:
-            collapsed_messages.append({'role': 'user', 'content': accumulator})
-
-        messages = collapsed_messages
+            messages = collapsed_messages
 
         # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
         # going to add an Assistant message in between two User messages, and a User message between two Assistant.

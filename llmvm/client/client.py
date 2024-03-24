@@ -5,6 +5,7 @@ import glob
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -61,12 +62,12 @@ logging = setup_logging()
 global thread_id
 global current_mode
 global last_thread
-global suppress_role
+global escape
 
 
 thread_id: int = 0
 current_mode = 'auto'
-suppress_role = False
+escape = False
 
 
 def parse_action(token) -> Content:
@@ -829,11 +830,17 @@ def markdown__rich_console__(
     yield syntax
 
 
-def print_response(messages: List[Message], suppress_role: bool = False):
+def print_response(messages: List[Message], escape: bool = False):
     # if we're being piped or redirected, we probably want to keep the
     # original output of the LLM, rather than render markdown.
     def contains_token(s, tokens):
         return any(token in s for token in tokens)
+
+    def escape_string(input_str):
+        # input_str = re.sub(r'\r?\n', '\\n', input_str)
+        # input_str = re.sub(r'\t', '\\t', input_str)
+        input_str = re.sub(r'"', r'\"', input_str)
+        return input_str
 
     def pprint(prepend: str, content: Content):
         markdown_tokens = ['###', '* ', '](', '```', '## ']
@@ -855,7 +862,7 @@ def print_response(messages: List[Message], suppress_role: bool = False):
             console.print(f'{prepend}', end='')
             console.print(Markdown(str(content)))
         else:
-            console.print(f'{prepend}{content}')
+            console.print(escape_string(f'{prepend}{content}'))
 
     def fire_helper(string: str):
         if 'digraph' and 'edge' and 'node' in string:
@@ -869,25 +876,25 @@ def print_response(messages: List[Message], suppress_role: bool = False):
 
     for message in messages:
         if message.role() == 'assistant':
-            if not suppress_role:
+            if not escape:
                 pprint('[bold cyan]Assistant[/bold cyan]: ', message.message)
             else:
                 pprint('', message.message)
             fire_helper(str(message))
         elif message.role() == 'system':
-            if not suppress_role:
+            if not escape:
                 pprint('[bold red]System[/bold red]: ', message.message)
             else:
                 pprint('', message.message)
         elif message.role() == 'user':
-            if not suppress_role:
+            if not escape:
                 pprint('[bold cyan]User[/bold cyan]: ', message.message)
             else:
                 pprint('', message.message)
 
 
-def print_thread(thread: SessionThread, suppress_role: bool = False):
-    print_response([MessageModel.to_message(message) for message in thread.messages], suppress_role)
+def print_thread(thread: SessionThread, escape: bool = False):
+    print_response([MessageModel.to_message(message) for message in thread.messages], escape)
 
 
 def get_string_thread_with_roles(thread: SessionThread):
@@ -951,8 +958,8 @@ class Repl():
             temp_file.flush()
             temp_file_name = temp_file.name
 
-            if editor == 'vim' or editor == 'nvim':
-                cmd = '{} -c "normal G" -c "normal A" {}'.format(editor, temp_file.name)
+            if 'vim' in editor or 'nvim' in editor:
+                cmd = f'{editor} -c "normal G" -c "normal A" +startinsert {temp_file.name}'
                 proc = subprocess.Popen(cmd, shell=True, env=os.environ)
             else:
                 proc = subprocess.Popen([editor, temp_file.name], env=os.environ)
@@ -1069,7 +1076,7 @@ class Repl():
                 ctx.params['message'] = current_text
                 ctx.params['id'] = thread.id
                 ctx.params['path'] = ''
-                ctx.params['path'] = ''
+                ctx.params['context'] = ''
                 ctx.params['upload'] = False
                 ctx.params['mode'] = current_mode
                 ctx.params['endpoint'] = Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
@@ -1077,7 +1084,7 @@ class Repl():
                 ctx.params['executor'] = thread.executor
                 ctx.params['compression'] = thread.compression
                 ctx.params['model'] = thread.model
-                ctx.params['suppress_role'] = False
+                ctx.params['escape'] = False
                 ctx.params['context_messages'] = [User(ImageContent(cast(bytes, raw_data), url=''))]
                 return message.invoke(ctx)
 
@@ -1465,7 +1472,7 @@ def cookies(
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to retrieve.')
 @click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool'], case_sensitive=False), required=False, default='auto',
-              help='Mode to use "auto", "tool" or "direct". Default is "auto".')
+              help='mode to use "auto", "tool" or "direct". Default is "auto".')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
@@ -1473,7 +1480,7 @@ def cookies(
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),  # type: ignore
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-@click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
+@click.option('--escape', '-s', type=bool, is_flag=True, required=False, default=False)
 def act(
     actor: str,
     id: int,
@@ -1481,7 +1488,7 @@ def act(
     executor: str,
     model: str,
     endpoint: str,
-    suppress_role: bool,
+    escape: bool,
 ):
     prompt_file = resources.files('llmvm.client') / 'awesome_prompts.csv'
     rows = []
@@ -1518,6 +1525,7 @@ def act(
             ctx.params['message'] = prompt_result
             ctx.params['id'] = id
             ctx.params['path'] = ''
+            ctx.params['context'] = ''
             ctx.params['upload'] = False
             ctx.params['mode'] = mode
             ctx.params['endpoint'] = endpoint
@@ -1525,11 +1533,11 @@ def act(
             ctx.params['compression'] = 'auto'
             ctx.params['executor'] = executor
             ctx.params['model'] = model
-            ctx.params['suppress_role'] = suppress_role
+            ctx.params['escape'] = escape
             return message.invoke(ctx)
 
 
-@cli.command('url', help='Download a url and insert the content into the message thread.')
+@cli.command('url', help='download a url and insert the content into the message thread.')
 @click.argument('url', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to download and push the content to. Default is last thread.')
@@ -1558,7 +1566,7 @@ def url(
     return thread
 
 
-@cli.command('search', help='Perform a search on ingested content using the LLMVM search engine.')
+@cli.command('search', help='perform a search on ingested content using the LLMVM search engine.')
 @click.argument('query', type=str, required=False, default='')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
@@ -1680,21 +1688,21 @@ def thread(
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-@click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False, default=False)
+@click.option('--escape', '-s', type=bool, is_flag=True, required=False, default=False)
 def messages(
     endpoint: str,
-    suppress_role: bool,
+    escape: bool,
 ):
     global thread_id
     global last_thread
 
     try:
         thread = asyncio.run(get_thread(endpoint, thread_id))
-        print_thread(thread=thread, suppress_role=suppress_role)
+        print_thread(thread=thread, escape=escape)
     except Exception:
         if 'last_thread' in globals():
             rich.print('LLMVM server not available. Showing local thread:')
-            print_thread(thread=last_thread, suppress_role=suppress_role)
+            print_thread(thread=last_thread, escape=escape)
         else:
             rich.print('LLMVM server not available.')
 
@@ -1729,30 +1737,33 @@ def new(
 @cli.command('message')
 @click.argument('message', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
-              help='thread ID to send message to. Default is last thread.')
+              help='thread ID to send message to. The default is create new thread (or use last thread if in repl mode).')
 @click.option('--path', '-p', callback=parse_path, required=False, multiple=True,
-              help='Path to a single file, multiple files, directory of files, glob, or url to add to User message stack.')
+              help='path to a single file, multiple files, directory of files, glob, or url to add to User message stack.')
+@click.option('--context', '-t', required=False, multiple=True,
+              help='a string to add as a context message to the User message stack. Use quotes \"\' .. \'\" for multi-word strings.')
 @click.option('--upload', '-u', is_flag=True, required=True, default=False,
-              help='Upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
+              help='upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
 @click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool', 'code'], case_sensitive=False),
               required=False, default='auto',
-              help='Mode to use "auto", "tool", "code", or "direct". Default is "auto".')
+              help='mode to use "auto", "tool", "code", or "direct". Default is "auto".')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
-@click.option('--cookies', '-e', type=str, required=False, default=Container.get_config_variable('LLMVM_COOKIES', default=''),
+@click.option('--cookies', '-k', type=str, required=False, default=Container.get_config_variable('LLMVM_COOKIES', default=''),
               help='cookies.txt file (Netscape) for the request. Default is $LLMVM_COOKIES or empty.')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
-              default='auto', help='Context window compression method if the message is too large. Default is "auto".')
-@click.option('--suppress_role', '-s', type=bool, is_flag=True, required=False)
+              default='auto', help='context window compression method if the message is too large. Default is "auto".')
+@click.option('--escape', '-s', type=bool, is_flag=True, required=False)
 def message(
     message: Optional[str | bytes | Message],
     id: int,
     path: List[str],
+    context: List[str],
     upload: bool,
     mode: str,
     endpoint: str,
@@ -1760,7 +1771,7 @@ def message(
     executor: str,
     model: str,
     compression: str,
-    suppress_role: bool,
+    escape: bool,
     context_messages: Sequence[Message] = [],
 ):
     global thread_id
@@ -1770,8 +1781,8 @@ def message(
     if mode == 'code' and not path:
         raise MissingParameter('path')
 
-    if not suppress_role and not sys.stdin.isatty():
-        suppress_role = True
+    if not escape and not sys.stdin.isatty():
+        escape = True
 
     if model:
         if (model.startswith('"') and model.endswith('"')) or (model.startswith("'") and model.endswith("'")):
@@ -1789,6 +1800,12 @@ def message(
         allowed_extensions = ['.py', '.md', 'Dockerfile', '.sh', '.txt'] if mode == 'code' else []
         context_messages = get_path_as_messages(path, upload, allowed_extensions)
         logging.debug(f'path: {path}')
+
+    if context:
+        for c in reversed(context):
+            if (c.startswith('"') and c.endswith('"')) or (c.startswith("'") and c.endswith("'")):
+                c = c[1:-1]
+            context_messages.insert(0, User(Content(c)))
 
     # if we have files, but no message, grab the last file and use it as the message
     if not message and context_messages:
@@ -1837,9 +1854,9 @@ def message(
             rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')
             return
 
-        if not suppress_role: StreamPrinter('').write_string('\n')
-        print_response([MessageModel.to_message(thread.messages[-1])], suppress_role)
-        if not suppress_role: StreamPrinter('').write_string('\n')
+        if not escape: StreamPrinter('').write_string('\n')
+        print_response([MessageModel.to_message(thread.messages[-1])], escape)
+        if not escape: StreamPrinter('').write_string('\n')
         last_thread = thread
         thread_id = thread.id
         return thread

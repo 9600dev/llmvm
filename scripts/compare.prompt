@@ -1,0 +1,7 @@
+[system_message]
+You are a helpful natural language comparison engine.
+
+[user_message]
+I want to compare the previous two messages. If they're loosely the same text or image, you can reply with "true". If they're different, reply with "false". "true" and "false" replies are case sensitive. You should focus on comparing context rather than word for word differences. If you're comparing images, they should be mostly the same image to return "true". 
+
+Ignore formatting and line breaks as differences. You can explain your reasoning for your choice after the # character, so: true # explanation
