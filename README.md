@@ -100,10 +100,6 @@ and then:
 cat somecode.py | llm -o direct "rewrite this code; make it cleaner and easier to read"
 ```
 
-```bash
-llm -p a.py -p b.py -p c.py "find bugs in the code supplied. be careful and specific"
-```
-
 Image understanding is supported on Anthropic Claude 3 models and OpenAI's GPT 4 turbo vision preview model.
 
 ```bash
@@ -467,15 +463,13 @@ And related narrative extraction + code:
 
 ## Things to do
 
-* Error handling still needs a lot of work.
+* Error handling still needs a lot of work. I need to move this to be more continuation passing style than execute blocks of code then re-write.
+* More complicated natural language queries tends to make the LLM generate unwieldy code. Need statement by statement execution, passing the LLM the already executed code, asking it if it wishes to re-write the later part of the code (sort of like continuation passing style execution, like above for error correction).
 * Working on Source Code insights (mode 'code'). You'll be able to hand it a project directory and work with the LLM to understand what the code is doing. Check out [source.py](https://github.com/9600dev/llmvm/blob/master/source.py)
-* ChatGPT and Claude doesn't conform to system prompts specifying how to shape the output of the response. Saying things like "Only reply with Starlark code" and "don't apologize" tends to work randomly, or not at all. Need to fix this.
-* Integration with local LLM's via [llama.cpp](https://github.com/ggerganov/llama.cpp) etc. [started]
-* More complicated natural language queries tends to make the LLM generate unwieldy code. Need statement by statement execution, passing the LLM the already executed code, asking it if it wishes to re-write the later part of the code (sort of like continuation passing style execution).
-* Playwright integration with LLM -- it should be straight forward to have cooperative execution for the task of proceeding through web app flows (login, do stuff, extract info, logout).
-* Fix bugs and refactor. The code is pretty hacky.
-* Write some docs.
-
+* Integration with local LLM's via [llama.cpp](https://github.com/ggerganov/llama.cpp) etc. [started this, but haiku is so good and cheap, I'm not sure I need it]
+* Playwright browser control integration from the LLM -- it should be straight forward to have cooperative execution for the task of proceeding through web app flows (login, do stuff, extract info, logout).
+* Fix bugs and refactor. The code is still pretty hacky as I've re-written it several times with different approaches.
+* Write some better docs.
 
 ## How I run LLMVM
 
