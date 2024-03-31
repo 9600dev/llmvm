@@ -16,10 +16,18 @@ from llmvm.server.tools.search import SerpAPISearcher
 
 logging = setup_logging()
 
-class IgnoringScriptConverter(MarkdownConverter):
+class VerboseConverter(MarkdownConverter):
     def convert_script(self, el, text, convert_as_inline):
         return ''
 
+    def convert_input(self, el, text, convert_as_inline):
+        return str(el)
+
+    def convert_textarea(self, el, text, convert_as_inline):
+        return str(el)
+
+    def convert_label(self, el, text, convert_as_inline):
+        return str(el)
 
 class WebHelpers():
     @staticmethod
@@ -61,7 +69,7 @@ class WebHelpers():
         for data in soup(['style', 'script']):
             data.decompose()
 
-        result = IgnoringScriptConverter().convert_soup(soup)
+        result = VerboseConverter().convert_soup(soup)
         cleaned_result = clean_markdown(result)
         return MarkdownContent(sequence=unicodedata.normalize('NFKD', cleaned_result), url=url)
 

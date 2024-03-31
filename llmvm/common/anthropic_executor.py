@@ -4,6 +4,7 @@ import os
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
+from anthropic.types.message import Message as AnthropicMessage
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
@@ -26,7 +27,7 @@ class AnthropicExecutor(Executor):
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_token_len: int = 200000,
         default_max_output_len: int = 4096,
-        beta: bool = True,
+        messages_api: bool = True,
     ):
         super().__init__(
             default_model=default_model,
@@ -35,7 +36,7 @@ class AnthropicExecutor(Executor):
             default_max_output_len=default_max_output_len,
         )
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
-        self.beta = beta
+        self.messages_api = messages_api
 
     def from_dict(self, message: Dict[str, Any]) -> 'Message':
         role = message['role']
@@ -170,19 +171,19 @@ class AnthropicExecutor(Executor):
         return wrapped
 
     def user_token(self):
-        if self.beta:
+        if self.messages_api:
             return 'User'
         else:
             return HUMAN_PROMPT.replace(':', '').replace('\n', '')
 
     def assistant_token(self) -> str:
-        if self.beta:
+        if self.messages_api:
             return 'Assistant'
         else:
             return AI_PROMPT.replace(':', '').replace('\n', '')
 
     def append_token(self) -> str:
-        if self.beta:
+        if self.messages_api:
             return ''
         else:
             return AI_PROMPT
@@ -235,7 +236,7 @@ class AnthropicExecutor(Executor):
         prompt += f"""{AI_PROMPT}"""
         return prompt
 
-    async def __aexecute_direct(
+    async def aexecute_direct(
         self,
         messages: List[Dict[str, Any]],
         functions: List[Dict[str, str]] = [],
@@ -305,11 +306,11 @@ class AnthropicExecutor(Executor):
 
         messages_trace(messages_list)
 
-        token_trace = TokenPerf('__aexecute_direct', 'anthropic', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore
         token_trace.start()
 
         try:
-            if self.beta:
+            if self.messages_api:
                 # AsyncStreamManager[AsyncMessageStream]
                 stream = self.client.messages.stream(
                     max_tokens=max_output_tokens,
@@ -362,7 +363,7 @@ class AnthropicExecutor(Executor):
         elif messages_list[0]['role'] == 'assistant':
             logging.error(f'First message must be from the user, not assistant: {messages_list}')
 
-        stream = self.__aexecute_direct(
+        stream = self.aexecute_direct(
             messages_list,
             max_output_tokens=max_output_tokens,
             model=model,
@@ -379,8 +380,13 @@ class AnthropicExecutor(Executor):
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
-        if self.beta:
-            _ = await stream_async.get_final_message()  # type: ignore
+        if self.messages_api:
+            final_message = await stream_async.get_final_message()  # type: ignore
+            # anthropic API does the proper accounting of input/output tokens, so set them here.
+            if final_message:
+                perf._prompt_len = final_message.usage.input_tokens
+                perf._sample_len = final_message.usage.output_tokens
+                perf.object = final_message  # type: ignore
         else:
             async for completion in await stream:  # type: ignore
                 s = completion.completion

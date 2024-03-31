@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import aiofiles
 import httpx
 import nest_asyncio
-from playwright.async_api import Error, Page, async_playwright
+from playwright.async_api import ElementHandle, Error, Page, async_playwright
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import write_client_stream
@@ -132,6 +132,14 @@ class FirefoxHelpers():
     async def click(self, element) -> None:
         return self.run_in_loop(self.firefox.click(element)).result()
 
+    async def get_input_elements(self) -> List[ElementHandle]:
+        return self.run_in_loop(self.firefox.get_input_elements()).result()
+
+    async def get_clickable_elements(self) -> List[ElementHandle]:
+        return self.run_in_loop(self.firefox.get_clickable_elements()).result()
+
+    async def fill(self, element: ElementHandle, value: str) -> None:
+        return self.run_in_loop(self.firefox.fill(element, value)).result()
 
 class FirefoxHelpersInternal():
     def __init__(self, cookies: List[Dict] = []):
@@ -320,3 +328,18 @@ class FirefoxHelpersInternal():
 
     async def click(self, element) -> None:
         await element.click()
+
+    async def get_clickable_elements(self) -> List[ElementHandle]:
+        clickable_elements = await (await self.page()).query_selector_all(
+            "a, button, input[type='submit'], input[type='button']"
+        )
+        return clickable_elements
+
+    async def get_input_elements(self) -> List[ElementHandle]:
+        input_elements = await (await self.page()).query_selector_all(
+            "input[type='text'], input[type='email'], input[type='password'], textarea"
+        )
+        return input_elements
+
+    async def fill(self, element: ElementHandle, value: str) -> None:
+        await element.fill(value)

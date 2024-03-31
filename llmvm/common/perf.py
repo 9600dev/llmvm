@@ -2,12 +2,13 @@ import datetime as dt
 import inspect
 import os
 import time
-from typing import List, cast
+from typing import Any, List, Optional, cast
 
 import openai
 from anthropic import AsyncMessageStream, AsyncMessageStreamManager
 from anthropic import AsyncStream as AnthropicAsyncStream
 from anthropic.types import Completion as AnthropicCompletion
+from anthropic.types import Message as AnthropicMessage
 from google.generativeai.types.generation_types import \
     AsyncGenerateContentResponse as AsyncGeminiStream
 from google.generativeai.types.generation_types import \
@@ -46,11 +47,13 @@ class TokenPerf:
         self._start: float = 0.0
         self._stop: float = 0.0
         self._prompt_len: int = prompt_len
+        self._sample_len: int = 0
         self._ticks: List[float] = []
         self.enabled = enabled
         self.log_file = log_file
         self.calculator = TokenPriceCalculator()
         self.request_id = request_id
+        self.object = None
 
     def start(self):
         if self.enabled:
@@ -89,7 +92,7 @@ class TokenPerf:
                 'prompt_time': prompt_time,
                 'sample_time': sample_time,
                 'prompt_len': self._prompt_len,
-                'sample_len': len(self._ticks),
+                'sample_len': self._sample_len if self._sample_len > 0 else len(self._ticks),
                 's_tok_sec': s_tok_sec,
                 'p_tok_sec': p_tok_sec,
                 'p_cost': self._prompt_len * self.calculator.input_price(self._model, self._executor),
@@ -125,7 +128,7 @@ class TokenPerf:
             import sys
             sys.stderr.write('\n')
             logging.debug(f"total_time: {res['total_time']:.2f} prompt_time: {res['prompt_time']:.2f} sample_time: {res['sample_time']:.2f}")
-            logging.debug(f"prompt_len: {res['prompt_len']} sample_len: {len(res['ticks'])}")
+            logging.debug(f"prompt_len: {res['prompt_len']} sample_len: {res['sample_len']}")
             logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f}")
             logging.debug(f"p_cost: ${res['p_cost']:.5f} s_cost: ${res['s_cost']:.5f} request_id: {res['request_id']}")
 
@@ -196,6 +199,7 @@ class TokenStreamWrapper:
     ):
         self.stream = original_stream
         self.perf = token_perf
+        self.object: Optional[Any] = None  # used for Anthropic's AsyncMessageStream needed for get_final_message()
 
     def __aiter__(self):
         return LoggingAsyncIterator(self.stream, self.perf)
@@ -209,8 +213,11 @@ class TokenStreamWrapper:
 
     # we're proxying the .text_stream, which doesn't have get_final_message()
     # but we don't need it as we're streaming
-    async def get_final_message(self):
-        return ''
+    async def get_final_message(self) -> Optional[AnthropicMessage]:
+        if isinstance(self.object, AsyncMessageStream):
+            return await self.object.get_final_message()
+        else:
+            return None
 
 
 class TokenStreamManager:
@@ -234,6 +241,8 @@ class TokenStreamManager:
                 with open(os.path.expanduser(Container().get_config_variable('LLMVM_SHARE') + f'/{self.perf.request_id}.json'), 'w') as f:
                     f.write(result.response._request._content.decode('utf-8'))  # type: ignore
             self.token_perf_wrapper = TokenStreamWrapper(result.text_stream, self.perf)  # type: ignore
+            self.token_perf_wrapper.object = result
+
             return self.token_perf_wrapper
         elif isinstance(self.stream, openai.AsyncStream):
             self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)

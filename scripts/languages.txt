@@ -1,0 +1,100 @@
+1. English
+2. Mandarin Chinese
+3. Spanish
+4. Hindi
+5. Bengali
+6. Portuguese
+7. Russian
+8. Japanese
+9. Yue Chinese (including Cantonese)
+10. Vietnamese
+11. Telugu
+12. Turkish
+13. Korean
+14. French
+15. German
+16. Marathi
+17. Tamil
+18. Urdu
+19. Italian
+20. Punjabi
+21. Persian (Farsi)
+22. Wu Chinese
+23. Indonesian
+24. Polish
+25. Arabic (Egyptian Spoken)
+26. Gujarati
+27. Kannada
+28. Malayalam
+29. Oriya
+30. Burmese
+31. Hakka Chinese
+32. Swahili
+33. Moroccan Spoken Arabic
+34. Ukrainian
+35. Igbo
+36. Amharic
+37. Min Nan Chinese
+38. Yoruba
+39. Xiang Chinese
+40. Sindhi
+41. Hausa
+42. Azerbaijani
+43. Sundanese
+44. Maithili
+45. Uzbek
+46. Romanian
+47. Gan Chinese
+48. Dutch
+49. Bhojpuri
+50. Awadhi
+51. Cebuano
+52. Thai
+53. Nepali
+54. Serbo-Croatian
+55. Malay
+56. Tagalog
+57. Sunda
+58. Algerian Spoken Arabic
+59. Hiligaynon
+60. Mossi
+61. Xhosa
+62. Belarusian
+63. Balochi
+64. Konkani
+65. Haitian Creole
+66. Odia
+67. Akan
+68. Kazakh
+69. Northern Min
+70. Zulu
+71. Czech
+72. Kinyarwanda
+73. Dhundhari
+74. Greek
+75. Malagasy
+76. Sabah Malay
+77. Hungarian
+78. Khmer
+79. Ilokano
+80. Quechua
+81. Uyghur
+82. Deccan
+83. Somali
+84. Marwari
+85. Magahi
+86. Chhattisgarhi
+87. Haryanvi
+88. Sylheti
+89. Chewa
+90. Assamese
+91. Madurese
+92. Sinhalese
+93. Chittagonian
+94. Danish
+95. Bhili
+96. Bavarian
+97. Tswana
+98. Gikuyu
+99. Tulu
+100. Swedish
