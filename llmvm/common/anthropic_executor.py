@@ -153,6 +153,15 @@ class AnthropicExecutor(Executor):
             elif isinstance(messages[i], User) and i < len(messages) - 1:  # is not last message, context messages
                 wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
                 counter += 1
+            elif (
+                isinstance(messages[i], User)
+                and i == len(messages) - 1
+                and (
+                    isinstance(messages[i].message, PdfContent)
+                    or isinstance(messages[i].message, ImageContent)
+                )
+            ):  # is the last message, and it's a pdf or image
+                wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
             elif isinstance(messages[i], User) and i == len(messages) - 1:  # is the last message
                 wrapped.append({'role': 'user', 'content': messages[i].message.get_str()})
             else:
