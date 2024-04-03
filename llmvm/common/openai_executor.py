@@ -11,8 +11,9 @@ from openai.types.chat.completion_create_params import Function
 from PIL import Image
 
 from llmvm.common.logging_helpers import messages_trace, setup_logging
-from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
-                                  Message, System, TokenStopNode, User,
+from llmvm.common.object_transformers import ObjectTransformers
+from llmvm.common.objects import (Assistant, AstNode, Content, Executor, MarkdownContent,
+                                  Message, PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
 from llmvm.common.perf import TokenPerf, TokenStreamManager
 
@@ -194,11 +195,20 @@ class OpenAIExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
+        expanded_messages = []
+        for message in messages:
+            if isinstance(message, User) and isinstance(message.message, PdfContent):
+                expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
+            elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
+                expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
+            else:
+                expanded_messages.append(message)
+
         # fresh message list
         messages_list: List[Dict[str, str]] = []
 
         messages_list.append(Message.to_dict(system_message))
-        for message in [m for m in messages if m.role() != 'system']:
+        for message in [m for m in expanded_messages if m.role() != 'system']:
             messages_list.append(Message.to_dict(message))
 
         stream = self.__aexecute_direct(

@@ -60,7 +60,7 @@ class ObjectTransformers():
             # avoid circular import
             pdf = Pdf(executor=executor)
             result = pdf.get_pdf_content(content)
-            content.original = content.sequence
+            content.original_sequence = content.sequence
             content.sequence = result
             cache.set(content.url, content)
 

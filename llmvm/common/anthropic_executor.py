@@ -82,6 +82,9 @@ class AnthropicExecutor(Executor):
         raise ValueError(f'role not found or not supported: {message}')
 
     def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
+        # todo: this logic is wrong -- if called from execute_direct
+        # it'll unpack the pdf/markdown but not do it properly
+        # as those functions will return multiple messages
         def wrap_message(index: int, content: Content) -> str:
             if isinstance(content, FileContent):
                 return f"<file url={content.url}>{content.get_str()}</file>"
@@ -364,8 +367,17 @@ class AnthropicExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
+        expanded_messages = []
+        for message in messages:
+            if isinstance(message, User) and isinstance(message.message, PdfContent):
+                expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
+            elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
+                expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
+            else:
+                expanded_messages.append(message)
+
         # fresh message list
-        messages_list: List[Dict[str, str]] = self.wrap_messages(messages)
+        messages_list: List[Dict[str, str]] = self.wrap_messages(expanded_messages)
 
         if messages_list[0]['role'] == 'system' and messages_list[1]['role'] != 'user':
             logging.error(f'First message must be from the user after a system prompt: {messages_list}')

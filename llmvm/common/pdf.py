@@ -9,6 +9,7 @@ import pdf2image
 import pdfplumber
 import pytesseract
 from pdfminer.high_level import extract_text_to_fp
+from pdfminer.image import ImageWriter
 from PIL import Image
 from pytesseract import Output
 
@@ -168,12 +169,23 @@ class Pdf():
             images = page.images
             for img in images:
                 raw_data = img['stream'].get_rawdata()
+                _, raw_data = Helpers.decompress_if_compressed(raw_data)
                 if Helpers.is_image(raw_data):
                     img_stream = BytesIO(img['stream'].get_rawdata())
                     im = Image.open(img_stream)
                     buf = io.BytesIO()
                     im.save(buf, format='PNG')
-                    page_content.append(ImageContent(buf.getvalue(), url=url_or_file))
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                        im.save(temp_file.name, format='PNG')
+                        page_content.append(ImageContent(buf.getvalue(), url=temp_file.name))
+                else:
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                        image_bbox = (img['x0'], page.height - img['y1'], img['x1'], page.height - img['y0'])
+                        page.crop(image_bbox).to_image().save(temp_file.name, format='PNG')
+                        im = Image.open(temp_file.name)
+                        buf = io.BytesIO()
+                        im.save(buf, format='PNG')
+                        page_content.append(ImageContent(buf.getvalue(), url=temp_file.name))
 
             content.extend(page_content)
 

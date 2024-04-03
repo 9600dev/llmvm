@@ -14,32 +14,14 @@ tell application "Google Chrome"
     tell application "System Events"
         keystroke "p" using {command down}
         delay 1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
-        keystroke tab
-        delay 0.1
         keystroke return
         delay 0.3 
         keystroke "g" using {shift down, command down}
-        delay 0.2 
+        delay 0.3 
         keystroke "$FILE"
-        delay 0.8 
+        delay 1.1 
         keystroke return
-        delay 0.2
+        delay 0.3
         keystroke return
     end tell
 end tell

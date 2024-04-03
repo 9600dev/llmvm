@@ -18,6 +18,7 @@ from itertools import cycle, islice
 from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional
 from urllib.parse import urlparse
+import zlib
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -403,6 +404,16 @@ class Helpers():
                 return True
         except Exception:
             return False
+
+    @staticmethod
+    def decompress_if_compressed(byte_stream):
+        try:
+            # Attempt to decompress to see if it's zlib compressed
+            decompressed_data = zlib.decompress(byte_stream)
+            return True, decompressed_data
+        except zlib.error as e:
+            # If decompression fails, it's likely not zlib compressed or the data is corrupted/incomplete
+            return False, byte_stream
 
     @staticmethod
     def image_size(byte_stream: bytes) -> tuple[int, int]:
