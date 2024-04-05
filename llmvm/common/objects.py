@@ -476,7 +476,7 @@ class Content(AstNode):
         elif isinstance(self.sequence, str):
             return base64.b64encode(self.sequence.encode('utf-8')).decode('utf-8')
         elif isinstance(self.sequence, list) and len(self.sequence) > 0 and isinstance(self.sequence[0], Content):
-            return base64.b64encode(self.original_sequence).decode('utf-8')
+            return base64.b64encode(self.original_sequence).decode('utf-8')  # type: ignore
         else:
             raise ValueError(f'unknown sequence: {self.sequence}')
 

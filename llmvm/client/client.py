@@ -128,46 +128,11 @@ def parse_message_thread(message: str):
     return messages
 
 
-def parse_path(ctx, param, value, raise_parse_exception=False) -> List[str]:
-    if not value:
-        return []
-
-    if (
-        (isinstance(value, str))
-        and (value.startswith('"') or value.startswith("'"))
-        and (value.endswith("'") or value.endswith('"'))
-    ):
-        value = value[1:-1]
-
-    files = []
-
-    if not value:
-        return files
-
-    if isinstance(value, str) and not Helpers.is_glob_pattern(value) and ',' in value:
-        value = value.split(',')
-
-    if isinstance(value, str):
-        value = [value]
-
-    if isinstance(value, tuple):
-        value = list(value)
-
-    # see if there are any brace glob patterns, and if so, expand them
-    # and include them in the value array
-    if any('{' in item and '}' in item for item in value):
-        brace_globs = [Helpers.glob_brace(item) for item in value if '{' in item and '}' in item]
-        brace_globs = Helpers.flatten(brace_globs)
-        value += tuple(brace_globs)
-
-    # split by ' '
-    value = Helpers.flatten([item.split(' ') for item in value])
-
-    exclusions = []
-
-    for item in value:
+def parse_path(ctx, param, value) -> List[str]:
+    def parse_helper(value, exclusions):
+        files = []
         # deal with ~
-        item = os.path.expanduser(item)
+        item = os.path.expanduser(value)
         # shell escaping
         item = item.replace('\\', '')
 
@@ -196,11 +161,43 @@ def parse_path(ctx, param, value, raise_parse_exception=False) -> List[str]:
                     files.append(filepath)
         elif item.startswith('http'):
             files.append(item)
-        else:
-            if raise_parse_exception:
-                raise MissingParameter(f'Unable to parse path: {item}')
-            else:
-                return []
+        return files
+
+    if not value:
+        return []
+
+    if (
+        (isinstance(value, str))
+        and (value.startswith('"') or value.startswith("'"))
+        and (value.endswith("'") or value.endswith('"'))
+    ):
+        value = value[1:-1]
+
+    files = []
+
+    if not value:
+        return files
+
+    if isinstance(value, str):
+        value = [value]
+
+    if isinstance(value, tuple):
+        value = list(value)
+
+    # see if there are any brace glob patterns, and if so, expand them
+    # and include them in the value array
+    if any('{' in item and '}' in item for item in value):
+        brace_globs = [Helpers.glob_brace(item) for item in value if '{' in item and '}' in item]
+        brace_globs = Helpers.flatten(brace_globs)
+        value += list(brace_globs)
+
+    # split by ' '
+    # value = Helpers.flatten([item.split(' ') for item in value])
+
+    exclusions = []
+
+    for item in value:
+        files.extend(parse_helper(item, exclusions))
 
     # deal with exclusions
     files = [file for file in files if file not in exclusions]
@@ -240,7 +237,7 @@ def parse_command_string(s, command):
                 while (
                     (z + 1 < len(parts))
                     and (
-                        parse_path(None, None, parts[z + 1], raise_parse_exception=False)
+                        parse_path(None, None, parts[z + 1])
                         or Helpers.glob_brace(parts[z + 1])
                         or parts[z + 1].startswith('!')
                     )
@@ -688,25 +685,6 @@ def llm(
         user_message = message
 
     context_messages_list = list(context_messages)
-
-    if not sys.stdin.isatty():
-        # input is coming from a pipe, could be binary or text
-        if not message: message = ''
-
-        file_content = sys.stdin.buffer.read()
-
-        with io.BytesIO(file_content) as bytes_buffer:
-            if Helpers.is_image(bytes_buffer):
-                image_bytes = Helpers.load_resize_save(bytes_buffer.getvalue(), 'PNG')
-                StreamPrinter('user').display_image(image_bytes)
-                context_messages_list.insert(0, User(ImageContent(image_bytes, url='cli')))
-            elif Helpers.is_pdf(bytes_buffer):
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-                    temp_file.write(bytes_buffer.read())
-                    temp_file.flush()
-                    context_messages_list.insert(0, User(PdfContent(bytes_buffer.read(), url=temp_file.name)))
-            else:
-                context_messages_list.insert(0, User(Content(bytes_buffer.read().decode('utf-8', errors='ignore'))))
 
     clear_thread = False
     # if the incoming message is a thread, parse it and send it through
@@ -1311,7 +1289,7 @@ class Repl():
 @click.group(
     cls=DefaultGroup,
     default='message',
-    default_if_no_args=False,
+    default_if_no_args=True,
 )
 @click.pass_context
 def cli(ctx):
@@ -1829,7 +1807,7 @@ def message(
 ):
     global thread_id
     global last_thread
-    # context_messages: Sequence[Message] = []
+    context_messages = list(context_messages)
 
     if mode == 'code' and not path:
         raise MissingParameter('path')
@@ -1864,6 +1842,45 @@ def message(
     if not message and context_messages:
         message = context_messages[-1]
         context_messages = context_messages[:-1]
+
+    # input is coming from a pipe, could be binary or text
+    if not sys.stdin.isatty():
+        import select
+        ready, _, _ = select.select([sys.stdin], [], [], 1)
+
+        if ready:
+            lines = []
+            while True:
+                line = sys.stdin.buffer.readline()
+                if not line:
+                    break
+                lines.append(line)
+            # file_content = sys.stdin.buffer.read()
+            file_content = b''.join(lines)
+            with io.BytesIO(file_content) as bytes_buffer:
+                if Helpers.is_image(bytes_buffer):
+                    image_bytes = Helpers.load_resize_save(bytes_buffer.getvalue(), 'PNG')
+                    StreamPrinter('user').display_image(image_bytes)
+                    tty_message = User(ImageContent(image_bytes, url='cli'))
+                    if message:
+                        context_messages.insert(0, tty_message)
+                    else:
+                        message = tty_message
+                elif Helpers.is_pdf(bytes_buffer):
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                        temp_file.write(bytes_buffer.read())
+                        temp_file.flush()
+                        tty_message = User(PdfContent(bytes_buffer.read(), url=temp_file.name))
+                        if message:
+                            context_messages.insert(0, tty_message)
+                        else:
+                            message = tty_message
+                else:
+                    tty_message = User(Content(bytes_buffer.read().decode('utf-8', errors='ignore')))
+                    if message:
+                        context_messages.insert(0, tty_message)
+                    else:
+                        message = tty_message
 
     if message:
         if isinstance(message, str) and (
@@ -1913,6 +1930,8 @@ def message(
         last_thread = thread
         thread_id = thread.id
         return thread
+    else:
+        rich.print('No message to send.')
 
 
 if __name__ == '__main__':
@@ -1921,7 +1940,7 @@ if __name__ == '__main__':
         Repl().help()
         sys.exit(0)
 
-    if len(sys.argv) <= 1:
+    if len(sys.argv) <= 1 and sys.stdin.isatty():
         repl_inst = Repl()
         loop = asyncio.get_event_loop()
         loop.run_until_complete(repl_inst.repl())

@@ -132,18 +132,18 @@ class OpenAIExecutor(Executor):
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
-        max_completion_tokens: int = 4096,
+        max_output_tokens: int = 4096,
         temperature: float = 0.0,
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
         message_tokens = self.count_tokens(messages, model=model)
-        if message_tokens > self.max_input_tokens(max_completion_tokens, model=model):
+        if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
             raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,
-                                    max_completion_tokens,
-                                    message_tokens + max_completion_tokens,
+                                    max_output_tokens,
+                                    message_tokens + max_output_tokens,
                                     self.max_tokens(model)))
 
         messages_cast = cast(List[ChatCompletionMessageParam], messages)
@@ -156,7 +156,7 @@ class OpenAIExecutor(Executor):
             response = await self.aclient.chat.completions.create(
                 model=model,
                 temperature=temperature,
-                max_tokens=max_completion_tokens,
+                max_tokens=max_output_tokens,
                 functions=functions_cast,
                 messages=messages_cast,
                 stream=True
@@ -167,7 +167,7 @@ class OpenAIExecutor(Executor):
             response = await self.aclient.chat.completions.create(
                 model=model if model else self.default_model,
                 temperature=temperature,
-                max_tokens=max_completion_tokens,
+                max_tokens=max_output_tokens,
                 messages=messages_cast,
                 stream=True
             )
@@ -176,7 +176,7 @@ class OpenAIExecutor(Executor):
     async def aexecute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 4096,
+        max_output_tokens: int = 4096,
         temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
@@ -213,7 +213,7 @@ class OpenAIExecutor(Executor):
 
         stream = self.__aexecute_direct(
             messages_list,
-            max_completion_tokens=max_completion_tokens,
+            max_output_tokens=max_output_tokens,
             model=model if model else self.default_model,
             temperature=temperature,
         )
@@ -241,7 +241,7 @@ class OpenAIExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        max_completion_tokens: int = 2048,
+        max_output_tokens: int = 2048,
         temperature: float = 0.0,
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
@@ -250,4 +250,4 @@ class OpenAIExecutor(Executor):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_completion_tokens, temperature, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, model, stream_pipe))
