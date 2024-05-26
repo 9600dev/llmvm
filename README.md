@@ -487,31 +487,42 @@ These days, I mostly run Anthropic's models. Their super fast, cheap, and smart.
 OPUS="claude-3-opus-20240229"
 SONNET="claude-3-sonnet-20240229"
 HAIKU="claude-3-haiku-20240307"
+INSTANT="claude-instant-1.2"
 
 # servers
-alias sopus='LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm_serve'
-alias ssonnet='LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm_serve'
-alias shaiku='LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm_serve'
+alias sopus='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llmvm_serve'
+alias ssonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llmvm_serve'
+alias shaiku='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llmvm_serve'
+alias sinstant='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$INSTANT LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" llmvm_serve'
+alias sgpt4o='LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4o" LLMVM_PROFILING="true" llmvm_serve'
 
 # clients
-alias sonnet='LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LMMVM_API_BASE="https://api.anthropic.com" llm'
-alias haiku='ANTHROPIC_API_KEY=$STAGING_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm'
+alias sonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LMMVM_API_BASE="https://api.anthropic.com" llm'
+alias haiku='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm'
 alias opus='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" llm'
+alias instant='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$INSTANT LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" llm'
+alias gpt4o='LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4o" LLMVM_PROFILING="true" llm'
+
 
 alias h=haiku
+alias l=gpt4o
 ```
 
 And the zsh functions:
 
 ```bash
 function llm() {
-    local pyenv_ver=$(cat $HOME/dev/llmvm/.python-version)
-    PYTHONPATH=$PYTHONPATH:$HOME/dev/llmvm $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.client "$@"
+    current_env=$CONDA_DEFAULT_ENV
+    conda activate llmvm
+    PYTHONPATH=$HOME/dev/llmvm python -m llmvm.client "$@"
+    conda activate $current_env
 }
 
-function llm_serve() {
-    local pyenv_ver=$(cat $HOME/dev/llmvm/.python-version)
-    PYTHONPATH=$PYTHONPATH:$HOME/dev/llmvm $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.server
+function llmvm_serve() {
+    current_env=$CONDA_DEFAULT_ENV
+    conda activate llmvm
+    PYTHONPATH=$HOME/dev/llmvm python -m llmvm.server
+    conda activate $current_env
 }
 ```
 
@@ -521,4 +532,79 @@ And then it's as simple as:
 $ h "hello world"
 
 Assistant: Hello! I'm an AI assistant created by Anthropic. How can I help you today?
+```
+
+### Adding extra context to your requests
+
+It's often helpful to pass in your command line history plus a little info about yourself to help the models rationalize your request:
+
+In the file $HOME/dev/context.md, I have:
+
+```md
+# Personal Information
+
+My name is Sonny.
+I live in the Bay Area in California.
+I'm really interested in LLM's, hiking, biking and eating.
+
+Today's date is {date +"%A, %d %B, %Y"}.
+```
+
+Anything in { } brackets in this file, will be replaced by the return result from the execution of that command.
+
+```bash
+function con() {
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: context 'instruction"
+        return 1
+    fi
+
+    local instruction=$1
+    local result=$(cat ~/.zsh_history | tail -n 100 | cut -d';' -f2-)
+    temp_file=$(mktemp)
+    echo "The following is my linux command history for the last little while. It might be useful for future messages.\n\n" >> "$temp_file"
+    echo result >> "$temp_file"
+
+    # parse and execute commands in the context file
+    local context_file=$HOME/dev/context.md
+    local context_temp=$(mktemp)
+
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        # Replace {command} with the output of the command
+        processed_line=$(echo "$line" | awk '{
+            while (match($0, /\{[^}]+\}/)) {
+                cmd = substr($0, RSTART+1, RLENGTH-2)
+                cmd | getline result
+                close(cmd)
+                $0 = substr($0, 1, RSTART-1) result substr($0, RSTART+RLENGTH)
+            }
+            print
+        }')
+        echo "$processed_line" >> "$context_temp"
+    done < "$context_file"
+
+    l -p $temp_file -p $context_temp $instruction
+    rm $temp_file
+    rm $context_temp
+}
+```
+
+```bash
+$ con "hey there, can you give me a list of things to do?"
+```
+
+```md
+Assistant:
+
+Seeing as you life in the Bay Area, it offers a wide range of activities and attractions to suit various interests. Here are some ideas for things you can do today:
+
+### Outdoor Activities:
+1. **Golden Gate Park**: Explore the park's gardens, museums, and recreational areas.
+2. **Hiking**: Try trails in places like Muir Woods, Mount Tamalpais, or the Marin Headlands.
+3. **Biking**: Rent a bike and ride across the Golden Gate Bridge.
+4. **Beaches**: Visit Ocean Beach, Baker Beach, or Crissy Field for a relaxing day by the water.
+
+### Cultural Experiences:
+1. **Museums**: Check out the San Francisco Museum of Modern Art (SFMOMA), the Exploratorium, or the California Academy of Sciences.
 ```
