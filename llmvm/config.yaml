@@ -20,8 +20,8 @@ vector_store_index_directory: '~/.local/share/llmvm/faiss'
 vector_store_embedding_model: 'all-MiniLM-L6-v2' # 'BAAI/bge-base-en'
 vector_store_chunk_size: 500
 openai_api_base: 'https://api.openai.com/v1'
-openai_model: 'gpt-4-vision-preview'
-openai_max_tokens: 16384
+openai_model: 'gpt-4o'
+openai_max_tokens: 128000
 anthropic_api_base: 'https://api.anthropic.com'
 anthropic_model: 'claude-3-sonnet-20240229'
 anthropic_max_tokens: 200000

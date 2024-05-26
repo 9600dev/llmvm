@@ -15,14 +15,20 @@ class Singleton (type):
 
 
 class Container(metaclass=Singleton):
-    def __init__(self, config_file: str = os.path.expanduser('~/.config/llmvm/config.yaml')):
+    def __init__(
+            self,
+            config_file: str = os.path.expanduser('~/.config/llmvm/config.yaml'),
+            throw: bool = True
+        ):
         self.config_file = config_file
 
         if os.getenv('LLMVM_CONFIG'):
             self.config_file = cast(str, os.getenv('LLMVM_CONFIG'))
 
-        if not os.path.exists(self.config_file):
+        if not os.path.exists(self.config_file) and throw:
             raise ValueError('configuration_file {} is not found. Put config in ~/.config/llmvm or set LLMVM_CONFIG'.format(config_file))
+        elif not os.path.exists(self.config_file) and not throw:
+            return
 
         with open(self.config_file, 'r') as conf_file:
             self.configuration: Dict = yaml.load(conf_file, Loader=yaml.FullLoader)  # type: ignore

@@ -75,6 +75,7 @@ class OpenAIExecutor(Executor):
                 "gpt-4",
                 "gpt-4-0314",
                 "gpt-4-vision-preview",
+                "gpt-4o",
                 "gpt-4-1106-preview",
                 "gpt-4-32k-0314",
                 "gpt-4-0613",

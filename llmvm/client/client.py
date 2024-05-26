@@ -617,7 +617,7 @@ async def execute_llm_call(
             message,
             Container.get_config_variable('OPENAI_API_KEY'),
             'openai',
-            'gpt-4-vision-preview',
+            'gpt-4o',
             context_messages
         )
         return SessionThread(

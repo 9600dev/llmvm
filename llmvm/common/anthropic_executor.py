@@ -283,7 +283,7 @@ class AnthropicExecutor(Executor):
                 logging.warning(f"Removing empty message: {message}")
                 messages.remove(message)
 
-        if Container().get_config_variable('ANTHROPIC_COLLAPSE_MESSAGES', default=False):
+        if Container(throw=False).get_config_variable('ANTHROPIC_COLLAPSE_MESSAGES', default=False):
             collapsed_messages = []
             accumulator = ''
             for i in range(len(messages)):
