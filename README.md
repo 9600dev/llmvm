@@ -163,7 +163,7 @@ playwright install firefox
 
 #### Manual Installation
 
-If you don't want to do ```pip install llmvm-cli``` you can do:
+If you don't want to do ```pip install llmvm-cli``` you use pyenv and poetry to install dependencies:
 
 * Install [pyenv](https://github.com/pyenv/pyenv):
   * ```curl https://pyenv.run | bash```
