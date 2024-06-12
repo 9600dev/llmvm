@@ -1,0 +1,30 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Client",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "llmvm.client",
+            "args": [],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "llmvm.server",
+            "args": [],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Python: Launch Both Modules",
+            "configurations": ["Python: Server", "Python: Client"],
+            "stopAll": false
+        }
+    ]
+}

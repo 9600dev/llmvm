@@ -113,14 +113,12 @@ class ExecutionController(Controller):
 
             # check for the header of a statement_to_message. We probably need to keep this
             if 'Result:\n' in prev_message.message.get_str():
-                # the following line of code was causing token count bugs
-                # similarity_message = prev_message.message.get_content()[0:prev_message.message.get_content().index('Result:\n')] + similarity_message  # noqa E501
                 similarity_message = 'Result:\n' + similarity_message
 
             similarity_messages.append(User(Content(similarity_message)))
 
         total_similarity_tokens = sum(
-            [self.executor.count_tokens(m.message.get_content(), model=llm_call.model) for m in similarity_messages]
+            [self.executor.count_tokens(m.message.get_str(), model=llm_call.model) for m in similarity_messages]
         )
         if total_similarity_tokens > llm_call.max_prompt_len:
             logging.error(f'__similarity() total_similarity_tokens: {total_similarity_tokens} is greater than max_prompt_len: {llm_call.max_prompt_len}, will perform map/reduce.')  # noqa E501

@@ -5,7 +5,7 @@ from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 from langchain.docstore.document import Document
-from langchain.embeddings.huggingface import HuggingFaceEmbeddings
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain.text_splitter import TextSplitter, TokenTextSplitter
 from langchain_community.document_loaders import TextLoader
 

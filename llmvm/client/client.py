@@ -372,7 +372,7 @@ async def stream_response(response, print_lambda: Callable) -> List[AstNode]:
             else:
                 print_lambda(strip_string(data))
             return True
-        except json.decoder.JSONDecodeError:
+        except Exception as ex:
             return False
 
     response_objects = []
