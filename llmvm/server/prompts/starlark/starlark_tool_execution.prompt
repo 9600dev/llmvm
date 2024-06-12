@@ -26,13 +26,17 @@ There are also 9 special features that I've added to our Starlark implementation
 
 1. llm_call(expression_list: List, instruction: str) -> str. Allows you to call yourself from my Starlark execution engine to perform arbitrary computation, text analysis, text translation, text transformation, or question answering for us. You return a string result. Use it by emitting: llm_call([variable1, "expression2"], "instruction to large language model"). If the Starlark execution engine sees this call, it will send whatever values are in "expression_list" along with the natural language instruction message specified in the "instruction" argument, and capture whatever is returned as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expression_list has a text size limit, so if you think the expression_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized result to llm_call instead.
 2. llm_bind(expression, function_call_str: str) -> Any. Allows you to bind data supplied in the expression to function call arguments and then execute the function, returning the whatever the function call returns. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind and call to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and it will bind and call the function WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
-3. llm_loop_bind(expression, llm_instruction: str, count: int = sys.maxsize) -> Iterator[str]. Allows you to properly bind text to a string list of size count. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings of size 'count' extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.
+3. llm_list_bind(expression, llm_instruction: str, count: int = sys.maxsize, list_type: type = Any) -> Iterator[Any]. Allows you to properly bind text to a list of type 'list_type' and size 'count'. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.
 4. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. However, this is a special dataframe where you can ask natural language questions about the data and get back responses using the ask(str) method. See examples below on how to use the "ask" method, as it's the only method you can use on the Pandas DataFrame.
 5. search(expression) -> str. Searches the Internet across various search engines and the users local machine to find content related to 'expression' and returns all that content as a string. Use this if you need general search, news search, product search or local file search capability.
 6. download(expression) -> str. Downloads any web page, html, PDF file, news article or word document, converts it to text, and returns that text content as a string.
 7. messages() -> List[str]. Returns the current large language model conversation as a list of strings. messages()[0] gets the first User message. messages()[-1] gets the current User message. messages()[-2] gets the second last message. Messages can either be {{user_token}} messages or {{assistant_token}} messages.
 8. coerce(expression, type_name: str) -> Any. Takes any value in expression and coerces it to specified Python type in type_name. Valid type_names are float, int, str, list[float | int | str].
 9. answer(expression) -> Answer. Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the human user. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Starlark code.
+
+You also have access to the full library of numpy (np) and scipy (scipy), but no other libraries. You can assume they've already been imported.
+
+Examples:
 
 Here is an example of using these special features to solve the user query: "get the career profile of the current AMD CEO".
 
@@ -54,7 +58,7 @@ Here is an example of using these special features to solve the user query: "ext
 answers = []
 var1 = download("https://ten13.vc/team")
 var2 = llm_call([var1], "extract list of names")  # perform the first task
-for list_item in llm_loop_bind(var2, "list of names"):
+for list_item in llm_list_bind(var2, "list of names"):
     var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")
     var4 = llm_call([var3], "summarize career profile")  # perform the second task
     answers.append(var4)
@@ -111,7 +115,7 @@ Here is an example of finding the top restaurants in a particular location:
 answers = []
 var1 = search("top restaurants in Brisbane, Australia")  # Step 1: Search the internet for the top restaurants in Brisbane, Australia
 var2 = llm_call([var1], "extract the names of the restaurants")  # Step 2: Extract the names of the restaurants from the search results
-for list_item in llm_loop_bind(var2, "restaurant name", 3):  # Step 3: Loop over the top 3 restaurants
+for list_item in llm_list_bind(var2, "restaurant name", 3):  # Step 3: Loop over the top 3 restaurants
     var4 = llm_bind(list_item, search(restaurant_name)")  # Step 4: Search the internet for details about the restaurant
     answers.append(llm_call([var4], "summarize restaurant details"))  # Step 5: Summarize the details of the restaurant
 answer(answers)  # Step 6: Show the summarized details of the top 3 restaurants in Brisbane, Australia to the user
@@ -203,7 +207,7 @@ merged_list = llm_call([var2, var4], "merge the lists of job titles together")  
 answer(merged_list)  # Step 5: Show the result to the use
 ```
 
-Another example: 
+Another example:
 
 {{user_colon_token}} "Get all the ads links from bbc.com"
 {{assistant_colon_token}}
@@ -211,7 +215,59 @@ Another example:
 var1 = download("https://bbc.com")  # append https:// to the site requested
 var2 = llm_call([var1], "extract all the href links that look like Ads")
 answer(var2)  # show the a-href links to the user
+```
 
+A very complicated example:
+
+{{user_colon_token}} "I have $5 million Australian dollars. I'm currently 60 years old. Figure out if I have enough money for retirement or not"
+{{assistant_colon_token}}
+```starlark
+# Step 1: Get the historical inflation rate for Australia
+var1 = search("Australian yearly inflation rates")
+inflation_history = llm_list_bind(var1, "historical inflation rates as float percentages", list_type=float)
+
+# Step 2: Generate an average stock market return distribution
+mean_return = 0.07
+std_dev_return = 0.15
+stock_returns = np.random.normal(mean_return, std_dev_return, 10000)
+
+# Step 3: Generate the code to deal with Australian tax brackets
+australian_tax_brackets = [
+    (0, 18200, 0),
+    (18201, 45000, 0.19),
+    (45001, 120000, 0.325),
+    (120001, 180000, 0.37),
+    (180001, float('inf'), 0.45)
+]
+
+def calculate_tax(income):
+    tax = 0
+    for lower, upper, rate in australian_tax_brackets:
+        if income > lower:
+            taxable_amount = min(income, upper) - lower
+            tax += taxable_amount * rate
+        if income <= upper:
+            break
+    return tax
+
+# Step 4: run a simulation with five million dollars over the next 20 years
+# assuming the simulation ends at 80 years old
+initial_capital = 5000000
+final_values = np.zeros(10000)
+
+for i in range(10000):
+    investment_value = initial_capital
+    for j in range(20):
+        annual_return = investment_value * BCL.sample_list(stock_returns)
+        tax = calculate_tax(annual_return)
+        net_return = annual_return - tax
+        investment_value += net_return
+        investment_value /= (1 + BCL.sample_list(inflation_history))
+    final_values[i] = investment_value
+
+# Step 5: Calculate what percentage chance of being positive
+probability_positive_amount = np.mean(final_values > 0)
+answer(f"The probability of having a positive balance for your full retirement of 20 years is {probability_positive_amount}")
 
 
 Rules:

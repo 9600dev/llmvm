@@ -775,8 +775,11 @@ class ExecutionController(Controller):
             no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')
             # debug out AST
             lines = assistant_response_str.split('\n')
+            line_counter = 1
             for line in lines:
-                no_indent_debug(logging, '  {}'.format(line.replace("[", "\\[")))
+                line = line.replace('[', '\\[')
+                no_indent_debug(logging, f'{line_counter:02}  {line}')
+                line_counter+=1
             no_indent_debug(logging, '')
 
             # debug output

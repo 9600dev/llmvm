@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import numpy as np
-from typing import Optional
+from typing import Optional, Any
 
 
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -17,6 +17,13 @@ class BCL():
         Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days"), datetime("now", "Australia/Brisbane")
         """
         return Helpers.parse_relative_datetime(str(expr), timezone)
+
+    def sample_list(self, data: list) -> Any:
+        """
+        Returns a random sample from a list.
+        Examples: sample_list([1, 2, 3]), sample_list(["a", "b", "c"])
+        """
+        return np.random.choice(data)
 
     def sample_normal(self, mean: float = 0.0, std_dev: float = 1.0) -> float:
         """

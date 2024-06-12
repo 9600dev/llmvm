@@ -1,0 +1,18 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+I have a goal of "{{goal}}".
+
+As part of that goal, I need you to extract an appropriate list of data from the text below under "Context:" and emit that data as a Python list of element types "{{type}}"
+as output. Do not assign the Python list to anything, just emit the list definition e.g. a list of strings: ["...", "...", "..."].
+Make sure you escape any strings that have the " character in them so they parse properly.
+
+You may use what is under "Context:" and content in any previous messages as context for figuring out what data should be in the Python list.
+Along with type coercion to {{type}}, you may have to perform some data conversion of the extracted data values in order to achieve the goal above. e.g if the goal includes extracting percentages, you should convert data like 2.5%, 3.0% into a floats [0.025, 0.03], or 2.4, 1.1 into [0.024, 0.011]. Do this data conversion inline. Don't hallucinate data.
+
+Only emit a Python list definition with the required data in it, and do not emit anything else. Lists must be opened [ and closed ]. Don't apologize, don't add commentary, don't explain yourself.
+
+Context:
+
+{{context}}

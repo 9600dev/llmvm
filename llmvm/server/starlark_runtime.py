@@ -1,11 +1,12 @@
 import ast
-import asyncio
+import numpy as np
 import datetime as dt
 import inspect
 import os
 import re
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+import scipy
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast, Any, Type
 from urllib.parse import urlparse
 
 import astunparse
@@ -85,7 +86,7 @@ class StarlarkRuntime:
                             )
                             return meta
                         return wrapper
-                raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
+                raise AttributeError(f"'{self.wrapped_class.__class__.__name__}' object has no attribute '{name}'")
 
         from llmvm.server.base_library.source_project import SourceProject
         from llmvm.server.bcl import BCL
@@ -97,7 +98,7 @@ class StarlarkRuntime:
         # todo: fix this hack
         self.globals_dict['llm_bind'] = self.llm_bind
         self.globals_dict['llm_call'] = self.llm_call
-        self.globals_dict['llm_loop_bind'] = self.llm_loop_bind
+        self.globals_dict['llm_list_bind'] = self.llm_list_bind
         self.globals_dict['coerce'] = self.coerce
         self.globals_dict['messages'] = self.messages
         self.globals_dict['search'] = self.search
@@ -114,6 +115,10 @@ class StarlarkRuntime:
         self.globals_dict['sys'] = sys
         self.globals_dict['os'] = os
         self.globals_dict['datetime'] = dt
+        self.globals_dict['numpy'] = np
+        self.globals_dict['scipy'] = scipy
+        self.globals_dict['np'] = np
+
         # code stuff
         source = SourceProject(self)
         self.globals_dict['source_project'] = source
@@ -319,17 +324,18 @@ class StarlarkRuntime:
         write_client_stream(Content(f'LLM returned: {str(assistant.message)}\n'))
         return assistant
 
-    def llm_loop_bind(self, expr, llm_instruction: str, count: int = sys.maxsize) -> List[Any]:
-        logging.debug(f'llm_loop_bind({str(expr)[:20]}, {repr(llm_instruction)})')
+    def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> List[Any]:
+        logging.debug(f'llm_list_bind({str(expr)[:20]}, {repr(llm_instruction)}, {count}, {list_type})')
         context = expr.message.get_str() if isinstance(expr, Message) else str(expr)
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
-                    prompt_name='llm_loop_bind.prompt',
+                    prompt_name='llm_list_bind.prompt',
                     template={
                         'goal': llm_instruction.replace('"', ''),
                         'context': context,
+                        'type': list_type.__name__,
                     },
                     user_token=self.controller.get_executor().user_token(),
                     assistant_token=self.controller.get_executor().assistant_token(),
@@ -341,7 +347,7 @@ class StarlarkRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='llm_loop_bind.prompt',
+                prompt_name='llm_list_bind.prompt',
             ),
             query=llm_instruction,
             original_query=self.original_query,
@@ -351,7 +357,7 @@ class StarlarkRuntime:
 
         # for anthropic
         if not list_result.startswith('['):
-            pattern = r'\[\s*(?:(\d+|"[^"]*"|\'[^\']*\')\s*,\s*)*(\d+|"[^"]*"|\'[^\']*\')\s*\]'
+            pattern = r'\[\s*((\d+(\.\d+)?|"[^"]*"|\'[^\']*\')\s*(,\s*(\d+(\.\d+)?|"[^"]*"|\'[^\']*\')\s*)*)?\]'
             match = re.search(pattern, list_result)
             if match:
                 list_result = match.group(0)
@@ -359,17 +365,17 @@ class StarlarkRuntime:
         try:
             result = cast(list, eval(list_result))
             if not isinstance(result, list):
-                raise ValueError('llm_loop_bind result is not a list, or is malformed')
+                raise ValueError('llm_list_bind result is not a list, or is malformed')
             return result[:count]
         except Exception as ex:
-            logging.debug('llm_loop_bind error: {}'.format(ex))
+            logging.debug('llm_list_bind error: {}'.format(ex))
             new_starlark_code = self.rewrite_starlark_error_correction(
                 query=llm_instruction,
                 starlark_code=str(assistant.message),
                 error=str(ex),
                 locals_dictionary=self.locals_dict,
             )
-            logging.debug('llm_loop_bind new_starlark_code: {}'.format(new_starlark_code))
+            logging.debug('llm_list_bind new_starlark_code: {}'.format(new_starlark_code))
             result = cast(list, eval(new_starlark_code))
             if not isinstance(result, list):
                 return []
@@ -789,6 +795,22 @@ class StarlarkRuntime:
         self,
         starlark_code: str,
     ) -> Dict[Any, Any]:
+
+        # massive hack to make locals globals so that generated functions can access that scope
+        class AutoGlobalDict(dict):
+            def __init__(self, globals_dict = {}, locals_dict = {}):
+                super().__init__(globals_dict)
+                self.update(locals_dict)
+                self.__dict__ = self
+
+            def __getitem__(self, key):
+                if key not in self and key in globals():
+                    self[key] = globals()[key]
+                return super().__getitem__(key)
+
+            def __setitem__(self, key: Any, value: Any) -> None:
+                return super().__setitem__(key, value)
+
         logging.debug('__compile_and_execute()')
         try:
             parsed_ast = ast.parse(starlark_code)
@@ -797,7 +819,11 @@ class StarlarkRuntime:
             logging.error(f'Error parsing starlark code: {ex}')
             raise ex
 
-        exec(compile(parsed_ast, filename="<ast>", mode="exec"), self.globals_dict, self.locals_dict)
+        context = AutoGlobalDict(self.globals_dict, self.locals_dict)
+
+        exec(compile(parsed_ast, filename="<ast>", mode="exec"), context, context)
+
+        self.locals_dict = context
         return self.locals_dict
 
     def __interpret(
@@ -806,6 +832,7 @@ class StarlarkRuntime:
     ) -> Dict[Any, Any]:
         parsed_ast = ast.parse(starlark_code)
 
+        # todo: this doens't have the globals/local dictionary merging stuff like above
         for node in parsed_ast.body:
             if isinstance(node, ast.Expr):
                 logging.debug(f'[eval] {astunparse.unparse(node)}')

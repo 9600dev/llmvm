@@ -39,3 +39,4 @@ helper_functions:
   - llmvm.server.bcl.BCL.sample_normal
   - llmvm.server.bcl.BCL.sample_binomial
   - llmvm.server.bcl.BCL.sample_lognormal
+  - llmvm.server.bcl.BCL.sample_list

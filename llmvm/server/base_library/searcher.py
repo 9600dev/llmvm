@@ -71,7 +71,7 @@ class Searcher():
 
     def search_research_hook(self, query: str):
         if not Container().get_config_variable('SERPAPI_API_KEY'):
-            return self.search_hook('https://news.google.com/search?q=', query)
+            return self.search_hook('https://www.google.com/search?q=', query)
         else:
             # likely want more thorough answers so we'll return more results
             self.total_links_to_return = 10
