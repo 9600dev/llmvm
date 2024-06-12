@@ -64,7 +64,7 @@ class FunctionBindable():
             raise ValueError('could not find function: {}'.format(function_str))
 
         function_callable = function_callable[0]
-        function_definition = Helpers.get_function_description_flat_extra(cast(Callable, function_callable))
+        function_definition = Helpers.get_function_description_flat(cast(Callable, function_callable))
 
         message = Helpers.prompt_message(
             prompt_name='llm_bind_global.prompt',

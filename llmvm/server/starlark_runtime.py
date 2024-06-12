@@ -400,7 +400,7 @@ class StarlarkRuntime:
                         'task': query,
                         'code': starlark_code,
                         'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
                         'dictionary': dictionary,
                     },
                     user_token=self.controller.get_executor().user_token(),
@@ -614,7 +614,7 @@ class StarlarkRuntime:
                         template={
                             'original_query': self.original_query,
                             'code': self.original_code,
-                            'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                            'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
                             'dictionary': dictionary,
                         },
                         user_token=self.controller.get_executor().user_token(),
@@ -734,7 +734,7 @@ class StarlarkRuntime:
                         'task': query,
                         'code': starlark_code,
                         'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat_extra(f) for f in self.agents]),
+                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
                         'dictionary': dictionary,
                     },
                     user_token=self.controller.get_executor().user_token(),
@@ -871,7 +871,7 @@ class StarlarkRuntime:
     ):
         logging.debug('rewrite()')
         # SyntaxError, or other more global error. We should rewrite the entire code.
-        function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+        function_list = [Helpers.get_function_description_flat(f) for f in self.agents]
         code_prompt = \
             f'''The following code (found under "Original Code") either didn't compile, or threw an exception while executing.
             Identify the error in the code below, and re-write the code and only that code.

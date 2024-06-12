@@ -75,8 +75,11 @@ class WebHelpers():
 
     @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:
+        """
+        Extracts the career information from a person's LinkedIn profile from a given LinkedIn url and returns
+        it as a string.
+        """
         from llmvm.common.pdf import PdfHelpers
-        """Extracts the career information from a person's LinkedIn profile from a given LinkedIn url"""
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
 
         firefox_helpers = FirefoxHelpers()

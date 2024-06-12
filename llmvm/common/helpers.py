@@ -804,7 +804,6 @@ class Helpers():
         if sections:
             results = Helpers.find_closest_sections(query, sections)
         else:
-            print('No sections found')
             return []
         return [a['text'] for a in results]
 
@@ -916,7 +915,7 @@ class Helpers():
             elif t is float:
                 return 'number'
             else:
-                return 'string'
+                return 'object'
 
         import inspect
 
@@ -930,80 +929,71 @@ class Helpers():
         func_class = Helpers.__get_class_of_func(func)
         invoked_by = f'{func_class.__name__}.{func_name}' if func_class else func_name
 
-        if openai_format:
-            params = {}
+        params = {}
 
-            for p in inspect.signature(func).parameters:
-                param = inspect.signature(func).parameters[p]
-                parameter = {
-                    param.name: {
-                        'type': parse_type(param.annotation) if param.annotation is not inspect._empty else 'string',
-                        'description': '',
-                    }
+        for p in inspect.signature(func).parameters:
+            param = inspect.signature(func).parameters[p]
+            parameter = {
+                param.name: {
+                    'type': parse_type(param.annotation) if param.annotation is not inspect._empty else 'object',
+                    'description': '',
                 }
-
-                if param.annotation and issubclass(param.annotation, Enum):
-                    values = [v.value for v in param.annotation.__members__.values()]
-                    parameter[param.name]['enum'] = values  # type: ignore
-
-                params.update(parameter)
-
-                # if it's got doc comments, use those instead
-                for p in parse(func.__doc__).params:  # type: ignore
-                    params.update({
-                        p.arg_name: {  # type: ignore
-                            'type': parse_type(p.type_name) if p.type_name is not None else 'string',  # type: ignore
-                            'description': p.description,  # type: ignore
-                        }  # type: ignore
-                    })
-
-            def required_params(func):
-                parameters = inspect.signature(func).parameters
-                return [
-                    name for name, param in parameters.items()
-                    if param.default == inspect.Parameter.empty and param.kind != param.VAR_KEYWORD
-                ]
-
-            function = {
-                'name': invoked_by,
-                'description': description,
-                'parameters': {
-                    'type': 'object',
-                    'properties': params
-                },
-                'required': required_params(func),
             }
+
+            if param.annotation and isinstance(param.annotation, type) and issubclass(param.annotation, Enum):
+                values = [v.value for v in param.annotation.__members__.values()]
+                parameter[param.name]['enum'] = values  # type: ignore
+
+            params.update(parameter)
+
+            # if it's got doc comments, use those instead
+            for p in parse(func.__doc__).params:  # type: ignore
+                params.update({
+                    p.arg_name: {  # type: ignore
+                        'type': parse_type(p.type_name) if p.type_name is not None else 'string',  # type: ignore
+                        'description': p.description,  # type: ignore
+                    }  # type: ignore
+                })
+
+        def required_params(func):
+            parameters = inspect.signature(func).parameters
+            return [
+                name for name, param in parameters.items()
+                if param.default == inspect.Parameter.empty and param.kind != param.VAR_KEYWORD
+            ]
+
+        function = {
+            'name': invoked_by,
+            'description': description,
+            'parameters': {
+                'type': 'object',
+                'properties': params
+            },
+            'required': required_params(func),
+        }
+
+        if openai_format:
             return function
         else:
-            # check to see if parameters are specified in the __doc__, often they're not
-            if not parse(func.__doc__).params:
-                parameters = list(inspect.signature(func).parameters.keys())
-            else:
-                parameters = [p.arg_name for p in parse(func.__doc__).params]
-
-            types = [p.__name__ for p in typing.get_type_hints(func).values()]
-            return_type = typing.get_type_hints(func).get('return')
-
             return {
-                # todo: refactor this to be name
                 'invoked_by': invoked_by,
                 'description': description,
-                'parameters': parameters,
-                'types': types,
-                'return_type': return_type,
+                'parameters': list(params.keys()),
+                'types': [p['type'] for p in params.values()],
+                'return_type': typing.get_type_hints(func).get('return')
             }
+
+    @staticmethod
+    def get_function_description_simple(function: Callable) -> str:
+        description = Helpers.get_function_description(function, openai_format=False)
+        return (f'{description["invoked_by"]}({", ".join(description["parameters"])})  # {description["description"] or "No docstring"}')
 
     @staticmethod
     def get_function_description_flat(function: Callable) -> str:
         description = Helpers.get_function_description(function, openai_format=False)
-        return (f'{description["invoked_by"]}({", ".join(description["parameters"])})  # {description["description"]}')
-
-    @staticmethod
-    def get_function_description_flat_extra(function: Callable) -> str:
-        description = Helpers.get_function_description(function, openai_format=False)
         parameter_type_list = [f"{param}: {typ}" for param, typ in zip(description['parameters'], description['types'])]
-        return_type = description['return_type'].__name__ if description['return_type'] else ''
-        return (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"]}')  # noqa: E501
+        return_type = description['return_type'].__name__ if description['return_type'] else 'Any'
+        return (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"] or "No docstring"}')  # noqa: E501
 
     @staticmethod
     def load_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.starlark') -> Dict[str, Any]:

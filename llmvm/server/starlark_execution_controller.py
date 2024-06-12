@@ -452,7 +452,7 @@ class ExecutionController(Controller):
             return {'tool': 1.0}
 
         # assess the type of task
-        function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+        function_list = [Helpers.get_function_description_flat(f) for f in self.agents]
         # todo rip out the probability from here
         query_understanding = Helpers.load_and_populate_prompt(
             prompt_name='query_understanding.prompt',
@@ -641,7 +641,7 @@ class ExecutionController(Controller):
         logging.debug(f'abuild_runnable_tools_ast() user_message = {llm_call.user_message.message.get_str()[0:25]}')
         logging.debug(f'abuild_runnable_tools_ast() model = {llm_call.model}, executor = {llm_call.executor.name()}')
 
-        functions = [Helpers.get_function_description_flat_extra(f) for f in agents]
+        functions = [Helpers.get_function_description_flat(f) for f in agents]
 
         tools_message = Helpers.prompt_message(
             prompt_name='starlark_tool_execution.prompt',

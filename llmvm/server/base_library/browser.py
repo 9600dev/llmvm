@@ -159,7 +159,7 @@ class Browser():
             self.fill,
         ]
 
-        function_defs = [Helpers.get_function_description_flat_extra(function) for function in functions]
+        function_defs = [Helpers.get_function_description_flat(function) for function in functions]
 
         code = self.controller.execute_llm_call(
             llm_call=LLMCall(
