@@ -579,6 +579,111 @@ async def tools_completions(request: SessionThread):
     return StreamingResponse(stream_response(stream()), media_type='text/event-stream')  # media_type="application/json")
 
 
+@app.post('/v1/chat/tools_completions_two', response_model=None)
+async def tools_completions_two(request: SessionThread):
+    thread = request
+
+    if not cache_session.has_key(thread.id) or thread.id == 0:
+        temp = __get_thread(0)
+        thread.id = temp.id
+
+    messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
+    mode = thread.current_mode
+    compression = compression_enum(thread.compression)
+    queue = asyncio.Queue()
+    cookies = thread.cookies if thread.cookies else []
+
+    # set the defaults, or use what the SessionThread thread asks
+    if thread.executor and thread.model:
+        controller = get_controller(thread.executor)
+        model = thread.model if thread.model else controller.get_executor().get_default_model()
+    # either the executor or the model is not set, so use the defaults
+    # and update the thread
+    else:
+        logging.debug('Either the executor or the model is not set. Updating thread.')
+        controller = get_controller()
+        model = controller.get_executor().get_default_model()
+        thread.executor = controller.get_executor().name()
+        thread.model = model
+
+    logging.debug(f'/v1/chat/tools_completions_two?id={thread.id}&mode={mode}&model={model} \
+                  &executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}')
+
+    if len(messages) == 0:
+        raise HTTPException(status_code=400, detail='No messages provided')
+
+    # todo perform some merge logic of the messages here
+    # I don't think we want to have the client always grab the full thread
+    # before posting
+
+    async def callback(token: AstNode):
+        queue.put_nowait(token)
+
+    async def stream():
+        def handle_exception(task):
+            if not task.cancelled() and task.exception() is not None:
+                Helpers.log_exception(logging, task.exception())
+                queue.put_nowait(StopNode())
+
+        async def execute_and_signal():
+            # todo: this is a hack
+            result = await controller.aexecute(
+                messages=messages,
+                temperature=thread.temperature,
+                mode=mode,
+                stream_handler=callback,
+                model=model,
+                compression=compression,
+                cookies=cookies
+            )
+            queue.put_nowait(StopNode())
+            return result
+
+        task = asyncio.create_task(execute_and_signal())
+        task.add_done_callback(handle_exception)
+
+        while True:
+            data = await queue.get()
+
+            if isinstance(data, StopNode):
+                break
+            yield data
+
+        try:
+            await task
+        except Exception as e:
+            pass
+
+        # error handling
+        if task.exception() is not None:
+            thread.messages.append(MessageModel.from_message(Assistant(Content(f'Error: {str(task.exception())}'))))
+            yield thread.model_dump()
+            return
+
+        statements: List[Statement] = task.result()
+
+        # todo parse Answers into Assistants for now
+        results = []
+        for statement in statements:
+            if isinstance(statement, Answer):
+                results.append(Assistant(Content(str(cast(Answer, statement).result()))))
+            elif isinstance(statement, Assistant):
+                results.append(statement)
+
+        if len(results) > 0:
+            for result in results:
+                thread.messages.append(MessageModel.from_message(result))
+            cache_session.set(thread.id, thread)
+            yield thread.model_dump()
+        else:
+            # todo need to do something here to deal with error cases
+            yield thread.model_dump()
+
+    return StreamingResponse(stream_response(stream()), media_type='text/event-stream')  # media_type="application/json")
+
+
+
+
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     logging.exception(exc)

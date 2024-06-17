@@ -133,14 +133,11 @@ class StarlarkRuntime:
     def get_code_blocks(code: str) -> List[str]:
         code = code.strip()
         ordered_blocks = []
-
-        # Pattern to match starlark, python, and unnamed code blocks, as well as inline code snippets
-        pattern = r'```(starlark|python)?\n(.*?)```|`(.*?)`'
+        # Pattern to match starlark, python, unnamed code blocks, inline code snippets, and <code> tags
+        pattern = r'```(starlark|python)?\n(.*?)```|`(.*?)`|<code>(.*?)</code>'
         matches = re.findall(pattern, code, re.DOTALL)
-
         for match in matches:
-            _, block, single_block = match
-
+            lang, block, single_block, code_tag_block = match
             if block:
                 try:
                     ast.parse(block)
@@ -153,7 +150,12 @@ class StarlarkRuntime:
                     ordered_blocks.append(single_block)
                 except SyntaxError:
                     pass
-
+            elif code_tag_block:
+                try:
+                    ast.parse(code_tag_block)
+                    ordered_blocks.append(code_tag_block)
+                except SyntaxError:
+                    pass
         return ordered_blocks
 
     def pandas_bind(self, expr) -> PandasMeta:
@@ -965,9 +967,11 @@ class StarlarkRuntime:
         starlark_code: str,
         original_query: str,
         messages: List[Message] = [],
+        locals_dict: Dict = {}
     ) -> Dict[Any, Any]:
         self.original_code = starlark_code
         self.original_query = original_query
         self.messages_list = messages
-        self.setup()
+        self.locals_dict = locals_dict
+
         return self.__interpret(starlark_code)
