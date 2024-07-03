@@ -846,6 +846,9 @@ class FunctionCallMeta(Call):
     def token(self):
         return 'functioncallmeta'
 
+    def __float__(self):
+        return float(self._result)  # type: ignore
+
     def __getattr__(self, name):
         return getattr(self._result, name)
 
