@@ -157,12 +157,41 @@ run() {
     ssh llmvm@localhost -p 2222
 }
 
+
 build() {
     echo "building llmvm into image $IMGNAME and container $CONTNAME"
     echo ""
-    echo "DOCKER_BUILDKIT=1 docker buildx build --build-arg OPENAI_API_KEY=$OPENAI_API_KEY --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY --build-arg SEC_API_KEY=$SEC_API_KEY --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY -f $BUILDDIR/Dockerfile --platform linux/amd64 -t $IMGNAME --force-rm=true --rm=true $BUILDDIR"
+
+    # Detect OS and set platform
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS
+        PLATFORM="linux/arm64"
+        echo "Detected macOS. Using ARM64 architecture."
+    else
+        # Assume Linux or other
+        PLATFORM="linux/amd64"
+        echo "Detected Linux or other OS. Using AMD64 architecture."
+    fi
+
+    # Construct the build command
+    BUILD_CMD="DOCKER_BUILDKIT=1 docker buildx build \
+        --build-arg OPENAI_API_KEY=$OPENAI_API_KEY \
+        --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+        --build-arg SEC_API_KEY=$SEC_API_KEY \
+        --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY \
+        --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY \
+        -f $BUILDDIR/Dockerfile \
+        --platform $PLATFORM \
+        -t $IMGNAME \
+        --force-rm=true \
+        --rm=true \
+        $BUILDDIR"
+
+    echo "$BUILD_CMD"
     echo ""
-    DOCKER_BUILDKIT=1 docker buildx build --build-arg OPENAI_API_KEY=$OPENAI_API_KEY --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY --build-arg SEC_API_KEY=$SEC_API_KEY --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY -f $BUILDDIR/Dockerfile --platform linux/amd64 -t $IMGNAME --force-rm=true --rm=true $BUILDDIR
+
+    # Execute the build command
+    eval $BUILD_CMD
 }
 
 sync() {

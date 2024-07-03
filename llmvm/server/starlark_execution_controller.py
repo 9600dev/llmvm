@@ -154,7 +154,7 @@ class ExecutionController(Controller):
 
         # iterate over the data.
         map_reduce_prompt_tokens = self.executor.count_tokens(
-            [User(Content(Helpers.load_prompt('map_reduce_map.prompt')['user_message']))],
+            [User(Content(Helpers.load_resources_prompt('map_reduce_map.prompt')['user_message']))],
             model=llm_call.model,
         )
 
@@ -868,20 +868,49 @@ class ExecutionController(Controller):
         template_args: Dict[str, Any] = {},
         agents: List[Callable] = [],
         cookies: List[Dict[str, Any]] = [],
+        locals_dict: Dict[str, Any] = {},
+        globals_dict: Dict[str, Any] = {},
     ) -> List[Statement]:
 
         from llmvm.server.starlark_runtime import StarlarkRuntime
-        starlark_runtime = StarlarkRuntime(self, agents=agents, vector_search=self.vector_search)
+        starlark_runtime = StarlarkRuntime(
+            self,
+            agents=agents,
+            vector_search=self.vector_search,
+            locals_dict=locals_dict,
+            globals_dict=globals_dict
+        )
 
         model = model if model else self.executor.get_default_model()
 
-        response: Assistant = Assistant(Content(''))
+        response: Assistant = Assistant(Content())
 
         # a single code block is supported as a special case which we execute immediately
         if StarlarkRuntime.only_code_block(messages[-1].message.get_str()):
             response.message = messages[-1].message
             messages.remove(messages[-1])
             raise NotImplementedError('Code block execution is not yet supported.')
+
+        # check the [system_message] [user_message] pair, and parse those into messages
+        # if they exist
+        i = 0
+        while i < len(messages):
+            if (
+                '[system_message]' in messages[i].message.get_str()
+                and '[user_message]' in messages[i].message.get_str()
+            ):
+                system, user = Helpers.get_prompts(
+                    messages[i].message.get_str(),
+                    template_args,
+                    self.get_executor().user_token(),
+                    self.get_executor().assistant_token(),
+                    self.get_executor().append_token(),
+                )
+                # inject system and user into messages
+                messages[i] = system
+                messages.insert(i + 1, user)
+                i += 1
+            i += 1
 
         # {{templates}}
         # check to see if the messages have {{templates}} in them, and if so, replace
@@ -904,6 +933,7 @@ class ExecutionController(Controller):
                     )
                 )
 
+        # bootstrap the continuation execution
         completed = False
         results: List[Statement] = []
         old_model = starlark_runtime.controller.get_executor().get_default_model()
@@ -932,6 +962,7 @@ class ExecutionController(Controller):
         messages_copy.extend(copy.deepcopy(messages[0:-1]))
         messages_copy.append(messages[-1])
 
+        # execute the continuation loop
         while not completed:
             llm_call = LLMCall(
                 user_message=messages_copy[-1],

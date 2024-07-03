@@ -1084,10 +1084,7 @@ class Helpers():
         return (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"] or "No docstring"}')  # noqa: E501
 
     @staticmethod
-    def load_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.starlark') -> Dict[str, Any]:
-        if not prompt_name.endswith('.prompt'):
-            prompt_name += '.prompt'
-
+    def load_resources_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.starlark') -> Dict[str, Any]:
         prompt_file = resources.files(module) / prompt_name
 
         with open(prompt_file, 'r') as f:  # type: ignore
@@ -1115,6 +1112,72 @@ class Helpers():
             }
 
     @staticmethod
+    def get_prompts(
+        prompt_text: str,
+        template: Dict[str, str],
+        user_token: str = 'User',
+        assistant_token: str = 'Assistant',
+        append_token: str = '',
+    ) -> Tuple[System, User]:
+        if '[system_message]' not in prompt_text:
+            raise ValueError('Prompt file must contain [system_message]')
+
+        if '[user_message]' not in prompt_text:
+            raise ValueError('Prompt file must contain [user_message]')
+
+        system_message = Helpers.in_between(prompt_text, '[system_message]', '[user_message]').strip()
+        user_message = prompt_text[prompt_text.find('[user_message]') + len('[user_message]'):].strip()
+        templates = []
+
+        temp_prompt = prompt_text
+        while '{{' and '}}' in temp_prompt:
+            templates.append(Helpers.in_between(temp_prompt, '{{', '}}'))
+            temp_prompt = temp_prompt.split('}}', 1)[-1]
+
+        prompt = {
+            'system_message': system_message,
+            'user_message': user_message,
+            'templates': templates
+        }
+
+        if not template.get('user_token'):
+            template['user_token'] = user_token
+            template['user_colon_token'] = user_token + ':'
+        if not template.get('assistant_token'):
+            template['assistant_token'] = assistant_token
+            template['assistant_colon_token'] = assistant_token + ':'
+
+        for key, value in template.items():
+            prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
+            prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
+
+        # deal with exec() statements to inject things like datetime
+        import datetime
+        for message_key in ['system_message', 'user_message']:
+            message = prompt[message_key]
+            while '{{' in message and '}}' in message:
+                start = message.find('{{')
+                end = message.find('}}', start)
+                if end == -1:  # No closing '}}' found
+                    break
+
+                key = message[start+2:end]
+                replacement = ''
+
+                if key.startswith('exec('):
+                    try:
+                        replacement = str(eval(key[5:-1]))
+                    except Exception as e:
+                        pass
+                else:
+                    replacement = key
+
+                message = message[:start] + replacement + message[end+2:]
+
+            prompt[message_key] = message
+        return (System(Content(prompt['system_message'])), User(Content(prompt['user_message'] + append_token)))
+
+    @staticmethod
     def load_and_populate_prompt(
         prompt_name: str,
         template: Dict[str, str],
@@ -1123,7 +1186,7 @@ class Helpers():
         append_token: str = '',
         module: str = 'llmvm.server.prompts.starlark'
     ) -> Dict[str, Any]:
-        prompt: Dict[str, Any] = Helpers.load_prompt(prompt_name, module)
+        prompt: Dict[str, Any] = Helpers.load_resources_prompt(prompt_name, module)
 
         if not template.get('user_token'):
             template['user_token'] = user_token
@@ -1166,6 +1229,18 @@ class Helpers():
         return prompt
 
     @staticmethod
+    def populate_prompts(
+        prompt_str: str,
+        template: Dict[str, str],
+        user_token: str = 'User',
+        assistant_token: str = 'Assistant',
+        append_token: str = '',
+        module: str = 'llmvm.server.prompts.starlark'
+    ) -> Tuple[System, User]:
+        prompt = Helpers.load_and_populate_prompt(prompt_str, template, user_token, assistant_token, append_token, module)
+        return (prompt['system_message'], prompt['user_message'])
+
+    @staticmethod
     def prompt_message(
         prompt_name: str,
         template: Dict[str, str],
@@ -1188,4 +1263,3 @@ class Helpers():
     ) -> Tuple[System, User]:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
         return (System(Content(prompt['system_message'])), User(Content(prompt['user_message'])))
-

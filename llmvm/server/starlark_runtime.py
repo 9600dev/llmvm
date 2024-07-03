@@ -35,14 +35,16 @@ class StarlarkRuntime:
         vector_search: VectorSearch,
         agents: List[Callable] = [],
         answer_error_correcting: bool = False,
+        locals_dict = {},
+        globals_dict = {}
     ):
         self.original_query = ''
         self.original_code = ''
         self.controller: ExecutionController = controller
         self.vector_search = vector_search
         self.agents = agents
-        self.locals_dict = {}
-        self.globals_dict = {}
+        self.locals_dict = locals_dict
+        self.globals_dict = globals_dict
         self.answers: List[Answer] = []
         self.messages_list: List[Message] = []
         self.answer_error_correcting = answer_error_correcting

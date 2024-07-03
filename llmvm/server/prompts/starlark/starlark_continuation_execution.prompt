@@ -368,7 +368,7 @@ Rules:
 
 * In <code></code> blocks, you must use the answer() special feature at least once to produce a result for the user.
 * Never apologize in your responses.
-* Prioritize using previous User and Assistant messages for context and information over asking the User for more context or information. Really look hard at previous User and Assistant messages in the conversation as context to understand the Users query, question or problem.
+* Prioritize using previous User and Assistant messages for context and information over asking the User for more context or information. Really look hard at the current conversation of User and Assistant messages as it will likely contain context to understand the Users query, question or problem.
 * Prioritize directly solving the Users problems, queries, questions over using <code></code> blocks.
 * <code_result></code_result> tags will not contain the original code that was executed, so you can just assume you wrote that code and that its been executed, and the results are the latest and freshest results or data.
 * If you feel like the users problem, query, question is answered based on your understanding of the entire conversation, emit the token "</complete>".
