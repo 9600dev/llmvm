@@ -296,6 +296,10 @@ class AnthropicExecutor(Executor):
         if messages_list[0]['role'] != 'system' and messages_list[0]['role'] != 'user':
             messages_list.insert(0, {'role': 'user', 'content': 'None.'})
 
+        # ugh, anthropic api can't have an assistant message with trailing whitespace...
+        if messages_list[-1]['role'] == 'assistant':
+            messages_list[-1]['content'] = messages_list[-1]['content'].rstrip()
+
         messages_trace(messages_list)
 
         token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore

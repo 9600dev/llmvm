@@ -9,6 +9,7 @@ from enum import Enum
 from importlib import resources
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
+import numpy as np
 from pydantic import BaseModel
 
 T = TypeVar('T')
@@ -233,11 +234,38 @@ def coerce_types(a, b):
         except ValueError:
             return False
 
+    def is_float(x):
+        return np.isscalar(x) and isinstance(x, (float, np.floating))
+
+    def is_aware(dt):
+        return dt.tzinfo is not None and dt.tzinfo.utcoffset(dt) is not None
+
+    if isinstance(a, FunctionCallMeta):
+        a = a.result()
+
+    if isinstance(b, FunctionCallMeta):
+        b = b.result()
+
     # If either operand is a string and represents a number, convert it
     if isinstance(a, str) and is_number(a):
         a = int(a) if '.' not in a else float(a)
     if isinstance(b, str) and is_number(b):
         b = int(b) if '.' not in b else float(b)
+
+    if isinstance(a, dt.date):
+        a = dt.datetime(a.year, a.month, a.day)
+
+    if isinstance(b, dt.date):
+        b = dt.datetime(b.year, b.month, b.day)
+
+    if isinstance(a, dt.datetime) and isinstance(b, dt.datetime):
+        if is_aware(a) and is_aware(b):
+            return a, b
+        elif not is_aware(a) and not is_aware(b):
+            return a, b
+        else:
+            a = a.replace(tzinfo=None)
+            b = b.replace(tzinfo=None)
 
     # If either operand is a string now, convert both to strings
     if isinstance(a, str) or isinstance(b, str):
@@ -247,17 +275,15 @@ def coerce_types(a, b):
     if type(a) is type(b):
         return a, b
 
+    # numpy and python floats
+    if is_float(a) and is_float(b):
+        return float(a), float(b)  # type: ignore
+
     # If one is a float and the other an int, convert the int to float
     if isinstance(a, float) and isinstance(b, int):
         return a, float(b)
     if isinstance(b, float) and isinstance(a, int):
         return float(a), b
-
-    if isinstance(a, dt.date):
-        a = dt.datetime(a.year, a.month, a.day)
-
-    if isinstance(b, dt.date):
-        b = dt.datetime(b.year, b.month, b.day)
 
     if isinstance(a, dt.datetime) and isinstance(b, dt.timedelta):
         return a, b
@@ -822,6 +848,12 @@ class FunctionCallMeta(Call):
 
     def __getattr__(self, name):
         return getattr(self._result, name)
+
+    def __set__(self, obj, val):
+        setattr(self._result, obj, val)
+
+    def __get__(self, obj, val):
+        return getattr(self._result, obj, val)
 
     def __str__(self):
         return str(self._result)

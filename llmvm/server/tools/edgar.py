@@ -144,8 +144,12 @@ class EdgarHelpers():
         This is useful to get financial information for a company,
         their current strategy, investments and risks. Use form_type = '' to
         get the latest form of any type. form_type can be '10-Q', '10-K' or '8-K'.
+        date is a Python datetime.
         """
         logging.debug('get_report: {} {} {}'.format(symbol, form_type, str(date)))
+
+        if not isinstance(date, dt.datetime) or not date:
+            date = dt.datetime.now()
 
         urls = EdgarHelpers.get_form_urls(
             symbol,

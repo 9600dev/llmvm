@@ -186,10 +186,6 @@ class Browser():
             original_query=self.original_query,
         )
 
-
-
-
-
     def search(
         self,
     ) -> List[Content]:

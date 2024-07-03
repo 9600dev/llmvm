@@ -38,6 +38,7 @@ helper_functions:
   - llmvm.server.tools.edgar.EdgarHelpers.get_report
   - llmvm.server.tools.market.MarketHelpers.get_stock_price
   - llmvm.server.tools.market.MarketHelpers.get_current_market_capitalization
+  - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
   - llmvm.server.bcl.BCL.sample_normal
   - llmvm.server.bcl.BCL.sample_binomial
   - llmvm.server.bcl.BCL.sample_lognormal

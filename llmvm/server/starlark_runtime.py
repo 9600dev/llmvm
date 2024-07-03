@@ -246,7 +246,7 @@ class StarlarkRuntime:
         )
         return downloader.download()
 
-    def search(self, expr: str, total_links_to_return: int = 2) -> List[Content]:
+    def search(self, expr: str, total_links_to_return: int = 3, titles_seen: List[str] = []) -> List[Content]:
         logging.debug(f'search({str(expr)})')
         from llmvm.server.base_library.searcher import Searcher
 
@@ -261,7 +261,7 @@ class StarlarkRuntime:
             vector_search=self.vector_search,
             total_links_to_return=total_links_to_return
         )
-        return searcher.search()
+        return searcher.search(titles_seen=titles_seen)
 
     def coerce(self, expr, type_name: str) -> Any:
         logging.debug(f'coerce({str(expr)[:20]}, {str(type_name)})')

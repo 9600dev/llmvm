@@ -1039,7 +1039,7 @@ class ExecutionController(Controller):
                         error=str(ex),
                     )
 
-                locals_dict = {'cookies': cookies} if cookies else {}
+                if cookies: locals_dict['cookies'] = cookies
                 locals_dict = starlark_runtime.run(
                     starlark_code=code_block,
                     original_query=messages[-1].message.get_str(),
@@ -1060,6 +1060,9 @@ class ExecutionController(Controller):
                     last_assignment = starlark_runtime.get_last_assignment(code_block, locals_dict)
                     if last_assignment:
                         answers = f'<code_result>{str(last_assignment[1])}</code_result>'
+
+                # we have a <code_result></code_result> block, push it to the user
+                write_client_stream(answers)
 
                 # assistant_response_str will have a code block <code></code> in it, so we need to replace it with the answers
                 # use regex to replace the code block with the answers

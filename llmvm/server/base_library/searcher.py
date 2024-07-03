@@ -23,7 +23,7 @@ class Searcher():
         original_code: str,
         original_query: str,
         vector_search: VectorSearch,
-        total_links_to_return: int = 2,
+        total_links_to_return: int = 3,
     ):
         self.query = expr
         self.original_code = original_code
@@ -74,11 +74,12 @@ class Searcher():
             return self.search_hook('https://www.google.com/search?q=', query)
         else:
             # likely want more thorough answers so we'll return more results
-            self.total_links_to_return = 10
+            self.total_links_to_return = self.total_links_to_return * 2
             return SerpAPISearcher().search_research(query)
 
     def search(
         self,
+        titles_seen: List[str] = [],
     ) -> List[Content]:
         # todo: we should probably return the Search instance, so we can futz with it later on.
         query_expander = self.controller.execute_llm_call(
@@ -266,6 +267,7 @@ class Searcher():
                         'snippets': '\n'.join(
                             [f'* {str(key)}: {value["title"]} {value["snippet"]}' for key, value in snippets.items()]
                         ),
+                        'seen_list': '\n'.join(titles_seen),
                     },
                     user_token=self.controller.get_executor().user_token(),
                     assistant_token=self.controller.get_executor().assistant_token(),

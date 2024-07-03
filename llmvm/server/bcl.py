@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import io
 import numpy as np
-from typing import Optional, Any
+from typing import Dict, Optional, Any
 
 
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -45,3 +46,61 @@ class BCL():
         Examples: sample_lognormal(0, 1), sample_lognormal(10, 2)
         """
         return np.random.lognormal(mean, std_dev)
+
+    def generate_graph_image(self, data: Dict, title: str, x_label: str, y_label: str) -> None:
+        """
+        Generates a graph image from the given data and returns it as bytes.
+
+        :param data: The data to plot
+        :type data: Dict
+        :param title: The title of the graph
+        :type title: str
+        :param x_label: The label for the x-axis
+        :type x_label: str
+        :param y_label: The label for the y-axis
+        :type y_label: str
+        :return: None
+
+        Examples:
+        generate_graph_image({"x": [1, 2, 3], "y": [4, 5, 6]}, "Title", "X Label", "Y Label")
+        """
+
+        data_dict = {}
+
+        if isinstance(data, list):
+            list_data = [float(item) for item in data if isinstance(item, (int, float))]
+            data_dict['x'] = list(range(len(list_data)))
+            data_dict['y'] = list_data
+        elif 'dates' in data and 'prices' in data:
+            # dates is Timestamp, prices is float
+            data_dict['x'] = [timestamp.strftime('%Y-%m-%d') for timestamp in data['dates']]
+            data_dict['y'] = data['prices']
+        elif 'x' not in data:
+            data_dict['x'] = data.keys()
+            data_dict['y'] = data.values()
+        else:
+            data_dict = data
+
+        from matplotlib import pyplot as plt
+        plt.figure(figsize=(10.24, 7.68))
+        plt.plot(data_dict['x'], data_dict['y'])  # type: ignore
+        plt.title(title)
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+
+        # Create a bytes buffer
+        buffer = io.BytesIO()
+
+        # Save the plot to the buffer in PNG format
+        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+
+        # Close the plot to free up memory
+        plt.close()
+
+        # Get the contents of the buffer
+        image_bytes = buffer.getvalue()
+
+        # Close the buffer
+        buffer.close()
+
+        write_client_stream(image_bytes)
