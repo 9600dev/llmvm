@@ -151,7 +151,6 @@ def setup_logging(
     logging.getLogger('PIL').setLevel(logging.WARNING)
     logging.getLogger('anthropic').setLevel(logging.WARNING)
     logging.getLogger('grpc').setLevel(logging.WARNING)
-    logging.getLogger('mistralai').setLevel(logging.WARNING)
 
     logger: Logger = logging.getLogger()
 

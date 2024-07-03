@@ -1,7 +1,7 @@
 #!/bin/bash
 
-if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GOOGLE_API_KEY" && -z "$MISTRAL_API_KEY" ]]; then
-    echo "Error: Either OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or MISTRAL_API_KEY must be set in your environment."
+if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GOOGLE_API_KEY" ]]; then
+    echo "Error: Either OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or must be set in your environment."
     exit 1
 fi
 
@@ -15,7 +15,6 @@ OPENAI_API_KEY=${OPENAI_API_KEY:-}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 SEC_API_KEY=${SEC_API_KEY:-}
 SERPAPI_API_KEY=${SERPAPI_API_KEY:-}
-MISTRAL_API_KEY=${MISTRAL_API_KEY:-}
 GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
 
 CONTNAME=llmvm-container
@@ -126,7 +125,7 @@ force_clean() {
 run() {
     echo "running container $CONTNAME with this command:"
     echo ""
-    echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e MISTRAL_API_KEY=$MISTRAL_API_KEY -e GOOGLE_API_KEY=$GOOGLE_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME -ti -p 2222:22 -p starting -p 8011:8011 --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
+    echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GOOGLE_API_KEY=$GOOGLE_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME -ti -p 2222:22 -p starting -p 8011:8011 --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
     echo ""
 
     if [ ! "$(docker image ls -a | grep $IMGNAME)" ]; then
@@ -137,7 +136,6 @@ run() {
     docker run \
         -e OPENAI_API_KEY=$OPENAI_API_KEY \
         -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-        -e MISTRAL_API_KEY=$MISTRAL_API_KEY \
         -e GOOGLE_API_KEY=$GOOGLE_API_KEY \
         -e SEC_API_KEY=$SEC_API_KEY \
         -e SERPAPI_API_KEY=$SERPAPI_API_KEY \
@@ -162,9 +160,9 @@ run() {
 build() {
     echo "building llmvm into image $IMGNAME and container $CONTNAME"
     echo ""
-    echo "DOCKER_BUILDKIT=1 docker buildx build --build-arg OPENAI_API_KEY=$OPENAI_API_KEY --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY --build-arg SEC_API_KEY=$SEC_API_KEY --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY --build-arg MISTRAL_API_KEY=$MISTRAL_API_KEY --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY -f $BUILDDIR/Dockerfile --platform linux/amd64 -t $IMGNAME --force-rm=true --rm=true $BUILDDIR"
+    echo "DOCKER_BUILDKIT=1 docker buildx build --build-arg OPENAI_API_KEY=$OPENAI_API_KEY --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY --build-arg SEC_API_KEY=$SEC_API_KEY --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY -f $BUILDDIR/Dockerfile --platform linux/amd64 -t $IMGNAME --force-rm=true --rm=true $BUILDDIR"
     echo ""
-    DOCKER_BUILDKIT=1 docker buildx build --build-arg OPENAI_API_KEY=$OPENAI_API_KEY --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY --build-arg MISTRAL_API_KEY=$MISTRAL_API_KEY --build-arg SEC_API_KEY=$SEC_API_KEY --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY -f $BUILDDIR/Dockerfile --platform linux/amd64 -t $IMGNAME --force-rm=true --rm=true $BUILDDIR
+    DOCKER_BUILDKIT=1 docker buildx build --build-arg OPENAI_API_KEY=$OPENAI_API_KEY --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY --build-arg SEC_API_KEY=$SEC_API_KEY --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY -f $BUILDDIR/Dockerfile --platform linux/amd64 -t $IMGNAME --force-rm=true --rm=true $BUILDDIR
 }
 
 sync() {

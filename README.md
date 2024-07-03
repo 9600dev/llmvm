@@ -2,7 +2,7 @@
 
 LLMVM is a CLI based productivity tool that uses Large Language Models and local Python tools/helpers to reason about and execute your tasks. A CLI client (client.py) either connects directly to an LLM provider or will connect to a local server (server.py) that coordinates tool execution, [Retrieval Agumented Generation](https://blogs.nvidia.com/blog/what-is-retrieval-augmented-generation/), document search and more.
 
-It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) and [Mistral](https://deepmind.google/technologies/gemini/) are currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
+It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) is currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
 
 LLMVM's features are best explored through examples. Let's install, then go through some:
 
@@ -135,7 +135,7 @@ You can even Ctrl-y + p to paste images into the REPL for upload and parsing by 
 
 ## Install
 
-You'll need either an OpenAI API account (including access to the GPT 4.x API), an [Anthropic API account](https://docs.anthropic.com/claude/reference/getting-started-with-the-api), a Google [Gemini API account](https://ai.google.dev/) or a [Mistral AI API account](https://mistral.ai/). It's highly recommended to sign up for a free [SerpAPI](https://serpapi.com/) account to ensure that web searches (Google, News, Yelp and more) work. A [sec-api.io](https://sec-api.io) is optional so LLMVM can download public company 10-K or 10-Q filings.
+You'll need either an OpenAI API account (including access to the GPT 4.x API), an [Anthropic API account](https://docs.anthropic.com/claude/reference/getting-started-with-the-api), or a Google [Gemini API account](https://ai.google.dev/). It's highly recommended to sign up for a free [SerpAPI](https://serpapi.com/) account to ensure that web searches (Google, News, Yelp and more) work. A [sec-api.io](https://sec-api.io) is optional so LLMVM can download public company 10-K or 10-Q filings.
 
 Ensure you have the following environment variables set:
 
@@ -143,7 +143,6 @@ Ensure you have the following environment variables set:
 ANTHROPIC_API_KEY   # your Anthropic API key
 OPENAPI_API_KEY     # your Openai API key, or ...
 GOOGLE_API_KEY      # your Gemini API key
-MISTRAL_API_KEY     # your Mistral API key
 EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Starlark code before it gets executed etc.
 ```
 

@@ -138,14 +138,12 @@ RUN pip install faiss-cpu
 
 # ARG OPENAI_API_KEY
 # ARG ANTHROPIC_API_KEY
-# ARG MISTRAL_API_KEY
 # ARG GOOGLE_API_KEY
 # ARG SEC_API_KEY
 # ARG SERPAPI_API_KEY
 
 # ENV OPENAI_API_KEY=$OPENAI_API_KEY
 # ENV ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
-# ENV MISTRAL_API_KEY=$MISTRAL_API_KEY
 # ENV GOOGLE_API_KEY=$GOOGLE_API_KEY
 # ENV SEC_API_KEY=$SEC_API_KEY
 # ENV SERPAPI_API_KEY=$SERPAPI_API_KEY
@@ -154,7 +152,6 @@ RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SEC_API_KEY=$SEC_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /home/llmvm/.ssh/environment
-RUN echo "MISTRAL_API_KEY=$MISTRAL_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "GOOGLE_API_KEY=$GOOGLE_API_KEY" >> /home/llmvm/.ssh/environment
 
 RUN playwright install firefox

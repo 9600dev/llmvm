@@ -13,8 +13,6 @@ from google.generativeai.types.generation_types import \
     AsyncGenerateContentResponse as AsyncGeminiStream
 from google.generativeai.types.generation_types import \
     GenerateContentResponse as GeminiCompletion
-from mistralai.models.chat_completion import \
-    ChatCompletionStreamResponse as MistralCompletion
 from openai.types.chat.chat_completion_chunk import \
     ChatCompletionChunk as OAICompletion
 
@@ -183,8 +181,6 @@ class LoggingAsyncIterator:
             elif isinstance(result, OAICompletion):
                 if result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
-                return cast(str, result.choices[0].delta.content or '')  # type: ignore
-            elif isinstance(result, MistralCompletion):
                 return cast(str, result.choices[0].delta.content or '')  # type: ignore
             elif isinstance(result, GeminiCompletion):
                 return cast(str, result.text or '')

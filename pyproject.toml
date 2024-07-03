@@ -133,7 +133,6 @@ yfinance = "^0.2.40"
 pydantic = "^2.7.4"
 google-generativeai = "^0.6.0"
 httpx = "0.25.2"
-mistralai = "^0.4.0"
 langchain-huggingface = "^0.0.3"
 
 [build-system]

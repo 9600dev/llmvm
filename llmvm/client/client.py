@@ -47,7 +47,6 @@ from llmvm.common.container import Container
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.mistral_executor import MistralExecutor
 from llmvm.common.objects import (Assistant, AstNode, Content, DownloadItem,
                                   Executor, FileContent, ImageContent, Message,
                                   MessageModel, PdfContent, SessionThread,
@@ -467,12 +466,6 @@ async def execute_llm_call_direct(
             default_model=model_name,
             api_endpoint=api_endpoint or Container.get_config_variable('LLMVM_API_BASE', default='https://api.anthropic.com')
         )
-    elif executor_name == 'mistral':
-        executor = MistralExecutor(
-            api_key=api_key,
-            default_model=model_name,
-            api_endpoint=api_endpoint or Container.get_config_variable('LLMVM_API_BASE', default='https://api.mistral.ai')
-        )
     elif executor_name == 'gemini':
         executor = GeminiExecutor(
             api_key=api_key,
@@ -586,18 +579,6 @@ async def execute_llm_call(
                 id=-1,
                 messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
             )
-        elif executor == 'mistral' and Container.get_config_variable('MISTRAL_API_KEY'):
-            assistant = await execute_llm_call_direct(
-                message,
-                Container.get_config_variable('MISTRAL_API_KEY'),
-                'mistral',
-                model,
-                context_messages
-            )
-            return SessionThread(
-                id=-1,
-                messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
-            )
         elif executor == 'gemini' and Container.get_config_variable('GOOGLE_API_KEY'):
             assistant = await execute_llm_call_direct(
                 message,
@@ -636,18 +617,6 @@ async def execute_llm_call(
             id=-1,
             messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
         )
-    elif os.environ.get('MISTRAL_API_KEY'):
-        assistant = await execute_llm_call_direct(
-            message,
-            Container.get_config_variable('MISTRAL_API_KEY'),
-            'mistral',
-            'mistral-medium',
-            context_messages
-        )
-        return SessionThread(
-            id=-1,
-            messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
-        )
     elif os.environ.get('GOOGLE_API_KEY'):
         assistant = await execute_llm_call_direct(
             message,
@@ -661,8 +630,8 @@ async def execute_llm_call(
             messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
         )
     else:
-        logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
-        raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY GOOGLE_API_KEY or MISTRAL_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
+        logging.warning('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
+        raise ValueError('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY or GOOGLE_API_KEY is set. Unable to execute direct call to LLM.')  # noqa
 
 
 def llm(

@@ -21,7 +21,6 @@ from llmvm.common.container import Container
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.mistral_executor import MistralExecutor
 from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
                                   DownloadItem, FileContent, MessageModel,
                                   SessionThread, Statement, StopNode,
@@ -111,20 +110,6 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             continuation_passing_style=False,
         )
         return anthropic_controller
-    elif controller == 'mistral':
-        mistral_executor = MistralExecutor(
-            api_key=os.environ.get('MISTRAL_API_KEY', ''),
-            default_model=Container().get_config_variable('mistral_model', 'LLMVM_MODEL'),
-            default_max_token_len=int(Container().get('mistral_max_tokens')),
-        )
-        mistral_controller = ExecutionController(
-            executor=mistral_executor,
-            agents=agents,  # type: ignore
-            vector_search=vector_search,
-            edit_hook=None,
-            continuation_passing_style=False,
-        )
-        return mistral_controller
     elif controller == 'gemini':
         gemini_executor = GeminiExecutor(
             api_key=os.environ.get('GOOGLE_API_KEY', ''),
