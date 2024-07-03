@@ -8,7 +8,15 @@
             "module": "llmvm.client",
             "args": [],
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "env": {
+                "LLMVM_EXECUTOR": "anthropic",
+                "LLMVM_MODEL": "claude-3-5-sonnet-20240620",
+                "LLMVM_FULL_PROCESSING": "true",
+                "LLMVM_PROFILING": "true",
+                "LLMVM_EXECUTOR_TRACE": "~/.local/share/llmvm/executor.trace",
+                "LLMVM_API_BASE": "https://api.anthropic.com"
+            }
         },
         {
             "name": "Python: Server",
@@ -17,7 +25,15 @@
             "module": "llmvm.server",
             "args": [],
             "console": "integratedTerminal",
-            "justMyCode": false
+            "justMyCode": false,
+            "env": {
+                "LLMVM_EXECUTOR": "anthropic",
+                "LLMVM_MODEL": "claude-3-5-sonnet-20240620",
+                "LLMVM_FULL_PROCESSING": "true",
+                "LLMVM_PROFILING": "true",
+                "LLMVM_EXECUTOR_TRACE": "~/.local/share/llmvm/executor.trace",
+                "LLMVM_API_BASE": "https://api.anthropic.com"
+            }
         }
     ],
     "compounds": [

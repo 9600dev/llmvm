@@ -9,6 +9,7 @@ import itertools
 import math
 import os
 import re
+import traceback
 import typing
 from collections import Counter
 from enum import Enum, IntEnum
@@ -16,7 +17,7 @@ from functools import reduce
 from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from urllib.parse import urlparse
 import zlib
 from zoneinfo import ZoneInfo
@@ -29,7 +30,7 @@ from docstring_parser import parse
 from PIL import Image
 
 from llmvm.common.objects import (Content, ImageContent, MarkdownContent,
-                                  Message, StreamNode, User)
+                                  Message, StreamNode, System, User)
 
 
 def write_client_stream(obj):
@@ -51,6 +52,17 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def remove_duplicates(lst, key_func=lambda x: x):
+        seen = set()
+        result = list(filter(lambda x: key_func(x) not in seen and not seen.add(key_func(x)), lst))
+        try:
+            # check to see if any of the strings in the list are substrings of another list item, and if so, remove that
+            sub_dups = [a for a in result if not any(key_func(a) in key_func(b) for b in result if a != b)]
+            return sub_dups
+        except Exception:
+            return result
+
     @staticmethod
     def anthropic_image_tok_count(base64_encoded: str):
         # go from base64 encoded to bytes
@@ -158,6 +170,79 @@ class Helpers():
         min_width: int,
         min_height: int
     ) -> List[Content]:
+        pattern = r'(.*?)!\[(?:.*?)\]\((.*?)\)|(.+?)$'
+        chunks = []
+        tasks = []
+        last_end = 0
+        content = markdown_content.get_str()
+        content_list: List[Content] = []
+        idx = 0
+
+        for match in re.finditer(pattern, content, re.DOTALL):
+            before, url, after = match.groups()
+
+            if before and before != content[last_end:match.start()] and last_end != match.start():
+                content_list.append(Content(content[last_end:match.start()]))
+                idx += 1
+
+            if before:
+                content_list.append(Content(before + '![]('))
+                idx += 1
+
+            if url:
+                task = asyncio.create_task(
+                    Helpers.get_image_fuzzy_url(logging, markdown_content.url, url, min_width, min_height)
+                )
+                tasks.append((idx, task, url))
+                content_list.append(Content())
+                idx += 1
+
+            if after:
+                content_list.append(Content(after))
+                idx += 1
+
+            last_end = match.end()
+
+        if last_end < len(content):
+            content_list.append(Content(content[last_end:]))
+            idx += 1
+
+        for idx, task, image_url in tasks:
+            image_bytes = await task
+            if image_bytes:
+                content_list[idx] = ImageContent(image_bytes, image_url)  # type: ignore
+
+        # we're going to collapse the content list here. if there is two text items in a row, we're going to combine them
+        # first, drop all empty content
+        collapsed_content_list = [c for c in content_list if c.sequence]
+        combined_content_list = []
+        current_text = ""
+
+        for c in collapsed_content_list:
+            if not isinstance(c, ImageContent):
+                # If it's a Content instance, add its text to current_text
+                current_text += c.get_str()
+            else:
+                # If current_text has accumulated content, add it to the list as a new Content instance
+                if current_text:
+                    combined_content_list.append(Content(current_text))
+                    current_text = ""  # Reset current_text for the next batch of text
+                # Add the non-text content directly to the list
+                combined_content_list.append(c)
+
+        # If there's any remaining text in current_text, add it to the list as a new Content instance
+        if current_text:
+            combined_content_list.append(Content(current_text))
+
+        return combined_content_list
+
+    @staticmethod
+    async def markdown_content_to_messages_deprecated(
+        logging,
+        markdown_content: MarkdownContent,
+        min_width: int,
+        min_height: int
+    ) -> List[Content]:
         markdown_str = markdown_content.get_str()
         tasks = []
         pattern = r"!\[(.*?)\]\((.*?)\)|([^!]+)"
@@ -182,9 +267,12 @@ class Helpers():
 
         for idx, task, image_url in tasks:
             image_bytes = await task
-            content_list[idx] = ImageContent(image_bytes, image_url)  # type: ignore
+            if image_bytes:
+                content_list[idx] = ImageContent(image_bytes, image_url)  # type: ignore
 
-        return content_list
+        # should we be collapsing the content list here?
+        results = [c for c in content_list if c.sequence]
+        return results
 
     @staticmethod
     def last_day_of_quarter(year, quarter):
@@ -284,7 +372,7 @@ class Helpers():
         lineno = exc_traceback.tb_lineno
         filename = frame.f_code.co_filename
 
-        log_message = f"Exception: {e} at line {lineno} in {filename}"
+        log_message = traceback.format_exception(type(e), e, e.__traceback__)
         if message:
             log_message += f": {message}"
 
@@ -671,23 +759,23 @@ class Helpers():
         return (first, rest[rest.find(end) + len(end):])
 
     @staticmethod
-    def first(predicate, iterable):
+    def first(predicate, iterable, default=None):
         try:
             result = next(x for x in iterable if predicate(x))
             return result
         except StopIteration as ex:
-            return None
+            return default
 
     @staticmethod
     def filter(predicate, iterable):
         return [x for x in iterable if predicate(x)]
 
     @staticmethod
-    def last(predicate, iterable):
+    def last(predicate, iterable, default=None):
         result = [x for x in iterable if predicate(x)]
         if result:
             return result[-1]
-        return None
+        return default
 
     @staticmethod
     def resize_image(screenshot_data, base_width=500):
@@ -1011,7 +1099,7 @@ class Helpers():
             if '[user_message]' not in prompt:
                 raise ValueError('Prompt file must contain [user_message]')
 
-            system_message = Helpers.in_between(prompt, '[system_message]', '[user_message]')
+            system_message = Helpers.in_between(prompt, '[system_message]', '[user_message]').strip()
             user_message = prompt[prompt.find('[user_message]') + len('[user_message]'):].strip()
             templates = []
 
@@ -1048,6 +1136,31 @@ class Helpers():
             prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
             prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
 
+        # deal with exec() statements to inject things like datetime
+        import datetime
+        for message_key in ['system_message', 'user_message']:
+            message = prompt[message_key]
+            while '{{' in message and '}}' in message:
+                start = message.find('{{')
+                end = message.find('}}', start)
+                if end == -1:  # No closing '}}' found
+                    break
+
+                key = message[start+2:end]
+                replacement = ''
+
+                if key.startswith('exec('):
+                    try:
+                        replacement = str(eval(key[5:-1]))
+                    except Exception as e:
+                        pass
+                else:
+                    replacement = key
+
+                message = message[:start] + replacement + message[end+2:]
+
+            prompt[message_key] = message
+
         prompt['user_message'] += f'{append_token}'
         prompt['prompt_name'] = prompt_name
         return prompt
@@ -1063,3 +1176,16 @@ class Helpers():
     ) -> Message:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
         return User(Content(prompt['user_message']))
+
+    @staticmethod
+    def prompts(
+        prompt_name: str,
+        template: Dict[str, str],
+        user_token: str = 'User',
+        assistant_token: str = 'Assistant',
+        append_token: str = '',
+        module: str = 'llmvm.server.prompts.starlark'
+    ) -> Tuple[System, User]:
+        prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
+        return (System(Content(prompt['system_message'])), User(Content(prompt['user_message'])))
+

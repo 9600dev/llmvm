@@ -23,11 +23,10 @@ class AnthropicExecutor(Executor):
     def __init__(
         self,
         api_key: str,
-        default_model: str = 'claude-3-sonnet-20240229',
+        default_model: str = 'claude-3-5-sonnet-20240620',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_token_len: int = 200000,
         default_max_output_len: int = 4096,
-        messages_api: bool = True,
     ):
         super().__init__(
             default_model=default_model,
@@ -36,7 +35,6 @@ class AnthropicExecutor(Executor):
             default_max_output_len=default_max_output_len,
         )
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
-        self.messages_api = messages_api
 
     def from_dict(self, message: Dict[str, Any]) -> 'Message':
         role = message['role']
@@ -170,35 +168,16 @@ class AnthropicExecutor(Executor):
             else:
                 wrapped.append({'role': messages[i].role(), 'content': messages[i].message.get_str()})
 
-        messages_list = []
-
-        # for i in range(len(wrapped)):
-        #     if i > 0 and wrapped[i]['role'] == wrapped[i - 1]['role']:
-        #         if wrapped[i]['role'] == 'user':
-        #             messages_list.append({'role': 'assistant', 'content': 'Thanks. Ready for next message.'})
-        #         elif wrapped[i]['role'] == 'assistant':
-        #             messages_list.append({'role': 'user', 'content': 'Thanks. Read for your next message.'})
-        #     messages_list.append(wrapped[i])
-
         return wrapped
 
     def user_token(self):
-        if self.messages_api:
-            return 'User'
-        else:
-            return HUMAN_PROMPT.replace(':', '').replace('\n', '')
+        return 'User'
 
     def assistant_token(self) -> str:
-        if self.messages_api:
-            return 'Assistant'
-        else:
-            return AI_PROMPT.replace(':', '').replace('\n', '')
+        return 'Assistant'
 
     def append_token(self) -> str:
-        if self.messages_api:
-            return ''
-        else:
-            return AI_PROMPT
+        return ''
 
     def count_tokens(
         self,
@@ -253,8 +232,9 @@ class AnthropicExecutor(Executor):
         messages: List[Dict[str, Any]],
         functions: List[Dict[str, str]] = [],
         model: Optional[str] = None,
-        max_output_tokens: int = 2048,
+        max_output_tokens: int = 4096,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
@@ -322,25 +302,16 @@ class AnthropicExecutor(Executor):
         token_trace.start()
 
         try:
-            if self.messages_api:
-                # AsyncStreamManager[AsyncMessageStream]
-                stream = self.client.messages.stream(
-                    max_tokens=max_output_tokens,
-                    messages=messages_list,  # type: ignore
-                    model=model,
-                    system=system_message,
-                    temperature=temperature,
-                )
-                return TokenStreamManager(stream, token_trace)
-            else:
-                stream = await self.client.completions.create(
-                    max_tokens_to_sample=max_output_tokens,
-                    model=model,
-                    stream=True,
-                    temperature=temperature,
-                    prompt=self.__format_prompt(messages_list),
-                )
-                return TokenStreamManager(stream, token_trace)
+            # AsyncStreamManager[AsyncMessageStream]
+            stream = self.client.messages.stream(
+                max_tokens=max_output_tokens,
+                messages=messages_list,  # type: ignore
+                model=model,
+                system=system_message,
+                temperature=temperature,
+                stop_sequences=stop_tokens,
+            )
+            return TokenStreamManager(stream, token_trace)
         except Exception as e:
             logging.error(e)
             raise
@@ -348,10 +319,12 @@ class AnthropicExecutor(Executor):
     async def aexecute(
         self,
         messages: List[Message],
-        max_output_tokens: int = 2048,
+        max_output_tokens: int = 4096,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         model = model if model else self.default_model
 
@@ -389,6 +362,7 @@ class AnthropicExecutor(Executor):
             max_output_tokens=max_output_tokens,
             model=model,
             temperature=temperature,
+            stop_tokens=stop_tokens,
         )
 
         text_response = ''
@@ -401,26 +375,17 @@ class AnthropicExecutor(Executor):
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
-        if self.messages_api:
-            final_message = await stream_async.get_final_message()  # type: ignore
-            # anthropic API does the proper accounting of input/output tokens, so set them here.
-            if final_message:
-                perf._prompt_len = final_message.usage.input_tokens
-                perf._sample_len = final_message.usage.output_tokens
-                perf.object = final_message  # type: ignore
-        else:
-            async for completion in await stream:  # type: ignore
-                s = completion.completion
-                await stream_handler(Content(s))
-                text_response += s
-            await stream_handler(TokenStopNode())
+        await stream_async.get_final_message()  # this forces an update to the perf object
+        perf.log()
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [self.from_dict(m) for m in messages_list]
 
         assistant = Assistant(
             message=conversation[-1].message,
-            messages_context=conversation
+            messages_context=conversation,
+            stop_reason=perf.stop_reason,
+            stop_token=perf.stop_token,
         )
         assistant.perf_trace = perf
         if assistant.message.get_str() == '':
@@ -431,8 +396,9 @@ class AnthropicExecutor(Executor):
     def execute(
         self,
         messages: List[Message],
-        max_output_tokens: int = 2048,
+        max_output_tokens: int = 4096,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:
@@ -440,4 +406,4 @@ class AnthropicExecutor(Executor):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))

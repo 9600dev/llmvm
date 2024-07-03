@@ -135,8 +135,9 @@ class Executor(ABC):
         messages: List['Message'],
         max_output_tokens: int = 2048,
         temperature: float = 1.0,
-        stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
+        stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
         template_args: Optional[Dict[str, Any]] = None,
     ) -> 'Assistant':
         pass
@@ -186,8 +187,9 @@ class Executor(ABC):
         messages: List['Message'],
         max_output_tokens: int = 2048,
         temperature: float = 1.0,
-        stream_handler: Optional[Callable[['AstNode'], None]] = None,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
+        stream_handler: Optional[Callable[['AstNode'], None]] = None,
         template_args: Optional[Dict[str, Any]] = None,
     ) -> 'Assistant':
         pass
@@ -292,6 +294,7 @@ class LLMCall():
         max_prompt_len: int,
         completion_tokens_len: int,
         prompt_name: str,
+        stop_tokens: List[str] = [],
         stream_handler: Callable[['AstNode'], Awaitable[None]] = awaitable_none
     ):
         self.user_message = user_message
@@ -302,6 +305,7 @@ class LLMCall():
         self.max_prompt_len = max_prompt_len
         self.completion_tokens_len = completion_tokens_len
         self.prompt_name = prompt_name
+        self.stop_tokens = stop_tokens
         self.stream_handler = stream_handler
 
     def copy(self):
@@ -314,6 +318,7 @@ class LLMCall():
             max_prompt_len=self.max_prompt_len,
             completion_tokens_len=self.completion_tokens_len,
             prompt_name=self.prompt_name,
+            stop_tokens=self.stop_tokens,
             stream_handler=self.stream_handler,
         )
 
@@ -565,6 +570,7 @@ class Message(AstNode):
         message: Content,
     ):
         self.message: Content = message
+        self.pinned: int = 0  # 0 is not pinned, -1 is pinned last, anything else is pinned
 
     @abstractmethod
     def role(self) -> str:
@@ -718,12 +724,16 @@ class Assistant(Message):
         messages_context: List[Message] = [],
         system_context: object = None,
         llm_call_context: object = None,
+        stop_reason: str = '',
+        stop_token: str = '',
     ):
         super().__init__(message)
         self.error = error
         self._llm_call_context: object = llm_call_context
         self._system_context = system_context,
         self._messages_context: List[Message] = messages_context
+        self.stop_reason: str = stop_reason
+        self.stop_token: str = stop_token
         self.perf_trace: object = None
 
     def role(self) -> str:
@@ -740,6 +750,8 @@ class Assistant(Message):
             messages_context=self._messages_context,
             system_context=self._system_context,
             llm_call_context=self._llm_call_context,
+            stop_reason=self.stop_reason,
+            stop_token=self.stop_token,
         )
         return assistant
 

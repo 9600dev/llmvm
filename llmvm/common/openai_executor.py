@@ -23,7 +23,7 @@ class OpenAIExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
-        default_model: str = 'gpt-4-1106-preview',
+        default_model: str = 'gpt-4o',
         api_endpoint: str = 'https://api.openai.com/v1',
         default_max_token_len: int = 128000,
         default_max_output_len: int = 4096,
@@ -103,9 +103,12 @@ class OpenAIExecutor(Executor):
                         for list_item in value:
                             if 'type' in list_item and list_item['type'] == 'image_url' and 'image_url' in list_item:
                                 if 'detail' in list_item['image_url'] and list_item['image_url']['detail'] == 'high':
-                                    with Image.open(BytesIO(base64.b64decode(list_item['image_url']['url'].split(',')[1]))) as img:  # NOQA: E501
-                                        width, height = img.size
-                                        num_tokens += self.__calculate_image_tokens(width=width, height=height)
+                                    try:
+                                        with Image.open(BytesIO(base64.b64decode(list_item['image_url']['url'].split(',')[1]))) as img:  # NOQA: E501
+                                            width, height = img.size
+                                            num_tokens += self.__calculate_image_tokens(width=width, height=height)
+                                    except Exception as e:
+                                        num_tokens += 85
                                 else:
                                     num_tokens += 85
                     else:
@@ -132,6 +135,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         max_output_tokens: int = 4096,
         temperature: float = 0.0,
@@ -153,25 +157,19 @@ class OpenAIExecutor(Executor):
         token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
-        if functions:
-            response = await self.aclient.chat.completions.create(
-                model=model,
-                temperature=temperature,
-                max_tokens=max_output_tokens,
-                functions=functions_cast,
-                messages=messages_cast,
-                stream=True
-            )
-            return TokenStreamManager(response, token_trace) # type: ignore
-        else:
-            # for whatever reason, [] functions generates an InvalidRequestError
-            response = await self.aclient.chat.completions.create(
-                model=model if model else self.default_model,
-                temperature=temperature,
-                max_tokens=max_output_tokens,
-                messages=messages_cast,
-                stream=True
-            )
+        base_params = {
+            "model": model if model else self.default_model,
+            "temperature": temperature,
+            "max_tokens": max_output_tokens,
+            "messages": messages_cast,
+            "stop": stop_tokens if stop_tokens else None,
+            "functions": functions_cast if functions else None,
+            "stream": True
+        }
+
+        params = {k: v for k, v in base_params.items() if v is not None}
+        response = await self.aclient.chat.completions.create(**params)
+
         return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(
@@ -179,6 +177,7 @@ class OpenAIExecutor(Executor):
         messages: List[Message],
         max_output_tokens: int = 4096,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
@@ -217,23 +216,33 @@ class OpenAIExecutor(Executor):
             max_output_tokens=max_output_tokens,
             model=model if model else self.default_model,
             temperature=temperature,
+            stop_tokens=stop_tokens,
         )
 
         text_response = ''
+        perf = None
 
         async with await stream as stream_async:  # type: ignore
             async for text in stream_async:  # type: ignore
                 await stream_handler(Content(text))
                 text_response += text
             await stream_handler(TokenStopNode())
+            perf = stream_async.perf
 
         messages_list.append({'role': 'assistant', 'content': text_response})
         conversation: List[Message] = [Message.from_dict(m) for m in messages_list]
 
+        await stream_async.get_final_message()
+
+        # todo, stashing this in 'perf' isn't great, should probably fix that.
         assistant = Assistant(
             message=conversation[-1].message,
-            messages_context=conversation
+            messages_context=conversation,
+            stop_reason=stream_async.perf.stop_reason,
+            stop_token=stream_async.perf.stop_token,
         )
+
+        perf.log()
 
         messages_trace(messages_list)
 
@@ -244,6 +253,7 @@ class OpenAIExecutor(Executor):
         messages: List[Message],
         max_output_tokens: int = 2048,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:
@@ -251,4 +261,4 @@ class OpenAIExecutor(Executor):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))

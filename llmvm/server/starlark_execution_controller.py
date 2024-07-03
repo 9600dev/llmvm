@@ -58,6 +58,7 @@ class ExecutionController(Controller):
                 temperature=llm_call.temperature,
                 stream_handler=llm_call.stream_handler,
                 model=llm_call.model,
+                stop_tokens=llm_call.stop_tokens,
             )
             role_debug(logging, llm_call.prompt_name, 'User', str(llm_call.user_message.message))
             role_debug(logging, llm_call.prompt_name, 'Assistant', str(assistant.message))
@@ -857,16 +858,16 @@ class ExecutionController(Controller):
 
         return results
 
-    async def aexecute_two(
+    async def aexecute_continuation(
         self,
         messages: List[Message],
         temperature: float = 0.0,
         model: Optional[str] = None,
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
-        template_args: Optional[Dict[str, Any]] = None,
+        template_args: Dict[str, Any] = {},
         agents: List[Callable] = [],
-        cookies: Optional[List[Dict[str, Any]]] = None,
+        cookies: List[Dict[str, Any]] = [],
     ) -> List[Statement]:
 
         from llmvm.server.starlark_runtime import StarlarkRuntime
@@ -874,159 +875,182 @@ class ExecutionController(Controller):
 
         model = model if model else self.executor.get_default_model()
 
-        def find_answers(d: Dict[Any, Any]) -> List[Statement]:
-            current_results = []
-            for _, value in d.items():
-                if isinstance(value, Answer):
-                    current_results.append(cast(Answer, value))
-                if isinstance(value, dict):
-                    current_results.extend(find_answers(value))
-            return current_results
-
-        results: List[Statement] = []
-
-        # assess the type of task
-        last_message = Helpers.last(lambda m: isinstance(m, User), messages)
-        if not last_message: return []
-
-        skip_generation = False
         response: Assistant = Assistant(Content(''))
 
-        code_message = Helpers.first(lambda m: StarlarkRuntime.get_code_blocks(m.message.get_str()), messages)
+        # a single code block is supported as a special case which we execute immediately
+        if StarlarkRuntime.only_code_block(messages[-1].message.get_str()):
+            response.message = messages[-1].message
+            messages.remove(messages[-1])
+            raise NotImplementedError('Code block execution is not yet supported.')
 
-        if code_message:
-            skip_generation = True
-            response.message = code_message.message
-            messages.remove(code_message)
+        # {{templates}}
+        # check to see if the messages have {{templates}} in them, and if so, replace
+        # with template_args.
+        for i in range(len(messages)):
+            message_text = messages[i].message.get_str()
+            for key, value in template_args.items():
+                key_replace = '{{' + key + '}}'
+                if key_replace in message_text:
+                    messages[i].message = Content(message_text.replace(key_replace, value))
 
-
-        # if it requires tooling, hand it off to the AST execution engine
-        if 'tool' in classification or 'code' in classification:
-            if 'tool' in classification and not skip_generation:
-                response = await self.abuild_runnable_tools_ast(
-                    llm_call=LLMCall(
-                        user_message=messages[-1],
-                        context_messages=messages[0:-1],
-                        executor=self.executor,
-                        model=model,
-                        temperature=temperature,
-                        max_prompt_len=self.executor.max_input_tokens(),
-                        completion_tokens_len=self.executor.max_output_tokens(),
-                        prompt_name='',
-                        stream_handler=stream_handler
-                    ),
-                    agents=self.agents,
-                )
-            elif 'code' in classification and not skip_generation:
-                files = template_args['files'] if template_args and 'files' in template_args else []
-                if files:
-                    starlark_runtime.globals_dict['source_project'].set_files(files)
-                response = await self.abuild_runnable_code_ast(
-                    llm_call=LLMCall(
-                        user_message=messages[-1],
-                        context_messages=messages[0:-1],
-                        executor=self.executor,
-                        model=model,
-                        temperature=temperature,
-                        max_prompt_len=self.executor.max_input_tokens(),
-                        completion_tokens_len=self.executor.max_output_tokens(),
-                        prompt_name='',
-                        stream_handler=stream_handler
-                    ),
-                    files=files,
-                )
-
-            assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
-
-            code_blocks = StarlarkRuntime.get_code_blocks(assistant_response_str)
-            # todo for now, just join them
-            assistant_response_str = '\n'.join(code_blocks)
-
-            no_indent_debug(logging, '')
-            no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')
-            # debug out AST
-            lines = assistant_response_str.split('\n')
-            line_counter = 1
-            for line in lines:
-                line = line.replace('[', '\\[')
-                no_indent_debug(logging, f'{line_counter:02}  {line}')
-                line_counter+=1
-            no_indent_debug(logging, '')
-
-            # debug output
-            response_writer('llm_call', assistant_response_str)
-
-            if self.edit_hook:
-                assistant_response_str = self.edit_hook(assistant_response_str)
-
-                # check to see if there is natural language in there or not
-                try:
-                    _ = ast.parse(assistant_response_str)
-                except SyntaxError as ex:
-                    logging.debug('aexecute() SyntaxError: {}'.format(ex))
-                    assistant_response_str = starlark_runtime.compile_error(
-                        starlark_code=assistant_response_str,
-                        error=str(ex),
+        # {{functions}}
+        # deal with the {{functions}} special case
+        for i in range(len(messages)):
+            message_text = messages[i].message.get_str()
+            if '{{functions}}' in message_text:
+                messages[i].message = Content(
+                    message_text.replace(
+                        '{{functions}}', '\n'.join([Helpers.get_function_description_flat(f) for f in agents])
                     )
-
-            if not self.continuation_passing_style:
-                old_model = starlark_runtime.controller.get_executor().get_default_model()
-
-                if model:
-                    starlark_runtime.controller.get_executor().set_default_model(model)
-
-                locals_dict = {'cookies': cookies} if cookies else {}
-                _ = starlark_runtime.run(
-                    starlark_code=assistant_response_str,
-                    original_query=messages[-1].message.get_str(),
-                    messages=messages,
-                    locals_dict=locals_dict
                 )
-                results.extend(starlark_runtime.answers)
 
-                if model:
-                    starlark_runtime.controller.get_executor().set_default_model(old_model)
+        completed = False
+        results: List[Statement] = []
+        old_model = starlark_runtime.controller.get_executor().get_default_model()
+        if model: starlark_runtime.controller.get_executor().set_default_model(model)
 
-                return results
-            else:
-                old_model = starlark_runtime.controller.get_executor().get_default_model()
+        # inject the starlark_continuation_execution.prompt prompt
+        functions = [Helpers.get_function_description_flat(f) for f in agents]
+        human_query = messages[-1].message.get_str()
+        system_message, tools_message = Helpers.prompts(
+            prompt_name='starlark_continuation_execution.prompt',
+            template={
+                'functions': '\n'.join(functions),
+                'user_input': human_query,
+            },
+            user_token=self.get_executor().user_token(),
+            assistant_token=self.get_executor().assistant_token(),
+            append_token=self.get_executor().append_token(),
+        )
 
-                if model:
-                    starlark_runtime.controller.get_executor().set_default_model(model)
+        # inject the tools_message into the messages, and make sure it's first.
+        tools_message.pinned = 0  # pinned as the first message # todo: thread this through the system
+        messages_copy = []
+        messages_copy.append(system_message)
+        messages_copy.append(tools_message)
+        messages_copy.append(Assistant(Content('Yes, I am ready.')))
+        messages_copy.extend(copy.deepcopy(messages[0:-1]))
+        messages_copy.append(messages[-1])
 
-                locals_dict = {'cookies': cookies} if cookies else {}
+        while not completed:
+            llm_call = LLMCall(
+                user_message=messages_copy[-1],
+                context_messages=messages_copy[0:-1],
+                executor=self.executor,
+                model=model,
+                temperature=temperature,
+                max_prompt_len=self.executor.max_input_tokens(),
+                completion_tokens_len=self.executor.max_output_tokens(),
+                prompt_name='',
+                stop_tokens=['</code>', '</complete>'],
+                stream_handler=stream_handler
+            )
 
-                _ = starlark_runtime.run_continuation_passing(
-                    starlark_code=assistant_response_str,
-                    original_query=messages[-1].message.get_str(),
-                    messages=messages,
-                    locals_dict=locals_dict
-                )
-                results.extend(starlark_runtime.answers)
-                return results
-        else:
-            # classified or specified as 'direct'
-            assistant_reply: Assistant = await self.aexecute_llm_call(
-                llm_call=LLMCall(
-                    user_message=messages[-1],
-                    context_messages=messages[0:-1],
-                    executor=self.executor,
-                    model=model,
-                    temperature=temperature,
-                    max_prompt_len=self.executor.max_input_tokens(),
-                    completion_tokens_len=self.executor.max_output_tokens(),
-                    prompt_name='',
-                    stream_handler=stream_handler,
-                ),
+            response: Assistant = await self.aexecute_llm_call(
+                llm_call,
                 query=messages[-1].message.get_str(),
                 original_query='',
                 compression=compression
             )
 
-            results.append(Answer(
-                conversation=[assistant_reply],
-                result=assistant_reply.message
-            ))
+            # openai doesn't return the stop token, so we should check the last message for the <code> token
+            if (
+                '<code>' in response.message.get_str()
+                and response.stop_token == ''
+                and self.get_executor().name() == 'openai'
+            ):
+                response.stop_token = '</code>'
 
-        return results
+            if (
+                response.stop_reason == 'stop'
+                and response.stop_token != '</code>'
+                and self.get_executor().name() == 'openai'
+            ):
+                response.stop_token = '</complete>'
 
+            # we don't want two assistant messages in a row (which is what happens if you're asking
+            # for a continuation), so we remove the last message and replace it with the response
+            if isinstance(messages_copy[-1], Assistant):
+                previous_assistant = messages_copy.pop()
+                response.message = Content(previous_assistant.message.get_str() + ' ' + response.message.get_str())
+
+            # add the stop token to the response
+            if response.stop_token and response.stop_token == '</code>':
+                response.message = Content(response.message.get_str() + response.stop_token)
+
+            assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
+            code_blocks: List[str] = StarlarkRuntime.get_code_blocks(assistant_response_str)
+
+            if code_blocks:
+                # emit some debugging
+                code_block = '\n'.join(code_blocks)
+
+                no_indent_debug(logging, '')
+                no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')
+                # debug out AST
+                lines = code_block.split('\n')
+                line_counter = 1
+                for line in lines:
+                    line = line.replace('[', '\\[')
+                    no_indent_debug(logging, f'{line_counter:02}  {line}')
+                    line_counter+=1
+                no_indent_debug(logging, '')
+
+                # debug output
+                response_writer('llm_call', code_block)
+
+                try:
+                    _ = ast.parse(code_block)
+                except SyntaxError as ex:
+                    logging.debug('aexecute() SyntaxError: {}'.format(ex))
+                    code_block = starlark_runtime.compile_error(
+                        starlark_code=code_block,
+                        error=str(ex),
+                    )
+
+                locals_dict = {'cookies': cookies} if cookies else {}
+                locals_dict = starlark_runtime.run(
+                    starlark_code=code_block,
+                    original_query=messages[-1].message.get_str(),
+                    messages=messages,
+                    locals_dict=locals_dict
+                )
+                results.extend(starlark_runtime.answers)
+
+                # we have the result of the code block execution, now we need to rewrite the assistant
+                # message to include the result of the code block execution and continue
+                answers = ''
+                if starlark_runtime.answers:
+                    answers = '\n'.join([str(a.result()) for a in starlark_runtime.answers])
+                    answers = f'<code_result>{answers}</code_result>'
+                else:
+                    # sometimes dove doesn't generate an answer() block, so we'll have to get the last
+                    # assignment of the code and use that.
+                    last_assignment = starlark_runtime.get_last_assignment(code_block, locals_dict)
+                    if last_assignment:
+                        answers = f'<code_result>{str(last_assignment[1])}</code_result>'
+
+                # assistant_response_str will have a code block <code></code> in it, so we need to replace it with the answers
+                # use regex to replace the code block with the answers
+                assistant_response_str = re.sub(r'<code>.*?</code>', answers, assistant_response_str, flags=re.DOTALL)
+                messages_copy.append(Assistant(Content(assistant_response_str)))
+            elif response.stop_token and response.stop_token == '</complete>':
+                # if we have a stop token, there are no code blocks, so we can just append the response
+                if response.message.get_str().strip() != '':
+                    results.append(Answer(
+                        conversation=[response],
+                        result=response.message.get_str()
+                    ))
+                completed = True
+            else:
+                # if there are no code blocks, we're done
+                if response.message.get_str().strip() != '':
+                    results.append(Answer(
+                        conversation=[response],
+                        result=response.message
+                    ))
+                completed = True
+                results.extend(starlark_runtime.answers)
+
+        if model: starlark_runtime.controller.get_executor().set_default_model(old_model)
+        return Helpers.remove_duplicates(results, lambda a: a.result())

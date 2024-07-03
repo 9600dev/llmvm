@@ -130,30 +130,29 @@ class StarlarkRuntime:
         self.globals_dict['get_references'] = source.get_references
 
     @staticmethod
+    def only_code_block(code: str) -> bool:
+        code = code.strip()
+        return (
+            (code.startswith('```starlark') or code.startswith('<code>'))
+            and (code.endswith('```') or code.endswith('</code>'))
+        )
+
+    @staticmethod
     def get_code_blocks(code: str) -> List[str]:
+        # pattern = r'(?:```(?:python|starlark)\s*([\s\S]*?)\s*```|<code>\s*([\s\S]*?)\s*</code>)'
+        pattern = r'(?:```(?:starlark)\s*([\s\S]*?)\s*```|<code>\s*([\s\S]*?)\s*</code>)'
+
+        def extract_code_blocks(text):
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            return [match[0] or match[1] for match in matches if match[0] or match[1]]
+
         code = code.strip()
         ordered_blocks = []
-        # Pattern to match starlark, python, unnamed code blocks, inline code snippets, and <code> tags
-        pattern = r'```(starlark|python)?\n(.*?)```|`(.*?)`|<code>(.*?)</code>'
-        matches = re.findall(pattern, code, re.DOTALL)
-        for match in matches:
-            lang, block, single_block, code_tag_block = match
+        for block in extract_code_blocks(code):
             if block:
                 try:
                     ast.parse(block)
                     ordered_blocks.append(block)
-                except SyntaxError:
-                    pass
-            elif single_block:
-                try:
-                    ast.parse(single_block)
-                    ordered_blocks.append(single_block)
-                except SyntaxError:
-                    pass
-            elif code_tag_block:
-                try:
-                    ast.parse(code_tag_block)
-                    ordered_blocks.append(code_tag_block)
                 except SyntaxError:
                     pass
         return ordered_blocks
@@ -542,6 +541,11 @@ class StarlarkRuntime:
             self.answers.append(answer)
             return answer
 
+        # todo: hack for continuations
+        answer = Answer(conversation=self.messages_list, result=str(expr))
+        self.answers.append(answer)
+        return answer
+
         # if we have a FunctionCallMeta object, it's likely we've called a helper function
         # and we're just keen to return that.
         # Handing this to the LLM means that call results that are larger than the context window
@@ -721,6 +725,32 @@ class StarlarkRuntime:
 
         var_node = ast.Name(variable_name, ctx=ast.Load())
         return var_node, assignment_node
+
+    def get_last_assignment(
+        self,
+        code: str,
+        locals_dict: Dict[str, Any],
+    ) -> Optional[Tuple[str, str]]:
+        ast_parsed_code_block = ast.parse(code)
+        last_stmt = ast_parsed_code_block.body[-1]
+
+        # Check if it's an assignment
+        if isinstance(last_stmt, ast.Assign):
+            # Get the target (left side of the assignment)
+            target = last_stmt.targets[0]
+
+            # Check if the target is a simple variable name
+            if isinstance(target, ast.Name):
+                var_name = target.id
+
+                # Get the value from local_dict if it exists
+                if var_name in locals_dict:
+                    return (var_name, locals_dict[var_name])
+                else:
+                    return None
+
+        # If it's not an assignment or doesn't have a simple variable name target
+        return None
 
     def rewrite_starlark_error_correction(
         self,

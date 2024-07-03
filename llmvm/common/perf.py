@@ -47,12 +47,14 @@ class TokenPerf:
         self._start: float = 0.0
         self._stop: float = 0.0
         self._prompt_len: int = prompt_len
-        self._sample_len: int = 0
+        self._completion_len: int = 0
         self._ticks: List[float] = []
         self.enabled = enabled
         self.log_file = log_file
         self.calculator = TokenPriceCalculator()
         self.request_id = request_id
+        self.stop_reason = ''
+        self.stop_token = ''
         self.object = None
 
     def start(self):
@@ -73,31 +75,33 @@ class TokenPerf:
             return sum(list) / len(list)
 
         if self.enabled:
-            total_time = self._stop - self._start
-            prompt_time = self._ticks[0] - self._start if self._ticks else 0
-            sample_time = total_time - prompt_time
+            ttlt = self._stop - self._start
+            ttft = self._ticks[0] - self._start if self._ticks else 0
+            completion_time = ttlt - ttft
             try:
-                s_tok_sec = len(self._ticks) / total_time
+                s_tok_sec = len(self._ticks) / ttlt
             except ZeroDivisionError:
                 s_tok_sec = 0.0
             try:
-                p_tok_sec = self._prompt_len / prompt_time
+                p_tok_sec = self._prompt_len / ttft
             except ZeroDivisionError:
                 p_tok_sec = 0.0
             return {
                 'name': self._name,
                 'executor': self._executor,
                 'model': self._model,
-                'total_time': total_time,
-                'prompt_time': prompt_time,
-                'sample_time': sample_time,
+                'ttlt': ttlt,
+                'ttft': ttft,
+                'completion_time': completion_time,
                 'prompt_len': self._prompt_len,
-                'sample_len': self._sample_len if self._sample_len > 0 else len(self._ticks),
+                'completion_len': self._completion_len if self._completion_len > 0 else len(self._ticks),
                 's_tok_sec': s_tok_sec,
                 'p_tok_sec': p_tok_sec,
                 'p_cost': self._prompt_len * self.calculator.input_price(self._model, self._executor),
                 's_cost': len(self._ticks) * self.calculator.output_price(self._model, self._executor),
                 'request_id': self.request_id,
+                'stop_reason': self.stop_reason,
+                'stop_token': self.stop_token,
                 'ticks': self.ticks()
             }
         else:
@@ -116,7 +120,7 @@ class TokenPerf:
     def __str__(self):
         if self.enabled:
             res = self.result()
-            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["total_time"]},{res["prompt_time"]},{res["sample_time"]},{res["prompt_len"]},{res["sample_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{res["request_id"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
+            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["ttlt"]},{res["ttft"]},{res["completion_time"]},{res["prompt_len"]},{res["completion_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{res["request_id"]},{res["stop_reason"]},{res["stop_token"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
             return result
         else:
             return ''
@@ -127,9 +131,9 @@ class TokenPerf:
             # output \n to the debug stream without using logging.debug
             import sys
             sys.stderr.write('\n')
-            logging.debug(f"total_time: {res['total_time']:.2f} prompt_time: {res['prompt_time']:.2f} sample_time: {res['sample_time']:.2f}")
-            logging.debug(f"prompt_len: {res['prompt_len']} sample_len: {res['sample_len']}")
-            logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f}")
+            logging.debug(f"ttlt: {res['ttlt']:.2f} ttft: {res['ttft']:.2f} completion_time: {res['completion_time']:.2f}")
+            logging.debug(f"prompt_len: {res['prompt_len']} completion_len: {res['completion_len']}")
+            logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f} stop_reason: {res['stop_reason']}")
             logging.debug(f"p_cost: ${res['p_cost']:.5f} s_cost: ${res['s_cost']:.5f} request_id: {res['request_id']}")
 
     def log(self):
@@ -137,7 +141,7 @@ class TokenPerf:
             self.debug()
             if not os.path.exists(os.path.expanduser(self.log_file)):
                 with open(os.path.expanduser(self.log_file), 'w') as f:
-                    f.write('name,executor,model,total_time,prompt_time,prompt_tokens,sample_time,prompt_len,sample_len,p_tok_sec,s_tok_sec,p_cost,s_cost,request_id,ticks\n')
+                    f.write('name,executor,model,ttlt,ttft,prompt_tokens,completion_time,prompt_len,completion_len,p_tok_sec,s_tok_sec,p_cost,s_cost,request_id,stop_reason,stop_token,ticks\n')
             with open(os.path.expanduser(self.log_file), 'a') as f:
                 result = str(self)
                 f.write(result + '\n')
@@ -146,16 +150,18 @@ class TokenPerf:
             return {
                 'name': self._name,
                 'executor': self._executor,
-                'total_time': 0.0,
-                'prompt_time': 0.0,
-                'sample_time': 0.0,
+                'ttlt': 0.0,
+                'ttft': 0.0,
+                'completion_time': 0.0,
                 'prompt_len': 0,
-                'sample_len': 0,
+                'completion_len': 0,
                 'p_tok_sec': 0.0,
                 's_tok_sec': 0.0,
                 'p_cost': 0.0,
                 's_cost': 0.0,
                 'request_id': '',
+                'stop_reason': '',
+                'stop_token': '',
                 'ticks': []
             }
 
@@ -175,6 +181,8 @@ class LoggingAsyncIterator:
             if isinstance(result, AnthropicCompletion):
                 return cast(str, result.completion or '')
             elif isinstance(result, OAICompletion):
+                if result.choices[0].finish_reason:
+                    self.perf.stop_reason = result.choices[0].finish_reason
                 return cast(str, result.choices[0].delta.content or '')  # type: ignore
             elif isinstance(result, MistralCompletion):
                 return cast(str, result.choices[0].delta.content or '')  # type: ignore
@@ -187,7 +195,6 @@ class LoggingAsyncIterator:
         except StopAsyncIteration:
             if self.perf.enabled:
                 self.perf.stop()
-                self.perf.log()
             raise
 
 
@@ -215,7 +222,13 @@ class TokenStreamWrapper:
     # but we don't need it as we're streaming
     async def get_final_message(self) -> Optional[AnthropicMessage]:
         if isinstance(self.object, AsyncMessageStream):
-            return await self.object.get_final_message()
+            final_message = await self.object.get_final_message()
+            self.perf._prompt_len = final_message.usage.input_tokens
+            self.perf._completion_len = final_message.usage.output_tokens
+            self.perf.object = final_message  # type: ignore
+            self.perf.stop_reason = str(final_message.stop_reason) if final_message.stop_reason else ''
+            self.perf.stop_token = final_message.stop_sequence if final_message.stop_sequence else ''
+            return final_message
         else:
             return None
 
@@ -224,11 +237,13 @@ class TokenStreamManager:
     def __init__(
         self,
         stream: AsyncMessageStreamManager | AnthropicAsyncStream[AnthropicCompletion] | openai.AsyncStream,  # type: ignore
-        token_perf: 'TokenPerf'
+        token_perf: 'TokenPerf',
+        stop_tokens: List[str] = []
     ):
         self.stream = stream
         self.perf = token_perf
         self.token_perf_wrapper = None
+        self.stop_tokens = stop_tokens
 
     async def __aenter__(self) -> TokenStreamWrapper:
         self.perf.start()

@@ -231,8 +231,8 @@ If the LLMVM server is running, profiling output will be emitted there, and if t
 ```bash
 export LLMVM_PROFILING="true"
 
-DEBUG    total_time: 0.59 prompt_time: 0.43 sample_time: 0.15             perf.py:127
-DEBUG    prompt_len: 7 sample_len: 18                                     perf.py:128
+DEBUG    total_time: 0.59 prompt_time: 0.43 completion_time: 0.15             perf.py:127
+DEBUG    prompt_len: 7 completion_len: 18                                 perf.py:128
 DEBUG    p_tok_sec: 16.14 s_tok_sec: 32.37                                perf.py:129
 DEBUG    p_cost: $0.00000 s_cost: $0.00002 request_id:                    perf.py:130
 ```
@@ -423,7 +423,7 @@ firefox_headless: true
 
 You can also copy your own browsers cookies file into Playwright's Firefox automation instance. This allows the Playwright instance to assume your logged in sessions to things like LinkedIn. Simply:
 
-* run ```scripts/extract_cookies.sh > cookies.txt```
+* run ```scripts/extract_firefox_cookies.sh > cookies.txt```
 * move the cookies.txt file to a secure location
 * update ```config.yaml``` to point to the cookies file:
 

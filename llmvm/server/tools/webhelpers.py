@@ -12,6 +12,7 @@ from llmvm.common.helpers import write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Content, MarkdownContent
 from llmvm.server.tools.firefox import FirefoxHelpers
+from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.tools.search import SerpAPISearcher
 
 logging = setup_logging()
@@ -77,12 +78,12 @@ class WebHelpers():
     def get_linkedin_profile(linkedin_url: str) -> str:
         """
         Extracts the career information from a person's LinkedIn profile from a given LinkedIn url and returns
-        it as a string.
+        the career information as a string.
         """
         from llmvm.common.pdf import PdfHelpers
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
 
-        firefox_helpers = FirefoxHelpers()
+        firefox_helpers = ChromeHelpers()
         asyncio.run(firefox_helpers.goto(linkedin_url))
         asyncio.run(firefox_helpers.wait_until_text('Experience'))
         pdf_file = asyncio.run(firefox_helpers.pdf())
@@ -95,7 +96,7 @@ class WebHelpers():
     def search_linkedin_profile(first_name: str, last_name: str, company_name: str) -> str:
         """
         Searches for the LinkedIn profile of a given first name and last name and optional company name and returns the
-        LinkedIn profile. If you use this method you do not need to call get_linkedin_profile.
+        LinkedIn profile information as a string. If you call this method you do not need to call get_linkedin_profile().
         """
         searcher = SerpAPISearcher()
         links = searcher.search_internet('{} {}, {} linkedin profile site:linkedin.com/in/'.format(

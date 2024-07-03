@@ -163,7 +163,6 @@ class Searcher():
 
         engines = {
             'Google Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
-            'Google News': {'searcher': self.search_news_hook, 'parser': url_to_text, 'description': 'Google News Search is a news search engine. This engine is excellent at finding news about particular topics, people, companies and entities.'},  # noqa:E501
             'Google Patent Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
@@ -204,7 +203,7 @@ class Searcher():
                 self.parser = engines[key]['parser']
                 searcher = engines[key]['searcher']
 
-        write_client_stream(Content(f"I'm using the {engine} engine to perform search.\n"))
+        write_client_stream(Content(f"I think the {engine} engine is best to perform a search for {self.query}\n"))
 
         # perform the search
         search_results = []

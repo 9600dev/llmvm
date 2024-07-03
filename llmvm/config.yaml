@@ -9,6 +9,8 @@ firefox_profile: '~/.mozilla/firefox/cp6sgb0s.selenium'
 firefox_download_directory: '~/.local/share/llmvm/download'
 firefox_cookies: '~/.local/share/llmvm/cookies.txt'
 firefox_headless: true
+chrome_headless: true
+chrome_cookies: '~/.local/share/llmvm/cookies.txt'
 smtp_server: 'localhost'
 smtp_port: 1025
 smtp_username: 'hello@hello.com'
@@ -23,7 +25,7 @@ openai_api_base: 'https://api.openai.com/v1'
 openai_model: 'gpt-4o'
 openai_max_tokens: 128000
 anthropic_api_base: 'https://api.anthropic.com'
-anthropic_model: 'claude-3-sonnet-20240229'
+anthropic_model: 'claude-3-5-sonnet-20240620'
 anthropic_max_tokens: 200000
 local_api_base: 'http://localhost:8000/v1'
 local_model: 'llongorca.gguf'

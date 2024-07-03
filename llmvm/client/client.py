@@ -529,7 +529,7 @@ async def execute_llm_call(
         thread.compression = compression
 
         if mode == 'direct' or mode == 'tool' or mode == 'auto':
-            endpoint = 'tools_completions'
+            endpoint = 'tools_completions_continuation'
         else:
             endpoint = 'code_completions'
 
@@ -817,8 +817,11 @@ def print_response(messages: List[Message], escape: bool = False):
     def escape_string(input_str):
         # input_str = re.sub(r'\r?\n', '\\n', input_str)
         # input_str = re.sub(r'\t', '\\t', input_str)
-        input_str = re.sub(r'"', r'\"', input_str)
-        return input_str
+        if escape:
+            input_str = re.sub(r'"', r'\"', input_str)
+            return input_str
+        else:
+            return input_str
 
     def pprint(prepend: str, content: Content):
         markdown_tokens = ['###', '* ', '](', '```', '## ']

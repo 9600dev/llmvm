@@ -52,22 +52,22 @@ def read_netscape_cookies(cookies_txt_filename: str):
     return cookies
 
 
-class FirefoxHelpers():
+class ChromeHelpers():
     def __init__(self, cookies: List[Dict] = []):
         self.loop = asyncio.SelectorEventLoop()
         self.thread = threading.Thread(target=self._run_event_loop, daemon=True)
         self.thread.start()
-        self.firefox = FirefoxHelpersInternal(cookies=cookies)
+        self.chrome = ChromeHelpersInternal(cookies=cookies)
 
     @staticmethod
     async def check_installed() -> bool:
         try:
             playwright = await async_playwright().start()
-            browser = await playwright.firefox.launch(headless=True)
+            browser = await playwright.chromium.launch(headless=True)
             await browser.close()
             return True
         except Exception as ex:
-            logging.debug(f'FirefoxHelpers.check_installed() failed with: {ex}')
+            logging.debug(f'ChromeHelpers.check_installed() failed with: {ex}')
             return False
 
     def _run_event_loop(self):
@@ -88,31 +88,31 @@ class FirefoxHelpers():
         return future
 
     def set_cookies(self, cookies: List[Dict]):
-        self.firefox.set_cookies(cookies)
+        self.chrome.set_cookies(cookies)
 
     async def close(self) -> None:
-        return self.run_in_loop(self.firefox.close()).result()
+        return self.run_in_loop(self.chrome.close()).result()
 
     async def goto(self, url: str):
-        return self.run_in_loop(self.firefox.goto(url)).result()
+        return self.run_in_loop(self.chrome.goto(url)).result()
 
     async def wait(self, milliseconds: int) -> None:
-        return self.run_in_loop(self.firefox.wait(milliseconds)).result()
+        return self.run_in_loop(self.chrome.wait(milliseconds)).result()
 
     async def wait_until(self, selector: str) -> None:
-        return self.run_in_loop(self.firefox.wait_until(selector)).result()
+        return self.run_in_loop(self.chrome.wait_until(selector)).result()
 
     async def wait_until_text(self, selector: str) -> None:
-        return self.run_in_loop(self.firefox.wait_until_text(selector)).result()
+        return self.run_in_loop(self.chrome.wait_until_text(selector)).result()
 
     async def get_html(self) -> str:
-        return self.run_in_loop(self.firefox.get_html()).result()
+        return self.run_in_loop(self.chrome.get_html()).result()
 
     async def screenshot(self) -> bytes:
-        return self.run_in_loop(self.firefox.screenshot()).result()
+        return self.run_in_loop(self.chrome.screenshot()).result()
 
     async def get_url(self, url: str):
-        result = self.run_in_loop(self.firefox.get_url(url)).result()
+        result = self.run_in_loop(self.chrome.get_url(url)).result()
         write_client_stream(
             StreamNode(
                 obj=await self.screenshot(),
@@ -122,40 +122,40 @@ class FirefoxHelpers():
         return result
 
     async def pdf(self) -> str:
-        return self.run_in_loop(self.firefox.pdf()).result()
+        return self.run_in_loop(self.chrome.pdf()).result()
 
     async def pdf_url(self, url: str) -> str:
-        return self.run_in_loop(self.firefox.pdf_url(url)).result()
+        return self.run_in_loop(self.chrome.pdf_url(url)).result()
 
     async def clickable(self) -> List[str]:
-        return self.run_in_loop(self.firefox.clickable()).result()
+        return self.run_in_loop(self.chrome.clickable()).result()
 
     async def click(self, element) -> None:
-        return self.run_in_loop(self.firefox.click(element)).result()
+        return self.run_in_loop(self.chrome.click(element)).result()
 
     async def get_input_elements(self) -> List[ElementHandle]:
-        return self.run_in_loop(self.firefox.get_input_elements()).result()
+        return self.run_in_loop(self.chrome.get_input_elements()).result()
 
     async def get_clickable_elements(self) -> List[ElementHandle]:
-        return self.run_in_loop(self.firefox.get_clickable_elements()).result()
+        return self.run_in_loop(self.chrome.get_clickable_elements()).result()
 
     async def fill(self, element: ElementHandle, value: str) -> None:
-        return self.run_in_loop(self.firefox.fill(element, value)).result()
+        return self.run_in_loop(self.chrome.fill(element, value)).result()
 
-class FirefoxHelpersInternal():
+class ChromeHelpersInternal():
     def __init__(self, cookies: List[Dict] = []):
-        self.prefs = {
-            "print.always_print_silent": True,
-            "print.printer_Mozilla_Save_to_PDF.print_to_file": True,
-            "print_printer": "Mozilla Save to PDF",
-            "browser.download.dir": Container().get('firefox_download_directory', default=os.path.expanduser('~')),
-            "browser.download.folderList": 2,
-            "browser.helperApps.neverAsk.saveToDisk": "text/plain, application/vnd.ms-excel, text/csv, text/comma-separated-values, application/octet-stream",
-        }
-
-        profile_directory = Container().get('firefox_profile_directory', '')
-        if os.path.exists(profile_directory):
-            self.prefs.update({"profile": profile_directory})
+        self.args = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-infobars',
+            '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled',
+            '--ignore-certificate-errors',
+            '--no-first-run',
+            '--no-service-autorun',
+            '--password-store=basic',
+            '--use-mock-keychain',
+        ]
 
         self.cookies = cookies
         self._context = None
@@ -173,13 +173,13 @@ class FirefoxHelpersInternal():
     async def __new_page(self, cookies: List[Dict] = []) -> Page:
         if self.playwright is None or self.browser is None:
             self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.firefox.launch(
-                headless=Container().get('firefox_headless', default=True),
-                firefox_user_prefs=self.prefs
+            self.browser = await self.playwright.chromium.launch(
+                headless=Container().get('chrome_headless', default=True),
+                args=self.args
             )
 
         self._context = await self.browser.new_context(viewport={'width': 1920, 'height': 1080}, accept_downloads=True)
-        cookie_file = Container().get('firefox_cookies', '')
+        cookie_file = Container().get('chrome_cookies', '')
         if os.path.exists(cookie_file):
             result = read_netscape_cookies(cookie_file)
             await self._context.add_cookies(result)
@@ -251,21 +251,9 @@ class FirefoxHelpersInternal():
             return html
 
     async def pdf(self) -> str:
-        await (await self.page()).evaluate("() => { setTimeout(function() { return; }, 0); }")
-        await (await self.page()).evaluate("() => { window.print(); }")
-        await (await self.page()).evaluate("() => { setTimeout(function() { return; }, 0); }")
-
-        # we have to wait for the pdf to be produced
-        counter = 0
-        while not os.path.exists('mozilla.pdf') and counter < 7:
-            time.sleep(1)
-            counter += 1
-
-        if os.path.exists('mozilla.pdf'):
-            return os.path.abspath('mozilla.pdf')
-        else:
-            logging.debug('pdf: pdf not found')
-            return ''
+        pdf_path = 'output.pdf'
+        await (await self.page()).pdf(path=pdf_path)
+        return os.path.abspath(pdf_path)
 
     async def pdf_url(self, url: str) -> str:
         async def requests_download(url, filename: str):
@@ -279,40 +267,19 @@ class FirefoxHelpersInternal():
             return os.path.abspath(filename)
 
         if '.pdf' in url:
-            if os.path.exists('mozilla.pdf'):
-                os.remove('mozilla.pdf')
-            if os.path.exists('/tmp/mozilla.pdf'):
-                os.remove('/tmp/mozilla.pdf')
+            pdf_path = '/tmp/output.pdf'
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
             try:
                 if 'arxiv.org' in url:
-                    return await requests_download(url, '/tmp/mozilla.pdf')
+                    return await requests_download(url, pdf_path)
 
-                await (await self.page()).set_content(f"""
-                        <html>
-                        <body>
-                        <a href="{url}" download id="downloadLink">Download</a>
-                        </body>
-                        </html>
-                        """)
-
-                async with (await self.page()).expect_download() as download_info:
-                    await (await self.page()).click('#downloadLink')
-                await (await self.page()).wait_for_timeout(2000)
-
-                d = await download_info.value
-                await d.save_as('mozilla.pdf')
-                end_time = time.time() + 8
-                while time.time() < end_time:
-                    if os.path.exists('mozilla.pdf'):
-                        return os.path.abspath('mozilla.pdf')
-                    else:
-                        await asyncio.sleep(1)
-
-                logging.debug(f'pdf_url({url}) failed, trying requests')
-                return await requests_download(url, '/tmp/mozilla.pdf')
+                await self.goto(url)
+                await (await self.page()).pdf(path=pdf_path)
+                return os.path.abspath(pdf_path)
             except Exception as ex:
                 logging.debug(f'pdf_url({url}) failed with: {ex}, trying requests')
-                return await requests_download(url, '/tmp/mozilla.pdf')
+                return await requests_download(url, pdf_path)
         else:
             await self.goto(url)
             return await self.pdf()
@@ -344,3 +311,4 @@ class FirefoxHelpersInternal():
 
     async def fill(self, element: ElementHandle, value: str) -> None:
         await element.fill(value)
+

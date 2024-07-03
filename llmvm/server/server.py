@@ -579,8 +579,8 @@ async def tools_completions(request: SessionThread):
     return StreamingResponse(stream_response(stream()), media_type='text/event-stream')  # media_type="application/json")
 
 
-@app.post('/v1/chat/tools_completions_two', response_model=None)
-async def tools_completions_two(request: SessionThread):
+@app.post('/v1/chat/tools_completions_continuation', response_model=None)
+async def tools_completions_continuation(request: SessionThread):
     thread = request
 
     if not cache_session.has_key(thread.id) or thread.id == 0:
@@ -606,7 +606,7 @@ async def tools_completions_two(request: SessionThread):
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/chat/tools_completions_two?id={thread.id}&mode={mode}&model={model} \
+    logging.debug(f'/v1/chat/tools_completions_continuation?id={thread.id}&mode={mode}&model={model} \
                   &executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}')
 
     if len(messages) == 0:
@@ -627,14 +627,14 @@ async def tools_completions_two(request: SessionThread):
 
         async def execute_and_signal():
             # todo: this is a hack
-            result = await controller.aexecute(
+            result = await controller.aexecute_continuation(
                 messages=messages,
                 temperature=thread.temperature,
-                mode=mode,
                 stream_handler=callback,
                 model=model,
                 compression=compression,
-                cookies=cookies
+                cookies=cookies,
+                agents=agents
             )
             queue.put_nowait(StopNode())
             return result
