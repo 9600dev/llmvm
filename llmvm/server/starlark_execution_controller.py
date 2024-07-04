@@ -896,7 +896,8 @@ class ExecutionController(Controller):
         i = 0
         while i < len(messages):
             if (
-                '[system_message]' in messages[i].message.get_str()
+                type(messages[i]) is Content
+                and '[system_message]' in messages[i].message.get_str()
                 and '[user_message]' in messages[i].message.get_str()
             ):
                 system, user = Helpers.get_prompts(
@@ -916,22 +917,24 @@ class ExecutionController(Controller):
         # check to see if the messages have {{templates}} in them, and if so, replace
         # with template_args.
         for i in range(len(messages)):
-            message_text = messages[i].message.get_str()
-            for key, value in template_args.items():
-                key_replace = '{{' + key + '}}'
-                if key_replace in message_text:
-                    messages[i].message = Content(message_text.replace(key_replace, value))
+            if type(messages[i]) is Content:
+                message_text = messages[i].message.get_str()
+                for key, value in template_args.items():
+                    key_replace = '{{' + key + '}}'
+                    if key_replace in message_text:
+                        messages[i].message = Content(message_text.replace(key_replace, value))
 
         # {{functions}}
         # deal with the {{functions}} special case
         for i in range(len(messages)):
-            message_text = messages[i].message.get_str()
-            if '{{functions}}' in message_text:
-                messages[i].message = Content(
-                    message_text.replace(
-                        '{{functions}}', '\n'.join([Helpers.get_function_description_flat(f) for f in agents])
+            if type(messages[i]) is Content:
+                message_text = messages[i].message.get_str()
+                if '{{functions}}' in message_text:
+                    messages[i].message = Content(
+                        message_text.replace(
+                            '{{functions}}', '\n'.join([Helpers.get_function_description_flat(f) for f in agents])
+                        )
                     )
-                )
 
         # bootstrap the continuation execution
         completed = False
