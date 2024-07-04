@@ -4,23 +4,34 @@ LLMVM is a CLI based productivity tool that uses Large Language Models and local
 
 It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) is currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
 
+> Update July 3rd 2024: I've refactored most of how LLMVM works to use "continuation passing style" execution, where queries result in query -> natural language interleaved with code -> result, rather than the old query -> code -> natural language -> result. This results in significantly better task performance, so will be the default from here.
+
 LLMVM's features are best explored through examples. Let's install, then go through some:
 
 ```$ pip install llmvm-cli```
+
 ```$ playwright install firefox```
 
 ```$ python -m llmvm.server```
 
 ```bash
 Default executor is: anthropic
-Default model is: claude-3-haiku-20240307
+Default model is: claude-3-5-sonnet-20240620
+Make sure to `playwright install firefox`.
 Loaded agent: datetime
 Loaded agent: search_linkedin_profile
 Loaded agent: get_linkedin_profile
 Loaded agent: get_report
 Loaded agent: get_stock_price
 Loaded agent: get_current_market_capitalization
-INFO:     Started server process [2773530]
+Loaded agent: get_stock_volatility
+Loaded agent: get_stock_price_history
+Loaded agent: sample_normal
+Loaded agent: sample_binomial
+Loaded agent: sample_lognormal
+Loaded agent: sample_list
+Loaded agent: generate_graph_image
+INFO:     Started server process [71093]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8011 (Press CTRL+C to quit)
@@ -42,7 +53,8 @@ query>>
 query>> go to https://ten13.vc/team and get the names of the people that work there
 ```
 
-![](docs/2024-01-02-13-21-01.png)
+![](docs/2024-07-03-16-25-15.png)
+
 
 The LLMVM server is coordinating with the LLM to deconstruct the query into executable code calls various Python helpers that can be executed in the server process on behalf of the LLM. In this case, the server is using a headless Firefox instance to download the website url, screenshot and send progress back to the client, convert the website to Markdown, and hand the markdown to the LLM for name extraction. More on how this works later.
 
@@ -52,11 +64,12 @@ The LLMVM server is coordinating with the LLM to deconstruct the query into exec
 query>> I have 5 MSFT stocks and 10 NVDA stocks, what is my net worth in grams of gold?
 ```
 
-![](docs/2024-01-02-13-27-43.png)
+![](docs/2024-07-03-16-26-29.png)
 
 ...
 
-![](docs/2024-01-02-13-27-14.png)
+![](docs/2024-07-03-16-26-52.png)
+
 
 Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidia. We're also using Google Search functionality to find the latest price of gold.
 
@@ -66,7 +79,7 @@ Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidi
 query>> -p docs/turnbull-speech.pdf "what is Malcolm Turnbull advocating for?"
 ```
 
-![](docs/2024-01-02-13-38-48.png)
+![](docs/2024-07-03-16-28-03.png)
 
 LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extract text properly) and supply the LLM with the text as content for queries.
 
@@ -127,7 +140,7 @@ llm "create a nice html file to display the content" > output.html
 
 #### As a Client REPL
 
-![](docs/2024-01-02-13-56-28.png)
+![](docs/2024-07-03-16-29-13.png)
 
 It integrates well with [vim](https://neovim.io/) or your favorite editor to build multiline queries, or edit long message threads.
 
@@ -143,7 +156,7 @@ Ensure you have the following environment variables set:
 ANTHROPIC_API_KEY   # your Anthropic API key
 OPENAPI_API_KEY     # your Openai API key, or ...
 GOOGLE_API_KEY      # your Gemini API key
-EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Starlark code before it gets executed etc.
+EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Python code before it gets executed etc.
 ```
 
 These are optional:
@@ -159,33 +172,6 @@ and then:
 pip install llmvm-cli
 playwright install firefox
 ```
-
-#### Manual Installation
-
-If you don't want to do ```pip install llmvm-cli``` you use pyenv and poetry to install dependencies:
-
-* Install [pyenv](https://github.com/pyenv/pyenv):
-  * ```curl https://pyenv.run | bash```
-* Install Python 3.11.6 using pyenv and set a virtualenv:
-  * ```pyenv install 3.11.7```
-  * ```pyenv virtualenv 3.11.7 llmvm```
-  * ```pyenv local llmvm```
-* Install [poetry](https://python-poetry.org/):
-  * ```curl -sSL https://install.python-poetry.org | python3 -```
-  * ```poetry config virtualenvs.prefer-active-python true```
-* Install library dependencies:
-  * ```poetry install```
-* Install [Playwright](https://playwright.dev/python/) Firefox automation:
-  * ```playwright install firefox```
-* Install [Poppler](https://poppler.freedesktop.org/)
-  * ```sudo apt install poppler-utils```
-  * ```brew install poppler```
-* Edit and save config.yaml into the config directory
-  * ```cp llmvm/config.yaml ~/.config/llmvm/config.yaml```
-
- Run the llmvm server and client:
-  * ```python -m llmvm.server```
-  * ```python -m llmvm.client```
 
 [Optional]
 
@@ -211,6 +197,7 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
 ```yaml
 executor: 'anthropic'  # or 'openai'
+anthropic_model: 'claude-3-5-sonnet-20240620'
 ```
 
 or, you can set environment variables that specify the execution backend and the model you'd like to use:
@@ -230,10 +217,16 @@ If the LLMVM server is running, profiling output will be emitted there, and if t
 ```bash
 export LLMVM_PROFILING="true"
 
-DEBUG    total_time: 0.59 prompt_time: 0.43 completion_time: 0.15             perf.py:127
-DEBUG    prompt_len: 7 completion_len: 18                                 perf.py:128
-DEBUG    p_tok_sec: 16.14 s_tok_sec: 32.37                                perf.py:129
-DEBUG    p_cost: $0.00000 s_cost: $0.00002 request_id:                    perf.py:130
+[0] query>> what is your name?
+My name is Claude.
+
+DEBUG    ttlt: 1.19 ttft: 1.13 completion_time: 0.06                perf.py:132
+DEBUG    prompt_len: 12 completion_len: 8                           perf.py:133
+DEBUG    p_tok_sec: 10.60 s_tok_sec: 1.68 stop_reason: end_turn     perf.py:134
+DEBUG    p_cost: $0.00004 s_cost: $0.00003 request_id:              perf.py:135
+req_01CQhMdHqH6dWbp2n5mMNVCx
+
+Assistant: My name is Claude.
 ```
 
 #### Extra PDF and Markdown Parsing and Extraction Performance
@@ -257,35 +250,6 @@ query>> get https://9600.dev/authors.html and get all the author names
 Produces:
 
 ![](docs/2024-03-16-20-30-45.png)
-
-
-#### Specifying Code for Pipeline Building
-
-Instead of having the LLM generate the code for the task, it's possible to pass code directly to the server and have it execute for you. Simply pass a quoted starlark block directly:
-
-```starlark
-(```starlark) <-- remove the ()
-company = messages()[-1]
-answers = []
-search_results = search(company)
-company_summary = llm_call([search_results], "summarize what the company does and what products it sells")
-answers.append(company_summary)
-founder_search = search(f"{company} founders executive team", 3)
-for founder_result in founder_search:
-    founder = llm_call([founder_result], f"extract the names and positions of founders and executives that work at {company}")
-    answers.append(founder)
-result = llm_call(answers, "there is a company summary and then a list of people who are the founders and the executive team. Simplify this into a markdown doc with # Company Summary, then # Founders and Executives ## Person 1 ## Person 2 ...")
-answer(result, False)
-(```)
-```
-
-And then:
-
-```bash
-python -m llmvm.client -p docs/get_company_summary.star "microsoft microsoft.com"
-```
-
-The `messages()[-1]` call gets the "microsoft microsoft.com" as message input to the pipeline.
 
 #### Using LLMVM as a message stack to run "programs"
 
@@ -312,7 +276,7 @@ gives:
 
 #### You can:
 
-* Write arbitrary natural language queries that get translated into Starlark code and cooperatively executed.
+* Write arbitrary natural language queries that get translated into Python code and cooperatively executed.
 * Upload .pdf, .txt, .csv and .html and have them ingested by FAISS and searchable by the LLMVM.
 * Add arbitrary Python helpers by modifying ~/.config/llmvm/config.yaml and adding your Python based helpers. Note: you may need to hook the helper in [starlark_runtime.py](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt). You may also need to show examples of its use in [prompts/starlark/starlark_tool_execution.prompt](https://github.com/9600dev/llmvm/blob/master/prompts/starlark/starlark_tool_execution.prompt)
 * [server.py](https://github.com/9600dev/llmvm/blob/master/server.py) via /v1/chat/completions endpoint, mimics and forwards to OpenAI's /v1/chat/completions API.
@@ -324,32 +288,38 @@ gives:
 
 ## Advanced Architectural Details
 
-#### Error Correction
+### Error Correction
 
 Each step of statement execution is carefully evaluated. Calls to user defined helper functions may throw exceptions, and code may be semantically incorrect (i.e. bindings may be incorrect, leading to the wrong data being returned etc). LLMVM has the ability to back-track up the statement execution list (todo: transactional rollback of variable assignment is probably the right call here but hasn't been implemented yet) and work with the LLM to re-write code, either partially or fully, to try and achieve the desired outcome.
 
 The code that performs error correction starts [here](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/starlark_runtime.py#L219), but there's still a bit more work to do here, including having the LLM engage in a "pdb" style debugging session, where locals in the Python runtime can be inspected for code-rewriting decisions.
 
-#### Helpers
+### Helpers
 
-You can define any arbitrary helper, and add it to the Starlark Runtime in ```StarlarkRuntime.setup()```. It'll automatically generate the helper tool's one-shot prompt example for the LLM, and will appear in the LLM responses for Starlark generated code. The LLMVM runtime will sort out the binding and marshalling of arguments via llm_bind().
+You can define any arbitrary helper, and add it to the Python Runtime in ```StarlarkRuntime.setup()```. It'll automatically generate the helper tool's one-shot prompt example for the LLM, and will appear in the LLM responses for Python generated code. The LLMVM runtime will sort out the binding and marshalling of arguments via llm_bind().
 
 Here are the list of helpers written so far:
 
 ```python
-WebHelpers.search_linkedin_profile(first_name, last_name, company_name)  # Searches for the LinkedIn profile of a given person name and optional company name and returns the profile text
-WebHelpers.get_linkedin_profile(linkedin_url)  # Extracts the career information from a person's LinkedIn profile from a given LinkedIn url
-EdgarHelpers.get_latest_form_text(symbol, form_type)  # This is useful to get the latest financial information for a company,
-their current strategy, investments and risks.
-PdfHelpers.parse_pdf(url_or_file)  # You can only use either a url or a path to a pdf file.
-MarketHelpers.get_stock_price(symbol)  # Get the current or latest price of the specified stock symbol
-MarketHelpers.get_market_capitalization(symbol)  # Get the current market capitalization of the specified stock symbol
+def BCL.datetime(self: object, expr: object, timezone: object) -> datetime  # Returns a datetime object from a string using datetime.strftime(). Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days"), datetime("now", "Australia/Brisbane")
+def WebHelpers.search_linkedin_profile(first_name: string, last_name: string, company_name: string) -> str  # Searches for the LinkedIn profile of a given first name and last name and optional company name and returns the LinkedIn profile information as a string. If you call this method you do not need to call get_linkedin_profile().
+def WebHelpers.get_linkedin_profile(linkedin_url: string) -> str  # Extracts the career information from a person's LinkedIn profile from a given LinkedIn url and returns the career information as a string.
+def EdgarHelpers.get_report(symbol: string, form_type: string, date: object) -> str  # Gets the 10-Q, 10-K or 8-K report text for a given company symbol/ticker for a given date. This is useful to get financial information for a company, their current strategy, investments and risks. Use form_type = '' to get the latest form of any type. form_type can be '10-Q', '10-K' or '8-K'. date is a Python datetime.
+def MarketHelpers.get_stock_price(symbol: string, date: string) -> float  # Get the closing price of the specified stock symbol at the specified date
+def MarketHelpers.get_current_market_capitalization(symbol: string) -> str  # Get the current market capitalization of the specified stock symbol
+def MarketHelpers.get_stock_volatility(symbol: object, days: object) -> float  # Calculate the volatility of a stock over a given number of days.
+def MarketHelpers.get_stock_price_history(symbol: object, start_date: object, end_date: object) -> Dict  # Get the closing prices of the specified stock symbol between the specified start and end dates
+def BCL.sample_normal(self: object, mean: object, std_dev: object) -> float  # Returns a random sample from a normal distribution with the given mean and standard deviation. Examples: sample_normal(0, 1), sample_normal(10, 2)
+def BCL.sample_binomial(self: object, n: object, p: object) -> float  # Returns a random sample from a binomial distribution with the given number of trials and probability of success. Examples: sample_binomial(10, 0.5), sample_binomial(100, 0.1)
+def BCL.sample_lognormal(self: object, mean: object, std_dev: object) -> float  # Returns a random sample from a lognormal distribution with the given mean and standard deviation. Examples: sample_lognormal(0, 1), sample_lognormal(10, 2)
+def BCL.sample_list(self: object, data: object) -> Any  # Returns a random sample from a list. Examples: sample_list([1, 2, 3]), sample_list(["a", "b", "c"])
+def BCL.generate_graph_image(self: object, data: object, title: object, x_label: object, y_label: object) -> NoneType  # Generates a graph image from the given data and returns it as bytes.
 ```
 
 Downloading web content (html, PDF's etc), and searching the web is done through special functions: ```download()``` and ```search()``` which are defined in the LLMVM runtimes base class libraries. ```download()``` as mentioned uses Firefox via Microsoft Playwright so that we can avoid web server blocking issues that tend to occur with requests.get(). ```search()``` uses [SerpAPI](https://serpapi.com/), which may require a paid subscription.
 
 
-#### Walkthrough of tool binding and execution
+### Walkthrough of tool binding and execution
 
 For our first example:
 
@@ -357,13 +327,22 @@ For our first example:
 query>> go to https://ten13.vc/team and extract all the names
 ```
 
-Let's walk through each line of the generated Starlark:
+Let's walk through each line of the generated Python:
 
-##### ```var1 = download("https://ten13.vc/team")```
+```
+Assistant: Certainly! I will download the webpage and extract the names of the people who work at Ten13
+
+<code>
+var1 = download("https://ten13.vc/team")
+```
+
+The \<code> block creates a Python runtime context and the LLMVM server will extract this code and execute it. Once the code is executed, the \<code>\</code> block is replaced with \<code_result>\</code_result> but the Python runtime context is kept alive for any further execution of \<code> blocks later.
 
 The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/starlark_runtime.py#L392C12-L392C12) function is part of a set of user definable base class libraries that the LLM knows about: download() llm_call() llm_list_bind(), llm_bind(), answer() and so on. download() fires up an instance of Firefox via [Playwright](https://playwright.dev/) to download web or PDF content and convert them to Markdown.
 
-##### ```var2 = llm_call([var1], "extract list of names")  # Step 2: Extract the list of names```
+```python
+var2 = llm_call([var1], "extract list of names")  # Step 2: Extract the list of names
+```
 
 [llm_call(expression_list, instruction) -> str](https://github.com/9600dev/llmvm/blob/f0caa7268822ec517af4a8b9c3afff6b086008e8/starlark_runtime.py#L427) takes an expression list, packages those expressions up into a stack of LLM User messages, and passes them back to the LLM to perform the instruction. If the stack of Messages is too big to fit in the context window, [faiss](https://github.com/facebookresearch/faiss) is used to chunk and rank message content via the following pseudocode:
 
@@ -376,9 +355,11 @@ The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3
 
 The map-reduce is done per-message, allowing for multiple expressions to be chunked and ranked independently, which is useful for queries like "download document 1, and document 2 and compare and contrast".
 
-##### ```for list_item in llm_list_bind(var2, "list of names"):  # Step 3: Loop over the list of names```
+```python
+for list_item in llm_list_bind(var2, "list of names"):  # Step 3: Loop over the list of names
+```
 
-[llm_list_bind(expression, instruction) -> List](https://github.com/9600dev/llmvm/blob/f0caa7268822ec517af4a8b9c3afff6b086008e8/starlark_runtime.py#L444) takes an arbitrary expression, converts it to a string, then has an LLM translate that string into a Starlark list ["one", "two", "three", ...].
+[llm_list_bind(expression, instruction) -> List](https://github.com/9600dev/llmvm/blob/f0caa7268822ec517af4a8b9c3afff6b086008e8/starlark_runtime.py#L444) takes an arbitrary expression, converts it to a string, then has an LLM translate that string into a Python list ["one", "two", "three", ...].
 
 In this particular case, ```var2``` has the following string, the response from GPT:
 
@@ -390,14 +371,13 @@ In this particular case, ```var2``` has the following string, the response from 
 > 4. Alexander Cohen
 > 5. Margot McQueen
 > 6. Sophie Robertson
-> 7. Mel Harrison
-> 8. Elise Cannell
-> 9. Seamus Crawford
-> 10. Alexander Barrat
+> 7. Seamus Crawford
 
-And ```llm_list_bind()``` takes this arbitrary text and converts it to: ["Steve Baxter", "Stew Glynn", "An Vo", "Alexander Cohen", "Margot McQueen", "Sophie Robertson", "Mel Harrison", "Elise Cannell", "Seamus Crawford", "Alexander Barrat"]
+And ```llm_list_bind()``` takes this arbitrary text and converts it to: ["Steve Baxter", "Stew Glynn", "An Vo", "Margot McQueen", "Sophie Robertson", "Seamus Crawford"]
 
-##### ```var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")```
+```python
+var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")
+```
 
 [llm_bind(expression, function_definition_str) -> Callable](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/bcl.py#L276) is one of the more interesting functions. It takes an expression and a string based function definition and tries to bind arbitrary data to the function arguments (turning the definition into a callsite). It performs these steps:
 
@@ -408,13 +388,23 @@ And ```llm_list_bind()``` takes this arbitrary text and converts it to: ["Steve 
   * (in this particular case, the company Steve Baxter works for is defined in the original webpage download() string, and when the LLM is passed the locals() dictionary, is able to self-answer the question of "which company Steve Baxter works for" and thus bind the callsite properly).
   * -> WebHelpers.search_linkedin_profile("Steve", "Baxter", "Transition Level Investments")
 
-##### ```answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the user```
+```python
+answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the user
+```
 
 [answer()](https://github.com/9600dev/llmvm/blob/f0caa7268822ec517af4a8b9c3afff6b086008e8/starlark_runtime.py#L477) is a collection of possible answers that either partially solve, or fully solve for the original query. Once code is finished executing, each answer found in answers() is handed to the LLM for guidance on how effective it is at solving/answering the query. The result is then shown to the user, and in this case, it's a career summary of each of the individuals from [TEN13](https://ten13.vc) extracted from LinkedIn.
 
-#### Debugging Firefox Automation Issues
+### Continuation Passing Style Execution
 
-The Starlark runtime uses [Playwright](https://playwright.dev/python/) to automate Firefox on its behalf. By default, it runs Firefox in headless mode, but this can be changed in `~/.config/llmvm/config.yaml`:
+The underlying LLM programming model is as follows:
+
+Query -> Natural Language interleaved with \<code> blocks -> stop_token of \<code> -> Python environment execution of \<code> block -> replace \<code> block with the result \<code_result> of code execution -> ask the LLM to continue by passing the entire result in as an "Assistant" message which forces the LLM to continue a completion - natural language or code will continue to be written until the task is complete (repeat until stop_token='stop' or '\</complete>').
+
+The other 'nifty trick' here is that you give the LLM the ability to call itself within a \<code> block with a fresh "call stack" via the llm_call() API, allowing for arbitrary compute without forcing the LLM to interpret the previous conversational User/Assistant messages.
+
+### Debugging Firefox Automation Issues
+
+The Python runtime uses [Playwright](https://playwright.dev/python/) to automate Firefox on its behalf. By default, it runs Firefox in headless mode, but this can be changed in `~/.config/llmvm/config.yaml`:
 
 ```yaml
 firefox_headless: true
@@ -430,13 +420,13 @@ You can also copy your own browsers cookies file into Playwright's Firefox autom
 firefox_cookies: '~/.local/share/llmvm/cookies.txt'
 ```
 
-#### The Problem this prototype solves
+### The Problem this prototype solves
 
 ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a).
 
 However, this interaction is usually User Task -> LLM decides what helper function to call -> local host calls helper function -> work with result, and does not allow for arbitrary deconstruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
 
-This prototype shows that LLM's are capable of taking a user task, reasoning about how to deconstruct the task into sub-tasks, understanding how to program, schedule and execute those sub-tasks on its own or via a virtual machine, and working with the VM to resolve error cases. We ask the LLM to use [Starlark](https://github.com/bazelbuild/starlark) expressed as [A-normal form](https://en.wikipedia.org/wiki/A-normal_form) as the programming language, and execute Starlark statement-by-statement on a local Python interpreter. When errors arise (syntax errors, exceptions, or semantic problems), we pause execution and work with the LLM to understand and resolve the error by exposing the locals dictionary, and allowing the LLM to "debug" the current execution state.
+This prototype shows that LLM's are capable of taking a user task, reasoning about how to deconstruct the task into sub-tasks, understanding how to program, schedule and execute those sub-tasks on its own or via a virtual machine, and working with the VM to resolve error cases. We ask the LLM to use [Python](https://github.com/bazelbuild/starlark) expressed as [A-normal form](https://en.wikipedia.org/wiki/A-normal_form) as the programming language, and execute Python statement-by-statement on a local Python interpreter. When errors arise (syntax errors, exceptions, or semantic problems), we pause execution and work with the LLM to understand and resolve the error by exposing the locals dictionary, and allowing the LLM to "debug" the current execution state.
 
 ## Other cute stuff
 
@@ -447,12 +437,13 @@ A fun one is graphing "narrative extraction", which is useful for quickly summar
 Download two news articles and put them in the "Messages" stack:
 
 ```bash
-url https://www.cnn.com/2023/08/27/football/what-happened-luis-rubiales-kiss-intl/index.html
-url https://www.bbc.com/sport/football/66645618
+query>> url https://www.cnn.com/2023/08/27/football/what-happened-luis-rubiales-kiss-intl/index.html
+
+query>> url https://www.bbc.com/sport/football/66645618
 ```
 
 ```bash
-act graph
+query>> act graph
 ```
 
 ```bash
@@ -471,9 +462,7 @@ And related narrative extraction + code:
 ## Things to do
 
 * Error handling still needs a lot of work. I need to move this to be more continuation passing style than execute blocks of code then re-write.
-* More complicated natural language queries tends to make the LLM generate unwieldy code. Need statement by statement execution, passing the LLM the already executed code, asking it if it wishes to re-write the later part of the code (sort of like continuation passing style execution, like above for error correction).
 * Working on Source Code insights (mode 'code'). You'll be able to hand it a project directory and work with the LLM to understand what the code is doing. Check out [source.py](https://github.com/9600dev/llmvm/blob/master/source.py)
-* Integration with local LLM's via [llama.cpp](https://github.com/ggerganov/llama.cpp) etc. [started this, but haiku is so good and cheap, I'm not sure I need it]
 * Playwright browser control integration from the LLM -- it should be straight forward to have cooperative execution for the task of proceeding through web app flows (login, do stuff, extract info, logout).
 * Fix bugs and refactor. The code is still pretty hacky as I've re-written it several times with different approaches.
 * Write some better docs.
@@ -501,7 +490,6 @@ alias haiku='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECU
 alias opus='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" llm'
 alias instant='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$INSTANT LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" llm'
 alias gpt4o='LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4o" LLMVM_PROFILING="true" llm'
-
 
 alias h=haiku
 alias l=gpt4o
@@ -554,7 +542,7 @@ Anything in { } brackets in this file, will be replaced by the return result fro
 ```bash
 function con() {
     if [ "$#" -ne 1 ]; then
-        echo "Usage: context 'instruction"
+        echo "Usage: context 'instruction or query'"
         return 1
     fi
 
@@ -567,7 +555,6 @@ function con() {
     # parse and execute commands in the context file
     local context_file=$HOME/dev/context.md
     local context_temp=$(mktemp)
-
 
     while IFS= read -r line || [ -n "$line" ]; do
         # Replace {command} with the output of the command
