@@ -153,6 +153,7 @@ def setup_logging(
     logging.getLogger('grpc').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
     logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+    logging.getLogger('dateparser').setLevel(logging.CRITICAL)
 
     logger: Logger = logging.getLogger()
 
@@ -193,7 +194,12 @@ def suppress_logging():
     logging.getLogger('rich').setLevel(logging.CRITICAL)
     logging.getLogger('httpx').setLevel(logging.CRITICAL)
     logging.getLogger('httpcore').setLevel(logging.CRITICAL)
-
+    logging.getLogger('PIL.PngImagePlugin').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('anthropic').setLevel(logging.WARNING)
+    logging.getLogger('grpc').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
 
 def get_timer():
     return timing

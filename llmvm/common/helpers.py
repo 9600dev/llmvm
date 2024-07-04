@@ -10,6 +10,7 @@ import math
 import os
 import re
 import traceback
+import dateparser
 import typing
 from collections import Counter
 from enum import Enum, IntEnum
@@ -26,7 +27,6 @@ import httpx
 import nest_asyncio
 import psutil
 from dateutil.relativedelta import relativedelta
-from dateutil import parser
 from docstring_parser import parse
 from PIL import Image
 
@@ -303,7 +303,7 @@ class Helpers():
         parts = relative_expression.split()
 
         if len(parts) != 2:
-            return parser.parse(relative_expression)  # type: ignore
+            return dateparser.parse(relative_expression)  # type: ignore
 
         value = int(parts[0])
         unit = parts[1].lower()
@@ -317,7 +317,7 @@ class Helpers():
         elif unit == "hours":
             return dt.datetime.now(tz) + dt.timedelta(hours=value)
         else:
-            return parser.parse(relative_expression)  # type: ignore
+            return dateparser.parse(relative_expression)  # type: ignore
 
     @staticmethod
     def load_resize_save(raw_data: bytes, output_format='PNG', max_size=5 * 1024 * 1024) -> bytes:
