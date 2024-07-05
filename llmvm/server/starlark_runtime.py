@@ -90,7 +90,6 @@ class StarlarkRuntime:
                         return wrapper
                 raise AttributeError(f"'{self.wrapped_class.__class__.__name__}' object has no attribute '{name}'")
 
-        from llmvm.server.base_library.source_project import SourceProject
         from llmvm.server.bcl import BCL
 
         self.answers = []
@@ -120,16 +119,6 @@ class StarlarkRuntime:
         self.globals_dict['numpy'] = np
         self.globals_dict['scipy'] = scipy
         self.globals_dict['np'] = np
-
-        # code stuff
-        source = SourceProject(self)
-        self.globals_dict['source_project'] = source
-        self.globals_dict['get_source_structure'] = source.get_source_structure
-        self.globals_dict['get_source'] = source.get_source
-        self.globals_dict['get_source_summary'] = source.get_source_summary
-        self.globals_dict['get_classes'] = source.get_classes
-        self.globals_dict['get_methods'] = source.get_methods
-        self.globals_dict['get_references'] = source.get_references
 
     @staticmethod
     def only_code_block(code: str) -> bool:

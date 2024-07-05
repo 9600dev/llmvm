@@ -2,7 +2,7 @@ from typing import List
 
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Content, LLMCall, User, bcl
+from llmvm.common.objects import Content, LLMCall, User
 from llmvm.server.base_library.source import Source
 from llmvm.server.starlark_execution_controller import ExecutionController
 
@@ -27,7 +27,6 @@ class SourceProject:
             else:
                 self.other_files.append(source_path)
 
-    @bcl
     def get_source_structure(self) -> str:
         """
         gets all class names, method names, and docstrings for all classes and methods in all files
@@ -48,7 +47,6 @@ class SourceProject:
 
         return structure
 
-    @bcl
     def get_source_summary(self, file_path: str) -> str:
         """
         gets all class names, method names and natural language descriptions of class and method names
@@ -104,11 +102,9 @@ class SourceProject:
                 return _summary_helper(source)
         raise ValueError(f"Source file not found: {file_path}")
 
-    @bcl
     def get_files(self):
         return self.sources
 
-    @bcl
     def get_source(self, file_path):
         for source in self.sources:
             if source.file_path == file_path:
@@ -121,21 +117,18 @@ class SourceProject:
 
         raise ValueError(f"Source file not found: {file_path}")
 
-    @bcl
     def get_methods(self, class_name) -> List['Source.Symbol']:
         methods = []
         for source in self.sources:
             methods.extend(source.get_methods(class_name))
         return methods
 
-    @bcl
     def get_classes(self) -> List['Source.Symbol']:
         classes = []
         for source in self.sources:
             classes.extend(source.get_classes())
         return classes
 
-    @bcl
     def get_references(self, method_name) -> List['Source.Callsite']:
         references = []
         for source in self.sources:

@@ -1,12 +1,13 @@
 import ast
 import asyncio
 import copy
+import json
 import math
 import random
 import re
 from importlib import resources
 import traceback
-from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, cast
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -861,6 +862,40 @@ class ExecutionController(Controller):
 
         return results
 
+    def __serialize_locals_dict(self, locals_dict: Dict[str, Any]) -> Dict[str, Any]:
+        temp_dict = {}
+        for key, value in locals_dict.items():
+            if isinstance(key, str) and key.startswith('__'):
+                continue
+            elif isinstance(value, dict):
+                temp_dict[key] = self.__serialize_locals_dict(value)
+            elif isinstance(value, list):
+                temp_dict[key] = [str(v) for v in value]
+            # all primitive types are fine
+            elif (
+                isinstance(value, str)
+                or isinstance(value, int)
+                or isinstance(value, float)
+                or isinstance(value, bool)
+            ):
+                temp_dict[key] = value
+            # all the types in objects.py are fine too
+            elif (
+                isinstance(value, Content)
+                or isinstance(value, AstNode)
+                or isinstance(value, Message)
+                or isinstance(value, Statement)
+            ):
+                temp_dict[key] = value
+            else:
+                # check to see if serializable
+                try:
+                    json.dumps(value)
+                    temp_dict[key] = value
+                except Exception as ex:
+                    pass
+        return temp_dict
+
     async def aexecute_continuation(
         self,
         messages: List[Message],
@@ -872,7 +907,7 @@ class ExecutionController(Controller):
         agents: List[Callable] = [],
         cookies: List[Dict[str, Any]] = [],
         locals_dict: Dict[str, Any] = {},
-    ) -> List[Statement]:
+    ) -> Tuple[List[Statement], Dict[str, Any]]:
 
         from llmvm.server.starlark_runtime import StarlarkRuntime
         starlark_runtime = StarlarkRuntime(
@@ -1113,4 +1148,4 @@ class ExecutionController(Controller):
                 results.extend(starlark_runtime.answers)
 
         if model: starlark_runtime.controller.get_executor().set_default_model(old_model)
-        return Helpers.remove_duplicates(results, lambda a: a.result())
+        return (Helpers.remove_duplicates(results, lambda a: a.result()), self.__serialize_locals_dict(locals_dict))

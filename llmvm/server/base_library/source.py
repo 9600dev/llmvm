@@ -1,5 +1,5 @@
 import ast
-from typing import List
+from typing import List, Optional
 
 
 class Source:
@@ -46,7 +46,7 @@ class Source:
     def get_tree(self):
         return self.tree
 
-    def get_methods(self, class_name) -> List[Symbol]:
+    def get_methods(self, class_name: Optional[str]) -> List[Symbol]:
         if not self.tree:
             return []
 

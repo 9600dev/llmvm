@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import os
 import numpy as np
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 
 
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
+from llmvm.server.base_library.source import Source
 
 logging = setup_logging()
 
@@ -104,3 +106,80 @@ class BCL():
         buffer.close()
 
         write_client_stream(image_bytes)
+
+    @staticmethod
+    def get_code_structure_summary(source_file_paths: Union[List[str], str]) -> str:
+        """
+        Gets all class names, method names, and docstrings for each of the source code files listed in source_files.
+        This method does not return any source code, only class names, method names and their docstrings.
+
+        :param source_file_paths: List of file paths to the source code files, or the source code directory root.
+        :type source_file_paths: List[str] | str
+        :return: A string containing the class names, method names, and docstrings for each of the source code files.
+        """
+        if isinstance(source_file_paths, str) and os.path.isdir(os.path.expanduser(source_file_paths)):
+            source_file_paths = [os.path.join(source_file_paths, file) for file in os.listdir(os.path.expanduser(source_file_paths)) if file.endswith('.py')]
+        elif isinstance(source_file_paths, list):
+            paths = []
+            for path in source_file_paths:
+                if os.path.isdir(os.path.expanduser(path)):
+                    for root, dirs, files in os.walk(os.path.expanduser(path)):
+                        for file in [file for file in files if file.endswith('.py')]:
+                            paths.append(os.path.join(root, file))
+                elif os.path.isfile(os.path.expanduser(path)):
+                    paths.append(os.path.expanduser(path))
+            source_file_paths = paths
+        else:
+            raise ValueError(f"Invalid source file paths: {source_file_paths}. Must be a list of file paths or a directory path.")
+
+        logging.debug(f"Getting code structure summary for {len(source_file_paths)} files.")
+        structure = ''
+        for source_file in source_file_paths:
+            source = Source(os.path.expanduser(source_file))
+
+            structure += f'File Path: {source_file}\n'
+            for class_def in source.get_classes():
+                structure += f'class {class_def.name}:\n'
+                structure += f'    """{class_def.docstring}"""\n'
+                structure += '\n'
+                for method_def in source.get_methods(class_def.name):
+                    structure += f'    def {method_def.name}:\n'
+                    structure += f'        """{method_def.docstring}"""\n'
+                    structure += '\n'
+            structure += '\n\n'
+        return structure
+
+    @staticmethod
+    def get_source_code(source_file_path) -> str:
+        """
+        Gets the source code from the file at the given file path.
+        :param source_file_path: The path to the file.
+        :return: The source code from the file.
+        """
+        logging.debug(f"Getting source code for file at {source_file_path}")
+        if os.path.exists(os.path.expanduser(source_file_path)):
+            with open(os.path.expanduser(source_file_path), 'r') as file:
+                return file.read()
+        else:
+            raise ValueError(f"File {source_file_path} not found")
+
+    @staticmethod
+    def get_all_references(
+            source_file_paths: List[str],
+            method_name: str
+        ) -> str:
+        """
+        Find's all references to the given method in the source code files listed in source_files.
+        :param source_file_paths: List of file paths to the source code files.
+        :param method_name: The name of the method to find references to.
+        :return: A string containing the references to the given method.
+        """
+        # open each source file, and grep for the method name
+        references = []
+        sources = [Source(os.path.expanduser(source_file)) for source_file in source_file_paths]
+
+        for source in sources:
+            references.extend(Source.get_references(source.tree, method_name))
+
+        return '\n'.join(references)
+

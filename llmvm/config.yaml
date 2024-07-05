@@ -45,3 +45,6 @@ helper_functions:
   - llmvm.server.bcl.BCL.sample_lognormal
   - llmvm.server.bcl.BCL.sample_list
   - llmvm.server.bcl.BCL.generate_graph_image
+  - llmvm.server.bcl.BCL.get_code_structure_summary
+  - llmvm.server.bcl.BCL.get_source_code
+  - llmvm.server.bcl.BCL.get_all_references

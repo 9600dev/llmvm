@@ -6,7 +6,7 @@ It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and 
 
 > Update July 3rd 2024: I've refactored most of how LLMVM works to use "continuation passing style" execution, where queries result in query -> natural language interleaved with code -> result, rather than the old query -> code -> natural language -> result. This results in significantly better task performance, so will be the default from here.
 
-LLMVM's features are best explored through examples. Let's install, then go through some:
+LLMVM's features are best explored through use case examples. Let's install, then go through some:
 
 ```$ pip install llmvm-cli```
 
@@ -31,6 +31,10 @@ Loaded agent: sample_binomial
 Loaded agent: sample_lognormal
 Loaded agent: sample_list
 Loaded agent: generate_graph_image
+Loaded agent: get_code_structure_summary
+Loaded agent: get_source_code
+Loaded agent: get_all_references
+
 INFO:     Started server process [71093]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
@@ -47,7 +51,15 @@ switch tools on and off.
 query>>
 ```
 
-#### Tool Use: Controlling Firefox Browser
+For the best experience, turning on all logging and very thorough (but expensive) content analysis, run the client and server with these settings:
+
+```bash
+LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-3-5-sonnet-20240620" LLMVM_PROFILING="true" python -m llmvm.client  # and llmvm.server
+```
+
+Let's explore some use cases:
+
+### Tool Use: Controlling Firefox Browser
 
 ```bash
 query>> go to https://ten13.vc/team and get the names of the people that work there
@@ -58,7 +70,7 @@ query>> go to https://ten13.vc/team and get the names of the people that work th
 
 The LLMVM server is coordinating with the LLM to deconstruct the query into executable code calls various Python helpers that can be executed in the server process on behalf of the LLM. In this case, the server is using a headless Firefox instance to download the website url, screenshot and send progress back to the client, convert the website to Markdown, and hand the markdown to the LLM for name extraction. More on how this works later.
 
-#### Tool Use: Finance and Searching
+### Tool Use: Finance and Searching
 
 ```bash
 query>> I have 5 MSFT stocks and 10 NVDA stocks, what is my net worth in grams of gold?
@@ -73,7 +85,7 @@ query>> I have 5 MSFT stocks and 10 NVDA stocks, what is my net worth in grams o
 
 Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidia. We're also using Google Search functionality to find the latest price of gold.
 
-#### Tool Use: PDF Parsing and Understanding
+### Tool Use: PDF Parsing and Understanding
 
 ```bash
 query>> -p docs/turnbull-speech.pdf "what is Malcolm Turnbull advocating for?"
@@ -83,7 +95,7 @@ query>> -p docs/turnbull-speech.pdf "what is Malcolm Turnbull advocating for?"
 
 LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extract text properly) and supply the LLM with the text as content for queries.
 
-#### Tool Use: Code Understanding
+### Tool Use: Code Understanding
 
 the ```-p``` path command can take shell globs, filenames and urls. Here's an example of collecting the entire llmvm codebase and passing it to LLMVM to build a tutorial in Markdown format:
 
@@ -91,7 +103,7 @@ the ```-p``` path command can take shell globs, filenames and urls. Here's an ex
 query>> -p **/*.py !**/__init__.py !**/__main__.py "explain this codebase as a tutorial for a new person joining the team. Use markdown as the output"
 ```
 
-#### As a Command Line Utility
+### As a Command Line Utility
 
 I bash/fish/zsh alias llm:
 
@@ -138,7 +150,7 @@ llm "write a small blog post from the bullet points in the previous message" | \
 llm "create a nice html file to display the content" > output.html
 ```
 
-#### As a Client REPL
+### As a Client REPL
 
 ![](docs/2024-07-03-16-29-13.png)
 
@@ -178,7 +190,7 @@ playwright install firefox
 * Install [viu](https://github.com/atanunq/viu) for image rendering in macos/linux terminals ```cargo install viu```
 * (the kitty terminal renders images out of the box)
 
-#### Docker instructions:
+### Docker instructions:
 
 * run `docker.sh -g` (builds the image, deploys into a container and runs the container)
 * python -m llmvm.server will automatically run on container port 8011. The host will open 8011 and forward to container port 8011.
@@ -191,7 +203,7 @@ With the docker container running, you can run client.py on your local machine:
 
 You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
-#### Configuring Anthropic vs. OpenAI
+### Configuring Anthropic vs. OpenAI
 
 * open `~/.config/llmvm/config.yaml` and change executor to 'anthropic' or 'openai':
 
@@ -208,7 +220,7 @@ export LLMVM_MODEL='gpt-4o'
 python -m llmvm.client "hello, who are you?"
 ```
 
-#### Performance Profiling
+### Performance Profiling
 
 * open `~/.config/llmvm/config.yaml` and change profiling to 'true' or 'false'.
 
@@ -229,7 +241,7 @@ req_01CQhMdHqH6dWbp2n5mMNVCx
 Assistant: My name is Claude.
 ```
 
-#### Extra PDF and Markdown Parsing and Extraction Performance
+### Extra PDF and Markdown Parsing and Extraction Performance
 
 You can use the "expensive" mode of PDF and Markdown extraction where images are included along with the text of PDF and Markdown documents. The LLM will be used to guide the extraction process, resulting in a few extra calls:
 
@@ -251,7 +263,7 @@ Produces:
 
 ![](docs/2024-03-16-20-30-45.png)
 
-#### Using LLMVM as a message stack to run "programs"
+### Using LLMVM as a message stack to run "programs"
 
 I want to loosely compare the language outputs of two LLM calls, I can embed the result of an LLMVM call into the input of another using the -s (escape the result) and -t (add a string as a context message). An example:
 
@@ -274,7 +286,7 @@ gives:
 ![](docs/2024-03-16-12-16-18.png)
 
 
-#### You can:
+### You can:
 
 * Write arbitrary natural language queries that get translated into Python code and cooperatively executed.
 * Upload .pdf, .txt, .csv and .html and have them ingested by FAISS and searchable by the LLMVM.
@@ -314,6 +326,9 @@ def BCL.sample_binomial(self: object, n: object, p: object) -> float  # Returns 
 def BCL.sample_lognormal(self: object, mean: object, std_dev: object) -> float  # Returns a random sample from a lognormal distribution with the given mean and standard deviation. Examples: sample_lognormal(0, 1), sample_lognormal(10, 2)
 def BCL.sample_list(self: object, data: object) -> Any  # Returns a random sample from a list. Examples: sample_list([1, 2, 3]), sample_list(["a", "b", "c"])
 def BCL.generate_graph_image(self: object, data: object, title: object, x_label: object, y_label: object) -> NoneType  # Generates a graph image from the given data and returns it as bytes.
+def BCL.get_code_structure_summary(source_file_paths: object) -> str  # Gets all class names, method names, and docstrings for each of the source code files listed in source_files. This method does not return any source code, only class names, method names and their docstrings.
+def BCL.get_source_code(source_file_path: string) -> str  # Gets the source code from the file at the given file path.
+def BCL.get_all_references(source_file_paths: string, method_name: string) -> str  # Find's all references to the given method in the source code files listed in source_files.
 ```
 
 Downloading web content (html, PDF's etc), and searching the web is done through special functions: ```download()``` and ```search()``` which are defined in the LLMVM runtimes base class libraries. ```download()``` as mentioned uses Firefox via Microsoft Playwright so that we can avoid web server blocking issues that tend to occur with requests.get(). ```search()``` uses [SerpAPI](https://serpapi.com/), which may require a paid subscription.

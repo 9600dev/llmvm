@@ -62,7 +62,9 @@ class WebHelpers():
                 else:
                     lines.append(line)
                     blank_counter = 0
-            return '\n'.join(lines)
+
+            lines = [line.strip() for line in lines]
+            return '\n'.join([line for line in lines if line])
 
         logging.debug(f'WebHelpers.convert_html_to_markdown_soup: {html[:25]}')
         soup = BeautifulSoup(html, features='lxml')

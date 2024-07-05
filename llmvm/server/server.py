@@ -571,13 +571,17 @@ async def tools_completions_continuation(request: SessionThread):
     if not cache_session.has_key(thread.id) or thread.id == 0:
         temp = __get_thread(0)
         thread.id = temp.id
+    # locals_dict needs to be set, grab it from the cache
+    elif cache_session.has_key(thread.id) and not thread.locals_dict:
+        thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore
 
     messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
     mode = thread.current_mode
     compression = compression_enum(thread.compression)
     queue = asyncio.Queue()
     cookies = thread.cookies if thread.cookies else []
-    locals_dict = thread.locals_dict if thread.locals_dict else {}
+
+
 
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:
@@ -613,7 +617,7 @@ async def tools_completions_continuation(request: SessionThread):
 
         async def execute_and_signal():
             # todo: this is a hack
-            result = await controller.aexecute_continuation(
+            result, locals_dict = await controller.aexecute_continuation(
                 messages=messages,
                 temperature=thread.temperature,
                 stream_handler=callback,
@@ -621,9 +625,10 @@ async def tools_completions_continuation(request: SessionThread):
                 compression=compression,
                 cookies=cookies,
                 agents=cast(List[Callable], agents),
-                locals_dict=locals_dict
+                locals_dict=thread.locals_dict
             )
             queue.put_nowait(StopNode())
+            thread.locals_dict = locals_dict
             return result
 
         task = asyncio.create_task(execute_and_signal())

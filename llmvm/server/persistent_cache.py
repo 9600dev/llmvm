@@ -31,6 +31,7 @@ class PersistentCache:
     def set(self, key, value):
         self.setup()
         serialized_key = self._serialize_key(key)
+
         self.cache[serialized_key] = value
 
         with open(self.filename, 'rb+') as f:
