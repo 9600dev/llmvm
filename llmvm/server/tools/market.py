@@ -110,7 +110,8 @@ class MarketHelpers():
     @staticmethod
     def get_stock_volatility(symbol: str, days: int) -> float:
         """
-        Calculate the volatility of a stock over a given number of days.
+        Calculate the volatility of a stock over a given number of days
+        returned as a percentage between 0.0 and 1.0.
 
         :param symbol: The stock symbol
         :type symbol: str
@@ -121,6 +122,9 @@ class MarketHelpers():
         """
         import yfinance as yf
         import numpy as np
+
+        if isinstance(days, int):
+            raise ValueError('days must be a string')
 
         # Get the end date (today)
         end_date = dt.datetime.now()
@@ -141,4 +145,4 @@ class MarketHelpers():
         annualized_volatility = daily_volatility * np.sqrt(252)
 
         # Convert to percentage
-        return annualized_volatility * 100
+        return annualized_volatility

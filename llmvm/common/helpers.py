@@ -1,3 +1,4 @@
+import ast
 import asyncio
 import base64
 import datetime as dt
@@ -53,6 +54,41 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def compare_ast(node1, node2):
+        if type(node1) is not type(node2):
+            return False
+        if isinstance(node1, ast.AST):
+            for k, v in vars(node1).items():
+                if k in ('lineno', 'col_offset', 'ctx'):
+                    continue
+                if not Helpers.compare_ast(v, getattr(node2, k)):
+                    return False
+            return True
+        elif isinstance(node1, list):
+            return len(node1) == len(node2) and all(Helpers.compare_ast(n1, n2) for n1, n2 in zip(node1, node2))
+        else:
+            return node1 == node2
+
+    @staticmethod
+    def compare_code_blocks(code1: str, code2: str):
+        tree1 = ast.parse(code1)
+        tree2 = ast.parse(code2)
+        return Helpers.compare_ast(tree1, tree2)
+
+    @staticmethod
+    def extract_stacktrace_until(stacktrace: str, cls: type):
+        filename = inspect.getfile(cls)
+        lines = stacktrace.split('\n')
+
+        # Find the last occurrence of the filename in the stacktrace
+        file_lines = [i for i, line in enumerate(lines) if filename in line]
+        if not file_lines:
+            return stacktrace
+
+        start_index = file_lines[-1] + 1  # Start from the line after the last occurrence
+        return '\n'.join(lines[start_index:])
+
     @staticmethod
     def remove_duplicates(lst, key_func=lambda x: x):
         seen = set()

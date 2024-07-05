@@ -3,7 +3,7 @@ import os
 import shutil
 import sys
 from importlib import resources
-from typing import List, Optional, cast
+from typing import Callable, List, Optional, cast
 
 import async_timeout
 import jsonpickle
@@ -577,6 +577,7 @@ async def tools_completions_continuation(request: SessionThread):
     compression = compression_enum(thread.compression)
     queue = asyncio.Queue()
     cookies = thread.cookies if thread.cookies else []
+    locals_dict = thread.locals_dict if thread.locals_dict else {}
 
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:
@@ -619,7 +620,8 @@ async def tools_completions_continuation(request: SessionThread):
                 model=model,
                 compression=compression,
                 cookies=cookies,
-                agents=agents
+                agents=cast(List[Callable], agents),
+                locals_dict=locals_dict
             )
             queue.put_nowait(StopNode())
             return result

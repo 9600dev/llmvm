@@ -224,6 +224,7 @@ class TokenStreamWrapper:
             self.perf.object = final_message  # type: ignore
             self.perf.stop_reason = str(final_message.stop_reason) if final_message.stop_reason else ''
             self.perf.stop_token = final_message.stop_sequence if final_message.stop_sequence else ''
+            await self.object.close()
             return final_message
         else:
             return None

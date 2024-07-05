@@ -5,6 +5,7 @@ import math
 import random
 import re
 from importlib import resources
+import traceback
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 from llmvm.common.container import Container
@@ -31,6 +32,7 @@ class ExecutionController(Controller):
         vector_search: VectorSearch,
         edit_hook: Optional[Callable[[str], str]] = None,
         continuation_passing_style: bool = False,
+        exception_limit: int = 3
     ):
         super().__init__()
 
@@ -39,6 +41,7 @@ class ExecutionController(Controller):
         self.vector_search = vector_search
         self.edit_hook = edit_hook
         self.continuation_passing_style = continuation_passing_style
+        self.exception_limit = exception_limit
 
     async def __llm_call(
         self,
@@ -869,7 +872,6 @@ class ExecutionController(Controller):
         agents: List[Callable] = [],
         cookies: List[Dict[str, Any]] = [],
         locals_dict: Dict[str, Any] = {},
-        globals_dict: Dict[str, Any] = {},
     ) -> List[Statement]:
 
         from llmvm.server.starlark_runtime import StarlarkRuntime
@@ -878,7 +880,6 @@ class ExecutionController(Controller):
             agents=agents,
             vector_search=self.vector_search,
             locals_dict=locals_dict,
-            globals_dict=globals_dict
         )
 
         model = model if model else self.executor.get_default_model()
@@ -896,7 +897,7 @@ class ExecutionController(Controller):
         i = 0
         while i < len(messages):
             if (
-                type(messages[i]) is Content
+                (type(messages[i]) is Content or type(messages[i]) is FileContent)
                 and '[system_message]' in messages[i].message.get_str()
                 and '[user_message]' in messages[i].message.get_str()
             ):
@@ -966,7 +967,9 @@ class ExecutionController(Controller):
         messages_copy.append(messages[-1])
 
         # execute the continuation loop
-        while not completed:
+        exception_counter = 0
+        code_blocks_executed: List[str] = []
+        while not completed and exception_counter <= self.exception_limit:
             llm_call = LLMCall(
                 user_message=messages_copy[-1],
                 context_messages=messages_copy[0:-1],
@@ -1014,8 +1017,16 @@ class ExecutionController(Controller):
 
             assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
             code_blocks: List[str] = StarlarkRuntime.get_code_blocks(assistant_response_str)
+            code_blocks_remove = []
 
-            if code_blocks:
+            # filter code_blocks we've already seen
+            for code_block in code_blocks:
+                for code_block_executed in code_blocks_executed:
+                    if Helpers.compare_code_blocks(code_block, code_block_executed):
+                        code_blocks_remove.append(code_block)
+            code_blocks = [code_block for code_block in code_blocks if code_block not in code_blocks_remove]
+
+            if code_blocks and not response.stop_token == '</complete>':
                 # emit some debugging
                 code_block = '\n'.join(code_blocks)
 
@@ -1043,33 +1054,45 @@ class ExecutionController(Controller):
                     )
 
                 if cookies: locals_dict['cookies'] = cookies
-                locals_dict = starlark_runtime.run(
-                    starlark_code=code_block,
-                    original_query=messages[-1].message.get_str(),
-                    messages=messages,
-                    locals_dict=locals_dict
-                )
-                results.extend(starlark_runtime.answers)
+                code_execution_result = ''
+
+                try:
+                    code_blocks_executed.append(code_block)
+                    locals_dict = starlark_runtime.run(
+                        starlark_code=code_block,
+                        original_query=messages[-1].message.get_str(),
+                        messages=messages,
+                        locals_dict=locals_dict
+                    )
+                    results.extend(starlark_runtime.answers)
+                except Exception as ex:
+                    code_execution_result = Helpers.extract_stacktrace_until(traceback.format_exc(), type(starlark_runtime))
+                    exception_counter += 1
+                    if exception_counter == self.exception_limit:
+                        EXCEPTION_PROMPT = """We have reached our exception limit.
+                        Running any of the previous code again won't work.
+                        You have one more shot, try something very different. Feel free to just emit a natural language message instead of code.\n"""
+                        code_execution_result = f'{code_execution_result}\n\n{EXCEPTION_PROMPT}'
 
                 # we have the result of the code block execution, now we need to rewrite the assistant
                 # message to include the result of the code block execution and continue
-                answers = ''
-                if starlark_runtime.answers:
-                    answers = '\n'.join([str(a.result()) for a in starlark_runtime.answers])
-                    answers = f'<code_result>{answers}</code_result>'
-                else:
+                if not code_execution_result and starlark_runtime.answers:
+                    code_execution_result = '\n'.join([str(a.result()) for a in starlark_runtime.answers])
+                elif not code_execution_result:
                     # sometimes dove doesn't generate an answer() block, so we'll have to get the last
                     # assignment of the code and use that.
                     last_assignment = starlark_runtime.get_last_assignment(code_block, locals_dict)
                     if last_assignment:
-                        answers = f'<code_result>{str(last_assignment[1])}</code_result>'
+                        code_execution_result = f'{str(last_assignment[1])}'
 
                 # we have a <code_result></code_result> block, push it to the user
-                write_client_stream(answers)
+                write_client_stream(f'<code_result>{code_execution_result}</code_result>')
+
+                code_execution_result = f'<code>{code_block}</code><code_result>{code_execution_result}</code_result>'
 
                 # assistant_response_str will have a code block <code></code> in it, so we need to replace it with the answers
-                # use regex to replace the code block with the answers
-                assistant_response_str = re.sub(r'<code>.*?</code>', answers, assistant_response_str, flags=re.DOTALL)
+                # use regex to replace the code block with the original code + answers
+                assistant_response_str = re.sub(r'<code>.*?</code>', code_execution_result, assistant_response_str, flags=re.DOTALL)
                 messages_copy.append(Assistant(Content(assistant_response_str)))
             elif response.stop_token and response.stop_token == '</complete>':
                 # if we have a stop token, there are no code blocks, so we can just append the response

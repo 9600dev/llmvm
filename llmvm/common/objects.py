@@ -10,7 +10,7 @@ from importlib import resources
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 T = TypeVar('T')
 
@@ -1051,3 +1051,4 @@ class SessionThread(BaseModel):
     temperature: float = 0.0
     cookies: List[Dict[str, Any]] = []
     messages: List[MessageModel] = []
+    locals_dict: Dict[str, Any] = Field(default_factory=dict, exclude=True)

@@ -122,12 +122,23 @@ Example: Here is an example of comparing the details of multiple documents. Note
 * download the second paper https://arxiv.org/pdf/2306.14077v1.pdf and summarize
 * call myself via llm_call() to find the differences between the two papers
 </scratchpad>
-I'm downloading the two papers, and will summarize both and compare the summaries.
+I'm downloading the first paper.
 <code>
 paper1_text = download("https://ceur-ws.org/Vol-3432/paper17.pdf")
 paper1_summary = llm_call([paper1_text], "Summarize all opinions in the document") # Step 1: Summarize paper 1 as it might be too big to fit in the llm_call context window.
+answer(paper1_summary)  # emit the summary to the User
+</code>
+
+I'm downloading the second paper.
+<code>
 paper2_text = download("https://arxiv.org/pdf/2306.14077v1.pdf")
 paper2_summary = llm_call([paper2_text], "Summarize all opinions in the document") # Step 2: Summarize paper 2 as it might be too big to fit in the llm_call context window.
+answer(paper2_summary)  # emit the summary to the User
+</code>
+
+I'll find the differences between the two papers for you.
+
+<code>
 summary_of_differences = llm_call([paper1_summary, paper2_summary], "find the differences between the two paper summaries") # Step 3: find the differences between the opinions of the two papers
 answer(summary_of_differences) # Step 4: Show the result to the user
 </code>
