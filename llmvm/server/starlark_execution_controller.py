@@ -1088,7 +1088,7 @@ class ExecutionController(Controller):
                 # we have a <code_result></code_result> block, push it to the user
                 write_client_stream(f'<code_result>{code_execution_result}</code_result>')
 
-                code_execution_result = f'<code>{code_block}</code><code_result>{code_execution_result}</code_result>'
+                code_execution_result = f'<code>{code_block}</code>\n<code_result>{code_execution_result}</code_result>'
 
                 # assistant_response_str will have a code block <code></code> in it, so we need to replace it with the answers
                 # use regex to replace the code block with the original code + answers

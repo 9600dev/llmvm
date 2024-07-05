@@ -9,7 +9,6 @@ from llmvm.server.starlark_execution_controller import ExecutionController
 logging = setup_logging()
 
 
-@bcl('llmvm.server.prompts.starlark.source_project.prompt')
 class SourceProject:
     def __init__(
         self,
