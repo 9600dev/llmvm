@@ -850,13 +850,17 @@ class FunctionCallMeta(Call):
         return float(self._result)  # type: ignore
 
     def __getattr__(self, name):
-        return getattr(self._result, name)
+        if self._result is not None:
+            return getattr(self._result, name)
+        raise AttributeError(f"'self._result isn't set, and {self.__class__.__name__}' object has no attribute '{name}'")
 
-    def __set__(self, obj, val):
-        setattr(self._result, obj, val)
+    def __setstate__(self, state):
+        # Directly set _data without going through __getattr__
+        self._result = state.get('_result')
 
-    def __get__(self, obj, val):
-        return getattr(self._result, obj, val)
+    def __getstate__(self):
+        # Return a dictionary representing the object's state
+        return {'_result': self._result}
 
     def __str__(self):
         return str(self._result)

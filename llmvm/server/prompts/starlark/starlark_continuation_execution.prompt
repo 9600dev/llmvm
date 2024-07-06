@@ -282,41 +282,51 @@ answer(merged_list)  # Step 5: Show the result to the use
 </code>
 </complete>
 
-Example: Looking at source code to answer a users question about their source based
+Example: Reading source code to answer a users question about their source code project
 
-{{user_colon_token}} ~/dev/llmvm/llmvm/common/anthropic_executor.py, ~/dev/llmvm/llmvm/common/openai_executor.py, ~/dev/llmvm/llmvm/common/gemini_executor.py, ~/dev/llmvm/llmvm/common/objects.py
+{{user_colon_token}} ~/dev/a.py, /home/user/dev/b.py, ~/dev/objects.py
 
 {{assistant_colon_token}} Thanks. I'm ready for your next message
 
-{{user_colon_token}} Where is the best place to add a new method to the LLM Executors? Add a new method "is_available()" to the best place.
+{{user_colon_token}} add a method called to_json() to all derived classes of BaseClass, and write a basic implementation of that method
 
 {{assistant_colon_token}}
 Let's take a look at the high level structure of the source code:
 <code>
-source_code_files = ["~/dev/llmvm/llmvm/common/anthropic_executor.py", "~/dev/llmvm/llmvm/common/openai_executor.py", "~/dev/llmvm/llmvm/common/gemini_executor.py", "~/dev/llmvm/llmvm/common/objects.py"]
-
+source_code_files = ["~/dev/a.py", "/home/user/dev/b.py", "~/dev/objects.py"]
 source_structure = BCL.get_code_structure_summary(source_code_files)
 answer(source_structure)
 </code>
 
-File Path: ~/dev/llmvm/llmvm/common/objects.py
-class Executor
-    def aexecute(...)
-    def set_default_max_tokens(...)
-    def set_default_model(...)
-    def max_output_tokens(...)
-    ...
+File Path: ~/dev/objects.py
+class BaseClass
+    def hello_world(self)
+    def x(self)
+    def paint(self)
 
-File Path: ~/dev/llmvm/llmvm/common/openai_executor.py
-class OpenAIExecutor(Executor)
-    def aexecute(...)
-    def set_default_max_tokens(...)
+File Path: ~/dev/a.py
+class A(BaseClass)
+    def hello_world(self)
+    def x(self)
+    def paint(self)
 
-It looks like the Executor class in objects.py might be the best spot. Let's have a look:
+File Path: ~/dev/b.py
+class B(BaseClass)
+    def hello_world(self)
+    def x(self)
+    def paint(self)
+
+It looks like A and B derive from BaseClass, so I should re-write those files with a basic to_json() method
 <code>
-source_code = BCL.get_source_code("~/dev/llmvm/llmvm/common/objects.py")
-var1 = llm_call([source_code], "Add a new method 'is_available()' to this source code with a basic implementation")
+a_source_code = BCL.get_source_code("~/dev/a.py")
+var1 = llm_call([a_source_code], "Add a new method 'to_json()' to this source code with a basic implementation")
 answer(var1)
+</code>
+
+<code>
+b_source_code = BCL.get_source_code("/home/user/dev/b.py")
+var2 = llm_call([b_source_code], "Add a new method 'to_json()' to this source code with a basic implementation")
+answer(var2)
 </code>
 </complete>
 

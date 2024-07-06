@@ -1,5 +1,5 @@
 import ast
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 class Source:
@@ -14,7 +14,7 @@ class Source:
             return f"Callsite(class_name={self.class_name!r}, method_name={self.method_name!r}, line={self.line}, col={self.col})"
 
     class Symbol:
-        def __init__(self, name, underlying_type, params, type, parent, docstring, line, col):
+        def __init__(self, name, underlying_type, params, type, parent, docstring, line, col, returns):
             self.name = name
             self.underlying_type = underlying_type
             self.params = params
@@ -23,12 +23,36 @@ class Source:
             self.docstring = docstring
             self.line = line
             self.col = col
+            self.returns = returns
 
         def __repr__(self):
             params_repr = ', '.join([f"{name}: {ptype}" for name, ptype in self.params]) if self.params else 'None'
             return (f"Symbol(name={self.name!r}, underlying_type={self.underlying_type!r}, "
                     f"params={params_repr}, type={self.type!r}, parent={self.parent!r}, "
                     f"docstring={self.docstring!r}, line={self.line}, col={self.col})")
+
+        def __get_type_name(self, type_node):
+            if isinstance(type_node, ast.Name):
+                return type_node.id
+            elif isinstance(type_node, ast.Attribute):
+                return f"{self.__get_type_name(type_node.value)}.{type_node.attr}"
+            elif isinstance(type_node, ast.Subscript):
+                return f"{self.__get_type_name(type_node.value)}[{self.__get_type_name(type_node.slice)}]"
+            elif isinstance(type_node, ast.Constant):
+                return str(type_node.value)
+            elif isinstance(type_node, ast.Tuple):
+                return f"Tuple[{', '.join(self.__get_type_name(elt) for elt in type_node.elts)}]"
+            else:
+                return "Any"
+
+        def method_definition(self):
+            return f"def {self.name}({', '.join([f'{name}: {ptype}' for name, ptype in self.params])}) -> {self.__get_type_name(self.returns)}:"
+
+        def class_definition(self):
+            if not self.parent:
+                return f"class {self.name}:"
+            else:
+                return f"class {self.name}({self.parent}):"
 
     def __init__(self, file_path):
         self.file_path = file_path
@@ -61,6 +85,7 @@ class Source:
                             # Check if there is a type annotation
                             param_type = ast.get_source_segment(self.source_code, arg.annotation) if arg.annotation else None
                             params.append((arg.arg, param_type))
+                        return_type = item.returns if item.returns else Any
                         symbol = Source.Symbol(
                             name=method_name,
                             underlying_type=class_name,
@@ -70,6 +95,7 @@ class Source:
                             docstring=ast.get_docstring(item),
                             line=item.lineno,
                             col=item.col_offset,
+                            returns=return_type
                         )
                         methods.append(symbol)
         return methods
@@ -99,7 +125,8 @@ class Source:
                     parent=None,  # Class definitions don't have a parent
                     docstring=class_docstring,
                     line=node.lineno,
-                    col=node.col_offset
+                    col=node.col_offset,
+                    returns=None,
                 )
                 class_symbols.append(symbol)
         return class_symbols

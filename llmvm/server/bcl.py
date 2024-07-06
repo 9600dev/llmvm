@@ -108,15 +108,7 @@ class BCL():
         write_client_stream(image_bytes)
 
     @staticmethod
-    def get_code_structure_summary(source_file_paths: Union[List[str], str]) -> str:
-        """
-        Gets all class names, method names, and docstrings for each of the source code files listed in source_files.
-        This method does not return any source code, only class names, method names and their docstrings.
-
-        :param source_file_paths: List of file paths to the source code files, or the source code directory root.
-        :type source_file_paths: List[str] | str
-        :return: A string containing the class names, method names, and docstrings for each of the source code files.
-        """
+    def __source_paths(source_file_paths: Union[List[str], str]) -> List[str]:
         if isinstance(source_file_paths, str) and os.path.isdir(os.path.expanduser(source_file_paths)):
             source_file_paths = [os.path.join(source_file_paths, file) for file in os.listdir(os.path.expanduser(source_file_paths)) if file.endswith('.py')]
         elif isinstance(source_file_paths, list):
@@ -131,6 +123,21 @@ class BCL():
             source_file_paths = paths
         else:
             raise ValueError(f"Invalid source file paths: {source_file_paths}. Must be a list of file paths or a directory path.")
+        return paths
+
+
+
+    @staticmethod
+    def get_code_structure_summary(source_file_paths: Union[List[str], str]) -> str:
+        """
+        Gets all class names, method names, and docstrings for each of the source code files listed in source_files.
+        This method does not return any source code, only class names, method names and their docstrings.
+
+        :param source_file_paths: List of file paths to the source code files, or the source code directory root.
+        :type source_file_paths: List[str] | str
+        :return: A string containing the class names, method names, and docstrings for each of the source code files.
+        """
+        source_file_paths = BCL.__source_paths(source_file_paths)
 
         logging.debug(f"Getting code structure summary for {len(source_file_paths)} files.")
         structure = ''
@@ -139,13 +146,12 @@ class BCL():
 
             structure += f'File Path: {source_file}\n'
             for class_def in source.get_classes():
-                structure += f'class {class_def.name}:\n'
-                structure += f'    """{class_def.docstring}"""\n'
-                structure += '\n'
-                for method_def in source.get_methods(class_def.name):
-                    structure += f'    def {method_def.name}:\n'
-                    structure += f'        """{method_def.docstring}"""\n'
+                structure += f'{class_def.class_definition()}\n'
+                if class_def.docstring:
+                    structure += f'    """{class_def.docstring}"""\n'
                     structure += '\n'
+                for method_def in source.get_methods(class_def.name):
+                    structure += f'    {method_def.method_definition()}\n'
             structure += '\n\n'
         return structure
 
@@ -164,7 +170,7 @@ class BCL():
             raise ValueError(f"File {source_file_path} not found")
 
     @staticmethod
-    def get_all_references(
+    def find_all_references(
             source_file_paths: List[str],
             method_name: str
         ) -> str:
@@ -174,6 +180,8 @@ class BCL():
         :param method_name: The name of the method to find references to.
         :return: A string containing the references to the given method.
         """
+        source_file_paths = BCL.__source_paths(source_file_paths)
+
         # open each source file, and grep for the method name
         references = []
         sources = [Source(os.path.expanduser(source_file)) for source_file in source_file_paths]
