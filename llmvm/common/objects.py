@@ -862,9 +862,6 @@ class FunctionCallMeta(Call):
         # Return a dictionary representing the object's state
         return {'_result': self._result}
 
-    def __getitem__(self, key):
-        return self._result.__getitem__(key)  # type: ignore
-
     def __str__(self):
         return str(self._result)
 
