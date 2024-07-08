@@ -123,9 +123,6 @@ class MarketHelpers():
         import yfinance as yf
         import numpy as np
 
-        if isinstance(days, int):
-            raise ValueError('days must be a string')
-
         # Get the end date (today)
         end_date = dt.datetime.now()
 
