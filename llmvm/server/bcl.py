@@ -73,7 +73,7 @@ class BCL():
             list_data = [float(item) for item in data if isinstance(item, (int, float))]
             data_dict['x'] = list(range(len(list_data)))
             data_dict['y'] = list_data
-        elif 'dates' in data and 'prices' in data:
+        elif isinstance(data, dict) and 'dates' in data and 'prices' in data:
             # dates is Timestamp, prices is float
             data_dict['x'] = [timestamp.strftime('%Y-%m-%d') for timestamp in data['dates']]
             data_dict['y'] = data['prices']

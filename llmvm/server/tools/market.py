@@ -71,7 +71,8 @@ class MarketHelpers():
         :type start_date: dt.datetime
         :param end_date: The end date and time of the price series
         :type end_date: dt.datetime
-        :return: A dictionary mapping dates to closing prices. Keys are datetimes and values are floats.
+        :return: A dict[dt.datetime, float] mapping dates to closing prices. Keys are datetimes and values are floats.
+        :rtype: Dict[dt.datetime, float]
         """
         import pandas as pd
         import yfinance as yf
