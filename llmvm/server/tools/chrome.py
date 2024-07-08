@@ -257,7 +257,6 @@ class ChromeHelpersInternal():
             # try new page
             self._page = await self.__new_page()
             await self.goto(url)
-            await self._page.wait_for_load_state('networkidle')
             html = await self.get_html()
             return html
 
