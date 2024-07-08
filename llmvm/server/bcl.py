@@ -109,21 +109,37 @@ class BCL():
 
     @staticmethod
     def __source_paths(source_file_paths: Union[List[str], str]) -> List[str]:
-        if isinstance(source_file_paths, str) and os.path.isdir(os.path.expanduser(source_file_paths)):
-            source_file_paths = [os.path.join(source_file_paths, file) for file in os.listdir(os.path.expanduser(source_file_paths)) if file.endswith('.py')]
+        def find_python_files(path):
+            python_files = []
+            for root, _, files in os.walk(os.path.expanduser(path)):
+                for file in files:
+                    if file.endswith('.py'):
+                        python_files.append(os.path.join(root, file))
+            return python_files
+
+        if isinstance(source_file_paths, str):
+            expanded_path = os.path.expanduser(source_file_paths)
+            if os.path.isdir(expanded_path):
+                return find_python_files(expanded_path)
+            elif os.path.isfile(expanded_path) and expanded_path.endswith('.py'):
+                return [expanded_path]
+            else:
+                raise ValueError(f"Invalid source file path: {source_file_paths}. Must be a directory or a .py file.")
+
         elif isinstance(source_file_paths, list):
-            paths = []
+            all_python_files = []
             for path in source_file_paths:
-                if os.path.isdir(os.path.expanduser(path)):
-                    for root, dirs, files in os.walk(os.path.expanduser(path)):
-                        for file in [file for file in files if file.endswith('.py')]:
-                            paths.append(os.path.join(root, file))
-                elif os.path.isfile(os.path.expanduser(path)):
-                    paths.append(os.path.expanduser(path))
-            source_file_paths = paths
+                expanded_path = os.path.expanduser(path)
+                if os.path.isdir(expanded_path):
+                    all_python_files.extend(find_python_files(expanded_path))
+                elif os.path.isfile(expanded_path) and expanded_path.endswith('.py'):
+                    all_python_files.append(expanded_path)
+                else:
+                    raise ValueError(f"Invalid source file path: {path}. Must be a directory or a .py file.")
+            return all_python_files
+
         else:
             raise ValueError(f"Invalid source file paths: {source_file_paths}. Must be a list of file paths or a directory path.")
-        return source_file_paths
 
     @staticmethod
     def get_code_structure_summary(source_file_paths: Union[List[str], str]) -> str:
