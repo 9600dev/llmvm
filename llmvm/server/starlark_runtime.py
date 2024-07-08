@@ -14,13 +14,12 @@ import astunparse
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Answer, Assistant, Content, Controller,
+from llmvm.common.objects import (Answer, Assistant, Content, Controller, FileContent,
                                   FunctionCall, FunctionCallMeta, LLMCall,
                                   MarkdownContent, Message, PandasMeta,
                                   Statement, User)
 from llmvm.server.starlark_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
-from llmvm.server.tools.firefox import FirefoxHelpers
 from llmvm.server.tools.market import MarketHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
@@ -110,7 +109,6 @@ class StarlarkRuntime:
         self.globals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
-        self.globals_dict['FirefoxHelpers'] = CallWrapper(self, FirefoxHelpers)
         self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
         self.globals_dict['answer'] = self.answer
         self.globals_dict['sys'] = sys
@@ -150,8 +148,7 @@ class StarlarkRuntime:
 
     def pandas_bind(self, expr) -> PandasMeta:
         import pandas as pd
-
-        logging.debug('pandas_bind()')
+        logging.debug(f'pandas_bind({expr})')
 
         def bind_with_llm(expr_str: str) -> PandasMeta:
             assistant = self.controller.execute_llm_call(
@@ -176,7 +173,17 @@ class StarlarkRuntime:
             )
             return PandasMeta(expr_str=expr_str, pandas_df=pd.DataFrame(str(assistant.message)))
 
-        if isinstance(expr, str) and '.csv' in expr:
+        if isinstance(expr, str) and 'FileContent' in expr:
+            # sometimes the LLM generates code which is the "FileContent(...)" representation of the variable
+            # rather than the actual FileContent variable
+            try:
+                file_content_url = re.search(r'FileContent\((.*)\)', expr).group(1)
+                df = pd.read_csv(file_content_url)
+                return PandasMeta(expr_str=expr, pandas_df=df)
+            except Exception:
+                return bind_with_llm(expr)
+
+        elif isinstance(expr, str) and '.csv' in expr:
             try:
                 result = urlparse(expr)
 
@@ -190,6 +197,9 @@ class StarlarkRuntime:
         elif isinstance(expr, list) or isinstance(expr, dict):
             df = pd.DataFrame(expr)
             return PandasMeta(expr_str=str(expr), pandas_df=df)
+        elif isinstance(expr, FileContent):
+            df = pd.read_csv(expr.url)
+            return PandasMeta(expr_str=expr.url, pandas_df=df)
         else:
             return bind_with_llm(expr)
 

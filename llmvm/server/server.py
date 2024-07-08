@@ -29,7 +29,7 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.persistent_cache import PersistentCache
 from llmvm.server.starlark_execution_controller import ExecutionController
-from llmvm.server.tools.firefox import FirefoxHelpers
+from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.vector_search import VectorSearch
 from llmvm.server.vector_store import VectorStore
 
@@ -318,11 +318,11 @@ async def health():
     logging.debug('/health')
     return {'status': 'ok'}
 
-@app.get('/firefox')
-async def firefox(url: str = 'https://9600.dev'):
-    logging.debug(f'/firefox?url={url}')
-    firefox = FirefoxHelpers()
-    result = await firefox.get_url(url)
+@app.get('/browser')
+async def browser(url: str = 'https://9600.dev'):
+    logging.debug(f'/browser?url={url}')
+    chrome = ChromeHelpers()
+    result = await chrome.get_url(url)
     return JSONResponse(content=result)
 
 @app.post('/v1/chat/cookies', response_model=None)
@@ -688,7 +688,7 @@ if __name__ == '__main__':
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
     rich.print(f'[cyan]Default executor is: {default_controller}[/cyan]')
     rich.print(f'[cyan]Default model is: {default_model}[/cyan]')
-    rich.print(f'[cyan]Make sure to `playwright install firefox`.[/cyan]')
+    rich.print(f'[cyan]Make sure to `playwright install`.[/cyan]')
 
     for agent in agents:
         rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore

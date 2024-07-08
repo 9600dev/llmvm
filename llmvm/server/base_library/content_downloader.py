@@ -3,8 +3,8 @@ from typing import Callable, Dict, List
 from urllib.parse import urlparse
 
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Content, PdfContent
-from llmvm.server.tools.webhelpers import FirefoxHelpers, WebHelpers
+from llmvm.common.objects import Content, FileContent, PdfContent
+from llmvm.server.tools.webhelpers import ChromeHelpers, WebHelpers
 
 logging = setup_logging()
 
@@ -35,22 +35,31 @@ class ContentDownloader():
 
         # deal with pdfs
         elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
-            firefox_helper = FirefoxHelpers(cookies=self.cookies)
+            chrome_helper = ChromeHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
             # downloads the pdf and gets a local file url
-            task = loop.create_task(firefox_helper.pdf_url(self.expr))
+            task = loop.create_task(chrome_helper.pdf_url(self.expr))
 
             pdf_filename = loop.run_until_complete(task)
-            _ = loop.run_until_complete(loop.create_task(firefox_helper.close()))
+            _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
             return PdfContent(sequence=b'', url=pdf_filename)
+
+        # deal with csv files
+        elif (result.scheme == 'http' or result.scheme == 'https') and '.csv' in result.path:
+            chrome_helper = ChromeHelpers(cookies=self.cookies)
+            loop = asyncio.get_event_loop()
+            task = loop.create_task(chrome_helper.download(self.expr))
+            csv_filename = loop.run_until_complete(task)
+            _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
+            return FileContent(sequence=b'', url=csv_filename)
 
         # deal with websites
         elif result.scheme == 'http' or result.scheme == 'https':
-            firefox_helper = FirefoxHelpers(cookies=self.cookies)
+            chrome_helper = ChromeHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
-            task = loop.create_task(firefox_helper.get_url(self.expr))
+            task = loop.create_task(chrome_helper.get_url(self.expr))
             result = loop.run_until_complete(task)
-            _ = loop.run_until_complete(loop.create_task(firefox_helper.close()))
+            _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
             return WebHelpers.convert_html_to_markdown(result, url=self.expr)
 
         # else, nothing

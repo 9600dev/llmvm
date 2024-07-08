@@ -1362,20 +1362,17 @@ def help():
 @cli.command('ls', hidden=True)
 @click.argument('args', type=str, required=False, default='')
 def ls(args):
-    os.system(f'ls --color {args}')
+    os.system(f'ls -la --color {args}')
 
 @cli.command('cookies', help='Set cookies for a message thread so that the tooling is able to access authenticated content.')
-@click.option('--sqlite', '-s', type=str, required=False,
-              help='location of Firefox/Chrome cookies sqlite file.')
 @click.option('--file_location', '-l', type=str, required=False,
-              help='location of Firefox/Chrome cookies txt file in Netscape format.')
+              help='location of cookies txt file in Netscape format.')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread id to attach cookies to')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def cookies(
-    sqlite: str,
     file_location: str,
     id: int,
     endpoint: str,
@@ -1390,50 +1387,6 @@ def cookies(
     if file_location:
         with open(file_location, 'r') as f:
             cookies = Helpers.read_netscape_cookies(f.read())
-    else:
-        if not sqlite:
-            # find either firefox or chrome cookies
-            start_locations = []
-
-            if os.path.exists(os.path.expanduser('~/.mozilla/firefox')):
-                # find any cookies.sqlite file and print the directory
-                for root, _, files in os.walk(os.path.expanduser('~/.mozilla/firefox')):
-                    for file in files:
-                        if file == 'cookies.sqlite':
-                            start_locations.append(os.path.join(root, file))
-
-            if os.path.exists(os.path.expanduser('~/.config/google-chrome')):
-                # find any cookies.sqlite file and print the directory
-                for root, dirs, files in os.walk(os.path.expanduser('~/.config/google-chrome')):
-                    for file in files:
-                        if file == 'Cookies':
-                            start_locations.append(os.path.join(root, file))
-
-            if len(start_locations) == 0:
-                rich.print('No cookies files found.')
-                return
-
-            # print the list of cookies files and ask the user to pick one
-            rich.print('Select a cookies file:')
-            for i, location in enumerate(start_locations):
-                rich.print(f'[{i}]: {location}')
-
-            selection = int(input('Selection: '))
-            if selection < 0 or selection >= len(start_locations):
-                rich.print('Invalid selection.')
-                return
-
-            sqlite = start_locations[selection]
-
-        # we have a location, now extract and upload
-        # run the scripts/extract_cookies.py script and capture the text output
-        browser = 'firefox' if 'sqlite' in sqlite else 'chrome'
-        cmd = f'scripts/extract_{browser}_cookies.sh {sqlite}'
-        result = subprocess.run(cmd, text=True, shell=True, env=os.environ, capture_output=True)
-        if result.returncode != 0:
-            rich.print(result.stderr)
-            return
-        cookies = Helpers.read_netscape_cookies(result.stdout)
 
     async def cookies_helper():
         async with httpx.AsyncClient(timeout=400.0) as client:

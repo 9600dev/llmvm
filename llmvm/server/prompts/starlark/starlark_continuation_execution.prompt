@@ -26,7 +26,7 @@ There are also 9 special functions that I've added to our Python implementation 
 1. llm_call(expression_list: List, instruction: str) -> str. Allows you to call yourself from my Python execution engine to perform arbitrary computation, text analysis, or text translation for us. You return a text result as a string. Use it by emitting: llm_call([variable1, "expression2"], "instruction to large language model"). If the Python execution engine sees this call, it will send whatever values are in "expression_list" as User messages, along with the natural language instruction message you specify in "instruction", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expression_list has a text size limit, so if you think the expression_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized result to llm_call instead.
 2. llm_bind(expression, function_str: str) -> Callable. Allows you to properly bind the helper function callsite to whatever is in the expression. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind that to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and I will give you both the value of the expression and the function call site, and you can emit a function call site that is late-bound properly: WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
 3. llm_list_bind(expression, llm_instruction: str, count: int = sys.maxsize) -> Iterator[str]. Allows you to properly bind text to a string list of size count. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings of size 'count' extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.
-4. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. However, this is a special dataframe where you can ask natural language questions about the data and get back responses using the ask(str) method. See examples below on how to use the "ask" method, as it's the only method you can use on the Pandas DataFrame.
+4. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame.
 5. search(expression, titles_seen: List[str]) -> str. Searches the Internet across various search engines to find content related to 'expression' and returns all of that content as a string. Use this if you need general search, news search, or product searching capability. If you have already called search() before, and do not want to include certain website titles in the results, you can pass in a list of string titles of those websites and they will be excluded from the search results.
 6. download(expression) -> str. Downloads any web page, html, PDF file, news article or word document, converts it to text, and returns that text content as a string.
 7. messages() -> List[str]. Returns the current large language model User Assistant conversation as a list of string messages for code within <code></code> blocks. messages()[0] is the first message sent in the conversation. messages()[-1] is the last message. Messages can either be User messages or Assistant messages. You can only get either the first message via [0], the last message via [-1], or all messages.
@@ -173,15 +173,56 @@ answer(answers)  # Step 6: Show the summarized details of the top 3 restaurants 
 </code>
 </complete>
 
-Example: Here is an example of using the special pandas_bind(expr) function to get CSV data, populate a Pandas Dataframe, then call the ask() method to ask natural language questions about the data.
+Example: Here is an example of using the special pandas_bind(expr) function to get CSV data, populate a Pandas Dataframe
 
-{{user_colon_token}} Get the organizational data csv from https://media.githubusercontent.com/media/datablist/sample-csv-files/main/files/organizations/organizations-100.csv and figure out which company has the largest number of employees
+{{user_colon_token}} Get the us cities data from https://9600.dev/us-cities.csv and figure out which city has the largest population
 
 {{assistant_colon_token}}
 <code>
-var1 = pandas_bind(""https://media.githubusercontent.com/media/datablist/sample-csv-files/main/files/organizations/organizations-100.csv")
-var2 = var1.ask("what company has the largest number of employees?")
-answer(var2)
+data_frame = pandas_bind("https://9600.dev/us-cities.csv")
+answer(data_frame)
+</code>
+
+Here is a description of the dataframe:
+
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 1000 entries, 0 to 999
+Data columns (total 5 columns):
+ #   Column      Non-Null Count  Dtype
+---  ------      --------------  -----
+ 0   City        1000 non-null   object
+ 1   State       1000 non-null   object
+ 2   Population  1000 non-null   int64
+ 3   lat         1000 non-null   float64
+ 4   lon         1000 non-null   float64
+dtypes: float64(2), int64(1), object(2)
+memory usage: 39.2+ KB
+
+[ins] In [11]: a.describe()
+Out[11]:
+         Population          lat          lon
+count  1.000000e+03  1000.000000  1000.000000
+mean   1.311324e+05    37.338241   -96.483023
+std    3.416902e+05     5.279127    17.024468
+min    3.687700e+04    21.306944  -157.858333
+25%    4.969775e+04    33.748627  -116.959608
+50%    6.820700e+04    37.768557   -93.238834
+75%    1.098850e+05    41.618357   -82.171804
+max    8.405837e+06    61.218056   -70.255326
+
+head()
+
+         City           State  Population        lat         lon
+0  Marysville      Washington       63269  48.051764 -122.177082
+1      Perris      California       72326  33.782519 -117.228648
+2   Cleveland            Ohio      390113  41.499320  -81.694361
+3   Worcester   Massachusetts      182544  42.262593  -71.802293
+4    Columbia  South Carolina      133358  34.000710  -81.034814
+
+{{assistant_colon_token}}
+<code>
+city_with_largest_population = df.loc[df['Population'].idxmax()]
+answer(city_with_largest_population)
 </code>
 </complete>
 

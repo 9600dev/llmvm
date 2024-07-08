@@ -11,7 +11,6 @@ from markdownify import MarkdownConverter
 from llmvm.common.helpers import write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Content, MarkdownContent
-from llmvm.server.tools.firefox import FirefoxHelpers
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.tools.search import SerpAPISearcher
 
@@ -85,13 +84,13 @@ class WebHelpers():
         from llmvm.common.pdf import PdfHelpers
         logging.debug('WebHelpers.get_linkedin_profile: {}'.format(linkedin_url))
 
-        firefox_helpers = ChromeHelpers()
-        asyncio.run(firefox_helpers.goto(linkedin_url))
-        asyncio.run(firefox_helpers.wait_until_text('Experience'))
-        pdf_file = asyncio.run(firefox_helpers.pdf())
+        chrome_helpers = ChromeHelpers()
+        asyncio.run(chrome_helpers.goto(linkedin_url))
+        asyncio.run(chrome_helpers.wait_until_text('Experience'))
+        pdf_file = asyncio.run(chrome_helpers.pdf())
         data = PdfHelpers.parse_pdf(pdf_file)
         os.remove(pdf_file)
-        asyncio.run(firefox_helpers.close())
+        asyncio.run(chrome_helpers.close())
         return data
 
     @staticmethod

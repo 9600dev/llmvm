@@ -12,10 +12,9 @@ from llmvm.common.objects import (Content, LLMCall, Message,
                                   TokenCompressionMethod, User, bcl)
 from llmvm.server.starlark_execution_controller import ExecutionController
 from llmvm.server.starlark_runtime import StarlarkRuntime
-from llmvm.server.tools.firefox import FirefoxHelpers
+from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.tools.search import SerpAPISearcher
 from llmvm.server.tools.webhelpers import WebHelpers
-from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
 
@@ -39,7 +38,7 @@ class Browser():
         if self.query.startswith('"') and self.query.endswith('"'):
             self.query = self.query[1:-1]
 
-        self.browser = FirefoxHelpers(cookies=cookies)
+        self.browser = ChromeHelpers(cookies=cookies)
         self.current_page: Page
 
     def check(

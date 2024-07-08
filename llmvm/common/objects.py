@@ -862,6 +862,9 @@ class FunctionCallMeta(Call):
         # Return a dictionary representing the object's state
         return {'_result': self._result}
 
+    def __getitem__(self, key):
+        return self._result.__getitem__(key)  # type: ignore
+
     def __str__(self):
         return str(self._result)
 
@@ -948,7 +951,7 @@ class PandasMeta(Call):
         pandas_df,
     ):
         self.expr_str = expr_str
-        self.df = pandas_df
+        self.df: DataFrame = pandas_df
 
     def result(self) -> object:
         return self._result
@@ -957,11 +960,28 @@ class PandasMeta(Call):
         return 'pandasmeta'
 
     def __str__(self):
-        return str(self.df)
+        str_acc = ''
+        if self.df is not None:
+            str_acc += f'{self.df.info()}\n\n'  # type: ignore
+            str_acc += f'{self.df.describe()()}\n\n'  # type: ignore
+            str_acc += f'{self.df.head()}\n\n'  # type: ignore
+            str_acc += 'head()\n'
+            return str_acc
+        else:
+            return '[]'
 
-    def ask(self, *args, **kwargs) -> object:
-        self._result = self.df.ask(*args, **kwargs)  # type: ignore
-        return self._result
+    def __getattr__(self, name):
+        if name in self.__dict__:
+            return getattr(self.df, name)
+        elif object.__getattribute__(self, 'df') is not None:
+            return getattr(self.df, name)
+        raise AttributeError(f"'self.df isn't set, and {self.__class__.__name__}' object has no attribute '{name}'")
+
+    def __getitem__(self, key):
+        return self.df.__getitem__(key)  # type: ignore
+
+    def __format__(self, format_spec):
+        return format(self.pandas_df, format_spec)
 
 
 class FunctionCall(Call):

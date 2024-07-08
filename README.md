@@ -10,14 +10,14 @@ LLMVM's features are best explored through use case examples. Let's install, the
 
 ```$ pip install llmvm-cli```
 
-```$ playwright install firefox```
+```$ playwright install```
 
 ```$ python -m llmvm.server```
 
 ```bash
 Default executor is: anthropic
 Default model is: claude-3-5-sonnet-20240620
-Make sure to `playwright install firefox`.
+Make sure to `playwright install`.
 Loaded agent: datetime
 Loaded agent: search_linkedin_profile
 Loaded agent: get_linkedin_profile
@@ -59,7 +59,7 @@ LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING
 
 Let's explore some use cases:
 
-### Tool Use: Controlling Firefox Browser
+### Tool Use: Controlling the Browser
 
 ```bash
 query>> go to https://ten13.vc/team and get the names of the people that work there
@@ -68,7 +68,7 @@ query>> go to https://ten13.vc/team and get the names of the people that work th
 ![](docs/2024-07-03-16-25-15.png)
 
 
-The LLMVM server is coordinating with the LLM to deconstruct the query into executable code calls various Python helpers that can be executed in the server process on behalf of the LLM. In this case, the server is using a headless Firefox instance to download the website url, screenshot and send progress back to the client, convert the website to Markdown, and hand the markdown to the LLM for name extraction. More on how this works later.
+The LLMVM server is coordinating with the LLM to deconstruct the query into executable code calls various Python helpers that can be executed in the server process on behalf of the LLM. In this case, the server is using a headless Chromium instance to download the website url, screenshot and send progress back to the client, convert the website to Markdown, and hand the markdown to the LLM for name extraction. More on how this works later.
 
 ### Tool Use: Finance and Searching
 
@@ -182,7 +182,7 @@ and then:
 
 ```bash
 pip install llmvm-cli
-playwright install firefox
+playwright install
 ```
 
 [Optional]
@@ -331,7 +331,7 @@ def BCL.get_source_code(source_file_path: string) -> str  # Gets the source code
 def BCL.get_all_references(source_file_paths: string, method_name: string) -> str  # Find's all references to the given method in the source code files listed in source_files.
 ```
 
-Downloading web content (html, PDF's etc), and searching the web is done through special functions: ```download()``` and ```search()``` which are defined in the LLMVM runtimes base class libraries. ```download()``` as mentioned uses Firefox via Microsoft Playwright so that we can avoid web server blocking issues that tend to occur with requests.get(). ```search()``` uses [SerpAPI](https://serpapi.com/), which may require a paid subscription.
+Downloading web content (html, PDF's etc), and searching the web is done through special functions: ```download()``` and ```search()``` which are defined in the LLMVM runtimes base class libraries. ```download()``` as mentioned uses Chromium via Microsoft Playwright so that we can avoid web server blocking issues that tend to occur with requests.get(). ```search()``` uses [SerpAPI](https://serpapi.com/), which may require a paid subscription.
 
 
 ### Walkthrough of tool binding and execution
@@ -353,7 +353,7 @@ var1 = download("https://ten13.vc/team")
 
 The \<code> block creates a Python runtime context and the LLMVM server will extract this code and execute it. Once the code is executed, the \<code>\</code> block is replaced with \<code_result>\</code_result> but the Python runtime context is kept alive for any further execution of \<code> blocks later.
 
-The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/starlark_runtime.py#L392C12-L392C12) function is part of a set of user definable base class libraries that the LLM knows about: download() llm_call() llm_list_bind(), llm_bind(), answer() and so on. download() fires up an instance of Firefox via [Playwright](https://playwright.dev/) to download web or PDF content and convert them to Markdown.
+The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/starlark_runtime.py#L392C12-L392C12) function is part of a set of user definable base class libraries that the LLM knows about: download() llm_call() llm_list_bind(), llm_bind(), answer() and so on. download() fires up an instance of Chromium via [Playwright](https://playwright.dev/) to download web or PDF content and convert them to Markdown.
 
 ```python
 var2 = llm_call([var1], "extract list of names")  # Step 2: Extract the list of names
@@ -417,22 +417,29 @@ Query -> Natural Language interleaved with \<code> blocks -> stop_token of \<cod
 
 The other 'nifty trick' here is that you give the LLM the ability to call itself within a \<code> block with a fresh "call stack" via the llm_call() API, allowing for arbitrary compute without forcing the LLM to interpret the previous conversational User/Assistant messages.
 
-### Debugging Firefox Automation Issues
+### Debugging Chromium Automation Issues
 
-The Python runtime uses [Playwright](https://playwright.dev/python/) to automate Firefox on its behalf. By default, it runs Firefox in headless mode, but this can be changed in `~/.config/llmvm/config.yaml`:
+The Python runtime uses [Playwright](https://playwright.dev/python/) to automate Chromium on its behalf. By default, it runs Chromium in headless mode, but this can be changed in `~/.config/llmvm/config.yaml`:
 
 ```yaml
-firefox_headless: true
+chromium_headless: true
 ```
 
-You can also copy your own browsers cookies file into Playwright's Firefox automation instance. This allows the Playwright instance to assume your logged in sessions to things like LinkedIn. Simply:
+You can also copy your own browsers cookies file into Playwright's Chromium automation instance. This allows the Playwright instance to use your session cookies for sites like LinkedIn. Simply:
 
 * run ```scripts/extract_firefox_cookies.sh > cookies.txt```
 * move the cookies.txt file to a secure location
 * update ```config.yaml``` to point to the cookies file:
 
 ```yaml
-firefox_cookies: '~/.local/share/llmvm/cookies.txt'
+chromium_cookies: '~/.local/share/llmvm/cookies.txt'
+```
+
+Chrome makes things more complicated. You can use [J2Team Cookies extension](https://chromewebstore.google.com/detail/j2team-cookies/okpidcojinmlaakglciglbpcpajaibco?hl=en&pli=1) to extract cookies per site, save as a json file, then:
+
+```bash
+cd scripts
+cat cookie.txt | python extract_chrome_json.py >> ~/.local/share/llmvm/cookies.txt
 ```
 
 ### The Problem this prototype solves

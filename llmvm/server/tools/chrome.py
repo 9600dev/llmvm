@@ -1,10 +1,11 @@
 import asyncio
+import base64
 import concurrent
 import concurrent.futures
 import datetime as dt
 import os
 import threading
-import time
+import tempfile
 from typing import Dict, List, cast
 from urllib.parse import urlparse
 
@@ -127,6 +128,9 @@ class ChromeHelpers():
     async def pdf_url(self, url: str) -> str:
         return self.run_in_loop(self.chrome.pdf_url(url)).result()
 
+    async def download(self, url: str) -> str:
+        return self.run_in_loop(self.chrome.download(url)).result()
+
     async def clickable(self) -> List[str]:
         return self.run_in_loop(self.chrome.clickable()).result()
 
@@ -164,6 +168,7 @@ class ChromeHelpersInternal():
         self.browser = None
         self.wait_fors = {
             'twitter.com': lambda page: self.wait(1500),
+            'x.com': lambda page: self.wait(1500),
             'techmeme.com': lambda page: self.wait(1500)
         }
 
@@ -174,19 +179,20 @@ class ChromeHelpersInternal():
         if self.playwright is None or self.browser is None:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
-                headless=Container().get('chrome_headless', default=True),
+                headless=Container().get('chromium_headless', default=True),
                 args=self.args
             )
 
         self._context = await self.browser.new_context(viewport={'width': 1920, 'height': 1080}, accept_downloads=True)
-        cookie_file = Container().get('chrome_cookies', '')
+        cookie_file = Container().get('chromium_cookies', '')
         if os.path.exists(cookie_file):
             result = read_netscape_cookies(cookie_file)
             await self._context.add_cookies(result)
 
         if self.cookies:
             await self._context.add_cookies(self.cookies)  # type: ignore
-        return await self._context.new_page()
+        page = await self._context.new_page()
+        return page
 
     async def page(self) -> Page:
         if self._page is None:
@@ -204,12 +210,16 @@ class ChromeHelpersInternal():
     async def goto(self, url: str):
         try:
             if (await self.page()).url != url:
-                await (await self.page()).goto(url)
+                await (await self.page()).goto(url, wait_until='load')
 
                 domain = urlparse(url).netloc
+
                 if domain in self.wait_fors:
                     wait_for_lambda = self.wait_fors[domain]
                     await wait_for_lambda(await self.page())
+
+                # wait some fraction of a second for some rendering
+                await self.wait(250)
 
         except Error as _:
             # try new page
@@ -227,7 +237,8 @@ class ChromeHelpersInternal():
         element = await (await self.page()).wait_for_selector(f'*:has-text("{selector}")', timeout=5000)
 
     async def get_html(self) -> str:
-        return await (await self.page()).content()
+        result = await (await self.page()).content()
+        return result
 
     async def screenshot(self) -> bytes:
         try:
@@ -255,31 +266,50 @@ class ChromeHelpersInternal():
         await (await self.page()).pdf(path=pdf_path)
         return os.path.abspath(pdf_path)
 
-    async def pdf_url(self, url: str) -> str:
+    async def download(self, url: str) -> str:
         async def requests_download(url, filename: str):
-            logging.debug('pdf_url: using requests to download')
+            logging.debug(f'download({url}): using requests to download')
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, follow_redirects=True)
                 async with aiofiles.open(filename, 'wb') as file:
                     async for chunk in response.aiter_bytes(chunk_size=8192):
                         await file.write(chunk)
-
             return os.path.abspath(filename)
 
-        if '.pdf' in url:
-            pdf_path = '/tmp/output.pdf'
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-            try:
-                if 'arxiv.org' in url:
-                    return await requests_download(url, pdf_path)
+        parsed_url = urlparse(url)
+        _, file_extension = os.path.splitext(parsed_url.path)
+        if not file_extension:
+            file_extension = '.tmp'
 
-                await self.goto(url)
-                await (await self.page()).pdf(path=pdf_path)
-                return os.path.abspath(pdf_path)
-            except Exception as ex:
-                logging.debug(f'pdf_url({url}) failed with: {ex}, trying requests')
-                return await requests_download(url, pdf_path)
+        try:
+            with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_file:
+                temp_filename = temp_file.name
+
+            if 'arxiv.org' in url:
+                return await requests_download(url, temp_filename)
+
+            # chrome renders the pdf, and you can't download it. So we force it.
+            html = '<html><head></head><body><a href="' + url + '">Download</a></body></html>'
+            data_uri = f"data:text/html;base64,{base64.b64encode(html.encode()).decode()}"
+
+            await self.goto(data_uri)
+
+            async with (await self.page()).expect_download(timeout=10000) as download_info:
+                link = await (await self.page()).query_selector('a')
+                await link.click(modifiers=['Alt'])  # type: ignore
+                download = await download_info.value
+
+                await download.save_as(temp_filename)
+                return os.path.abspath(temp_filename)
+        except Exception as ex:
+            logging.debug(f'download({url}) failed with: {ex}, trying requests')
+            return await requests_download(url, temp_filename)
+
+    async def pdf_url(self, url: str) -> str:
+        if '.pdf' in url:
+            return await self.download(url)
+        elif '.csv' in url:
+            return await self.download(url)
         else:
             await self.goto(url)
             return await self.pdf()
