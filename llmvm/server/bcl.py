@@ -123,9 +123,7 @@ class BCL():
             source_file_paths = paths
         else:
             raise ValueError(f"Invalid source file paths: {source_file_paths}. Must be a list of file paths or a directory path.")
-        return paths
-
-
+        return source_file_paths
 
     @staticmethod
     def get_code_structure_summary(source_file_paths: Union[List[str], str]) -> str:
