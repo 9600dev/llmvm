@@ -532,6 +532,22 @@ class ImageContent(Content):
         return f'ImageContent({self.url})'
 
 
+class BrowserContent(Content):
+    def __init__(
+        self,
+        sequence: List[Content],
+        url: str = '',
+    ):
+        super().__init__(sequence, 'browser', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return f'BrowserContent({self.url})'
+
+    def __repr__(self):
+        return f'BrowserContent({self.url})'
+
+
 class MarkdownContent(Content):
     def __init__(
         self,
