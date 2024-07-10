@@ -13,7 +13,7 @@ tell application "Google Chrome"
     activate
     tell application "System Events"
         keystroke "p" using {command down}
-        delay 1
+        delay 1.5
         keystroke return
         delay 0.3 
         keystroke "g" using {shift down, command down}
