@@ -30,6 +30,7 @@ from click_default_group import DefaultGroup
 from httpx import ConnectError
 from PIL import Image
 from prompt_toolkit import PromptSession
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer as PromptCompleter
 from prompt_toolkit.completion import Completion as PromptCompletion
@@ -67,6 +68,17 @@ global escape
 thread_id: int = 0
 current_mode = 'auto'
 escape = False
+
+
+def setup_named_pipe(pid = os.getpid()):
+    pid = os.getpid()
+    FIFO = f'/tmp/llmvm_client_pipe_{pid}'
+    if not os.path.exists(FIFO):
+        os.mkfifo(FIFO)
+    return FIFO
+
+
+pipe_path = setup_named_pipe()
 
 
 def parse_action(token) -> Content:
@@ -985,6 +997,7 @@ class Repl():
         rich.print(f'$LLMVM_EXECUTOR: {Container.get_config_variable("LLMVM_EXECUTOR", default="(not set)")}')
         rich.print(f'$LLMVM_MODEL: {Container.get_config_variable("LLMVM_MODEL", default="(not set)")}')
         rich.print()
+        rich.print(f'Named pipe: {pipe_path}')
         rich.print('[bold]Keys:[/bold]')
         rich.print('[white](Ctrl-c or "exit" to exit, or cancel current request)[/white]')
         rich.print('[white](Ctrl-n to create a new thread)[/white]')
@@ -1006,6 +1019,18 @@ class Repl():
         event.app.invalidate()
         event.app.renderer.reset()
         event.app._redraw()
+
+    async def read_from_pipe(self, pipe_path = pipe_path):  # type: ignore
+        pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)  # type: ignore
+        with os.fdopen(pipe_fd) as pipe:
+            while True:
+                try:
+                    message = pipe.readline()
+                    if message:
+                        yield message
+                    await asyncio.sleep(0.1)
+                except IOError:
+                    await asyncio.sleep(0.1)
 
     async def repl(
         self,
@@ -1174,6 +1199,11 @@ class Repl():
 
         self.help()
 
+        async def process_pipe_messages(self):
+            async for message in self.read_from_pipe(pipe_path):
+                session.default_buffer.insert_text(message)
+                session.default_buffer.validate_and_handle()  # type: ignore
+
         def has_option(option_str, command):
             if isinstance(command, click.core.Command):
                 return any(option_str in param.opts for param in command.params if isinstance(param, click.Option))
@@ -1202,11 +1232,14 @@ class Repl():
         while True:
             try:
                 ctx = click.Context(cli)
+                pipe_task = asyncio.create_task(process_pipe_messages(self))
 
                 query = await session.prompt_async(
                     f'[{thread_id}] query>> ',
                     complete_while_typing=True,
                 )
+
+                pipe_task.cancel()
 
                 # there are a few special commands that aren't 'clickified'
                 if query == 'yy':
@@ -1252,10 +1285,13 @@ class Repl():
                 if command_executing:
                     command_executing = False
                     continue
+                os.unlink(pipe_path)
+                os.remove(pipe_path)
                 break
-
             except Exception:
                 console.print_exception(max_frames=10)
+                os.unlink(pipe_path)
+                os.remove(pipe_path)
 
 
 @click.group(
