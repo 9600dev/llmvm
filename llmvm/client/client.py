@@ -1,11 +1,13 @@
 import asyncio
 import base64
+import fcntl
 import csv
 import glob
 import io
 import json
 import os
 import re
+import select
 import shlex
 import shutil
 import subprocess
@@ -79,6 +81,28 @@ def setup_named_pipe(pid = os.getpid()):
 
 
 pipe_path = setup_named_pipe()
+
+
+async def read_from_pipe(pipe_path, timeout=0.3):
+    pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(pipe_fd, 'r') as pipe:
+        buffer = ""
+        last_read_time = time.time()
+        while True:
+            try:
+                chunk = pipe.read(4096)  # Read in larger chunks
+                if chunk:
+                    buffer += chunk
+                    last_read_time = time.time()
+                else:
+                    # No new data, check if we've been idle for a while
+                    if time.time() - last_read_time > timeout and buffer:
+                        return_buffer = buffer
+                        buffer = ''
+                        yield return_buffer # Return the entire collected message
+                    await asyncio.sleep(0.1)
+            except IOError:
+                await asyncio.sleep(0.1)
 
 
 def parse_action(token) -> Content:
@@ -1020,17 +1044,6 @@ class Repl():
         event.app.renderer.reset()
         event.app._redraw()
 
-    async def read_from_pipe(self, pipe_path = pipe_path):  # type: ignore
-        pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)  # type: ignore
-        with os.fdopen(pipe_fd) as pipe:
-            while True:
-                try:
-                    message = pipe.readline()
-                    if message:
-                        yield message
-                    await asyncio.sleep(0.1)
-                except IOError:
-                    await asyncio.sleep(0.1)
 
     async def repl(
         self,
@@ -1200,8 +1213,10 @@ class Repl():
         self.help()
 
         async def process_pipe_messages(self):
-            async for message in self.read_from_pipe(pipe_path):
-                session.default_buffer.insert_text(message)
+            async for message in read_from_pipe(pipe_path):
+                session.app.current_buffer.text = message
+                session.app.current_buffer.cursor_position = len(message) - 1
+                # session.app.text insert_text(message)
                 session.default_buffer.validate_and_handle()  # type: ignore
 
         def has_option(option_str, command):
@@ -1286,12 +1301,10 @@ class Repl():
                     command_executing = False
                     continue
                 os.unlink(pipe_path)
-                os.remove(pipe_path)
                 break
             except Exception:
                 console.print_exception(max_frames=10)
                 os.unlink(pipe_path)
-                os.remove(pipe_path)
 
 
 @click.group(
@@ -1382,6 +1395,7 @@ def mode(
 
 @cli.command('exit', hidden=True)
 def exit():
+    os.unlink(pipe_path)
     os._exit(os.EX_OK)
 
 
@@ -1899,6 +1913,7 @@ if __name__ == '__main__':
     # special case the hijacking of --help
     if len(sys.argv) == 2 and (sys.argv[1] == '--help' or sys.argv[1] == '-h'):
         Repl().help()
+        os.unlink(pipe_path)
         sys.exit(0)
 
     if len(sys.argv) <= 1 and sys.stdin.isatty():
