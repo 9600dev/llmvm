@@ -608,7 +608,7 @@ class ExecutionController(Controller):
         logging.debug(f'abuild_runnable_code_ast() model = {llm_call.model}, executor = {llm_call.executor.name()}')
 
         tools_message = Helpers.prompt_message(
-            prompt_name='starlark_code_insights.prompt',
+            prompt_name='python_code_insights.prompt',
             template={
                 'user_input': messages[-1].message.get_str(),
                 'files': '\n'.join(files),
@@ -627,7 +627,7 @@ class ExecutionController(Controller):
                 temperature=llm_call.temperature,
                 max_prompt_len=llm_call.max_prompt_len,
                 completion_tokens_len=llm_call.completion_tokens_len,
-                prompt_name='starlark_code_insights.prompt',
+                prompt_name='python_code_insights.prompt',
                 stream_handler=llm_call.stream_handler,
             ),
             query='',
@@ -647,7 +647,7 @@ class ExecutionController(Controller):
         functions = [Helpers.get_function_description_flat(f) for f in agents]
 
         tools_message = Helpers.prompt_message(
-            prompt_name='starlark_tool_execution.prompt',
+            prompt_name='python_tool_execution.prompt',
             template={
                 'functions': '\n'.join(functions),
                 'user_input': llm_call.user_message.message.get_str(),
@@ -666,7 +666,7 @@ class ExecutionController(Controller):
                 temperature=llm_call.temperature,
                 max_prompt_len=llm_call.max_prompt_len,
                 completion_tokens_len=llm_call.completion_tokens_len,
-                prompt_name='starlark_tool_execution.prompt',
+                prompt_name='python_tool_execution.prompt',
                 stream_handler=llm_call.stream_handler,
             ),
             query='',
@@ -982,7 +982,7 @@ class ExecutionController(Controller):
         functions = [Helpers.get_function_description_flat(f) for f in agents]
         human_query = messages[-1].message.get_str()
         system_message, tools_message = Helpers.prompts(
-            prompt_name='starlark_continuation_execution.prompt',
+            prompt_name='python_continuation_execution.prompt',
             template={
                 'functions': '\n'.join(functions),
                 'user_input': human_query,

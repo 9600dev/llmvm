@@ -1205,7 +1205,7 @@ class Helpers():
         return (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"] or "No docstring"}')  # noqa: E501
 
     @staticmethod
-    def load_resources_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.starlark') -> Dict[str, Any]:
+    def load_resources_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.python') -> Dict[str, Any]:
         prompt_file = resources.files(module) / prompt_name
 
         with open(prompt_file, 'r') as f:  # type: ignore
@@ -1305,7 +1305,7 @@ class Helpers():
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
         append_token: str = '',
-        module: str = 'llmvm.server.prompts.starlark'
+        module: str = 'llmvm.server.prompts.python'
     ) -> Dict[str, Any]:
         prompt: Dict[str, Any] = Helpers.load_resources_prompt(prompt_name, module)
 
@@ -1356,7 +1356,7 @@ class Helpers():
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
         append_token: str = '',
-        module: str = 'llmvm.server.prompts.starlark'
+        module: str = 'llmvm.server.prompts.python'
     ) -> Tuple[System, User]:
         prompt = Helpers.load_and_populate_prompt(prompt_str, template, user_token, assistant_token, append_token, module)
         return (prompt['system_message'], prompt['user_message'])
@@ -1368,7 +1368,7 @@ class Helpers():
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
         append_token: str = '',
-        module: str = 'llmvm.server.prompts.starlark'
+        module: str = 'llmvm.server.prompts.python'
     ) -> Message:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
         return User(Content(prompt['user_message']))
@@ -1380,7 +1380,7 @@ class Helpers():
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
         append_token: str = '',
-        module: str = 'llmvm.server.prompts.starlark'
+        module: str = 'llmvm.server.prompts.python'
     ) -> Tuple[System, User]:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
         return (System(Content(prompt['system_message'])), User(Content(prompt['user_message'])))

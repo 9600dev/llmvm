@@ -122,13 +122,13 @@ class PythonRuntime:
     def only_code_block(code: str) -> bool:
         code = code.strip()
         return (
-            (code.startswith('```starlark') or code.startswith('<code>'))
+            (code.startswith('```python') or code.startswith('<code>'))
             and (code.endswith('```') or code.endswith('</code>'))
         )
 
     @staticmethod
     def get_code_blocks(code: str) -> List[str]:
-        pattern = r'(?:```(?:starlark)\s*([\s\S]*?)\s*```|<code>\s*([\s\S]*?)\s*</code>)'
+        pattern = r'(?:```(?:python)\s*([\s\S]*?)\s*```|<code>\s*([\s\S]*?)\s*</code>)'
 
         def extract_code_blocks(text):
             matches = re.findall(pattern, text, re.IGNORECASE)
@@ -767,7 +767,7 @@ class PythonRuntime:
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
-                    prompt_name='starlark_error_correction.prompt',
+                    prompt_name='python_error_correction.prompt',
                     template={
                         'task': query,
                         'code': python_code,
@@ -785,7 +785,7 @@ class PythonRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='starlark_error_correction.prompt',
+                prompt_name='python_error_correction.prompt',
             ),
             query=self.original_query,
             original_query=self.original_query
@@ -950,7 +950,7 @@ class PythonRuntime:
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
-                    prompt_name='starlark_tool_execution.prompt',
+                    prompt_name='python_tool_execution.prompt',
                     template={
                         'functions': '\n'.join(function_list),
                         'user_input': code_prompt,
@@ -965,7 +965,7 @@ class PythonRuntime:
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='starlark_tool_execution.prompt',
+                prompt_name='python_tool_execution.prompt',
             ),
             query=self.original_query,
             original_query=self.original_query,

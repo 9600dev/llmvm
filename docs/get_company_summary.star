@@ -1,4 +1,4 @@
-```starlark
+```python
 company = messages()[-1]
 answers = []
 search_results = search(company)
