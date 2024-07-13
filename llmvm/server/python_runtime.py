@@ -14,11 +14,11 @@ import astunparse
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Answer, Assistant, Content, Controller, FileContent,
-                                  FunctionCall, FunctionCallMeta, LLMCall,
-                                  MarkdownContent, Message, PandasMeta,
-                                  Statement, User)
-from llmvm.server.starlark_execution_controller import ExecutionController
+from llmvm.common.objects import (Answer, Assistant, Content, FileContent,
+                                  FunctionCallMeta, LLMCall,
+                                  Message, PandasMeta,
+                                  User)
+from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.tools.market import MarketHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
@@ -27,7 +27,7 @@ from llmvm.server.vector_search import VectorSearch
 logging = setup_logging()
 
 
-class StarlarkRuntime:
+class PythonRuntime:
     def __init__(
         self,
         controller: ExecutionController,
@@ -73,7 +73,7 @@ class StarlarkRuntime:
                             caller_frame = inspect.currentframe().f_back  # type: ignore
                             caller_frame_lineno = caller_frame.f_lineno  # type: ignore
 
-                            # extract the line from the original starlark code
+                            # extract the line from the original python code
                             code_line = self.outer_self.original_code.split('\n')[caller_frame_lineno - 1]
 
                             # todo: we should probably do the marshaling here too
@@ -128,7 +128,6 @@ class StarlarkRuntime:
 
     @staticmethod
     def get_code_blocks(code: str) -> List[str]:
-        # pattern = r'(?:```(?:python|starlark)\s*([\s\S]*?)\s*```|<code>\s*([\s\S]*?)\s*</code>)'
         pattern = r'(?:```(?:starlark)\s*([\s\S]*?)\s*```|<code>\s*([\s\S]*?)\s*</code>)'
 
         def extract_code_blocks(text):
@@ -227,7 +226,7 @@ class StarlarkRuntime:
             original_code=self.original_code,
             original_query=self.original_query,
             controller=self.controller,
-            starlark_runtime=self,
+            python_runtime=self,
         )
         bindable.bind(expr, func)
         return bindable
@@ -371,14 +370,14 @@ class StarlarkRuntime:
             return result[:count]
         except Exception as ex:
             logging.debug('llm_list_bind error: {}'.format(ex))
-            new_starlark_code = self.rewrite_starlark_error_correction(
+            new_python_code = self.rewrite_python_error_correction(
                 query=llm_instruction,
-                starlark_code=str(assistant.message),
+                python_code=str(assistant.message),
                 error=str(ex),
                 locals_dictionary=self.locals_dict,
             )
-            logging.debug('llm_list_bind new_starlark_code: {}'.format(new_starlark_code))
-            result = cast(list, eval(new_starlark_code))
+            logging.debug('llm_list_bind new_python_code: {}'.format(new_python_code))
+            result = cast(list, eval(new_python_code))
             if not isinstance(result, list):
                 return []
             return result[:count]
@@ -386,7 +385,7 @@ class StarlarkRuntime:
     def __rewrite_answer_error_correction(
         self,
         query: str,
-        starlark_code: str,
+        python_code: str,
         error: str,
         locals_dictionary: Dict[Any, Any],
     ) -> str:
@@ -406,7 +405,7 @@ class StarlarkRuntime:
                     prompt_name='answer_error_correction.prompt',
                     template={
                         'task': query,
-                        'code': starlark_code,
+                        'code': python_code,
                         'error': error,
                         'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
                         'dictionary': dictionary,
@@ -647,10 +646,10 @@ class StarlarkRuntime:
             )
 
             # determine if the assistant has given us a new code snippet or a re-written answer
-            if StarlarkRuntime.get_code_blocks(rewriter_assistant.message.get_str()):
+            if PythonRuntime.get_code_blocks(rewriter_assistant.message.get_str()):
                 # re-written code
                 logging.debug(f'Answer() re-written code: {rewriter_assistant.message}')
-                re_written_code_blocks = StarlarkRuntime.get_code_blocks(str(rewriter_assistant.message))
+                re_written_code_blocks = PythonRuntime.get_code_blocks(str(rewriter_assistant.message))
                 self.setup()
                 locals_dict = self.locals_dict
                 # the re-written code will likely call answer() again, so we need to
@@ -658,7 +657,7 @@ class StarlarkRuntime:
                 # a loop
                 try:
                     for block in re_written_code_blocks:
-                        runtime = StarlarkRuntime(
+                        runtime = PythonRuntime(
                             controller=self.controller,
                             agents=self.agents,
                             vector_search=self.vector_search,
@@ -753,14 +752,14 @@ class StarlarkRuntime:
         # If it's not an assignment or doesn't have a simple variable name target
         return None
 
-    def rewrite_starlark_error_correction(
+    def rewrite_python_error_correction(
         self,
         query: str,
-        starlark_code: str,
+        python_code: str,
         error: str,
         locals_dictionary: Dict[Any, Any],
     ) -> str:
-        logging.debug('rewrite_starlark_error_correction()')
+        logging.debug('rewrite_python_error_correction()')
         dictionary = ''
         for key, value in locals_dictionary.items():
             dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
@@ -771,7 +770,7 @@ class StarlarkRuntime:
                     prompt_name='starlark_error_correction.prompt',
                     template={
                         'task': query,
-                        'code': starlark_code,
+                        'code': python_code,
                         'error': error,
                         'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
                         'dictionary': dictionary,
@@ -799,34 +798,34 @@ class StarlarkRuntime:
         except SyntaxError as ex:
             logging.debug('SyntaxError: {}'.format(ex))
             try:
-                _ = self.rewrite_starlark_error_correction(
+                _ = self.rewrite_python_error_correction(
                     query=query,
-                    starlark_code=str(assistant.message),
+                    python_code=str(assistant.message),
                     error=str(ex),
                     locals_dictionary=locals_dictionary,
                 )
                 return str(assistant.message)
             except Exception as ex:
-                logging.debug('Second exception rewriting starlark code: {}'.format(ex))
+                logging.debug('Second exception rewriting Python code: {}'.format(ex))
                 return ''
 
     def __eval_with_error_wrapper(
         self,
-        starlark_code: str,
+        python_code: str,
         retry_count: int = 2,
     ):
         counter = 0
         while counter < retry_count:
             try:
-                return eval(starlark_code, self.globals_dict, self.locals_dict)
+                return eval(python_code, self.globals_dict, self.locals_dict)
             except Exception as ex:
-                starlark_code = self.rewrite(starlark_code, str(ex))
+                python_code = self.rewrite(python_code, str(ex))
             counter += 1
         return None
 
     def __compile_and_execute(
         self,
-        starlark_code: str,
+        python_code: str,
     ) -> Dict[Any, Any]:
 
         # massive hack to make locals globals so that generated functions can access that scope
@@ -846,10 +845,10 @@ class StarlarkRuntime:
 
         logging.debug('__compile_and_execute()')
         try:
-            parsed_ast = ast.parse(starlark_code)
+            parsed_ast = ast.parse(python_code)
         except Exception as ex:
-            logging.error(starlark_code)
-            logging.error(f'Error parsing starlark code: {ex}')
+            logging.error(python_code)
+            logging.error(f'Error parsing Python code: {ex}')
             raise ex
 
         context = AutoGlobalDict(self.globals_dict, self.locals_dict)
@@ -861,11 +860,11 @@ class StarlarkRuntime:
 
     def __interpret(
         self,
-        starlark_code: str,
+        python_code: str,
     ) -> Dict[Any, Any]:
-        parsed_ast = ast.parse(starlark_code)
+        parsed_ast = ast.parse(python_code)
 
-        # todo: this doens't have the globals/local dictionary merging stuff like above
+        # todo: this doesn't have the globals/local dictionary merging stuff like above
         for node in parsed_ast.body:
             if isinstance(node, ast.Expr):
                 logging.debug(f'[eval] {astunparse.unparse(node)}')
@@ -885,14 +884,14 @@ class StarlarkRuntime:
 
     def compile_error(
         self,
-        starlark_code: str,
+        python_code: str,
         error: str,
     ) -> str:
         logging.debug('compile_error()')
         # SyntaxError, or other more global error. We should rewrite the entire code.
         # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
         code_prompt = \
-            f'''The following Starlark code (found under "Original Code") didn't parse or compile.
+            f'''The following Python code (found under "Original Code") didn't parse or compile.
             Identify the error in the code below, and re-write the code and only that code.
             The error is found under "Error" and the code is found under "Code".
 
@@ -900,7 +899,7 @@ class StarlarkRuntime:
 
             Original Code:
 
-            {starlark_code}
+            {python_code}
             '''
 
         assistant = self.controller.execute_llm_call(
@@ -919,14 +918,14 @@ class StarlarkRuntime:
         )
 
         lines = str(assistant.message).split('\n')
-        logging.debug('compile_error() Re-written Starlark code:')
+        logging.debug('compile_error() Re-written Python code:')
         for line in lines:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)
 
     def rewrite(
         self,
-        starlark_code: str,
+        python_code: str,
         error: str,
     ):
         logging.debug('rewrite()')
@@ -945,7 +944,7 @@ class StarlarkRuntime:
 
             Original Code:
 
-            {starlark_code}
+            {python_code}
             '''
 
         assistant = self.controller.execute_llm_call(
@@ -972,37 +971,37 @@ class StarlarkRuntime:
             original_query=self.original_query,
         )
         lines = str(assistant.message).split('\n')
-        logging.debug('rewrite() Re-written Starlark code:')
+        logging.debug('rewrite() Re-written Python code:')
         for line in lines:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)
 
     def run(
         self,
-        starlark_code: str,
+        python_code: str,
         original_query: str,
         messages: List[Message] = [],
         locals_dict: Dict = {}
     ) -> Dict[Any, Any]:
-        self.original_code = starlark_code
+        self.original_code = python_code
         self.original_query = original_query
         self.messages_list = messages
         # todo: why are we running setup again here?
         # self.setup()
         self.locals_dict = locals_dict
 
-        return self.__compile_and_execute(starlark_code)
+        return self.__compile_and_execute(python_code)
 
     def run_continuation_passing(
         self,
-        starlark_code: str,
+        python_code: str,
         original_query: str,
         messages: List[Message] = [],
         locals_dict: Dict = {}
     ) -> Dict[Any, Any]:
-        self.original_code = starlark_code
+        self.original_code = python_code
         self.original_query = original_query
         self.messages_list = messages
         self.locals_dict = locals_dict
 
-        return self.__interpret(starlark_code)
+        return self.__interpret(python_code)

@@ -10,8 +10,8 @@ from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (BrowserContent, Content, ImageContent, LLMCall, MarkdownContent, Message,
                                   TokenCompressionMethod, User, bcl)
-from llmvm.server.starlark_execution_controller import ExecutionController
-from llmvm.server.starlark_runtime import StarlarkRuntime
+from llmvm.server.python_execution_controller import ExecutionController
+from llmvm.server.python_runtime import PythonRuntime
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
 
@@ -22,7 +22,7 @@ class Browser():
         self,
         task: str,
         controller: ExecutionController,
-        runtime: StarlarkRuntime,
+        runtime: PythonRuntime,
         original_code: str,
         original_query: str,
         cookies: List[Dict[str, str]] = [],
@@ -35,7 +35,7 @@ class Browser():
         self.original_query = original_query
         self.controller = controller
         self.cookies = cookies
-        self.runtime = StarlarkRuntime
+        self.runtime = PythonRuntime
         self.query = original_query
 
         self.browser = ChromeHelpers(cookies=cookies)

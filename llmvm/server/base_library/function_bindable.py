@@ -9,9 +9,8 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, Content, FunctionCall, LLMCall,
                                   Message, System, User)
-from llmvm.server.ast_parser import Parser
-from llmvm.server.starlark_execution_controller import ExecutionController
-from llmvm.server.starlark_runtime import StarlarkRuntime
+from llmvm.server.python_execution_controller import ExecutionController
+from llmvm.server.python_runtime import PythonRuntime
 
 logging = setup_logging()
 
@@ -29,7 +28,7 @@ class FunctionBindable():
         original_code: str,
         original_query: str,
         controller: ExecutionController,
-        starlark_runtime: StarlarkRuntime,
+        python_runtime: PythonRuntime,
     ):
         self.expr = expr
         self.expr_instantiation = expr_instantiation
@@ -42,7 +41,7 @@ class FunctionBindable():
         self.original_query = original_query
         self.controller = controller
         self.bound_function: Optional[Callable] = None
-        self.starlark_runtime = starlark_runtime
+        self.python_runtime = python_runtime
         self._result = None
 
     def __call__(self, *args, **kwargs):
@@ -112,15 +111,15 @@ class FunctionBindable():
             node, parent = find_string_instantiation(expr, self.original_code)
             if parent:
                 expr_instantiation_message.message = Content(
-                    f"The data in the next message was instantiated via this Starlark code: {astunparse.unparse(parent)}"
+                    f"The data in the next message was instantiated via this Python code: {astunparse.unparse(parent)}"
                 )
             elif node:
                 expr_instantiation_message.message = Content(
-                    f"The data in the next message was instantiated via this Starlark code: {astunparse.unparse(node.value)}"
+                    f"The data in the next message was instantiated via this Python code: {astunparse.unparse(node.value)}"
                 )
 
         messages.append(System(Content(
-            '''You are a Starlark compiler and code generator. You generate parsable Starlark code.'''
+            '''You are a Python compiler and code generator. You generate parsable Python code.'''
         )))
 
         # get the binder prompt message
@@ -134,10 +133,10 @@ class FunctionBindable():
             messages.append(expr_instantiation_message)
         # goal
         messages.append(User(Content(
-            f"""The overall goal of the Starlark program is to: {self.original_query}."""
+            f"""The overall goal of the Python program is to: {self.original_query}."""
         )))
         messages.append(User(Content(
-            f"""The Starlark code that is currently being executed is: {self.original_code}"""
+            f"""The Python code that is currently being executed is: {self.original_code}"""
         )))
 
         # program scope
@@ -150,7 +149,7 @@ class FunctionBindable():
 
         scope = '\n'.join(['{} = "{}"'.format(key, expand_str(value)) for key, value in self.scope_dict.items()])
         messages.append(User(Content(
-            f"""The Starlark program's running global scope for all variables is:
+            f"""The Python program's running global scope for all variables is:
 
             {scope}
 
@@ -158,7 +157,7 @@ class FunctionBindable():
             """
         )))
 
-        counter = 5  # expr, overall goal, starlark code being executed
+        counter = 5  # expr, overall goal, python code being executed
         # counter = 6  # program scope, including all variables
         assistant_counter = 0
 
@@ -193,15 +192,8 @@ class FunctionBindable():
                     if match:
                         bindable = match.group(1).replace('python', '').strip()
 
-                if '```starlark' in bindable:
-                    match = re.search(r'```starlark([\s\S]*?)```', bindable)
-                    if match:
-                        bindable = match.group(1).replace('starlark', '').strip()
-
                 # get function definition
-                parser = Parser()
-                parser.agents = self.agents
-                function_call = parser.get_callsite(bindable)
+                function_call = Helpers.get_callsite(bindable, self.agents)
 
                 if 'None' in str(bindable):
                     # move forward a stage and add the latest assistant response
@@ -214,7 +206,7 @@ class FunctionBindable():
                         question = bindable.split('#')[1].strip()
                         prompt = f'''
                         Using the data found in previous messages, answer the question "{question}", and then bind the callsite
-                        using the same reply rules as in previous messages. Reply with only Starlark code.
+                        using the same reply rules as in previous messages. Reply with only Python code.
                         '''
                         messages.insert(0, User(Content(prompt)))
                     else:
@@ -232,9 +224,9 @@ class FunctionBindable():
                     messages.insert(0, User(message=Content(
                         """Please try harder to bind the callsite.
                         Look thoroughly through the previous messages for data and then reply with your best guess at the bounded
-                        callsite. Reply only with Starlark code that can be parsed by the Starlark compiler.
+                        callsite. Reply only with Python code that can be parsed by the Python compiler.
                         Do not apologize. Do not explain yourself. If you have previously replied with natural language,
-                        it's likely I could not compile it. Please reply with only Starlark code.
+                        it's likely I could not compile it. Please reply with only Python code.
                         """
                     )))
                     assistant_counter += 1
@@ -262,15 +254,15 @@ class FunctionBindable():
 
             # execute the function
             # todo: figure out what to do when you get back None, or ''
-            starlark_code = bindable
+            python_code = bindable
             locals_result = {}
 
             try:
-                locals_result = StarlarkRuntime(
+                locals_result = PythonRuntime(
                     controller=self.controller,
                     agents=self.agents,
-                    vector_search=self.starlark_runtime.vector_search,
-                ).run(starlark_code, '')
+                    vector_search=self.python_runtime.vector_search,
+                ).run(python_code, '')
 
                 self._result = locals_result[identifier]
                 yield self
@@ -283,9 +275,9 @@ class FunctionBindable():
             except Exception as ex:
                 logging.error('Error executing function call: {}'.format(ex))
                 counter += 1
-                starlark_code = self.starlark_runtime.rewrite_starlark_error_correction(
+                python_code = self.python_runtime.rewrite_python_error_correction(
                     query=self.original_query,
-                    starlark_code=starlark_code,
+                    python_code=python_code,
                     error=str(ex),
                     locals_dictionary=self.scope_dict,
                 )

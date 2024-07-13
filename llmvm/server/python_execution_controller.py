@@ -687,8 +687,8 @@ class ExecutionController(Controller):
         cookies: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Statement]:
 
-        from llmvm.server.starlark_runtime import StarlarkRuntime
-        starlark_runtime = StarlarkRuntime(self, agents=self.agents, vector_search=self.vector_search)
+        from llmvm.server.python_runtime import PythonRuntime
+        python_runtime = PythonRuntime(self, agents=self.agents, vector_search=self.vector_search)
 
         model = model if model else self.executor.get_default_model()
 
@@ -710,7 +710,7 @@ class ExecutionController(Controller):
         skip_generation = False
         response: Assistant = Assistant(Content(''))
 
-        code_message = Helpers.first(lambda m: StarlarkRuntime.get_code_blocks(m.message.get_str()), messages)
+        code_message = Helpers.first(lambda m: PythonRuntime.get_code_blocks(m.message.get_str()), messages)
 
         if code_message:
             skip_generation = True
@@ -752,7 +752,7 @@ class ExecutionController(Controller):
             elif 'code' in classification and not skip_generation:
                 files = template_args['files'] if template_args and 'files' in template_args else []
                 if files:
-                    starlark_runtime.globals_dict['source_project'].set_files(files)
+                    python_runtime.globals_dict['source_project'].set_files(files)
                 response = await self.abuild_runnable_code_ast(
                     llm_call=LLMCall(
                         user_message=messages[-1],
@@ -770,12 +770,12 @@ class ExecutionController(Controller):
 
             assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
 
-            code_blocks = StarlarkRuntime.get_code_blocks(assistant_response_str)
+            code_blocks = PythonRuntime.get_code_blocks(assistant_response_str)
             # todo for now, just join them
             assistant_response_str = '\n'.join(code_blocks)
 
             no_indent_debug(logging, '')
-            no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')
+            no_indent_debug(logging, '** [bold yellow]Python Abstract Syntax Tree:[/bold yellow] **')
             # debug out AST
             lines = assistant_response_str.split('\n')
             line_counter = 1
@@ -796,45 +796,45 @@ class ExecutionController(Controller):
                     _ = ast.parse(assistant_response_str)
                 except SyntaxError as ex:
                     logging.debug('aexecute() SyntaxError: {}'.format(ex))
-                    assistant_response_str = starlark_runtime.compile_error(
-                        starlark_code=assistant_response_str,
+                    assistant_response_str = python_runtime.compile_error(
+                        python_code=assistant_response_str,
                         error=str(ex),
                     )
 
             if not self.continuation_passing_style:
-                old_model = starlark_runtime.controller.get_executor().get_default_model()
+                old_model = python_runtime.controller.get_executor().get_default_model()
 
                 if model:
-                    starlark_runtime.controller.get_executor().set_default_model(model)
+                    python_runtime.controller.get_executor().set_default_model(model)
 
                 locals_dict = {'cookies': cookies} if cookies else {}
-                _ = starlark_runtime.run(
-                    starlark_code=assistant_response_str,
+                _ = python_runtime.run(
+                    python_code=assistant_response_str,
                     original_query=messages[-1].message.get_str(),
                     messages=messages,
                     locals_dict=locals_dict
                 )
-                results.extend(starlark_runtime.answers)
+                results.extend(python_runtime.answers)
 
                 if model:
-                    starlark_runtime.controller.get_executor().set_default_model(old_model)
+                    python_runtime.controller.get_executor().set_default_model(old_model)
 
                 return results
             else:
-                old_model = starlark_runtime.controller.get_executor().get_default_model()
+                old_model = python_runtime.controller.get_executor().get_default_model()
 
                 if model:
-                    starlark_runtime.controller.get_executor().set_default_model(model)
+                    python_runtime.controller.get_executor().set_default_model(model)
 
                 locals_dict = {'cookies': cookies} if cookies else {}
 
-                _ = starlark_runtime.run_continuation_passing(
-                    starlark_code=assistant_response_str,
+                _ = python_runtime.run_continuation_passing(
+                    python_code=assistant_response_str,
                     original_query=messages[-1].message.get_str(),
                     messages=messages,
                     locals_dict=locals_dict
                 )
-                results.extend(starlark_runtime.answers)
+                results.extend(python_runtime.answers)
                 return results
         else:
             # classified or specified as 'direct'
@@ -909,8 +909,8 @@ class ExecutionController(Controller):
         locals_dict: Dict[str, Any] = {},
     ) -> Tuple[List[Statement], Dict[str, Any]]:
 
-        from llmvm.server.starlark_runtime import StarlarkRuntime
-        starlark_runtime = StarlarkRuntime(
+        from llmvm.server.python_runtime import PythonRuntime
+        python_runtime = PythonRuntime(
             self,
             agents=agents,
             vector_search=self.vector_search,
@@ -922,7 +922,7 @@ class ExecutionController(Controller):
         response: Assistant = Assistant(Content())
 
         # a single code block is supported as a special case which we execute immediately
-        if StarlarkRuntime.only_code_block(messages[-1].message.get_str()):
+        if PythonRuntime.only_code_block(messages[-1].message.get_str()):
             response.message = messages[-1].message
             messages.remove(messages[-1])
             raise NotImplementedError('Code block execution is not yet supported.')
@@ -975,10 +975,10 @@ class ExecutionController(Controller):
         # bootstrap the continuation execution
         completed = False
         results: List[Statement] = []
-        old_model = starlark_runtime.controller.get_executor().get_default_model()
-        if model: starlark_runtime.controller.get_executor().set_default_model(model)
+        old_model = python_runtime.controller.get_executor().get_default_model()
+        if model: python_runtime.controller.get_executor().set_default_model(model)
 
-        # inject the starlark_continuation_execution.prompt prompt
+        # inject the python_continuation_execution.prompt prompt
         functions = [Helpers.get_function_description_flat(f) for f in agents]
         human_query = messages[-1].message.get_str()
         system_message, tools_message = Helpers.prompts(
@@ -1051,7 +1051,7 @@ class ExecutionController(Controller):
                 response.message = Content(response.message.get_str() + response.stop_token)
 
             assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
-            code_blocks: List[str] = StarlarkRuntime.get_code_blocks(assistant_response_str)
+            code_blocks: List[str] = PythonRuntime.get_code_blocks(assistant_response_str)
             code_blocks_remove = []
 
             # filter code_blocks we've already seen
@@ -1066,7 +1066,7 @@ class ExecutionController(Controller):
                 code_block = '\n'.join(code_blocks)
 
                 no_indent_debug(logging, '')
-                no_indent_debug(logging, '** [bold yellow]Starlark Abstract Syntax Tree:[/bold yellow] **')
+                no_indent_debug(logging, '** [bold yellow]Python Abstract Syntax Tree:[/bold yellow] **')
                 # debug out AST
                 lines = code_block.split('\n')
                 line_counter = 1
@@ -1083,8 +1083,8 @@ class ExecutionController(Controller):
                     _ = ast.parse(code_block)
                 except SyntaxError as ex:
                     logging.debug('aexecute() SyntaxError: {}'.format(ex))
-                    code_block = starlark_runtime.compile_error(
-                        starlark_code=code_block,
+                    code_block = python_runtime.compile_error(
+                        python_code=code_block,
                         error=str(ex),
                     )
 
@@ -1093,15 +1093,15 @@ class ExecutionController(Controller):
 
                 try:
                     code_blocks_executed.append(code_block)
-                    locals_dict = starlark_runtime.run(
-                        starlark_code=code_block,
+                    locals_dict = python_runtime.run(
+                        python_code=code_block,
                         original_query=messages[-1].message.get_str(),
                         messages=messages,
                         locals_dict=locals_dict
                     )
-                    results.extend(starlark_runtime.answers)
+                    results.extend(python_runtime.answers)
                 except Exception as ex:
-                    code_execution_result = Helpers.extract_stacktrace_until(traceback.format_exc(), type(starlark_runtime))
+                    code_execution_result = Helpers.extract_stacktrace_until(traceback.format_exc(), type(python_runtime))
                     exception_counter += 1
                     if exception_counter == self.exception_limit:
                         EXCEPTION_PROMPT = """We have reached our exception limit.
@@ -1111,12 +1111,12 @@ class ExecutionController(Controller):
 
                 # we have the result of the code block execution, now we need to rewrite the assistant
                 # message to include the result of the code block execution and continue
-                if not code_execution_result and starlark_runtime.answers:
-                    code_execution_result = '\n'.join([str(a.result()) for a in starlark_runtime.answers])
+                if not code_execution_result and python_runtime.answers:
+                    code_execution_result = '\n'.join([str(a.result()) for a in python_runtime.answers])
                 elif not code_execution_result:
                     # sometimes dove doesn't generate an answer() block, so we'll have to get the last
                     # assignment of the code and use that.
-                    last_assignment = starlark_runtime.get_last_assignment(code_block, locals_dict)
+                    last_assignment = python_runtime.get_last_assignment(code_block, locals_dict)
                     if last_assignment:
                         code_execution_result = f'{str(last_assignment[1])}'
 
@@ -1145,7 +1145,7 @@ class ExecutionController(Controller):
                         result=response.message
                     ))
                 completed = True
-                results.extend(starlark_runtime.answers)
+                results.extend(python_runtime.answers)
 
-        if model: starlark_runtime.controller.get_executor().set_default_model(old_model)
+        if model: python_runtime.controller.get_executor().set_default_model(old_model)
         return (Helpers.remove_duplicates(results, lambda a: a.result()), self.__serialize_locals_dict(locals_dict))

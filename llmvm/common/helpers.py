@@ -31,7 +31,7 @@ from dateutil.relativedelta import relativedelta
 from docstring_parser import parse
 from PIL import Image
 
-from llmvm.common.objects import (Content, ImageContent, MarkdownContent,
+from llmvm.common.objects import (Content, FunctionCall, ImageContent, MarkdownContent,
                                   Message, StreamNode, System, User)
 
 
@@ -54,6 +54,90 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def get_callsite(call_str: str, agents: List[Callable]) -> Optional[FunctionCall]:
+        def __get_callsite_helper(
+            call: str,
+            functions: List[Callable]
+        ) -> Optional[Tuple[Callable, Dict[str, Any]]]:
+            function_description: Dict[str, Any] = {}
+
+            if call.startswith('def '):
+                call = call[4:]
+
+            function_name = Helpers.in_between(call, '', '(')
+            if ' ' in function_name or ',' in function_name:
+                return None
+
+            function_arg_str = Helpers.in_between(call, '(', ')')
+            function_args = []
+
+            is_str = False
+            token = ''
+            for i in range(0, len(function_arg_str)):
+                c = function_arg_str[i]
+                if c == '"' and not is_str:
+                    is_str = True
+                    token += c
+                elif c == '"' and is_str:
+                    is_str = False
+                    token += c
+                elif not is_str and c == ',':
+                    function_args.append(token.strip())
+                    token = ''
+                elif not is_str and c == ' ':  # ignore spaces
+                    continue
+                else:
+                    token += c
+
+            if token:
+                function_args.append(token.strip())
+
+            # function_args = [p.strip() for p in Helpers.in_between(call, '(', ')').split(',')]
+            func = functions[0]
+
+            for f in functions:
+                if f.__name__.lower() in function_name.lower():
+                    function_description = Helpers.get_function_description(
+                        f,
+                        openai_format=True
+                    )
+                    func = f
+                    break
+
+            if not function_description:
+                return None
+
+            argument_count = 0
+
+            for _, parameter in function_description['parameters']['properties'].items():
+                if argument_count < len(function_args):
+                    parameter.update({'argument': function_args[argument_count]})
+                argument_count += 1
+
+            return func, function_description
+
+        callsite = __get_callsite_helper(call_str, agents)
+        if callsite:
+            func, function_description = callsite
+            name = function_description['name']
+            arguments = []
+            types = []
+            for arg_name, metadata in function_description['parameters']['properties'].items():
+                # todo if we don't have an argument here, we should ensure that
+                # the function has a default value for the parameter
+                if 'argument' in metadata:
+                    arguments.append({arg_name: metadata['argument']})
+                    types.append({arg_name: metadata['type']})
+
+            return FunctionCall(
+                name=name,
+                args=arguments,
+                types=types,
+                func=func,
+            )
+        return None
+
     @staticmethod
     def compare_ast(node1, node2):
         if type(node1) is not type(node2):

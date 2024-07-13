@@ -28,7 +28,7 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
                                   compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.persistent_cache import PersistentCache
-from llmvm.server.starlark_execution_controller import ExecutionController
+from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.vector_search import VectorSearch
 from llmvm.server.vector_store import VectorStore

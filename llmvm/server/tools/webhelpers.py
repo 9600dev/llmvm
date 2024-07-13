@@ -2,7 +2,6 @@ import asyncio
 import os
 import re
 import unicodedata
-from typing import Callable, Dict, Generator
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
