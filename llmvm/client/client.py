@@ -862,10 +862,13 @@ def print_response(messages: List[Message], escape: bool = False):
 
     for message in messages:
         if message.role() == 'assistant':
+            temp_content = message.message
+            if type(temp_content) is Content:
+                temp_content.sequence = temp_content.get_str().replace('<code_result>', '').replace('</code_result>', '')
             if not escape:
-                pprint('[bold cyan]Assistant[/bold cyan]: ', message.message)
+                pprint('[bold cyan]Assistant[/bold cyan]: ', temp_content)
             else:
-                pprint('', message.message)
+                pprint('', temp_content)
             fire_helper(str(message))
         elif message.role() == 'system':
             if not escape:
@@ -1300,11 +1303,11 @@ class Repl():
                 if command_executing:
                     command_executing = False
                     continue
-                os.unlink(pipe_path)
+                if os.path.exists(pipe_path): os.unlink(pipe_path)
                 break
             except Exception:
                 console.print_exception(max_frames=10)
-                os.unlink(pipe_path)
+                if os.path.exists(pipe_path): os.unlink(pipe_path)
 
 
 @click.group(
@@ -1395,7 +1398,7 @@ def mode(
 
 @cli.command('exit', hidden=True)
 def exit():
-    os.unlink(pipe_path)
+    if os.path.exists(pipe_path): os.unlink(pipe_path)
     os._exit(os.EX_OK)
 
 
@@ -1913,7 +1916,7 @@ if __name__ == '__main__':
     # special case the hijacking of --help
     if len(sys.argv) == 2 and (sys.argv[1] == '--help' or sys.argv[1] == '-h'):
         Repl().help()
-        os.unlink(pipe_path)
+        if os.path.exists(pipe_path): os.unlink(pipe_path)
         sys.exit(0)
 
     if len(sys.argv) <= 1 and sys.stdin.isatty():
