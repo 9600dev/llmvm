@@ -300,7 +300,7 @@ class AnthropicExecutor(Executor):
         if messages_list[-1]['role'] == 'assistant':
             messages_list[-1]['content'] = messages_list[-1]['content'].rstrip()
 
-        messages_trace(messages_list)
+        messages_trace([{'role': 'system', 'content': system_message}] + messages_list)
 
         token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore
         token_trace.start()
