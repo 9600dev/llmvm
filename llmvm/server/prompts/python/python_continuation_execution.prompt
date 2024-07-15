@@ -47,7 +47,7 @@ Example: Here is an example of using these special features and Python helpers t
 
 The current AMD CEO is <code>
 var1 = search("current AMD CEO") # Search the internet for details about the current AMD CEO
-var2 = llm_call([var1], "extract the name of AMD CEO", str)
+var2 = llm_call([var1], "extract the name of AMD CEO")
 answer(var4)  # Show the answer to the user
 </code>
 </complete>
@@ -61,7 +61,7 @@ I'm downloading https://ten13.vc/team for you.
 <code>
 answers = []
 var1 = download("https://ten13.vc/team")
-var2 = llm_call([var1], "extract list of names", str)  # perform the first task
+var2 = llm_call([var1], "extract list of names")  # perform the first task
 </code>
 </complete>
 
@@ -76,7 +76,7 @@ And here is a summary of each person's career profile:
 <code>
 for list_item in llm_list_bind(var2, "list of names"):
     linkedin_profile_text = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")
-    career_profile_text = llm_call([linkedin_profile_text], "summarize career profile", str)  # perform the second task
+    career_profile_text = llm_call([linkedin_profile_text], "summarize career profile")  # perform the second task
     answers.append(career_profile_text)
 answer(answers)
 </code>
@@ -127,21 +127,21 @@ Example: Here is an example of comparing the details of multiple documents. Note
 I'm downloading the first paper.
 <code>
 paper1_text = download("https://ceur-ws.org/Vol-3432/paper17.pdf")
-paper1_summary = llm_call([paper1_text], "Summarize all opinions in the document", str) # Step 1: Summarize paper 1 as it might be too big to fit in the llm_call context window.
+paper1_summary = llm_call([paper1_text], "Summarize all opinions in the document") # Step 1: Summarize paper 1 as it might be too big to fit in the llm_call context window.
 answer(paper1_summary)  # emit the summary to the User
 </code>
 
 I'm downloading the second paper.
 <code>
 paper2_text = download("https://arxiv.org/pdf/2306.14077v1.pdf")
-paper2_summary = llm_call([paper2_text], "Summarize all opinions in the document", str) # Step 2: Summarize paper 2 as it might be too big to fit in the llm_call context window.
+paper2_summary = llm_call([paper2_text], "Summarize all opinions in the document") # Step 2: Summarize paper 2 as it might be too big to fit in the llm_call context window.
 answer(paper2_summary)  # emit the summary to the User
 </code>
 
 I'll find the differences between the two papers for you.
 
 <code>
-summary_of_differences = llm_call([paper1_summary, paper2_summary], "find the differences between the two paper summaries", str) # Step 3: find the differences between the opinions of the two papers
+summary_of_differences = llm_call([paper1_summary, paper2_summary], "find the differences between the two paper summaries") # Step 3: find the differences between the opinions of the two papers
 answer(summary_of_differences) # Step 4: Show the result to the user
 </code>
 </complete>
@@ -155,7 +155,7 @@ I'll search the Internet to find the top restaurants in Brisbane, Australia
 <code>
 answers = []
 var1 = search("top restaurants in Brisbane, Australia")  # Step 1: Search the internet for the top restaurants in Brisbane, Australia
-var2 = llm_call([var1], "extract the names of the restaurants", str)  # Step 2: Extract the names of the restaurants from the search results
+var2 = llm_call([var1], "extract the names of the restaurants")  # Step 2: Extract the names of the restaurants from the search results
 </code>
 
 I've found the following:
@@ -170,7 +170,7 @@ Let's get their menu's:
 <code>
 for list_item in restaurant_list:  # Step 3: Loop over the top 3 restaurants
     var4 = llm_bind(list_item, search(restaurant_name)")  # Step 4: Search the internet for details about the restaurant
-    answers.append(llm_call([var4], "summarize restaurant details", str))  # Step 5: Summarize the details of the restaurant
+    answers.append(llm_call([var4], "summarize restaurant details"))  # Step 5: Summarize the details of the restaurant
 answer(answers)  # Step 6: Show the summarized details of the top 3 restaurants in Brisbane, Australia to the user
 </code>
 </complete>
@@ -235,8 +235,8 @@ Example: Here is an example of being asked to search for information and then ge
 {{assistant_colon_token}}
 <code>
 var1 = search("research on climate change effects for Brisbane, Australia")  # user needs the latest information, so search the internet
-var2 = llm_call([var1], "summarize information on climate change effects", str)
-var3 = llm_call([var2], "Generate small essay", str)
+var2 = llm_call([var1], "summarize information on climate change effects")
+var3 = llm_call([var2], "Generate small essay")
 answer(var3)
 </code>
 </complete>
@@ -268,7 +268,7 @@ Example: Here is an example of transforming the last message into something else
 {{assistant_colon_token}}
 <code>
 previous_message = messages()[-1]
-var1 = llm_call([previous_message], "Convert into a bullet point list", str)
+var1 = llm_call([previous_message], "Convert into a bullet point list")
 answer(var1)
 </code>
 </complete>
@@ -296,7 +296,7 @@ answer(var1)
 </code> and the value of 5 MSFT stocks is <code>var2 = var1 * 5  # Step 2: Calculate the value of 5 MSFT stocks
 answer(var2)
 </code>. The current price of Gold in grams is <code>var3 = search("gold price per gram")  # Step 3: Get the current price of gold in grams
-var4 = llm_call(var3, "extract the current price of gold per gram", str)
+var4 = llm_call(var3, "extract the current price of gold per gram")
 answer(var4)
 </code>, therefore <code>var5 = var2 / coerce(var4, "float")  # Step 4: Divide 5 Microsoft Stocks by gold price per gram
 answer(f"5 MSFT stocks is worth {var5} grams of gold")  # Step 5: Show the result to the use
@@ -317,10 +317,10 @@ Example: Multiple inputs to the special helper llm_call()
 {{assistant_colon_token}}
 <code>
 var1 = download("https://www.anthropic.com/careers")
-var2 = llm_call([var1], "extract the list of open job titles", str)
+var2 = llm_call([var1], "extract the list of open job titles")
 var3 = download("https://jobs.lever.co/mistral")
-var4 = llm_call([var3], "extract the list of open job titles", str)
-merged_list = llm_call([var2, var4], "merge the lists of job titles together", str)  # ask the LLM to perform general text transformation
+var4 = llm_call([var3], "extract the list of open job titles")
+merged_list = llm_call([var2, var4], "merge the lists of job titles together")  # ask the LLM to perform general text transformation
 answer(merged_list)  # Step 5: Show the result to the use
 </code>
 </complete>
@@ -362,13 +362,13 @@ class B(BaseClass)
 It looks like A and B derive from BaseClass, so I should re-write those files with a basic to_json() method
 <code>
 a_source_code = BCL.get_source_code("~/dev/a.py")
-var1 = llm_call([a_source_code], "Add a new method 'to_json()' to this source code with a basic implementation", str)
+var1 = llm_call([a_source_code], "Add a new method 'to_json()' to this source code with a basic implementation")
 answer(var1)
 </code>
 
 <code>
 b_source_code = BCL.get_source_code("/home/user/dev/b.py")
-var2 = llm_call([b_source_code], "Add a new method 'to_json()' to this source code with a basic implementation", str)
+var2 = llm_call([b_source_code], "Add a new method 'to_json()' to this source code with a basic implementation")
 answer(var2)
 </code>
 </complete>
