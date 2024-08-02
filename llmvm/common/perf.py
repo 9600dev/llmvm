@@ -2,6 +2,7 @@ import datetime as dt
 import inspect
 import os
 import time
+from fireworks.client.api import ChatCompletionStreamResponse
 from typing import Any, List, Optional, cast
 
 import openai
@@ -186,6 +187,10 @@ class LoggingAsyncIterator:
                 return cast(str, result.text or '')
             elif isinstance(result, str):
                 return result
+            elif isinstance(result, ChatCompletionStreamResponse):
+                if result.choices[0].finish_reason:
+                    self.perf.stop_reason = result.choices[0].finish_reason
+                return cast(str, result.choices[0].delta.content or '')
             else:
                 raise ValueError(f'Unknown completion type: {type(result)}, stream type: {type(self.original_iterator)}')
         except StopAsyncIteration:

@@ -18,6 +18,7 @@ from openai import AsyncOpenAI, OpenAI
 
 from llmvm.common.anthropic_executor import AnthropicExecutor
 from llmvm.common.container import Container
+from llmvm.common.fireworks_executor import FireworksExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
@@ -124,6 +125,20 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             continuation_passing_style=False,
         )
         return gemini_controller
+    elif controller == 'fireworks':
+        fireworks_executor = FireworksExecutor(
+            api_key=os.environ.get('FIREWORKS_API_KEY', ''),
+            default_model=Container().get_config_variable('model', 'LLMVM_MODEL'),
+            default_max_token_len=128000,
+        )
+        fireworks_controller = ExecutionController(
+            executor=fireworks_executor,
+            agents=agents,  # type: ignore
+            vector_search=vector_search,
+            edit_hook=None,
+            continuation_passing_style=False,
+        )
+        return fireworks_controller
     else:
         openai_executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),

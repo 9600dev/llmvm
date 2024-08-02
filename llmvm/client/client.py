@@ -47,6 +47,7 @@ from rich.syntax import Syntax
 
 from llmvm.common.anthropic_executor import AnthropicExecutor
 from llmvm.common.container import Container
+from llmvm.common.fireworks_executor import FireworksExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
@@ -507,6 +508,11 @@ async def execute_llm_call_direct(
             api_key=api_key,
             default_model=model_name,
         )
+    elif executor_name == 'fireworks':
+        executor = FireworksExecutor(
+            api_key=api_key,
+            default_model=model_name,
+        )
     else:
         raise ValueError('No executor specified.')
 
@@ -620,6 +626,18 @@ async def execute_llm_call(
                 message,
                 Container.get_config_variable('GOOGLE_API_KEY'),
                 'gemini',
+                model,
+                context_messages
+            )
+            return SessionThread(
+                id=-1,
+                messages=[MessageModel.from_message(message) for message in list(context_messages) + [message, assistant]]
+            )
+        elif executor == 'fireworks' and Container.get_config_variable('FIREWORKS_API_KEY'):
+            assistant = await execute_llm_call_direct(
+                message,
+                Container.get_config_variable('FIREWORKS_API_KEY'),
+                'fireworks',
                 model,
                 context_messages
             )
