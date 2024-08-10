@@ -299,7 +299,7 @@ class PythonRuntime:
         # called with llm_call([var], ...), so we need to flatten
         expr_list = Helpers.flatten(expr_list)
 
-        write_client_stream(Content(f'Calling LLM with instruction: "{llm_instruction}"\n'))
+        write_client_stream(Content(f'Calling {self.controller.get_executor().get_default_model()} with instruction: "{llm_instruction}"\n'))
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(

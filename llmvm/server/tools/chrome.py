@@ -166,6 +166,7 @@ class ChromeHelpersInternal():
         self._page = None
         self.playwright = None
         self.browser = None
+        self.is_closed = True
         self.wait_fors = {
             'twitter.com': lambda page: self.wait(1500),
             'x.com': lambda page: self.wait(1500),
@@ -176,7 +177,7 @@ class ChromeHelpersInternal():
         self.cookies = cookies
 
     async def __new_page(self, cookies: List[Dict] = []) -> Page:
-        if self.playwright is None or self.browser is None:
+        if self.is_closed:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(
                 headless=Container().get('chromium_headless', default=True),
@@ -192,6 +193,7 @@ class ChromeHelpersInternal():
         if self.cookies:
             await self._context.add_cookies(self.cookies)  # type: ignore
         page = await self._context.new_page()
+        self.is_closed = False
         return page
 
     async def page(self) -> Page:
@@ -206,6 +208,7 @@ class ChromeHelpersInternal():
             await (await self.page()).close()
         if self.browser is not None:
             await self.browser.close()
+        self.is_closed = True
 
     async def goto(self, url: str):
         try:
