@@ -1,10 +1,11 @@
+import base64
 import os
 import time
 import asyncio
 import requests
 import tempfile
 import urllib.parse
-from llmvm.common.objects import Content, ImageContent, PdfContent, FileContent, User, Message
+from llmvm.common.objects import Content, ImageContent, MessageModel, PdfContent, FileContent, SessionThread, User, Message
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from typing import List, Sequence
@@ -15,6 +16,34 @@ import glob
 
 
 logging = setup_logging()
+
+
+def get_string_thread_with_roles(thread: SessionThread):
+    string_result = ''
+    for message in [MessageModel.to_message(message) for message in thread.messages]:
+        if message.role() == 'assistant':
+            string_result += 'Assistant: '
+        elif message.role() == 'system':
+            string_result += 'System: '
+        elif message.role() == 'user':
+            string_result += 'User: '
+
+        if isinstance(message.message, ImageContent):
+            if message.message.url.startswith('data:image'):
+                decoded_base64 = base64.b64decode(message.message.url.split(',')[1])
+                with tempfile.NamedTemporaryFile(mode='w+b', suffix='.jpg', delete=False) as temp_file:
+                    temp_file.write(decoded_base64)
+                    temp_file.flush()
+                    string_result += f'[ImageContent({temp_file.name})]\n\n'
+            else:
+                string_result += f'[ImageContent({message.message.url})]\n\n'
+        elif isinstance(message.message, FileContent):
+            string_result += f'[FileContent({message.message.url})]\n\n'
+        elif isinstance(message.message, PdfContent):
+            string_result += f'[PdfContent({message.message.url})]\n\n'
+        else:
+            string_result += str(message) + '\n\n'
+    return string_result
 
 
 async def read_from_pipe(pipe_path, timeout=0.3):

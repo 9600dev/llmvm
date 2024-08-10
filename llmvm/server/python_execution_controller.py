@@ -97,7 +97,7 @@ class ExecutionController(Controller):
     ) -> Assistant:
 
         tokens_per_message = (
-            math.floor((llm_call.max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+            math.floor((llm_call.max_prompt_len - await self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
         )
         write_client_stream(f'Performing context window compression type: similarity vector search with tokens per message {tokens_per_message}.\n')  # noqa E501
 
@@ -106,7 +106,7 @@ class ExecutionController(Controller):
         for i in range(len(llm_call.context_messages)):
             prev_message = llm_call.context_messages[i]
 
-            similarity_chunks = self.vector_search.chunk_and_rank(
+            similarity_chunks = await self.vector_search.chunk_and_rank(
                 query=query,
                 token_calculator=self.executor.count_tokens,
                 content=prev_message.message.get_str(),
@@ -123,7 +123,7 @@ class ExecutionController(Controller):
             similarity_messages.append(User(Content(similarity_message)))
 
         total_similarity_tokens = sum(
-            [self.executor.count_tokens(m.message.get_str(), model=llm_call.model) for m in similarity_messages]
+            [await self.executor.count_tokens(m.message.get_str(), model=llm_call.model) for m in similarity_messages]
         )
         if total_similarity_tokens > llm_call.max_prompt_len:
             logging.error(f'__similarity() total_similarity_tokens: {total_similarity_tokens} is greater than max_prompt_len: {llm_call.max_prompt_len}, will perform map/reduce.')  # noqa E501
@@ -157,12 +157,12 @@ class ExecutionController(Controller):
         chunk_results = []
 
         # iterate over the data.
-        map_reduce_prompt_tokens = self.executor.count_tokens(
+        map_reduce_prompt_tokens = await self.executor.count_tokens(
             [User(Content(Helpers.load_resources_prompt('map_reduce_map.prompt')['user_message']))],
             model=llm_call.model,
         )
 
-        chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - self.executor.count_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
+        chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - await self.executor.count_tokens([llm_call.user_message], model=llm_call.model) - 32  # noqa E501
         chunks = self.vector_search.chunk(
             content=context_message.message.get_str(),
             chunk_size=chunk_size,
@@ -222,7 +222,7 @@ class ExecutionController(Controller):
         # todo: this is a hack. we should check the length of all the messages, and if they're less
         # than the tokens per message, then we can add more tokens to other messages.
         tokens_per_message = (
-            math.floor((llm_call.max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
+            math.floor((llm_call.max_prompt_len - await self.executor.count_tokens([llm_call.user_message], model=llm_call.model)) / len(llm_call.context_messages))  # noqa E501
         )
         tokens_per_message = tokens_per_message - header_text_token_len
 
@@ -230,7 +230,7 @@ class ExecutionController(Controller):
 
         llm_call_copy = llm_call.copy()
 
-        if llm_call.executor.count_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
+        if await llm_call.executor.count_tokens([llm_call.user_message], llm_call.model) > tokens_per_message:
             logging.debug('__summary_map_reduce() user message is longer than the summary window, will try to cut.')
             llm_call_copy.user_message = User(Content(llm_call.user_message.message.get_str()[0:tokens_per_message]))
 
@@ -267,7 +267,7 @@ class ExecutionController(Controller):
         lifo_messages = copy.deepcopy(llm_call.context_messages)
 
         prompt_context_messages = [llm_call.user_message]
-        current_tokens = self.executor.count_tokens(
+        current_tokens = await self.executor.count_tokens(
             llm_call.user_message.message.get_str(),
             model=llm_call.model
         ) + llm_call.completion_tokens_len
@@ -275,11 +275,11 @@ class ExecutionController(Controller):
         # reverse over the messages, last to first
         for i in range(len(lifo_messages) - 1, -1, -1):
             if (
-                current_tokens + self.executor.count_tokens(lifo_messages[i].message.get_str(), model=llm_call.model)
+                current_tokens + await self.executor.count_tokens(lifo_messages[i].message.get_str(), model=llm_call.model)
                 < llm_call.max_prompt_len
             ):
                 prompt_context_messages.append(lifo_messages[i])
-                current_tokens += self.executor.count_tokens(lifo_messages[i].message.get_str(), model=llm_call.model)
+                current_tokens += await self.executor.count_tokens(lifo_messages[i].message.get_str(), model=llm_call.model)
             else:
                 break
 
@@ -378,7 +378,7 @@ class ExecutionController(Controller):
             return [User(Content(result_prompt['user_message']))]
 
         elif isinstance(context, PandasMeta):
-            return [User(Content(context.df.to_csv()))]
+            return [User(Content(context.df.to_csv()))]  # type: ignore
 
         elif isinstance(context, MarkdownContent):
             return ObjectTransformers.transform_markdown_content(context, self.executor)
@@ -506,7 +506,7 @@ class ExecutionController(Controller):
         # before firing off the call.
         from llmvm.common.pdf import Pdf
 
-        prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
+        prompt_len = await self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message], model=llm_call.model)
         max_prompt_len = self.executor.max_input_tokens(output_token_len=llm_call.completion_tokens_len, model=model)
 
         # I have either a message, or a list of messages. They might need to be map/reduced.
@@ -534,13 +534,13 @@ class ExecutionController(Controller):
             write_client_stream(
                 'Determining context window compression approach of either similarity vector search, or full map/reduce.\n'
             )
-            similarity_chunks = self.vector_search.chunk_and_rank(
+            similarity_chunks = await self.vector_search.chunk_and_rank(
                 query=query,
                 token_calculator=self.executor.count_tokens,
                 content=context_message.message.get_str(),
                 chunk_token_count=256,
                 chunk_overlap=0,
-                max_tokens=max_prompt_len - self.executor.count_tokens([llm_call.user_message], model=model) - 16,  # noqa E501
+                max_tokens=max_prompt_len - await self.executor.count_tokens([llm_call.user_message], model=model) - 16,  # noqa E501
             )
 
             # randomize and sample from the similarity_chunks

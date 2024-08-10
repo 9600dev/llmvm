@@ -134,8 +134,8 @@ class Executor(ABC):
     async def aexecute(
         self,
         messages: List['Message'],
-        max_output_tokens: int = 2048,
-        temperature: float = 1.0,
+        max_output_tokens: int = 4096,
+        temperature: float = 0.0,
         stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
@@ -200,7 +200,7 @@ class Executor(ABC):
         pass
 
     @abstractmethod
-    def count_tokens(
+    async def count_tokens(
         self,
         messages: List['Message'] | str,
         model: Optional[str] = None,
@@ -746,7 +746,7 @@ class System(Message):
             Ask for clarification if a user request is ambiguous.
         ''')
     ):
-        super().__init__(Content(message))
+        super().__init__(message)
 
     def role(self) -> str:
         return 'system'
@@ -798,7 +798,10 @@ class Assistant(Message):
         return assistant
 
     def __repr__(self):
-        return f'Assistant({self.message} {self.error})'
+        if self.error:
+            return f'Assistant({self.message} {self.error})'
+        else:
+            return f'Assistant({self.message})'
 
 
 class Statement(AstNode):
@@ -1086,6 +1089,8 @@ class SessionThread(BaseModel):
     current_mode: str = 'auto'
     compression: str = 'auto'
     temperature: float = 0.0
+    stop_tokens: list[str] = []
+    output_token_len: int = 4096
     cookies: List[Dict[str, Any]] = []
     messages: List[MessageModel] = []
     locals_dict: Dict[str, Any] = Field(default_factory=dict, exclude=True)

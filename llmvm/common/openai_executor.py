@@ -2,7 +2,7 @@ import asyncio
 import base64
 import os
 from io import BytesIO
-from typing import Awaitable, Callable, Dict, List, Optional, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
 import tiktoken
 from openai import AsyncOpenAI
@@ -23,10 +23,10 @@ class OpenAIExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
-        default_model: str = 'gpt-4o',
+        default_model: str = 'gpt-4o-2024-08-06',
         api_endpoint: str = 'https://api.openai.com/v1',
         default_max_token_len: int = 128000,
-        default_max_output_len: int = 4096,
+        default_max_output_len: int =  16384,
     ):
         super().__init__(
             default_model=default_model,
@@ -75,7 +75,13 @@ class OpenAIExecutor(Executor):
                 "gpt-4",
                 "gpt-4-0314",
                 "gpt-4-vision-preview",
+                "gpt-4-turbo-2024-04-09",
+                "gpt-4-turbo",
                 "gpt-4o",
+                "gpt-4o-2024-08-06",
+                "gpt-4o-2024-05-13",
+                "gpt-4o-mini",
+                "gpt-4o-mini-2024-07-18",
                 "gpt-4-1106-preview",
                 "gpt-4-32k-0314",
                 "gpt-4-0613",
@@ -180,6 +186,7 @@ class OpenAIExecutor(Executor):
         stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         model = model if model else self.default_model
 
@@ -256,9 +263,10 @@ class OpenAIExecutor(Executor):
         stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         async def stream_pipe(node: AstNode):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe, template_args))

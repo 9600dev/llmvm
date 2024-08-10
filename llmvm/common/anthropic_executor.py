@@ -179,7 +179,7 @@ class AnthropicExecutor(Executor):
     def append_token(self) -> str:
         return ''
 
-    def count_tokens(
+    async def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
         model: Optional[str] = None,
@@ -193,39 +193,28 @@ class AnthropicExecutor(Executor):
             token_count = await self.client.count_tokens(str(content))
             return token_count
 
-        def num_tokens_from_messages(messages):
+        async def num_tokens_from_messages(messages):
             # this is inexact, but it's a reasonable approximation
             num_tokens = 0
             tokens_per_message = 4
             for message in messages:
                 num_tokens += tokens_per_message
                 for _, value in message.items():
-                    num_tokens += asyncio.run(tokenizer_len(value))
+                    num_tokens += await tokenizer_len(value)
             return num_tokens
 
         if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
             dict_messages = self.wrap_messages(cast(List[Message], messages))
-            return num_tokens_from_messages(dict_messages)
+            return await num_tokens_from_messages(dict_messages)
         elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
-            return num_tokens_from_messages(messages)
+            return await num_tokens_from_messages(messages)
         elif isinstance(messages, str):
-            return num_tokens_from_messages(self.wrap_messages([User(Content(messages))]))
+            return await num_tokens_from_messages(self.wrap_messages([User(Content(messages))]))
         else:
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
     def name(self) -> str:
         return 'anthropic'
-
-    def __format_prompt(self, messages: List[Dict[str, str]]) -> str:
-        prompt = ''
-        for message in messages:
-            if message['role'] == 'assistant':
-                prompt += f"""{AI_PROMPT} {message['content']}\n\n"""
-            elif message['role'] == 'user':
-                prompt += f"""{HUMAN_PROMPT} {message['content']}\n\n"""
-
-        prompt += f"""{AI_PROMPT}"""
-        return prompt
 
     async def aexecute_direct(
         self,
@@ -241,7 +230,7 @@ class AnthropicExecutor(Executor):
         if functions:
             raise NotImplementedError('functions are not implemented for ClaudeExecutor')
 
-        message_tokens = self.count_tokens(messages=messages, model=model)
+        message_tokens = await self.count_tokens(messages=messages, model=model)
         if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
             raise Exception('Prompt too long. input tokens: {}, output tokens: {}, total: {}, max sontext window: {}'
                             .format(message_tokens,
@@ -405,9 +394,10 @@ class AnthropicExecutor(Executor):
         stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         async def stream_pipe(node: AstNode):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe, template_args))

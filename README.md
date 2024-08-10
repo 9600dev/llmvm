@@ -8,13 +8,17 @@ It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and 
 
 LLMVM's features are best explored through use case examples. Let's install, then go through some:
 
-```$ pip install llmvm-cli```
+```
+$ pip install llmvm-cli
+```
 
-```$ playwright install```
+```
+$ playwright install
+```
 
-```$ python -m llmvm.server```
+```
+$ python -m llmvm.server
 
-```bash
 Default executor is: anthropic
 Default model is: claude-3-5-sonnet-20240620
 Make sure to `playwright install`.
@@ -41,9 +45,9 @@ INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8011 (Press CTRL+C to quit)
 ```
 
-```$ python -m llmvm.client```
+```
+$ python -m llmvm.client
 
-```bash
 ...
 I am a helpful assistant that has access to tools. Use "mode" to
 switch tools on and off.
@@ -280,6 +284,25 @@ haiku -s -t \"$(haiku -s generate two sentences about prime ministers)\" -t \"$(
 gives:
 
 > false # The two messages have different content. The first message is about the role and position of the prime minister in various countries, while the second message is about the role and position of the President of the United States. The context and subject matter of the two messages are different.
+
+## Using the Python API
+
+There are two helpers `llm()` and `llmvm()` you can use, or use the `LLMVMClient` class directly:
+
+```python
+from llmvm.client.client import llm, llmvm, LLMVMClient
+```
+
+```
+assistant = llm('hello world')
+Hello! How can I assist you today? Is there anything specific you'd like to talk about or any questions you have?
+
+print(assistant)
+
+Assistant(Hello! How can I assist you today? Is there anything specific you'd like to talk about or any questions you have?)
+```
+
+`llm()` connects directly to the specified executor (Anthropic, OpenAI, or Gemini), and `llmvm()` connects to an instance of the LLMVM server for tool handling and so on.
 
 ## Architecture
 

@@ -1,5 +1,5 @@
 import datetime as dt
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from langchain.text_splitter import TextSplitter
 
@@ -92,17 +92,17 @@ class VectorSearch():
     ) -> List[str]:
         return self.vector_store.chunk(content, chunk_size, overlap)
 
-    def chunk_and_rank(
+    async def chunk_and_rank(
         self,
         query: str,
         content: str,
-        token_calculator: Callable[[str], int],
+        token_calculator: Callable[[str], Awaitable[int]],
         chunk_token_count: int = 256,
         chunk_overlap: int = 0,
         max_tokens: int = 8196,
         splitter: Optional[TextSplitter] = None,
     ) -> List[Tuple[str, float]]:
-        return self.vector_store.chunk_and_rank(
+        return await self.vector_store.chunk_and_rank(
             query,
             content,
             token_calculator,
@@ -190,7 +190,7 @@ class VectorSearch():
         classes = sourcer.get_classes()
         for _class in classes:
             metadata['classes'].append(_class)
-            for _method in sourcer.get_methods(_class):
+            for _method in sourcer.get_methods(_class):  # type: ignore
                 metadata['methods'].append(_method.name)
                 metadata['docstrings'].append(_method.docstring)
 

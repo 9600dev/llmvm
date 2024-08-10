@@ -17,10 +17,10 @@ class GeminiExecutor(Executor):
         api_key: str = cast(str, os.environ.get('GOOGLE_API_KEY')),
         # from the docs:
         # Note: The vision model gemini-pro-vision is not optimized for multi-turn chat.
-        default_model: str = 'gemini-pro',
+        default_model: str = 'gemini-1.5-pro',
         api_endpoint: str = '',
-        default_max_token_len: int = 32768,
-        default_max_output_len: int = 2048,
+        default_max_token_len: int = 2097152,
+        default_max_output_len: int = 8192,
     ):
         super().__init__(
             default_model=default_model,
@@ -40,7 +40,7 @@ class GeminiExecutor(Executor):
     def append_token(self) -> str:
         return ''
 
-    def count_tokens(
+    async def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
         model: Optional[str] = None,
@@ -100,7 +100,7 @@ class GeminiExecutor(Executor):
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
-        message_tokens = self.count_tokens(messages, model=model)
+        message_tokens = await self.count_tokens(messages, model=model)
         if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
             raise Exception('Prompt too long. prompt tokens: {}, output tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,
@@ -140,8 +140,10 @@ class GeminiExecutor(Executor):
         messages: List[Message],
         max_output_tokens: int = 4096,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         model = model if model else self.default_model
 
@@ -183,11 +185,13 @@ class GeminiExecutor(Executor):
         messages: List[Message],
         max_output_tokens: int = 2048,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
+        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         async def stream_pipe(node: AstNode):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe, template_args))

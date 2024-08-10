@@ -14,12 +14,17 @@ vector_store_index_directory: '~/.local/share/llmvm/faiss'
 vector_store_embedding_model: 'all-MiniLM-L6-v2' # 'BAAI/bge-base-en'
 vector_store_chunk_size: 500
 openai_api_base: 'https://api.openai.com/v1'
-openai_model: 'gpt-4o'
+openai_model: 'gpt-4o-2024-08-06'
 openai_max_tokens: 128000
+openai_max_output_tokens: 16384
 anthropic_api_base: 'https://api.anthropic.com'
 anthropic_model: 'claude-3-5-sonnet-20240620'
 anthropic_max_tokens: 200000
-executor: 'openai'  # openai, anthropic
+anthropic_max_output_tokens: 4096
+gemini_max_tokens: 2097152
+gemini_max_output_tokens: 8192
+gemini_model: 'gemini-1.5-pro'
+executor: 'openai'  # openai, anthropic, gemini
 helper_functions:
   - llmvm.server.bcl.BCL.datetime
   - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile

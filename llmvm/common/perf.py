@@ -129,8 +129,8 @@ class TokenPerf:
             # output \n to the debug stream without using logging.debug
             import sys
             sys.stderr.write('\n')
-            logging.debug(f"ttlt: {res['ttlt']:.2f} ttft: {res['ttft']:.2f} completion_time: {res['completion_time']:.2f}")
-            logging.debug(f"prompt_len: {res['prompt_len']} completion_len: {res['completion_len']}")
+            logging.debug(f"ttft: {res['ttft']:.2f} ttlt: {res['ttlt']:.2f} completion_time: {res['completion_time']:.2f}")
+            logging.debug(f"prompt_len: {res['prompt_len']} completion_len: {res['completion_len']} model: {res['model']}")
             logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f} stop_reason: {res['stop_reason']}")
             logging.debug(f"p_cost: ${res['p_cost']:.5f} s_cost: ${res['s_cost']:.5f} request_id: {res['request_id']}")
 

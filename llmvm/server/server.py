@@ -99,8 +99,9 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         anthropic_executor = AnthropicExecutor(
             api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=Container().get_config_variable('anthropic_model', 'LLMVM_MODEL'),
-            api_endpoint=Container().get_config_variable('anthropic_api_base', 'LLMVM_API_BASE'),
+            api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
             default_max_token_len=int(Container().get_config_variable('anthropic_max_tokens')),
+            default_max_output_len=int(Container().get_config_variable('anthropic_max_output_tokens')),
         )
         anthropic_controller = ExecutionController(
             executor=anthropic_executor,
@@ -115,6 +116,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             api_key=os.environ.get('GOOGLE_API_KEY', ''),
             default_model=Container().get_config_variable('gemini_model', 'LLMVM_MODEL'),
             default_max_token_len=int(Container().get('gemini_max_tokens')),
+            default_max_output_len=int(Container().get('gemini_max_output_tokens')),
         )
         gemini_controller = ExecutionController(
             executor=gemini_executor,
@@ -128,8 +130,9 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         openai_executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),
             default_model=Container().get_config_variable('openai_model', 'LLMVM_MODEL'),
-            api_endpoint=Container().get_config_variable('openai_api_base', 'LLMVM_API_BASE'),
+            api_endpoint=Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
             default_max_token_len=int(Container().get('openai_max_tokens')),
+            default_max_output_len=int(Container().get('openai_max_output_tokens')),
         )
 
         openai_controller = ExecutionController(
@@ -353,8 +356,6 @@ async def tools_completions(request: SessionThread):
     compression = compression_enum(thread.compression)
     queue = asyncio.Queue()
     cookies = thread.cookies if thread.cookies else []
-
-
 
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:

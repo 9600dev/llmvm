@@ -1,7 +1,7 @@
 import math
 import os
 import tempfile
-from typing import Callable, List, Optional, Tuple
+from typing import Awaitable, Callable, List, Optional, Tuple
 
 import numpy as np
 from langchain.docstore.document import Document
@@ -117,11 +117,11 @@ class VectorStore():
         text_splitter = TokenTextSplitter(chunk_size=_chunk_size, chunk_overlap=_overlap)
         return text_splitter.split_text(content)
 
-    def chunk_and_rank(
+    async def chunk_and_rank(
         self,
         query: str,
         content: str,
-        token_calculator: Callable[[str], int],
+        token_calculator: Callable[[str], Awaitable[int]],
         chunk_token_count: int = 256,
         chunk_overlap: int = 0,
         max_tokens: int = 0,
@@ -145,7 +145,7 @@ class VectorStore():
 
         split_texts = text_splitter.split_text(content)
 
-        token_chunk_cost = token_calculator(split_texts[0])
+        token_chunk_cost = await token_calculator(split_texts[0])
 
         logging.debug(f'VectorStore.chunk_and_rank document length: {len(content)} split_texts: {len(split_texts)}, token_chunk_cost: {token_chunk_cost}, max_tokens: {max_tokens}')  # noqa
         chunk_faiss = FAISS.from_texts(split_texts, self.embeddings())
@@ -154,7 +154,7 @@ class VectorStore():
         chunk_k = math.floor(max_tokens / token_chunk_cost)
         result = chunk_faiss.similarity_search_with_relevance_scores(query, k=chunk_k * 5)
 
-        total_tokens = token_calculator(query)
+        total_tokens = await token_calculator(query)
         return_results = []
 
         def half_str(s):
@@ -162,15 +162,15 @@ class VectorStore():
             return s[:mid]
 
         for doc, rank in result:
-            if total_tokens + token_calculator(doc.page_content) < max_tokens:
+            if total_tokens + await token_calculator(doc.page_content) < max_tokens:
                 return_results.append((self.__document_str(doc), rank))
-                total_tokens += token_calculator(self.__document_str(doc))
+                total_tokens += await token_calculator(self.__document_str(doc))
             elif (
                 half_str(doc.page_content)
-                and total_tokens + token_calculator(half_str(doc.page_content)) < max_tokens
+                and total_tokens + await token_calculator(half_str(doc.page_content)) < max_tokens
             ):
                 return_results.append((half_str(self.__document_str(doc))[0], rank))
-                total_tokens += token_calculator(half_str(self.__document_str(doc)))
+                total_tokens += await token_calculator(half_str(self.__document_str(doc)))
             else:
                 break
 

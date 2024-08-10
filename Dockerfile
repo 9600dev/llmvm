@@ -149,9 +149,9 @@ RUN pip install faiss-cpu
 
 RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /home/llmvm/.ssh/environment
+RUN echo "GOOGLE_API_KEY=$GOOGLE_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SEC_API_KEY=$SEC_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /home/llmvm/.ssh/environment
-RUN echo "GOOGLE_API_KEY=$GOOGLE_API_KEY" >> /home/llmvm/.ssh/environment
 
 RUN playwright install
 

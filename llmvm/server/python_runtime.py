@@ -177,7 +177,7 @@ class PythonRuntime:
             # sometimes the LLM generates code which is the "FileContent(...)" representation of the variable
             # rather than the actual FileContent variable
             try:
-                file_content_url = re.search(r'FileContent\((.*)\)', expr).group(1)
+                file_content_url = re.search(r'FileContent\((.*)\)', expr).group(1)  # type: ignore
                 df = pd.read_csv(file_content_url)
                 return PandasMeta(expr_str=expr, pandas_df=df)
             except Exception:

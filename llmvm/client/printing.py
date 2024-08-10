@@ -7,7 +7,7 @@ import re
 import jsonpickle
 import async_timeout
 import asyncio
-from typing import List, Callable, cast
+from typing import Any, Awaitable, List, Callable, cast
 
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.markdown import CodeBlock, Markdown
@@ -21,31 +21,31 @@ from llmvm.common.objects import Message, Content, ImageContent, PdfContent, Fil
 logging = setup_logging()
 
 
-async def stream_response(response, print_lambda: Callable) -> List[AstNode]:
-    def strip_string(str):
+async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) -> List[AstNode]:
+    def strip_string(str) -> str:
         if str.startswith('"'):
             str = str[1:]
         if str.endswith('"'):
             str = str[:-1]
         return str
 
-    def decode(content) -> bool:
+    async def decode(content) -> bool:
         try:
             data = jsonpickle.decode(content)
 
             # tokens
             if isinstance(data, Content):
-                print_lambda(str(cast(Content, data)))
+                await print_lambda(str(cast(Content, data)))
             elif isinstance(data, TokenStopNode):
-                print_lambda(str(cast(TokenStopNode, data)))
+                await print_lambda(str(cast(TokenStopNode, data)))
             elif isinstance(data, StreamNode):
-                print_lambda(cast(StreamNode, data))
+                await print_lambda(cast(StreamNode, data))
             elif isinstance(data, AstNode):
                 response_objects.append(data)
             elif isinstance(data, (dict, list)):
                 response_objects.append(data)
             else:
-                print_lambda(strip_string(data))
+                await print_lambda(strip_string(data))
             return True
         except Exception as ex:
             return False
@@ -63,10 +63,10 @@ async def stream_response(response, print_lambda: Callable) -> List[AstNode]:
                 elif content == '':
                     pass
                 else:
-                    result = decode(content)
+                    result = await decode(content)
                     if not result:
                         buffer += content
-                        result = decode(buffer)
+                        result = await decode(buffer)
                         if result:
                             buffer = ''
                     else:
@@ -82,8 +82,6 @@ async def stream_response(response, print_lambda: Callable) -> List[AstNode]:
     return response_objects
 
 
-
-
 class StreamPrinter():
     def __init__(self, role: str):
         self.buffer = ''
@@ -92,7 +90,7 @@ class StreamPrinter():
         self.role = role
         self.started = False
 
-    def display_image(self, image_bytes):
+    async def display_image(self, image_bytes):
         if len(image_bytes) < 10:
             return
         try:
@@ -134,11 +132,11 @@ class StreamPrinter():
         except Exception as e:
             pass
 
-    def write_string(self, string: str):
+    async def write_string(self, string: str):
         if logging.level <= 20:  # INFO
             self.console.print(f'[bright_black]{string}[/bright_black]', end='')
 
-    def write(self, node: AstNode):
+    async def write(self, node: AstNode):
         if logging.level <= 20:  # INFO
             if not self.started and self.role:
                 self.console.print(f'[bold green]{self.role}[/bold green]: ', end='')
@@ -152,7 +150,7 @@ class StreamPrinter():
                 string = '\n'
             elif isinstance(node, StreamNode):
                 if isinstance(node.obj, bytes):
-                    self.display_image(node.obj)
+                    await self.display_image(node.obj)
                     return
             else:
                 string = str(node)
@@ -194,7 +192,7 @@ def print_response(messages: List[Message], escape: bool = False):
 
         if isinstance(content, ImageContent):
             console.print(f'{prepend}\n', end='')
-            StreamPrinter('user').display_image(content.sequence)
+            asyncio.run(StreamPrinter('user').display_image(content.sequence))
         elif isinstance(content, PdfContent):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
