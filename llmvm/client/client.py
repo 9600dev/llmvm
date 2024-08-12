@@ -133,11 +133,32 @@ class LLMVMClient():
         self.executor = default_executor_name
         self.model = default_model_name
         self.__set_defaults(default_executor_name, default_model_name, api_key)
+        self.role_strings = ['Assistant: ', 'System: ', 'User: ']
+        self.action_strings = ['ImageContent(', 'PdfContent(', 'FileContent(']
 
     def __set_defaults(self, executor: str, model: str, api_key: str):
         executor_instance = self.get_executor(executor, model, api_key)
         self.default_executor = executor_instance
         self.model = executor_instance.default_model
+
+    def __parse_messages(self, messages: list[Message]) -> list[Message]:
+        thread_messages = messages
+        thread_messages_copy = []
+        for message in thread_messages:
+            if (
+                any(role_string in message.message.get_str() for role_string in self.role_strings)
+            ):
+                parsed_messages = parse_message_thread(message.message.get_str())
+                thread_messages_copy += parsed_messages
+            # if the incoming message has actions [ImageContent(...), PdfContent(...), FileContent(...)] etc
+            elif (
+                any(action_string in message.message.get_str() for action_string in self.action_strings)
+            ):
+                parsed_messages = parse_message_actions(User, message.message.get_str())
+                thread_messages_copy += parsed_messages
+            else:
+                thread_messages_copy.append(message)
+        return thread_messages_copy
 
     def get_executor(self, executor_name: str, model_name: Optional[str], api_key: Optional[str]) -> Executor:
         if executor_name == 'anthropic' and model_name and (Container.get_config_variable('ANTHROPIC_API_KEY') or api_key):
@@ -196,8 +217,10 @@ class LLMVMClient():
         if not model:
             model = self.model
 
+        thread_messages: List[Message] = self.__parse_messages(messages)
+
         assistant = await executor.aexecute(
-            messages=messages,
+            messages=thread_messages,
             max_output_tokens=output_token_len,
             temperature=temperature,
             stop_tokens=stop_tokens,
@@ -274,8 +297,6 @@ class LLMVMClient():
             raise ValueError('the messages argument must be a list of Message objects')
 
         # deal with weird message types and inputs
-        role_strings = ['Assistant: ', 'System: ', 'User: ']
-        action_strings = ['ImageContent(', 'PdfContent(', 'FileContent(']
         thread_messages: List[Message] = []
 
         if isinstance(thread, SessionThread):
@@ -283,26 +304,7 @@ class LLMVMClient():
         elif isinstance(messages, list):
             thread_messages = messages
 
-        thread_messages_copy = []
-
-        for message in thread_messages:
-            if (
-                isinstance(message.message.sequence, str)
-                and any(role_string in message.message.get_str() for role_string in role_strings)
-            ):
-                parsed_messages = parse_message_thread(message.message.get_str())
-                thread_messages_copy += parsed_messages
-            # if the incoming message has actions [ImageContent(...), PdfContent(...), FileContent(...)] etc
-            elif (
-                isinstance(message.message.sequence, str)
-                and any(action_string in message.message.get_str() for action_string in action_strings)
-            ):
-                parsed_messages = parse_message_actions(User, message.message.get_str())
-                thread_messages_copy += parsed_messages
-            else:
-                thread_messages_copy.append(message)
-
-        thread_messages = thread_messages_copy
+        thread_messages = self.__parse_messages(thread_messages)
 
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
