@@ -1,7 +1,9 @@
 import asyncio
+import os
 from typing import Callable, Dict, List
 from urllib.parse import urlparse
 
+from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Content, FileContent, PdfContent
 from llmvm.server.tools.webhelpers import ChromeHelpers, WebHelpers
@@ -60,7 +62,14 @@ class ContentDownloader():
             task = loop.create_task(chrome_helper.get_url(self.expr))
             result = loop.run_until_complete(task)
             _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
-            return WebHelpers.convert_html_to_markdown(result, url=self.expr)
+            # sometimes results can be a downloaded file (embedded pdf in the chrome browser)
+            # so we have to deal with that.
+            if os.path.exists(result) and Helpers.is_pdf(open(result, 'rb')):
+                return PdfContent(sequence=b'', url=result)
+            elif os.path.exists(result):
+                return FileContent(sequence=b'', url=result)
+            else:
+                WebHelpers.convert_html_to_markdown(result, url=self.expr)
 
         # else, nothing
         return Content()

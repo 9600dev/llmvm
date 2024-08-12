@@ -283,7 +283,7 @@ class Repl():
 
             if im is not None:
                 with io.BytesIO() as output:
-                    im.save(output, format='PNG')
+                    im.save(output, format='PNG')  # type: ignore
                     output.seek(0)
                     raw_data = Helpers.load_resize_save(output.read(), 'PNG')
 
@@ -430,6 +430,11 @@ class Repl():
                 )
 
                 pipe_task.cancel()
+
+                if query.startswith('$(') and query.endswith(')'):
+                    command_substitution_result = Helpers.command_substitution(query)
+                    rich.print(command_substitution_result)
+                    continue
 
                 # there are a few special commands that aren't 'clickified'
                 if query == 'yy':
@@ -1073,6 +1078,14 @@ def message(
 
         if id <= 0:
             id = thread_id  # type: ignore
+
+        if (
+            isinstance(message, str)
+            and '$(' in message
+            and ')' in message
+        ):
+            # command substitution
+            message = Helpers.command_substitution(message)
 
         # if we have a last_thread but the thread_id is 0 or -1, then we don't
         # have a connection to the server, so we'll just use the last thread

@@ -55,7 +55,7 @@ class OpenAIExecutor(Executor):
         total = 85 + 170 * n
         return total
 
-    def count_tokens(
+    async def count_tokens(
         self,
         messages: List[Message] | List[Dict[str, str]] | str,
         model: Optional[str] = None,
@@ -149,7 +149,7 @@ class OpenAIExecutor(Executor):
         model = model if model else self.default_model
 
         # only works if profiling or LLMVM_PROFILING is set to true
-        message_tokens = self.count_tokens(messages, model=model)
+        message_tokens = await self.count_tokens(messages, model=model)
         if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
             raise Exception('Prompt too long. prompt tokens: {}, completion tokens: {}, total: {}, max context window: {}'
                             .format(message_tokens,

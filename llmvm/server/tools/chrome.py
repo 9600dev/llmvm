@@ -241,6 +241,8 @@ class ChromeHelpersInternal():
 
     async def get_html(self) -> str:
         result = await (await self.page()).content()
+        if '<embed ' in result and 'application/pdf' in result:
+            return await self.download((await self.page()).url)
         return result
 
     async def screenshot(self) -> bytes:
@@ -269,6 +271,7 @@ class ChromeHelpersInternal():
         return os.path.abspath(pdf_path)
 
     async def download(self, url: str) -> str:
+        logging.debug(f'ChromeHelpersInternal.download({url})')
         async def requests_download(url, filename: str):
             logging.debug(f'download({url}): using requests to download')
             async with httpx.AsyncClient() as client:
@@ -286,9 +289,6 @@ class ChromeHelpersInternal():
         try:
             with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_file:
                 temp_filename = temp_file.name
-
-            if 'arxiv.org' in url:
-                return await requests_download(url, temp_filename)
 
             # chrome renders the pdf, and you can't download it. So we force it.
             html = '<html><head></head><body><a href="' + url + '">Download</a></body></html>'

@@ -10,6 +10,7 @@ import itertools
 import math
 import os
 import re
+import subprocess
 import traceback
 import dateparser
 import typing
@@ -54,6 +55,21 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def command_substitution(input_string):
+        def execute_command(match):
+            command = match.group(1)
+            try:
+                # Recursively handle nested substitutions
+                command = Helpers.command_substitution(command)
+                result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+                return result.stdout.strip()
+            except subprocess.CalledProcessError as e:
+                return f"Error: {e}"
+
+        pattern = r'\$\(((?:[^()]+|\((?:[^()]+|\([^()]*\))*\))*)\)'
+        return re.sub(pattern, execute_command, input_string)
+
     @staticmethod
     def get_callsite(call_str: str, agents: List[Callable]) -> Optional[FunctionCall]:
         def __get_callsite_helper(
