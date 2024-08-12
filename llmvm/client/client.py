@@ -152,7 +152,8 @@ class LLMVMClient():
                 thread_messages_copy += parsed_messages
             # if the incoming message has actions [ImageContent(...), PdfContent(...), FileContent(...)] etc
             elif (
-                any(action_string in message.message.get_str() for action_string in self.action_strings)
+                type(message.message) is Content
+                and any(action_string in message.message.get_str() for action_string in self.action_strings)
             ):
                 parsed_messages = parse_message_actions(User, message.message.get_str())
                 thread_messages_copy += parsed_messages

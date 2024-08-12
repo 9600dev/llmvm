@@ -496,7 +496,7 @@ class Content(AstNode):
             return str(self.sequence)
 
     def __repr__(self):
-        return f'Content({self.sequence})'
+        return f'Content({self.sequence.__repr__()})'
 
     def get_str(self) -> str:
         return self.__str__()
@@ -734,7 +734,7 @@ class User(Message):
         return str(self.message)
 
     def __repr__(self):
-        return f'Message({self.message})'
+        return f'User({self.message.__repr__()})'
 
 
 class System(Message):
@@ -755,7 +755,7 @@ class System(Message):
         return str(self.message)
 
     def __repr__(self):
-        return f'SystemPrompt({self.message})'
+        return f'System({self.message.__repr__()})'
 
 
 class Assistant(Message):
@@ -799,9 +799,9 @@ class Assistant(Message):
 
     def __repr__(self):
         if self.error:
-            return f'Assistant({self.message} {self.error})'
+            return f'Assistant({self.message.__repr__()} {self.error})'
         else:
-            return f'Assistant({self.message})'
+            return f'Assistant({self.message.__repr__()})'
 
 
 class Statement(AstNode):
