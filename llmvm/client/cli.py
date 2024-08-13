@@ -1106,6 +1106,16 @@ def message(
 
         throw_if_server_down = mode == 'tool' or mode == 'code'
 
+        # we used to do context_messages + [User(Content(message))] but this is wrong
+        # because we might swap the context message to be the message and it's already a Message object
+        thread_messages: List[Message] = []
+        if isinstance(message, Message):
+            thread_messages = context_messages + [message]
+        elif isinstance(message, list) and all(isinstance(m, Message) for m in message):
+            thread_messages = context_messages + message  # type: ignore
+        else:
+            thread_messages = context_messages + [User(Content(message))]
+
         llmvm_client = LLMVMClient(
             api_endpoint=endpoint,
             default_executor_name=executor,
@@ -1117,7 +1127,7 @@ def message(
 
         thread = asyncio.run(llmvm_client.call(
             thread=id,
-            messages=cast(List[Message], context_messages + [User(Content(message))]),
+            messages=thread_messages,
             executor_name=executor,
             model_name=model,
             temperature=temperature,

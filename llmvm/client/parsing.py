@@ -71,7 +71,7 @@ async def read_from_pipe(pipe_path, timeout=0.3):
 def parse_action(token) -> Content:
     """
     For a given [Action(...)] token, parse it into either
-    ImageContent, PdfContent, or FileContent
+    [ImageContent()], [PdfContent()], or [FileContent()]
     """
     action_type = token[1:].split('(')[0]
     action_data = Helpers.in_between(token, '(', ')')
@@ -89,8 +89,7 @@ def parse_action(token) -> Content:
         raise ValueError('Unknown action type')
 
 
-def parse_message_actions(role_type: type, message: str) -> list[Message]:
-    actions = ['[ImageContent(', '[PdfContent(', '[FileContent(']
+def parse_message_actions(role_type: type, message: str, actions: list[str]) -> list[Message]:
     accumulated_tokens = []
     messages = []
     # go through the message, create User() nodes for normal text content
@@ -316,7 +315,6 @@ def get_path_as_messages(
                             file_content,
                         )
                         file_content = markdown if markdown else file_content
-                        file_content = f.read().encode('utf-8')
                         files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
                 except UnicodeDecodeError:
                     raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')

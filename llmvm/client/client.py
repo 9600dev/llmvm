@@ -134,7 +134,7 @@ class LLMVMClient():
         self.model = default_model_name
         self.__set_defaults(default_executor_name, default_model_name, api_key)
         self.role_strings = ['Assistant: ', 'System: ', 'User: ']
-        self.action_strings = ['ImageContent(', 'PdfContent(', 'FileContent(']
+        self.action_strings = ['[ImageContent(', '[PdfContent(', '[FileContent(']
 
     def __set_defaults(self, executor: str, model: str, api_key: str):
         executor_instance = self.get_executor(executor, model, api_key)
@@ -146,16 +146,17 @@ class LLMVMClient():
         thread_messages_copy = []
         for message in thread_messages:
             if (
-                any(role_string in message.message.get_str() for role_string in self.role_strings)
+                type(message.message) is Content
+                and any(role_string in message.message.get_str() for role_string in self.role_strings)
             ):
                 parsed_messages = parse_message_thread(message.message.get_str())
                 thread_messages_copy += parsed_messages
-            # if the incoming message has actions [ImageContent(...), PdfContent(...), FileContent(...)] etc
+            # if the incoming message has actions [ImageContent(...)], [PdfContent(...)], [FileContent(...)] etc
             elif (
                 type(message.message) is Content
                 and any(action_string in message.message.get_str() for action_string in self.action_strings)
             ):
-                parsed_messages = parse_message_actions(User, message.message.get_str())
+                parsed_messages = parse_message_actions(User, message.message.get_str(), self.action_strings)
                 thread_messages_copy += parsed_messages
             else:
                 thread_messages_copy.append(message)

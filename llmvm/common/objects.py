@@ -593,7 +593,10 @@ class FileContent(Content):
         self.sequence = sequence
 
     def __str__(self):
-        return f'FileContent({self.url})'
+        return f'FileContent({self.url.__str__()} is_local: {self.is_local()})'
+
+    def __repr__(self):
+        return f'FileContent({self.url.__str__()} is_local: {self.is_local()})'
 
     def is_local(self):
         return os.path.isfile(self.url)
