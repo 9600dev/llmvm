@@ -69,7 +69,7 @@ class ContentDownloader():
             elif os.path.exists(result):
                 return FileContent(sequence=b'', url=result)
             else:
-                WebHelpers.convert_html_to_markdown(result, url=self.expr)
+                return WebHelpers.convert_html_to_markdown(result, url=self.expr)
 
         # else, nothing
-        return Content()
+        return Content(f'ContentDownloader.download: nothing found for {self.expr}')
