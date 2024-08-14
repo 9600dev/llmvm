@@ -1,19 +1,22 @@
 import re
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, TypedDict
 
 from googlesearch import search as google_search
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Content, LLMCall, Message,
+from llmvm.common.objects import (Content, DownloadParams, LLMCall, Message,
                                   TokenCompressionMethod, User, bcl)
+from llmvm.server.base_library.content_downloader import WebAndContentDriver
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.search import SerpAPISearcher
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
+
+
 
 class Searcher():
     def __init__(
@@ -31,7 +34,12 @@ class Searcher():
         self.controller = controller
         self.query_expansion = 2
 
-        self.parser = WebHelpers.get_url
+            # url: str,
+            # goal: str,
+            # search_term: Optional[str],
+            # controller: ExecutionController,
+
+        self.parser: Callable = lambda x: Content('Searcher().search() parser: no parser found.')
         self.ordered_snippets: List = []
         self.index = 0
         self._result = None
@@ -73,8 +81,6 @@ class Searcher():
         if not Container().get_config_variable('SERPAPI_API_KEY'):
             return self.search_hook('https://www.google.com/search?q=', query)
         else:
-            # likely want more thorough answers so we'll return more results
-            self.total_links_to_return = self.total_links_to_return * 2
             return SerpAPISearcher().search_research(query)
 
     def search(
@@ -132,11 +138,29 @@ class Searcher():
 
         def url_to_text(result: Dict[str, Any]) -> Content:
             if 'link' in result and isinstance(result['link'], Dict) and 'link' in result['link']:
-                return WebHelpers.get_url(result['link']['link'])
+                if Container().get_config_variable('LLMVM_FULL_PROCESSING', default=False):
+                    return WebAndContentDriver().download_with_goal(download = {
+                        'url': str(result['link']['link']),
+                        'goal': self.original_query,
+                        'search_term': self.query
+                        },
+                        controller=self.controller
+                    )
+                else:
+                    return WebHelpers.get_url(result['link']['link'])
             elif 'link' in result:
-                return WebHelpers.get_url(result['link'])  # type: ignore
+                if Container().get_config_variable('LLMVM_FULL_PROCESSING', default=False):
+                    return WebAndContentDriver().download_with_goal(download = {
+                        'url': str(result['link']),
+                        'goal': self.original_query,
+                        'search_term': self.query
+                        },
+                        controller=self.controller
+                    )
+                else:
+                    return WebHelpers.get_url(str(result['link']))
             else:
-                return Content()
+                return Content('Searcher().search() url_to_text: no link found in result, so no content to return.')
 
         def yelp_to_text(reviews: Dict[Any, Any]) -> Content:
             return_str = f"{reviews['title']} in {reviews['neighborhood']}."

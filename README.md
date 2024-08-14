@@ -247,7 +247,7 @@ Assistant: My name is Claude.
 
 ### Extra PDF and Markdown Parsing and Extraction Performance
 
-You can use the "expensive" mode of PDF and Markdown extraction where images are included along with the text of PDF and Markdown documents. The LLM will be used to guide the extraction process, resulting in a few extra calls:
+You can use the "expensive" mode of PDF and Markdown extraction where images are included along with the text of PDF and Markdown documents. The LLM will be used to guide the extraction process, resulting in a few extra calls and extra costs:
 
 ```bash
 export LLMVM_FULL_PROCESSING="true"
@@ -266,6 +266,8 @@ query>> get https://9600.dev/authors.html and get all the author names
 Produces:
 
 ![](docs/2024-03-16-20-30-45.png)
+
+When LLMVM_FULL_PROCESSING="true", all searches and their search results performed by LLMVM will be first "checked" to see if the url the Search Engine returned contains the actual data LLMVM cares about, and if not, will find the best available link on the page to click next to get the required data. (for example, Google links directly to the summary of arxiv.org papers, rather than the PDF paper itself, LLMVM will click the "View PDF" link to get the PDF)
 
 ### Using LLMVM as a message stack to run "programs"
 

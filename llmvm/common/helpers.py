@@ -21,7 +21,7 @@ from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 import zlib
 from zoneinfo import ZoneInfo
 
@@ -55,6 +55,23 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def get_full_url(base_url: str, href: str) -> str:
+        # Parse the base URL to extract scheme and domain
+        parsed_base = urlparse(base_url)
+        base_domain = f"{parsed_base.scheme}://{parsed_base.netloc}"
+
+        # If href is already a full URL, return it
+        if href.startswith(('http://', 'https://')):
+            return href
+
+        # If href starts with '/', join it with the base domain
+        if href.startswith('/'):
+            return urljoin(base_domain, href)
+
+        # For relative URLs, join with the full base URL
+        return str(urljoin(base_url, href))
+
     @staticmethod
     def command_substitution(input_string):
         def execute_command(match):
@@ -832,6 +849,15 @@ class Helpers():
         after_start = s[s.find(start) + len(start):]
         part = after_start[:after_start.find(end)]
         return part
+
+    @staticmethod
+    def outside_of(s, start, end):
+        if end == '\n' and '\n' not in s:
+            return s[:s.find(start)]
+
+        before_start = s[:s.find(start)]
+        after_end = s[s.find(end) + len(end):]
+        return before_start + after_end
 
     @staticmethod
     def in_between_ends(s, start, end_strs: List[str]):

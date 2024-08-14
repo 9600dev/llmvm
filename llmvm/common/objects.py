@@ -7,12 +7,18 @@ import os
 from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, TypedDict
 
 import numpy as np
 from pydantic import BaseModel, Field
 
 T = TypeVar('T')
+
+
+class DownloadParams(TypedDict):
+    url: str
+    goal: str
+    search_term: str
 
 
 class TokenPriceCalculator():

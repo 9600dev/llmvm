@@ -15,7 +15,7 @@ import astunparse
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Answer, Assistant, Content, FileContent,
+from llmvm.common.objects import (Answer, Assistant, Content, DownloadParams, FileContent,
                                   FunctionCallMeta, LLMCall,
                                   Message, PandasMeta,
                                   User)
@@ -236,14 +236,16 @@ class PythonRuntime:
         logging.debug(f'download({str(expr)})')
 
         from llmvm.server.base_library.content_downloader import \
-            ContentDownloader
+            WebAndContentDriver
         cookies = self.locals_dict['cookies'] if 'cookies' in self.locals_dict else []
 
-        downloader = ContentDownloader(
-            expr=expr,
-            cookies=cookies
-        )
-        return downloader.download()
+        downloader = WebAndContentDriver(cookies=cookies)
+        download_params: DownloadParams = {
+            'url': expr,
+            'goal': self.original_query,
+            'search_term': ''
+        }
+        return downloader.download(download=download_params)
 
     def search(self, expr: str, total_links_to_return: int = 3, titles_seen: List[str] = []) -> List[Content]:
         logging.debug(f'search({str(expr)})')

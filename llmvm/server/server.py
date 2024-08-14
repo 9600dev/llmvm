@@ -253,10 +253,10 @@ async def download(
         async def execute_and_signal():
             stream_handler = callback
             from llmvm.server.base_library.content_downloader import \
-                ContentDownloader
+                WebAndContentDriver
 
             # todo thread cookies through here
-            downloader = ContentDownloader(
+            downloader = WebAndContentDriver(
                 expr=download_item.url,
             )
             content: Content = downloader.download()

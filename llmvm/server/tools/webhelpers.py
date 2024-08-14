@@ -9,7 +9,7 @@ from markdownify import MarkdownConverter
 
 from llmvm.common.helpers import write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Content, MarkdownContent
+from llmvm.common.objects import Content, DownloadParams, MarkdownContent
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.tools.search import SerpAPISearcher
 
@@ -125,7 +125,8 @@ class WebHelpers():
         """
         # todo this is redundant with ContentDownloader
         from llmvm.server.base_library.content_downloader import \
-            ContentDownloader
+            WebAndContentDriver
         logging.debug('WebHelpers.get_url: {}'.format(url))
-        downloader = ContentDownloader(url)
-        return downloader.download()
+        downloader = WebAndContentDriver()
+        download_params: DownloadParams = {'url': url, 'goal': '', 'search_term': ''}
+        return downloader.download(download_params)

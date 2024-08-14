@@ -6,10 +6,11 @@ import datetime as dt
 import os
 import threading
 import tempfile
-from typing import Dict, List, cast
+from typing import Dict, List, Tuple, cast
 from urllib.parse import urlparse
 
 import aiofiles
+from bs4 import BeautifulSoup
 import httpx
 import nest_asyncio
 from playwright.async_api import ElementHandle, Error, Page, async_playwright
@@ -22,6 +23,19 @@ from llmvm.common.singleton import Singleton
 
 nest_asyncio.apply()
 logging = setup_logging()
+
+class ClickableHandle():
+    def __init__(
+        self,
+        element_handle: ElementHandle,
+        scope_id: int,
+        element_id: str,
+        outer_html: str,
+    ):
+        self.element_handle = element_handle
+        self.scope_id = scope_id
+        self.element_id = element_id
+        self.outer_html = outer_html
 
 def read_netscape_cookies(cookies_txt_filename: str):
     cookies = []
@@ -134,13 +148,19 @@ class ChromeHelpers():
     async def clickable(self) -> List[str]:
         return self.run_in_loop(self.chrome.clickable()).result()
 
-    async def click(self, element) -> None:
+    async def click_str(self, str_element) -> bool:
+        return self.run_in_loop(self.chrome.click_str(str_element)).result()
+
+    async def click(self, element) -> bool:
         return self.run_in_loop(self.chrome.click(element)).result()
+
+    async def get_ahrefs(self) -> List[Tuple[str, str]]:
+        return self.run_in_loop(self.chrome.get_ahrefs()).result()
 
     async def get_input_elements(self) -> List[ElementHandle]:
         return self.run_in_loop(self.chrome.get_input_elements()).result()
 
-    async def get_clickable_elements(self) -> List[ElementHandle]:
+    async def get_clickable_elements(self) -> List[ClickableHandle]:
         return self.run_in_loop(self.chrome.get_clickable_elements()).result()
 
     async def fill(self, element: ElementHandle, value: str) -> None:
@@ -173,6 +193,40 @@ class ChromeHelpersInternal():
             'techmeme.com': lambda page: self.wait(1500)
         }
 
+    async def safe_click_element(self, element: ElementHandle, timeout=5000):
+        try:
+            # Ensure the element is in the viewport
+            await element.scroll_into_view_if_needed(timeout=timeout)
+
+            # Check if the element is truly visible and clickable
+            is_visible = await element.is_visible()
+            is_enabled = await element.is_enabled()
+
+            if not is_visible or not is_enabled:
+                logging.debug("Element is not visible or not enabled")
+                return False
+
+            # Get the bounding box of the element
+            box = await element.bounding_box()
+            if not box:
+                logging.debug("Could not get bounding box for element")
+                return False
+
+            # Get the page associated with this element
+            page = await element.owner_frame() or await element.page()
+
+            # Click in the center of the element
+            x = box['x'] + box['width'] / 2
+            y = box['y'] + box['height'] / 2
+            await page.mouse.click(x, y)
+
+            logging.debug("Successfully clicked element")
+            return True
+
+        except Exception as e:
+            logging.error(f"Error interacting with element: {str(e)}")
+            return False
+
     def set_cookies(self, cookies: List[Dict]):
         self.cookies = cookies
 
@@ -184,7 +238,7 @@ class ChromeHelpersInternal():
                 args=self.args
             )
 
-        self._context = await self.browser.new_context(viewport={'width': 1920, 'height': 1080}, accept_downloads=True)
+        self._context = await self.browser.new_context(viewport={'width': 1920, 'height': 1080}, accept_downloads=True)  # type: ignore
         cookie_file = Container().get('chromium_cookies', '')
         if os.path.exists(cookie_file):
             result = read_netscape_cookies(cookie_file)
@@ -326,14 +380,43 @@ class ChromeHelpersInternal():
             unique_ids.add(element)
         return list(unique_ids)
 
-    async def click(self, element) -> None:
-        await element.click()
+    async def click_str(self, str_element) -> bool:
+        # can either be a <a href ...> or a <button> or a straight up id
+        # figure out what, then click it
+        element = await (await self.page()).query_selector(str_element)
+        if element:
+            await element.click()
+            return True
+        else:
+            element = await (await self.page()).query_selector(f'#{str_element}')
+            if element:
+                await element.click()
+                return True
+        return False
 
-    async def get_clickable_elements(self) -> List[ElementHandle]:
-        clickable_elements = await (await self.page()).query_selector_all(
+    async def click(self, element: ElementHandle) -> bool:
+        await self.safe_click_element(element)
+        return True
+
+    async def get_ahrefs(self) -> List[Tuple[str, str]]:
+        ahrefs = await (await self.page()).query_selector_all('a')
+        result = [(await ahref.evaluate('(el) => el.outerHTML'), await ahref.get_attribute('href') or '') for ahref in ahrefs]
+        return result
+
+    async def get_clickable_elements(self) -> List[ClickableHandle]:
+        page = await self.page()
+        clickable_elements = await page.query_selector_all(
             "a, button, input[type='submit'], input[type='button']"
         )
-        return clickable_elements
+        elements = []
+        counter = 0
+
+        for element in clickable_elements:
+            element_id = await element.get_attribute('id')
+            outer_html = await element.evaluate('(el) => el.outerHTML')
+            elements.append(ClickableHandle(element, counter, element_id or '', outer_html))
+            counter+=1
+        return elements
 
     async def get_input_elements(self) -> List[ElementHandle]:
         input_elements = await (await self.page()).query_selector_all(

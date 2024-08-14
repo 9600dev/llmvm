@@ -1,46 +1,48 @@
 import asyncio
 import os
-from typing import Callable, Dict, List
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+
+from bs4 import BeautifulSoup
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Content, FileContent, PdfContent
+from llmvm.common.objects import Content, DownloadParams, FileContent, LLMCall, MarkdownContent, PdfContent, User
+from llmvm.server.python_execution_controller import ExecutionController
+from llmvm.server.tools.chrome import ClickableHandle
 from llmvm.server.tools.webhelpers import ChromeHelpers, WebHelpers
 
 logging = setup_logging()
 
 
-class ContentDownloader():
+class WebAndContentDriver():
     def __init__(
         self,
-        expr,
         cookies: List[Dict] = [],
     ):
-        self.expr = expr
         self.cookies = cookies
 
-        # the client can often send through urls with quotes around them
-        if self.expr.startswith('"') and self.expr.endswith('"'):
-            self.expr = self.expr[1:-1]
+    def download(self, download: DownloadParams) -> Content:
+        logging.debug('WebAndContentDriver.download: {}'.format(download['url']))
 
-    def download(self) -> Content:
-        logging.debug('ContentDownloader.download: {}'.format(self.expr))
+        # the client can often send through urls with quotes around them
+        if download['url'].startswith('"') and download['url'].endswith('"'):
+            download['url'] = download['url'][1:-1]
 
         # deal with files
-        result = urlparse(self.expr)
+        result = urlparse(download['url'])
         if result.scheme == '' or result.scheme == 'file':
             if '.pdf' in result.path:
                 return PdfContent(sequence=b'', url=str(result.path))
             if '.htm' in result.path or '.html' in result.path:
-                return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read(), url=self.expr)
+                return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read(), url=download['url'])
 
         # deal with pdfs
         elif (result.scheme == 'http' or result.scheme == 'https') and '.pdf' in result.path:
             chrome_helper = ChromeHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
             # downloads the pdf and gets a local file url
-            task = loop.create_task(chrome_helper.pdf_url(self.expr))
+            task = loop.create_task(chrome_helper.pdf_url(download['url']))
 
             pdf_filename = loop.run_until_complete(task)
             _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
@@ -50,7 +52,7 @@ class ContentDownloader():
         elif (result.scheme == 'http' or result.scheme == 'https') and '.csv' in result.path:
             chrome_helper = ChromeHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
-            task = loop.create_task(chrome_helper.download(self.expr))
+            task = loop.create_task(chrome_helper.download(download['url']))
             csv_filename = loop.run_until_complete(task)
             _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
             return FileContent(sequence=b'', url=csv_filename)
@@ -59,7 +61,7 @@ class ContentDownloader():
         elif result.scheme == 'http' or result.scheme == 'https':
             chrome_helper = ChromeHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
-            task = loop.create_task(chrome_helper.get_url(self.expr))
+            task = loop.create_task(chrome_helper.get_url(download['url']))
             result = loop.run_until_complete(task)
             _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
             # sometimes results can be a downloaded file (embedded pdf in the chrome browser)
@@ -69,7 +71,85 @@ class ContentDownloader():
             elif os.path.exists(result):
                 return FileContent(sequence=b'', url=result)
             else:
-                return WebHelpers.convert_html_to_markdown(result, url=self.expr)
+                return WebHelpers.convert_html_to_markdown(result, url=download['url'])
 
         # else, nothing
-        return Content(f'ContentDownloader.download: nothing found for {self.expr}')
+        return Content(f'WebAndContentDriver.download: nothing found for {download["url"]}')
+
+    def download_with_goal(
+            self,
+            download: DownloadParams,
+            controller: ExecutionController,
+        ) -> Content:
+        logging.debug(
+            'WebAndContentDriver.download_with_goal: url={} goal={} search_term={}'
+            .format(download['url'], download['goal'], download['search_term'])
+        )
+        # here we're going to go to the url and see if it's the correct content or not, based on the goal
+        result = urlparse(download['url'])
+
+        if (
+            '.pdf' in result.path
+            or '.csv' in result.path
+        ):
+            return self.download(download)
+
+        chrome_helper = ChromeHelpers(cookies=self.cookies)
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(chrome_helper.get_url(download['url']))
+        result = loop.run_until_complete(task)
+
+        if os.path.exists(result) and Helpers.is_pdf(open(result, 'rb')):
+            return PdfContent(sequence=b'', url=result)
+        elif os.path.exists(result):
+            return FileContent(sequence=b'', url=result)
+
+        # result should have html content at this point
+        ahrefs: List[Tuple[str, str]] = loop.run_until_complete(chrome_helper.get_ahrefs())
+
+        markdown = WebHelpers.convert_html_to_markdown(result, url=download['url']).get_str()
+        markdown += '\n\n'
+        markdown += 'Links:\n\n'
+        for i, (text, link) in enumerate(ahrefs):
+            markdown += f'[{text}]({link})\n\n'
+        markdown = MarkdownContent(sequence=markdown, url=download['url'])
+
+        # append clickable elements to the markdown
+        next_action = controller.execute_llm_call(
+            llm_call=LLMCall(
+                user_message=Helpers.prompt_message(
+                    prompt_name='download_and_validate.prompt',
+                    template={
+                        'url': download['url'],
+                        'user_goal': download['goal'],
+                        'referring_search_term': download['search_term'] or '',
+                    },
+                    user_token=controller.get_executor().user_token(),
+                    assistant_token=controller.get_executor().assistant_token(),
+                    append_token=controller.get_executor().append_token(),
+                ),
+                context_messages=[User(markdown)],
+                executor=controller.get_executor(),
+                model=controller.get_executor().get_default_model(),
+                temperature=0.0,
+                max_prompt_len=controller.get_executor().max_input_tokens(),
+                completion_tokens_len=controller.get_executor().max_output_tokens(),
+                prompt_name='download_and_validate.prompt',
+            ),
+            query=download['search_term'] or '',
+            original_query=download['goal'],
+        )
+
+        next_action_str = next_action.message.get_str()
+        loop.run_until_complete(chrome_helper.close())
+        logging.debug(f'WebAndContentDriver.download_with_goal decision: {next_action_str}')
+        if 'yes' in next_action_str.lower():
+            return Content(markdown)
+        else:
+            download_params = DownloadParams({
+                'url': Helpers.get_full_url(download['url'], next_action_str),
+                'goal': download['goal'],
+                'search_term': download['search_term'],
+            })
+            return self.download(download_params)
+

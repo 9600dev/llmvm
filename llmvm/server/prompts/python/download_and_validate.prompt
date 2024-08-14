@@ -1,0 +1,57 @@
+[system_message]
+You are a helpful assistant.
+
+[user_message]
+The previous message has markdown content and a list of "clickable" web browser "a href" elements from the website {{url}}. Your task is to figure out if this particular website content completely satisfies a goal the User has. If it does, simply return "YES". If it doesn't, you should return the a href (the href part of the <a href="...">link text</a>) that you think has the best chance of progressing forward or achieving the User goal. Usually, we've arrived at this website through a search engine. I will give you the search term that was used if it's available also. The search term may provide more hints on where we are at with the User goal and what the website might be providing.
+
+Here's an example of your task. Your response is after "Assistant": 
+
+Markdown:
+
+## Introduction to Python
+Python is a high-level, interpreted programming language known for its simplicity and readability. It's widely used in various fields, including web development, data science, and artificial intelligence.
+
+## Key Features
+- Easy to learn and read
+- Extensive standard library
+- Cross-platform compatibility
+- Large and active community
+
+## Basic Syntax
+- Indentation is crucial for code blocks
+- Use of colons (:) to denote the start of a block
+- Variables don't need explicit declaration
+
+## Data Types
+1. Numbers (int, float, complex)
+2. Strings
+3. Lists
+4. Tuples
+5. Dictionaries
+6. [Sets](sets.html)
+
+You can download the full tutorial here: [Download Full Python Tutorial PDF](https://example.com/python_tutorial.pdf)
+
+All rights reserved. [TutorialCo](https://tutorialco.com)
+
+Links: 
+
+[Sets](<a href="sets.html">Sets</a>)
+[Download Full Python Tutorial](<a href="https://example.com/python_tutorial.pdf">Download Full Python Tutorial PDF</a>)
+[Lists](<a href="lists.html"></a>)
+[Strings](/strings.html)
+[TutorialCo](<a href="https://tutorialco.com">TutorialCo</a>)
+
+User Goal: "I want to download tutorials related to Python programming and then summarize them"
+Referring Search Term: "python programming tutorials"
+
+Assistant:
+https://example.com/python_tutorial.pdf
+
+In the above example, you returned the a href "https://example.com/python_tutorial.pdf" which was a link to the full Python Tutorial in PDF format, which was more likely to have the complete tutorial, as the current webpage only has part of the Python tutorial, thus more likely satisfying the user goal of finding Python programming tutorials to summarize them.
+
+Okay. Your turn. I'll give you the User Goal and Referring Search Term. Look at the previous message which contains the Markdown and clickable links and decide to either return "YES", or return the one clickable "a href" that you think will proceed the User goal forward better than the current webpage. 
+
+User Goal: {{user_goal}}
+Referring Search Term: {{referring_search_term}}
+
