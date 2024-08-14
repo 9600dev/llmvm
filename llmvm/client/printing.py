@@ -228,8 +228,8 @@ def print_response(messages: List[Message], escape: bool = False):
                 # and the answer will be a tonne of markdown in the var1 string
                 # remove everything in between <code_result> and </code_result> including the code_result tag
                 # todo: I dunno about this
-                temp_content.sequence = Helpers.outside_of(temp_content.get_str(), '<code_result>', '</code_result>')
-                # temp_content.sequence = temp_content.get_str().replace('<code_result>', '').replace('</code_result>', '')
+                # temp_content.sequence = Helpers.outside_of(temp_content.get_str(), '<code_result>', '</code_result>')
+                temp_content.sequence = temp_content.get_str().replace('<code_result>', '').replace('</code_result>', '')
             if not escape:
                 pprint('[bold cyan]Assistant[/bold cyan]: ', temp_content)
             else:
