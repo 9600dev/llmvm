@@ -22,7 +22,7 @@ from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
-                                  DownloadItem, FileContent, MessageModel,
+                                  DownloadItem, DownloadParams, FileContent, MessageModel,
                                   SessionThread, Statement, StopNode,
                                   TokenCompressionMethod, User,
                                   compression_enum)
@@ -148,7 +148,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
 def __get_thread(id: int) -> SessionThread:
     if not cache_session.has_key(id) or id <= 0:
         id = cache_session.gen_key()
-        thread = SessionThread(current_mode='tool', id=id)
+        thread = SessionThread(id=id)
         cache_session.set(thread.id, thread)
     return cast(SessionThread, cache_session.get(id))
 
@@ -256,10 +256,12 @@ async def download(
                 WebAndContentDriver
 
             # todo thread cookies through here
-            downloader = WebAndContentDriver(
-                expr=download_item.url,
-            )
-            content: Content = downloader.download()
+            downloader = WebAndContentDriver()
+            content: Content = downloader.download(download={
+                'url': download_item.url,
+                'goal': '',
+                'search_term': ''
+            })
             queue.put_nowait(StopNode())
 
             if content:
@@ -370,8 +372,7 @@ async def tools_completions(request: SessionThread):
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&model={model} \
-                  &executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}')
+    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}&temperature={thread.temperature}')  # NOQA: E501
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')
@@ -390,20 +391,33 @@ async def tools_completions(request: SessionThread):
                 queue.put_nowait(StopNode())
 
         async def execute_and_signal():
-            # todo: this is a hack
-            result, locals_dict = await controller.aexecute_continuation(
-                messages=messages,
-                temperature=thread.temperature,
-                stream_handler=callback,
-                model=model,
-                compression=compression,
-                cookies=cookies,
-                agents=cast(List[Callable], agents),
-                locals_dict=thread.locals_dict
-            )
-            queue.put_nowait(StopNode())
-            thread.locals_dict = locals_dict
-            return result
+            if thread.current_mode == 'direct':
+                result = await controller.aexecute(
+                    messages=messages,
+                    temperature=thread.temperature,
+                    model=model,
+                    mode=thread.current_mode,
+                    compression=compression,
+                    cookies=cookies,
+                    stream_handler=callback,
+                )
+                queue.put_nowait(StopNode())
+                return result
+            else:
+                # todo: this is a hack
+                result, locals_dict = await controller.aexecute_continuation(
+                    messages=messages,
+                    temperature=thread.temperature,
+                    stream_handler=callback,
+                    model=model,
+                    compression=compression,
+                    cookies=cookies,
+                    agents=cast(List[Callable], agents),
+                    locals_dict=thread.locals_dict
+                )
+                queue.put_nowait(StopNode())
+                thread.locals_dict = locals_dict
+                return result
 
         task = asyncio.create_task(execute_and_signal())
         task.add_done_callback(handle_exception)
@@ -430,11 +444,15 @@ async def tools_completions(request: SessionThread):
 
         # todo parse Answers into Assistants for now
         results = []
-        for statement in statements:
-            if isinstance(statement, Answer):
-                results.append(Assistant(Content(str(cast(Answer, statement).result()))))
-            elif isinstance(statement, Assistant):
-                results.append(statement)
+
+        assistant_result = '\n\n'.join([str(statement) for statement in reversed(statements)])
+        results.append(Assistant(Content(assistant_result)))
+
+        # for statement in reversed(statements):
+        #     if isinstance(statement, Answer):
+        #         results.append(Assistant(Content(str(cast(Answer, statement).result()))))
+        #     elif isinstance(statement, Assistant):
+        #         results.append(statement)
 
         if len(results) > 0:
             for result in results:

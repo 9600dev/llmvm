@@ -317,8 +317,6 @@ class Searcher():
         except SyntaxError as ex:
             logging.debug(f"Searcher.search() SyntaxError: {ex}, trying again with regex list extractor")
             pattern = r'\[(?:"[^"]*"(?:,\s*)?)+\]'
-            # pattern = r"(['\"]\[(?:[^\[\]]+|\[[^\[\]]*\])*\]['\"])"
-            # pattern = r'\[\s*(-?\d+\s*,\s*)*-?\d+\s*\]'
             match = re.search(pattern, str(result_rank.message))
 
             if match:

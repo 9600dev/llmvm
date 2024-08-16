@@ -149,7 +149,7 @@ class LLMVMClient():
                 type(message.message) is Content
                 and any(role_string in message.message.get_str() for role_string in self.role_strings)
             ):
-                parsed_messages = parse_message_thread(message.message.get_str())
+                parsed_messages = parse_message_thread(message.message.get_str(), self.action_strings)
                 thread_messages_copy += parsed_messages
             # if the incoming message has actions [ImageContent(...)], [PdfContent(...)], [FileContent(...)] etc
             elif (
@@ -287,8 +287,8 @@ class LLMVMClient():
         output_token_len: int = 4096,
         stop_tokens: List[str] = [],
         cookies: List[Dict[str, Any]] = [],
-        compression: str = 'auto',
-        mode: str = 'auto',
+        compression: str = '',
+        mode: str = '',
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
         template_args: Optional[Dict[str, Any]] = None,
     ) -> SessionThread:
@@ -325,12 +325,18 @@ class LLMVMClient():
 
             if not thread.executor: thread.executor = executor_name
             if not thread.model: thread.model = model_name
-            if not thread.cookies: thread.cookies = cookies
-            if not thread.temperature: thread.temperature = temperature
             if not thread.output_token_len: thread.output_token_len = output_token_len
-            if not thread.compression: thread.compression = compression
-            if not thread.stop_tokens: thread.stop_tokens = stop_tokens
-            if not thread.current_mode: thread.current_mode = mode
+            if temperature:
+                thread.temperature = temperature
+            if cookies:
+                thread.cookies = cookies
+            if stop_tokens:
+                thread.stop_tokens = stop_tokens
+            if compression:
+                thread.compression = compression
+            if mode:
+                thread.current_mode = mode
+
             # attach the messages to the thread
             thread.messages = [MessageModel.from_message(message) for message in thread_messages]
 

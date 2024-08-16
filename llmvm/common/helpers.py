@@ -56,6 +56,25 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def is_markdown(text):
+        # Define regex patterns for common markdown elements
+        patterns = [
+            r'^\s{0,3}#{1,6}\s',  # Headers
+            r'^\s{0,3}>\s',       # Blockquotes
+            r'^\s{0,3}[-*+]\s',   # Unordered lists
+            r'^\s{0,3}\d+\.\s',   # Ordered lists
+            r'\[.*?\]\(.*?\)',    # Links
+            r'!\[.*?\]\(.*?\)',   # Images
+            r'`.*?`',             # Inline code
+            r'^\s{0,3}```',       # Code blocks
+        ]
+        # Check if any pattern matches the text
+        for pattern in patterns:
+            if re.search(pattern, text, re.MULTILINE):
+                return True
+        return False
+
+    @staticmethod
     def get_full_url(base_url: str, href: str) -> str:
         # Parse the base URL to extract scheme and domain
         parsed_base = urlparse(base_url)
@@ -848,6 +867,15 @@ class Helpers():
 
         after_start = s[s.find(start) + len(start):]
         part = after_start[:after_start.find(end)]
+        return part
+
+    @staticmethod
+    def in_between_including(s, start, end):
+        if end == '\n' and '\n' not in s:
+            return s[s.find(start):]
+
+        after_start = s[s.find(start):]
+        part = after_start[:after_start.find(end)+len(end)]
         return part
 
     @staticmethod

@@ -9,8 +9,7 @@ import tempfile
 import textwrap
 import time
 from importlib import resources
-from typing import Any, Callable, Dict, List, Optional, Sequence, cast
-from urllib.parse import urlparse
+from typing import List, Optional, Sequence
 
 import click
 import httpx
@@ -20,7 +19,6 @@ import rich
 from click import MissingParameter
 from click_default_group import DefaultGroup
 from httpx import ConnectError
-from PIL import Image
 from prompt_toolkit import PromptSession
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
@@ -30,22 +28,20 @@ from prompt_toolkit.completion import WordCompleter, merge_completers
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
-from pydantic.type_adapter import TypeAdapter
-from rich.console import Console, ConsoleOptions, RenderResult
+from rich.console import Console
 from rich.markdown import CodeBlock, Markdown
-from rich.syntax import Syntax
+from threading import Event
 
 from llmvm.client.printing import StreamPrinter, markdown__rich_console__, print_response, print_thread, stream_response
 from llmvm.client.client import LLMVMClient
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Assistant, AstNode, Content, DownloadItem,
-                                  Executor, FileContent, ImageContent, Message,
+from llmvm.common.objects import (Content, DownloadItem,
+                                  ImageContent, Message,
                                   MessageModel, PdfContent, SessionThread,
-                                  StreamNode, TokenStopNode, User)
-from llmvm.common.openai_executor import OpenAIExecutor
-from llmvm.client.parsing import get_string_thread_with_roles, parse_command_string, parse_message_actions, parse_message_thread, read_from_pipe, get_path_as_messages, parse_path
+                                  User)
+from llmvm.client.parsing import get_string_thread_with_roles, parse_command_string, read_from_pipe, get_path_as_messages, parse_path
 
 
 invoke_context = None
@@ -55,6 +51,7 @@ nest_asyncio.apply()
 global thread_id
 global current_mode
 global last_thread
+global pipe_event
 global escape
 
 
@@ -72,6 +69,7 @@ def setup_named_pipe(pid = os.getpid()):
 
 
 pipe_path = setup_named_pipe()
+pipe_event = Event()
 
 
 def invoke_context_wrapper(ctx):
@@ -183,6 +181,7 @@ class Repl():
         rich.print()
         rich.print(f'$LLMVM_EXECUTOR: {Container.get_config_variable("LLMVM_EXECUTOR", default="(not set)")}')
         rich.print(f'$LLMVM_MODEL: {Container.get_config_variable("LLMVM_MODEL", default="(not set)")}')
+        rich.print(f'$LLMVM_FULL_PROCESSING: {str(Container.get_config_variable("LLMVM_FULL_PROCESSING", default="(not set)")).lower()}')
         rich.print()
         rich.print(f'Named pipe: {pipe_path}')
         rich.print('[bold]Keys:[/bold]')
@@ -388,7 +387,7 @@ class Repl():
         self.help()
 
         async def process_pipe_messages(self):
-            async for message in read_from_pipe(pipe_path):
+            async for message in read_from_pipe(pipe_path, pipe_event):
                 session.app.current_buffer.text = message
                 session.app.current_buffer.cursor_position = len(message) - 1
                 # session.app.text insert_text(message)
@@ -489,11 +488,15 @@ class Repl():
                 if command_executing:
                     command_executing = False
                     continue
-                if os.path.exists(pipe_path): os.unlink(pipe_path)
+                pipe_event.set()
+                if os.path.exists(pipe_path):
+                    os.remove(pipe_path)
                 break
             except Exception:
                 console.print_exception(max_frames=10)
-                if os.path.exists(pipe_path): os.unlink(pipe_path)
+                pipe_event.set()
+                if os.path.exists(pipe_path):
+                    os.remove(pipe_path)
 
 
 @click.group(
@@ -580,7 +583,10 @@ def mode(
 
 @cli.command('exit', hidden=True)
 def exit():
-    if os.path.exists(pipe_path): os.unlink(pipe_path)
+    pipe_event.set()
+    time.sleep(0.1)
+    if os.path.exists(pipe_path):
+        os.remove(pipe_path)
     os._exit(os.EX_OK)
 
 

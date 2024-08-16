@@ -12,6 +12,7 @@ from typing import Any, Awaitable, List, Callable, cast
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.markdown import CodeBlock, Markdown
 from rich.syntax import Syntax
+from rich.text import Text
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
@@ -187,7 +188,6 @@ def print_response(messages: List[Message], escape: bool = False):
             return input_str
 
     def pprint(prepend: str, content: Content):
-        markdown_tokens = ['###', '* ', '](', '```', '## ']
         console = Console()
 
         if isinstance(content, ImageContent):
@@ -201,12 +201,16 @@ def print_response(messages: List[Message], escape: bool = False):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
             console.print(Markdown(f'[FileContent({content.url})]'))
-        elif contains_token(str(content), markdown_tokens) and sys.stdout.isatty():
+        elif isinstance(content, Markdown):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
-            console.print(Markdown(str(content)))
+            console.print(content.get_str())
+        elif isinstance(content, Content) and Helpers.is_markdown(content.get_str()) and sys.stdout.isatty():
+            CodeBlock.__rich_console__ = markdown__rich_console__
+            console.print(f'{prepend}', end='')
+            console.print(Markdown(content.get_str()))
         else:
-            console.print(escape_string(f'{prepend}{content}'))
+            console.print(escape_string(f'{prepend}{content.get_str()}'))
 
     def fire_helper(string: str):
         if 'digraph' and 'edge' and 'node' in string:
@@ -229,7 +233,17 @@ def print_response(messages: List[Message], escape: bool = False):
                 # remove everything in between <code_result> and </code_result> including the code_result tag
                 # todo: I dunno about this
                 # temp_content.sequence = Helpers.outside_of(temp_content.get_str(), '<code_result>', '</code_result>')
-                temp_content.sequence = temp_content.get_str().replace('<code_result>', '').replace('</code_result>', '')
+                # temp_content.sequence = temp_content.get_str().replace('<code_result>', '').replace('</code_result>', '')
+                code_result = Helpers.in_between(temp_content.get_str(), '<code_result>', '</code_result>')
+                if len(code_result) > 10000:
+                    # using regex, replace the stuff inside of <code_result></code_result> with a 20 character summary string
+                    code_result_str = '<code_result>' + code_result[:300] + ' ... ' + code_result[-300:] + '</code_result>'
+                    temp_content.sequence = re.sub(r'<code_result>.*?</code_result>', code_result_str, temp_content.get_str(), flags=re.DOTALL)
+                # embed ```python around the code_result
+                if '<code>' in temp_content.get_str() and '</code>' in temp_content.get_str():
+                    temp_content.sequence = temp_content.get_str().replace('<code>', '```python\n<code>\n').replace('</code>', '\n</code>\n```')
+                if '<code_result>' in temp_content.get_str() and '</code_result>' in temp_content.get_str():
+                    temp_content.sequence = temp_content.get_str().replace('<code_result>', '<code_result>').replace('</code_result>', '</code_result>')
             if not escape:
                 pprint('[bold cyan]Assistant[/bold cyan]: ', temp_content)
             else:

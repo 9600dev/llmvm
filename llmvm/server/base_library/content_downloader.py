@@ -9,8 +9,8 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Content, DownloadParams, FileContent, LLMCall, MarkdownContent, PdfContent, User
 from llmvm.server.python_execution_controller import ExecutionController
-from llmvm.server.tools.chrome import ClickableHandle
 from llmvm.server.tools.webhelpers import ChromeHelpers, WebHelpers
+from llmvm.common.helpers import write_client_stream
 
 logging = setup_logging()
 
@@ -104,17 +104,10 @@ class WebAndContentDriver():
         elif os.path.exists(result):
             return FileContent(sequence=b'', url=result)
 
-        # result should have html content at this point
-        ahrefs: List[Tuple[str, str]] = loop.run_until_complete(chrome_helper.get_ahrefs())
+        markdown = MarkdownContent(sequence=WebHelpers.convert_html_to_markdown(result, url=download['url']).get_str(), url=download['url'])
 
-        markdown = WebHelpers.convert_html_to_markdown(result, url=download['url']).get_str()
-        markdown += '\n\n'
-        markdown += 'Links:\n\n'
-        for i, (text, link) in enumerate(ahrefs):
-            markdown += f'[{text}]({link})\n\n'
-        markdown = MarkdownContent(sequence=markdown, url=download['url'])
+        write_client_stream(f'Checking the content of {download["url"]} against the original user query of \"{download["goal"]}\".\n')
 
-        # append clickable elements to the markdown
         next_action = controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
@@ -146,6 +139,8 @@ class WebAndContentDriver():
         if 'yes' in next_action_str.lower():
             return Content(markdown)
         else:
+            write_client_stream(f'Decided to proceed to {next_action_str}.\n')
+
             download_params = DownloadParams({
                 'url': Helpers.get_full_url(download['url'], next_action_str),
                 'goal': download['goal'],

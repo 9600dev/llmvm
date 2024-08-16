@@ -793,6 +793,9 @@ class Assistant(Message):
     def __str__(self):
         return f'{self.message}'
 
+    def get_str(self):
+        return str(self.message)
+
     def __add__(self, other):
         other_message = str(other)
 
@@ -1062,11 +1065,13 @@ class Answer(Statement):
         self.error = error
 
     def __str__(self):
-        ret_result = f'Answer({self.result})\n'
-        ret_result = f'Error: {self.error}\n'
-        ret_result += '  Conversation:\n'
-        ret_result += '\n  '.join([str(n) for n in self.conversation])
-        return ret_result
+        if not self.error:
+            return str(self.result())
+        else:
+            return str(self.error)
+
+    def get_str(self):
+        return str(self)
 
     def token(self):
         return 'answer'
@@ -1095,11 +1100,11 @@ class SessionThread(BaseModel):
     id: int = -1
     executor: str = ''
     model: str = ''
-    current_mode: str = 'auto'
-    compression: str = 'auto'
+    current_mode: str = ''
+    compression: str = ''
     temperature: float = 0.0
     stop_tokens: list[str] = []
-    output_token_len: int = 4096
+    output_token_len: int = 0
     cookies: List[Dict[str, Any]] = []
     messages: List[MessageModel] = []
     locals_dict: Dict[str, Any] = Field(default_factory=dict, exclude=True)

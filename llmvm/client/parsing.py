@@ -1,11 +1,12 @@
 import base64
 import os
+from threading import Event
 import time
 import asyncio
 import requests
 import tempfile
 import urllib.parse
-from llmvm.common.objects import Content, ImageContent, MessageModel, PdfContent, FileContent, SessionThread, User, Message
+from llmvm.common.objects import Content, ImageContent, MessageModel, PdfContent, FileContent, SessionThread, User, Message, Assistant, System
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from typing import List, Sequence
@@ -46,26 +47,31 @@ def get_string_thread_with_roles(thread: SessionThread):
     return string_result
 
 
-async def read_from_pipe(pipe_path, timeout=0.3):
-    pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
-    with os.fdopen(pipe_fd, 'r') as pipe:
-        buffer = ""
-        last_read_time = time.time()
-        while True:
-            try:
-                chunk = pipe.read(4096)  # Read in larger chunks
-                if chunk:
-                    buffer += chunk
-                    last_read_time = time.time()
-                else:
-                    # No new data, check if we've been idle for a while
-                    if time.time() - last_read_time > timeout and buffer:
-                        return_buffer = buffer
-                        buffer = ''
-                        yield return_buffer # Return the entire collected message
+async def read_from_pipe(pipe_path, pipe_event: Event, timeout=0.3):
+    try:
+        pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+        with os.fdopen(pipe_fd, 'r') as pipe:
+            buffer = ""
+            last_read_time = time.time()
+            while not pipe_event.is_set():
+                try:
+                    chunk = pipe.read(4096)  # Read in larger chunks
+                    if chunk:
+                        buffer += chunk
+                        last_read_time = time.time()
+                    else:
+                        # No new data, check if we've been idle for a while
+                        if time.time() - last_read_time > timeout and buffer:
+                            return_buffer = buffer
+                            buffer = ''
+                            yield return_buffer # Return the entire collected message
+                        await asyncio.sleep(0.1)
+                except IOError:
                     await asyncio.sleep(0.1)
-            except IOError:
-                await asyncio.sleep(0.1)
+        os.unlink(pipe_path)
+        os.remove(pipe_path)
+    except Exception as _:
+        return
 
 
 def parse_action(token) -> Content:
@@ -108,7 +114,7 @@ def parse_message_actions(role_type: type, message: str, actions: list[str]) -> 
     return messages
 
 
-def parse_message_thread(message: str):
+def parse_message_thread(message: str, actions: list[str]):
     def create_message(type) -> Message:
         MessageClass = globals()[type]
         return MessageClass('')
@@ -120,7 +126,7 @@ def parse_message_thread(message: str):
         role = next(role for role in roles if message.startswith(role))
         parsed_message = create_message(role.replace(': ', ''))
         content = Helpers.in_between_ends(message, role, roles)
-        sub_messages = parse_message_actions(type(parsed_message), content)
+        sub_messages = parse_message_actions(type(parsed_message), content, actions=actions)
         for sub_message in sub_messages:
             messages.append(sub_message)
         message = message[len(role) + len(content):]

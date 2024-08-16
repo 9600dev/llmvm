@@ -1121,9 +1121,13 @@ class ExecutionController(Controller):
                         code_execution_result = f'{str(last_assignment[1])}'
 
                 # we have a <code_result></code_result> block, push it to the user
-                write_client_stream(f'<code_result>{code_execution_result}</code_result>')
+                if len(code_execution_result) > 300:
+                    # grab the first and last 150 characters
+                    write_client_stream(f'<code_result>{code_execution_result[:150]} ... {code_execution_result[-150:]}</code_result>\n\n')
+                else:
+                    write_client_stream(f'<code_result>{code_execution_result}</code_result>\n\n')
 
-                code_execution_result = f'<code>{code_block}</code>\n<code_result>{code_execution_result}</code_result>'
+                code_execution_result = f'<code>{code_block}</code>\n<code_result>{code_execution_result}</code_result>\n\n'
 
                 # assistant_response_str will have a code block <code></code> in it, so we need to replace it with the answers
                 # use regex to replace the code block with the original code + answers

@@ -129,21 +129,37 @@ class PythonRuntime:
 
     @staticmethod
     def get_code_blocks(code: str) -> List[str]:
-        pattern = r'(?:```(?:python)\s*([\s\S]*?)\s*```|<code>\s*([\s\S]*?)\s*</code>)'
-
         def extract_code_blocks(text):
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            return [match[0] or match[1] for match in matches if match[0] or match[1]]
+            # Pattern to match <code> blocks
+            code_pattern = re.compile(r'<code>(.*?)</code>', re.DOTALL)
+            code_blocks = code_pattern.findall(text)
+
+            blocks = []
+            for block in code_blocks:
+                # Check for nested Markdown block
+                markdown_pattern = re.compile(r'```(?:python)?\s*(.*?)\s*```', re.DOTALL)
+                nested_markdown = markdown_pattern.search(block)
+                if nested_markdown:
+                    blocks.append(nested_markdown.group(1))
+                else:
+                    blocks.append(block)
+            return blocks
 
         code = code.strip()
         ordered_blocks = []
+
         for block in extract_code_blocks(code):
+            block = block.strip()
             if block:
+                # Remove language identifier if present
+                if block.startswith('python'):
+                    block = block[6:].lstrip()
                 try:
                     ast.parse(block)
                     ordered_blocks.append(block)
                 except SyntaxError:
                     pass
+
         return ordered_blocks
 
     def pandas_bind(self, expr) -> PandasMeta:
