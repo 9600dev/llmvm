@@ -12,7 +12,7 @@ from PIL import Image
 
 from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Assistant, AstNode, Content, Executor, MarkdownContent,
+from llmvm.common.objects import (Assistant, AstNode, Content, Executor, FileContent, ImageContent, MarkdownContent,
                                   Message, PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
 from llmvm.common.perf import TokenPerf, TokenStreamManager
@@ -27,6 +27,7 @@ class OpenAIExecutor(Executor):
         api_endpoint: str = 'https://api.openai.com/v1',
         default_max_token_len: int = 128000,
         default_max_output_len: int =  16384,
+        max_images: int = 20,
     ):
         super().__init__(
             default_model=default_model,
@@ -36,6 +37,7 @@ class OpenAIExecutor(Executor):
         )
         self.openai_key = api_key
         self.aclient = AsyncOpenAI(api_key=self.openai_key, base_url=self.api_endpoint)
+        self.max_images = max_images
 
     def user_token(self) -> str:
         return 'User'
@@ -54,6 +56,90 @@ class OpenAIExecutor(Executor):
         n = w * h
         total = 85 + 170 * n
         return total
+
+    def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
+        # todo: this logic is wrong -- if called from execute_direct
+        # it'll unpack the pdf/markdown but not do it properly
+        # as those functions will return multiple messages
+        def wrap_message(index: int, content: Content) -> str:
+            if isinstance(content, FileContent):
+                return f"<file url={content.url}>{content.get_str()}</file>"
+            elif isinstance(content, PdfContent):
+                # return f"<pdf url={content.url}>{content.get_str()}</pdf>"
+                return f"<pdf url={content.url}>{ObjectTransformers.transform_pdf_content(content, self)}</pdf>"
+            elif isinstance(content, MarkdownContent):
+                return f"{ObjectTransformers.transform_markdown_content(content, self)}"
+            else:
+                return f"{content.get_str()}"
+
+        wrapped = []
+
+        # grab the last system message
+        system_messages = [m for m in messages if m.role() == 'system']
+        if len(system_messages) > 1:
+            logging.debug('More than one system message in the message list. Using the last one.')
+
+        system_message = ''
+        if len(system_messages) > 0:
+            system_message = system_messages[-1]
+            wrapped.append({'role': 'system', 'content': system_message.message.get_str()})
+
+        messages = [m for m in messages if m.role() != 'system']
+
+        # remove empty messages
+        for message in messages:
+            if not message['content'] or message['content'] == '' or message['content'] == b'':
+                logging.warning(f"Removing empty message: {message}")
+                messages.remove(message)
+
+        # check to see if there are more than self.max_images images in the message list
+        image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
+        if image_count >= self.max_images:
+            logging.debug(f'Image count is {image_count}, filtering.')
+
+            # get the top self.max_images ordered by size, then remove the rest
+            images = [m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)]
+            images.sort(key=lambda x: len(x.message.sequence), reverse=True)
+            smaller_images = images[self.max_images:]
+
+            # remove the images from the messages list and collapse the previous and next message
+            # if there is no other images in between
+            for image in smaller_images:
+                index = messages.index(image)
+                if (
+                    index > 0
+                    and not isinstance(messages[index - 1].message, ImageContent)
+                    and not isinstance(messages[index + 1].message, ImageContent)
+                ):
+                    previous = messages[index - 1]
+                    next = messages[index + 1]
+                    previous.message = Content(previous.message.get_str() + next.message.get_str())
+                    messages.remove(image)
+                    messages.remove(next)
+                else:
+                    messages.remove(image)
+
+        counter = 1
+        for i in range(len(messages)):
+            if isinstance(messages[i], User) and isinstance(messages[i].message, ImageContent):
+                wrapped.append(Message.to_dict(messages[i]))
+            elif isinstance(messages[i], User) and i < len(messages) - 1:  # is not last message, context messages
+                wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
+                counter += 1
+            elif (
+                isinstance(messages[i], User)
+                and i == len(messages) - 1
+                and (
+                    isinstance(messages[i].message, PdfContent)
+                    or isinstance(messages[i].message, ImageContent)
+                )
+            ):  # is the last message, and it's a pdf or image
+                wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
+            elif isinstance(messages[i], User) and i == len(messages) - 1:  # is the last message
+                wrapped.append({'role': 'user', 'content': messages[i].message.get_str()})
+            else:
+                wrapped.append({'role': messages[i].role(), 'content': messages[i].message.get_str()})
+        return wrapped
 
     async def count_tokens(
         self,
@@ -202,21 +288,21 @@ class OpenAIExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
-        expanded_messages = []
-        for message in messages:
-            if isinstance(message, User) and isinstance(message.message, PdfContent):
-                expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
-            elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
-                expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
-            else:
-                expanded_messages.append(message)
+        # expanded_messages = []
+        # for message in messages:
+        #     if isinstance(message, User) and isinstance(message.message, PdfContent):
+        #         expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
+        #     elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
+        #         expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
+        #     else:
+        #         expanded_messages.append(message)
 
-        # fresh message list
-        messages_list: List[Dict[str, str]] = []
+        # fresh message list, includes system message
+        messages_list: List[Dict[str, str]] = self.wrap_messages(messages)
 
-        messages_list.append(Message.to_dict(system_message))
-        for message in [m for m in expanded_messages if m.role() != 'system']:
-            messages_list.append(Message.to_dict(message))
+        # messages_list.append(Message.to_dict(system_message))
+        # for message in [m for m in expanded_messages if m.role() != 'system']:
+        #     messages_list.append(Message.to_dict(message))
 
         stream = self.__aexecute_direct(
             messages_list,

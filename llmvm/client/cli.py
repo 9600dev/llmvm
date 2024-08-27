@@ -31,6 +31,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.markdown import CodeBlock, Markdown
+from rich.text import Text
 from threading import Event
 
 from llmvm.client.printing import StreamPrinter, markdown__rich_console__, print_response, print_thread, stream_response
@@ -200,7 +201,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
             'diff_content': diff_content if diff_content else ''
         }
 
-    while '```' in message_str and '```\n' in message_str:
+    while '```' in message_str and '```' in message_str[message_str.index('```') + 3:]:
         diff_info = extract_diff_info(message_str)
         # ['command'] ['filename'] ['diff_content']
         if diff_info['filename']:
@@ -215,7 +216,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                 rich.print(f'Apply diff to: {filename}? (y/n) ', end='')
                 answer = input()
                 if answer == 'n':
-                    message_str = Helpers.after_end(message_str, '```diff', '```\n')
+                    message_str = Helpers.after_end(message_str, '```diff', '```')
                     continue
 
             if diff_info['command'] == 'patch':
@@ -236,7 +237,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                 with open(filename, 'w') as f:
                     f.write(applied_diff)
 
-            message_str = Helpers.after_end(message_str, '```diff', '```\n')
+            message_str = Helpers.after_end(message_str, '```diff', '```')
             continue
 
         if extract_filename_and_match(message_str)[0]:
@@ -246,7 +247,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                 rich.print(f'File {filename} already exists. Overwrite (y/n)? ', end='')
                 answer = input()
                 if answer == 'n':
-                    message_str = Helpers.after_end(message_str, '```', '```\n')
+                    message_str = Helpers.after_end(message_str, '```', '```')
                     continue
 
             if filename and not os.path.exists(filename):
@@ -265,10 +266,10 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
             else:
                 rich.print(f'File {filename} not written. Skipping.')
 
-            message_str = Helpers.after_end(message_str, '```', '```\n')
+            message_str = Helpers.after_end(message_str, '```', '```')
             continue
 
-        message_str = Helpers.after_end(message_str, '```', '```\n')
+        message_str = Helpers.after_end(message_str, '```', '```')
 
 
 class CustomCompleter(PromptCompleter):
@@ -353,6 +354,9 @@ class Repl():
         rich.print('[white](Ctrl-y+a yank entire message thread to clipboard)[/white]')
         rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
         rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
+        rich.print('[white](:w filename to save the current thread to a file)[/white]')
+        rich.print('[white]($(command) to execute a shell command and capture in query)[/white]')
+        rich.print('[white]($$(command) to execute a shell command and display to screen)[/white]')
         rich.print('')
         rich.print('[white](If the LLMVM server.py is not running, messages are executed directly)[/white]')
         rich.print('[white]("message" is the default command, so you can omit it)[/white]')
@@ -590,9 +594,9 @@ class Repl():
                 pipe_task.cancel()
 
                 # deal with $(...) command substitution
-                if query.startswith('$(') and query.endswith(')'):
+                if query.startswith('$$(') and query.endswith(')'):
                     command_substitution_result = Helpers.command_substitution(query)
-                    rich.print(command_substitution_result)
+                    console.print(Text.from_ansi(command_substitution_result))
                     continue
 
                 if (
@@ -609,6 +613,17 @@ class Repl():
                     last_thread_t: SessionThread = last_thread
                     pyperclip.copy(str(last_thread_t.messages[-1].content))
                     rich.print('Last message copied to clipboard.')
+                    continue
+
+                # save a thread
+                if query.startswith(':w ') and len(query) > 3:
+                    # save the current thread to a file
+                    filename = query[3:]
+                    last_thread_t: SessionThread = last_thread
+                    thread_text = get_string_thread_with_roles(last_thread_t)
+                    with open(filename, 'w') as f:
+                        f.write(thread_text)
+                        rich.print(f'Thread saved to {filename}')
                     continue
 
                 # see if the first argument is a command
@@ -1334,8 +1349,6 @@ def message(
         apply_file_writes_and_diffs(thread.messages[-1].to_message().message.get_str(), not file_writes)
 
         return thread
-    else:
-        rich.print('No message to send.')
 
 
 if __name__ == '__main__':

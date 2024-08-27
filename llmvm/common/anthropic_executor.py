@@ -27,6 +27,7 @@ class AnthropicExecutor(Executor):
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_token_len: int = 200000,
         default_max_output_len: int = 4096,
+        max_images: int = 20,
     ):
         super().__init__(
             default_model=default_model,
@@ -35,6 +36,7 @@ class AnthropicExecutor(Executor):
             default_max_output_len=default_max_output_len,
         )
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
+        self.max_images = max_images
 
     def from_dict(self, message: Dict[str, Any]) -> 'Message':
         role = message['role']
@@ -108,15 +110,15 @@ class AnthropicExecutor(Executor):
 
         messages = [m for m in messages if m.role() != 'system']
 
-        # check to see if there are more than 20 images in the message list
+        # check to see if there are more than self.max_images images in the message list
         image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
-        if image_count >= 20:
+        if image_count >= self.max_images:
             logging.debug(f'Image count is {image_count}, filtering.')
 
-            # get the top 20 ordered by size, then remove the rest
+            # get the top self.max_images ordered by size, then remove the rest
             images = [m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)]
             images.sort(key=lambda x: len(x.message.sequence), reverse=True)
-            smaller_images = images[20:]
+            smaller_images = images[self.max_images:]
 
             # remove the images from the messages list and collapse the previous and next message
             # if there is no other images in between
