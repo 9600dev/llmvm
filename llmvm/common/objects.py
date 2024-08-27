@@ -745,6 +745,10 @@ class User(Message):
     def __repr__(self):
         return f'User({self.message.__repr__()})'
 
+    def __add__(self, other):
+        a, b = str(self), str(other)
+        return a + b  # type: ignore
+
 
 class System(Message):
     def __init__(
