@@ -3,6 +3,7 @@ import csv
 import glob
 import io
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -114,6 +115,162 @@ def call_click_message(
         return message.invoke(ctx)
 
 
+def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
+    def extract_filename_and_match(markdown_block):
+        # Updated pattern to handle ```diff case correctly
+        pattern = r'```(\w+)?(?:\s+(?:Filename:\s*)?([^\s\n]+\.[^\s\n]+))?'
+        match = re.search(pattern, markdown_block)
+        if match:
+            language = match.group(1) or ''
+            filename = match.group(2) or ''
+            full_match = match.group(0)  # The entire matched string
+
+            # Don't return a filename for ```diff with no specified filename
+            if language.lower() == 'diff' and not filename:
+                return '', full_match
+
+            return filename, full_match
+        return '', None
+
+    def extract_diff_info(markdown_block):
+        # Pattern for the entire diff block
+        # diff_block_pattern = r'```diff\s*([\s\S]*?)```'
+        diff_block_pattern = r'```diff\s+(?:.*?)\n([\s\S]*?)```'
+
+        # Pattern for Git-style diff
+        git_pattern = r'(diff\s+--git\s+(\S+)\s+\S+)'
+
+        # Updated pattern for standard patch format
+        patch_pattern = r'---\s+(?:a/)?(\S+)'
+
+        # unified diff format, no patch, no git
+        # @@ -1,3 +1,3 @@  # no patch, no git, just diff content
+        unified_diff_pattern = r'^@@ -(\d+),(\d+) \+(\d+),(\d+) @@'
+
+        # no patch, no git, just diff content
+        filename_pattern = r'```diff\s+(\S+)'
+
+        # Try to match the entire diff block
+        block_match = re.search(diff_block_pattern, markdown_block, re.MULTILINE)
+        if not block_match:
+            # If no block found, treat the entire input as potential diff content
+            diff_content = markdown_block.strip()
+        else:
+            diff_content = block_match.group(1).strip()
+
+        # Try to match Git-style diff
+        git_match = re.search(git_pattern, diff_content)
+        if git_match:
+            return {
+                'command': git_match.group(1),
+                'filename': git_match.group(2).split('/')[-1],
+                'diff_content': diff_content
+            }
+
+        # If not Git-style, try to match standard patch format
+        patch_match = re.search(patch_pattern, diff_content)
+        if patch_match:
+            return {
+                'command': 'patch',
+                'filename': patch_match.group(1),
+                'diff_content': diff_content
+            }
+
+        unified_match = re.search(unified_diff_pattern, diff_content)
+        filename_match = re.search(filename_pattern, markdown_block, re.MULTILINE)
+        if unified_match and filename_match:
+            return {
+                'command': 'apply_unified_diff',
+                'filename': filename_match.group(1),
+                'diff_content': diff_content
+            }
+
+        filename_match = re.search(filename_pattern, markdown_block, re.MULTILINE)
+        if filename_match:
+            return {
+                'command': 'apply_context_free_diff',
+                'filename': filename_match.group(1),
+                'diff_content': diff_content
+            }
+
+        # If no specific format matched, but we found content
+        return {
+            'command': '',
+            'filename': '',
+            'diff_content': diff_content if diff_content else ''
+        }
+
+    while '```' in message_str and '```\n' in message_str:
+        diff_info = extract_diff_info(message_str)
+        # ['command'] ['filename'] ['diff_content']
+        if diff_info['filename']:
+            filename = diff_info['filename']
+            if filename.startswith('~'):
+                filename = os.path.expanduser(filename)
+            filename = os.path.abspath(filename)
+            if os.path.exists(filename) and prompt:
+                rich.print(f'File {filename} already exists')
+
+            if prompt:
+                rich.print(f'Apply diff to: {filename}? (y/n) ', end='')
+                answer = input()
+                if answer == 'n':
+                    message_str = Helpers.after_end(message_str, '```diff', '```\n')
+                    continue
+
+            if diff_info['command'] == 'patch':
+                with tempfile.NamedTemporaryFile(mode='w', delete=True) as temp_file:
+                    temp_file.write(diff_info['diff_content'])
+                    temp_file.flush()
+                    command = f'patch -u {filename} {temp_file.name}'
+                    rich.print(f'Applying diff to {filename} via command {command}')
+                    subprocess.run(command, shell=True)
+            elif diff_info['command'] == 'apply_context_free_diff':
+                with open(filename, 'r') as f:
+                    applied_diff = Helpers.apply_context_free_diff(f.read(), diff_info['diff_content'])
+                with open(filename, 'w') as f:
+                    f.write(applied_diff)
+            elif diff_info['command'] == 'apply_unified_diff':
+                with open(filename, 'r') as f:
+                    applied_diff = Helpers.apply_unified_diff(f.read(), diff_info['diff_content'])
+                with open(filename, 'w') as f:
+                    f.write(applied_diff)
+
+            message_str = Helpers.after_end(message_str, '```diff', '```\n')
+            continue
+
+        if extract_filename_and_match(message_str)[0]:
+            filename, _ = extract_filename_and_match(message_str)
+            answer = 'n' if prompt else 'y'
+            if os.path.exists(filename) and prompt:
+                rich.print(f'File {filename} already exists. Overwrite (y/n)? ', end='')
+                answer = input()
+                if answer == 'n':
+                    message_str = Helpers.after_end(message_str, '```', '```\n')
+                    continue
+
+            if filename and not os.path.exists(filename):
+                rich.print(f'File {filename} does not exist. Creating...')
+                answer = 'y'
+
+            if not filename and prompt:
+                rich.print(f'No filename for diff specified by LLM. Filename? ', end='')
+                filename = input()
+                answer = 'y'
+
+            if answer == 'y' and filename:
+                with open(filename, 'w') as f:
+                    f.write(message_str)
+                    f.flush()
+            else:
+                rich.print(f'File {filename} not written. Skipping.')
+
+            message_str = Helpers.after_end(message_str, '```', '```\n')
+            continue
+
+        message_str = Helpers.after_end(message_str, '```', '```\n')
+
+
 class CustomCompleter(PromptCompleter):
     def get_completions(self, document, complete_event):
         # Your logic to compute completions
@@ -125,7 +282,9 @@ class CustomCompleter(PromptCompleter):
                           for f in glob.glob(f'{current_dir}/**', recursive=True)
                           if f not in filter_out]
 
-        for completion in files_and_dirs:
+        filtered_files_and_dirs = [f for f in files_and_dirs if f.startswith(word)]
+
+        for completion in filtered_files_and_dirs:
             yield PromptCompletion(completion, start_position=-len(word))
 
 
@@ -274,7 +433,7 @@ class Repl():
             global thread_id
             global last_thread
 
-            from PIL import ImageGrab
+            from PIL import ImageGrab # type: ignore
             try:
                 im = ImageGrab.grabclipboard()
             except Exception as ex:
@@ -604,6 +763,20 @@ def help():
 @click.argument('args', type=str, required=False, default='')
 def ls(args):
     os.system(f'ls -la --color {args}')
+
+
+@cli.command('cd', hidden=True)
+@click.argument('args', type=str, required=False, default='')
+def cd(args):
+    current_dir = os.getcwd()
+    args = args.strip()
+    if args[0] == '"' and args[-1] == '"':
+        args = args[1:-1]
+    if args[0] == '~':
+        args = os.path.expanduser(args)
+    full_path = os.path.join(current_dir, args)
+    rich.print(f'Changing directory from {current_dir} to {full_path}')
+    os.chdir(full_path)
 
 
 @cli.command('cookies', help='Set cookies for a message thread so that the tooling is able to access authenticated content.')
@@ -981,6 +1154,7 @@ def new(
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
               default='auto', help='context window compression method if the message is too large. Default is "auto".')
+@click.option('--file-writes', type=bool, required=False, default=False, is_flag=True, help='automatically apply file writes and diffs')
 @click.option('--temperature', type=float, required=False, default=0.0, help='temperature for the call.')
 @click.option('--output_token_len', type=int, required=False, default=4096, help='maximum output tokens for the call.')
 @click.option('--stop_tokens', type=str, required=False, multiple=True, help='stop tokens for the call.')
@@ -998,6 +1172,7 @@ def message(
     executor: str,
     model: str,
     compression: str,
+    file_writes: bool,
     temperature: float,
     output_token_len: int,
     stop_tokens: List[str],
@@ -1154,6 +1329,10 @@ def message(
         if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
         last_thread = thread
         thread_id = thread.id
+
+        # apply file writes with or without prompting
+        apply_file_writes_and_diffs(thread.messages[-1].to_message().message.get_str(), not file_writes)
+
         return thread
     else:
         rich.print('No message to send.')

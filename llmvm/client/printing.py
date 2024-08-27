@@ -212,10 +212,10 @@ def print_response(messages: List[Message], escape: bool = False):
         else:
             console.print(escape_string(f'{prepend}{content.get_str()}'))
 
-    def fire_helper(string: str):
-        if 'digraph' and 'edge' and 'node' in string:
+    def fire_helper(s: str):
+        if 'digraph' in s and 'edge' in s and 'node' in s:
             # fire up graphvis.
-            graphvis_code = 'digraph' + Helpers.in_between(string, 'digraph', '}') + '}\n\n'
+            graphvis_code = 'digraph' + Helpers.in_between(s, 'digraph', '}') + '}\n\n'
             temp_file = tempfile.NamedTemporaryFile(mode='w+')
             temp_file.write(graphvis_code)
             temp_file.flush()

@@ -56,6 +56,78 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def apply_unified_diff(original_content, diff_content):
+        original_lines = original_content.splitlines()
+        diff_lines = diff_content.splitlines()
+        modified_lines = original_lines.copy()
+        current_line = 0
+
+        start_line = diff_lines[0]
+        if start_line.startswith("@@") and not start_line.endswith("@@") and "@@" in start_line[2:]:
+            # sonnet botched the format
+            new_start_line = Helpers.in_between_including(start_line, '@@', '@@')
+            next_line = Helpers.after_end(start_line, '@@', '@@').strip()
+            diff_lines.insert(1, next_line)
+            diff_lines[0] = new_start_line
+
+        for i, line in enumerate(diff_lines):
+            if line.startswith("@@"):
+                # @@ -6,6 +6,7 @@ - hunk header
+                # Parse hunk header
+                _, old, new, _ = line.split()
+                old_start = int(old.split(',')[0][1:])
+                current_line = old_start - 1  # -1 because list indices start at 0
+            elif line.startswith("-"):
+                # Remove line
+                if modified_lines[current_line] == line[1:]:
+                    modified_lines.pop(current_line)
+                else:
+                    print(f"Warning: Mismatch at line {current_line + 1}")
+            elif line.startswith("+"):
+                # Add line
+                modified_lines.insert(current_line, line[1:])
+                current_line += 1
+            else:
+                # Context line
+                current_line += 1
+
+        return '\n'.join(modified_lines)
+
+    @staticmethod
+    def apply_context_free_diff(original_content, diff_content):
+        original_lines = original_content.splitlines(True)  # Keep line endings
+        diff_lines = diff_content.splitlines()
+
+        modified_lines = []
+        original_index = 0
+
+        for diff_line in diff_lines:
+            diff_line = diff_line.rstrip('\n')
+            if diff_line.startswith('+'):
+                # Add new line
+                modified_lines.append(diff_line[1:] + '\n')
+            elif diff_line.startswith('-'):
+                # Skip the line in the original content (effectively deleting it)
+                if original_index < len(original_lines):
+                    original_index += 1
+            else:
+                # Context line or unchanged line
+                if original_index < len(original_lines):
+                    if diff_line == original_lines[original_index].rstrip('\n'):
+                        modified_lines.append(original_lines[original_index])
+                        original_index += 1
+                    else:
+                        # Context mismatch - could indicate an error in the diff or original content
+                        modified_lines.append(original_lines[original_index])
+                        original_index += 1
+
+        # Add any remaining lines from the original content
+        modified_lines.extend(original_lines[original_index:])
+
+        # Join the lines back into a single string
+        return ''.join(modified_lines)
+
+    @staticmethod
     def is_markdown(text):
         # Define regex patterns for common markdown elements
         patterns = [
@@ -861,6 +933,22 @@ class Helpers():
         return ''
 
     @staticmethod
+    def after_end(s: str, start: str, end: str) -> str:
+        # Find the start position
+        start_pos = s.find(start)
+        if start_pos == -1:
+            return s
+
+        # Find the end position, starting from after the start token
+        end_pos = s.find(end, start_pos + len(start))
+        if end_pos == -1:
+            return s
+
+        # Extract the content after the end token
+        result = s[end_pos + len(end):]
+        return result
+
+    @staticmethod
     def in_between(s, start, end):
         if end == '\n' and '\n' not in s:
             return s[s.find(start) + len(start):]
@@ -871,12 +959,17 @@ class Helpers():
 
     @staticmethod
     def in_between_including(s, start, end):
-        if end == '\n' and '\n' not in s:
-            return s[s.find(start):]
+        start_index = s.find(start)
+        if start_index == -1:
+            return ""  # Return empty string if start is not found
 
-        after_start = s[s.find(start):]
-        part = after_start[:after_start.find(end)+len(end)]
-        return part
+        after_start = s[start_index:]
+        end_index = after_start.find(end, len(start))  # Start searching for `end` after `start`
+
+        if end_index == -1:
+            return after_start  # Return everything after start if end is not found
+
+        return s[start_index:start_index + end_index + len(end)]
 
     @staticmethod
     def outside_of(s, start, end):
