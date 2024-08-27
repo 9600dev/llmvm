@@ -746,7 +746,11 @@ class User(Message):
         return f'User({self.message.__repr__()})'
 
     def __add__(self, other):
-        a, b = str(self), str(other)
+        a, b = coerce_types(str(self), other)
+        return a + b  # type: ignore
+
+    def __radd__(self, other):
+        a, b = coerce_types(other, str(self))
         return a + b  # type: ignore
 
 
