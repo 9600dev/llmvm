@@ -104,7 +104,7 @@ class WebAndContentDriver():
         elif os.path.exists(result):
             return FileContent(sequence=b'', url=result)
 
-        markdown = MarkdownContent(sequence=WebHelpers.convert_html_to_markdown(result, url=download['url']).get_str(), url=download['url'])
+        markdown_content = MarkdownContent(sequence=WebHelpers.convert_html_to_markdown(result, url=download['url']).get_str(), url=download['url'])
 
         write_client_stream(f'Checking the content of {download["url"]} against the original user query of \"{download["goal"]}\".\n')
 
@@ -121,7 +121,7 @@ class WebAndContentDriver():
                     assistant_token=controller.get_executor().assistant_token(),
                     append_token=controller.get_executor().append_token(),
                 ),
-                context_messages=[User(markdown)],
+                context_messages=[User(markdown_content)],
                 executor=controller.get_executor(),
                 model=controller.get_executor().get_default_model(),
                 temperature=0.0,
@@ -137,7 +137,7 @@ class WebAndContentDriver():
         loop.run_until_complete(chrome_helper.close())
         logging.debug(f'WebAndContentDriver.download_with_goal decision: {next_action_str}')
         if 'yes' in next_action_str.lower():
-            return Content(markdown)
+            return markdown_content
         else:
             write_client_stream(f'Decided to proceed to {next_action_str}.\n')
 

@@ -155,7 +155,8 @@ class PythonRuntime:
                 if block.startswith('python'):
                     block = block[6:].lstrip()
                 try:
-                    ast.parse(block)
+                    # ast.parse(block)
+                    # syntax errors weren't allowing the model to try again and fix the error
                     ordered_blocks.append(block)
                 except SyntaxError:
                     pass
@@ -278,7 +279,8 @@ class PythonRuntime:
             vector_search=self.vector_search,
             total_links_to_return=total_links_to_return
         )
-        return searcher.search(titles_seen=titles_seen)
+        results = searcher.search(titles_seen=titles_seen)
+        return results
 
     def coerce(self, expr, type_name: str) -> Any:
         logging.debug(f'coerce({str(expr)[:20]}, {str(type_name)})')

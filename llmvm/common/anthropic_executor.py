@@ -56,12 +56,22 @@ class AnthropicExecutor(Executor):
             byte_content = base64.b64decode(message_content[0]['source']['data'])
             content = ImageContent(byte_content, message_content[0]['source']['data'])
 
+        # to support the extra {'type': 'text'} key in the content ala explicit prompt caching
+        elif (
+            isinstance(message_content, list)
+            and len(message_content) > 0
+            and 'type' in message_content[0]
+            and message_content[0]['type'] == 'text'
+        ):
+            content = Content(message_content[0]['text'])
+
         elif content_type == 'pdf':
             if url and not message_content:
                 with open(url, 'rb') as f:
                     content = PdfContent(f.read(), url)
             else:
-                content = PdfContent(FileContent.decode(str(message_content)), url)
+                content = PdfContent(FileContent.decode(str(message_content[0]['text'])), url)
+
         elif content_type == 'file':
             # if there's a url here, but no content, then it's a file local to the server
             if url and not message_content:
@@ -69,9 +79,18 @@ class AnthropicExecutor(Executor):
                     content = FileContent(f.read().encode('utf-8'), url)
             # else, it's been transferred from the client to server via b64
             else:
-                content = FileContent(FileContent.decode(str(message_content)), url)
+                content = FileContent(FileContent.decode(str(message_content[0]['text'])), url)
+
         else:
-            content = Content(message_content)
+            if (
+                isinstance(message_content, list)
+                and len(message_content) > 0
+                and 'type' in message_content[0]
+                and message_content[0]['type'] == 'text'
+            ):
+                content = Content(message_content[0]['text'])
+            else:
+                content = Content(str(message_content))
 
         if role == 'user':
             return User(content)
@@ -92,7 +111,7 @@ class AnthropicExecutor(Executor):
                 # return f"<pdf url={content.url}>{content.get_str()}</pdf>"
                 return f"<pdf url={content.url}>{ObjectTransformers.transform_pdf_content(content, self)}</pdf>"
             elif isinstance(content, MarkdownContent):
-                return f"{ObjectTransformers.transform_markdown_content(content, self)}"
+                return f"<markdown url={content.url}>{ObjectTransformers.transform_markdown_content(content, self)}</markdown>"
             else:
                 return f"{content.get_str()}"
 
@@ -106,7 +125,14 @@ class AnthropicExecutor(Executor):
         system_message = ''
         if len(system_messages) > 0:
             system_message = system_messages[-1]
-            wrapped.append({'role': 'system', 'content': system_message.message.get_str()})
+            wrapped.append({
+                'role': 'system',
+                'content': [{
+                    'type': 'text',
+                    'text': system_message.message.get_str(),
+                    **({'cache_control': {'type': 'ephemeral'}} if system_message.prompt_cached else {}),
+                }]
+            })
 
         messages = [m for m in messages if m.role() != 'system']
 
@@ -154,7 +180,14 @@ class AnthropicExecutor(Executor):
                         }]
                     })
             elif isinstance(messages[i], User) and i < len(messages) - 1:  # is not last message, context messages
-                wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
+                wrapped.append({
+                    'role': 'user',
+                    'content': [{
+                        'type': 'text',
+                        'text': wrap_message(counter, messages[i].message),
+                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached else {}),
+                    }]
+                })
                 counter += 1
             elif (
                 isinstance(messages[i], User)
@@ -164,11 +197,25 @@ class AnthropicExecutor(Executor):
                     or isinstance(messages[i].message, ImageContent)
                 )
             ):  # is the last message, and it's a pdf or image
-                wrapped.append({'role': 'user', 'content': wrap_message(counter, messages[i].message)})
+                wrapped.append({'role': 'user', 'content': [{'type': 'text', 'text': wrap_message(counter, messages[i].message)}]})
             elif isinstance(messages[i], User) and i == len(messages) - 1:  # is the last message
-                wrapped.append({'role': 'user', 'content': messages[i].message.get_str()})
+                wrapped.append({
+                    'role': 'user',
+                    'content': [{
+                        'type': 'text',
+                        'text': messages[i].message.get_str(),
+                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached else {}),
+                    }]
+                })
             else:
-                wrapped.append({'role': messages[i].role(), 'content': messages[i].message.get_str()})
+                wrapped.append({
+                    'role': messages[i].role(),
+                    'content': [{
+                        'type': 'text',
+                        'text': messages[i].message.get_str(),
+                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached else {}),
+                    }]
+                })
 
         return wrapped
 
@@ -250,8 +297,12 @@ class AnthropicExecutor(Executor):
 
         # anthropic disallows empty messages, so we're going to remove any Message that doesn't contain content
         for message in messages:
-            if not message['content'] or message['content'] == '' or message['content'] == b'':
-                logging.warning(f"Removing empty message: {message}")
+            if (
+                message['content']
+                and message['content'][0]['type'] == 'text'
+                and (message['content'][0]['text'] == '' or message['content'][0]['text'] == b'')
+            ):
+                logging.warning(f"Removing empty textmessage: {message}")
                 messages.remove(message)
 
         if Container(throw=False).get_config_variable('ANTHROPIC_COLLAPSE_MESSAGES', default=False):
@@ -261,37 +312,37 @@ class AnthropicExecutor(Executor):
                 if messages[i]['role'] == 'user' and not isinstance(messages[i]['content'], list):
                     accumulator += messages[i]['content'] + '\n\n'
                 elif messages[i]['role'] == 'user' and isinstance(messages[i]['content'], list) and accumulator:
-                    collapsed_messages.append({'role': 'user', 'content': accumulator})
+                    collapsed_messages.append({'role': 'user', 'content': [{'type': 'text', 'text': accumulator}]})
                     collapsed_messages.append(messages[i])
                     accumulator = ''
                 else:
                     collapsed_messages.append(messages[i])
             if accumulator:
-                collapsed_messages.append({'role': 'user', 'content': accumulator})
+                collapsed_messages.append({'role': 'user', 'content': [{'type': 'text', 'text': accumulator}]})
             messages = collapsed_messages
 
         # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
         # going to add an Assistant message in between two User messages, and a User message between two Assistant.
-        messages_list: List[Dict[str, str]] = []
+        messages_list: List[Dict[str, Any]] = []
 
         for i in range(len(messages)):
             if i > 0 and messages[i]['role'] == messages[i - 1]['role']:
                 if messages[i]['role'] == 'user':
-                    messages_list.append({'role': 'assistant', 'content': 'Thanks. I am ready for your next message.'})
+                    messages_list.append({'role': 'assistant', 'content': [{'type': 'text', 'text': 'Thanks. I am ready for your next message.'}]})
                 elif messages[i]['role'] == 'assistant':
-                    messages_list.append({'role': 'user', 'content': 'Thanks. I am ready for your next message.'})
+                    messages_list.append({'role': 'user', 'content': [{'type': 'text', 'text': 'Thanks. I am ready for your next message.'}]})
             messages_list.append(messages[i])
 
         # todo, this is a busted hack. if a helper function returns nothing, then usually that
         # message get stripped away
         if messages_list[0]['role'] != 'system' and messages_list[0]['role'] != 'user':
-            messages_list.insert(0, {'role': 'user', 'content': 'None.'})
+            messages_list.insert(0, {'role': 'user', 'content': [{'type': 'text', 'text': 'None.'}]})
 
         # ugh, anthropic api can't have an assistant message with trailing whitespace...
         if messages_list[-1]['role'] == 'assistant':
-            messages_list[-1]['content'] = messages_list[-1]['content'].rstrip()
+            messages_list[-1]['content'][0]['text'] = messages_list[-1]['content'][0]['text'].rstrip()
 
-        messages_trace([{'role': 'system', 'content': system_message}] + messages_list)
+        messages_trace([{'role': 'system', 'content': [{'type': 'text', 'text': system_message}]}] + messages_list)
 
         token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore
         token_trace.start()
@@ -305,6 +356,7 @@ class AnthropicExecutor(Executor):
                 system=system_message,
                 temperature=temperature,
                 stop_sequences=stop_tokens,
+                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
             )
             return TokenStreamManager(stream, token_trace)
         except Exception as e:
@@ -345,7 +397,7 @@ class AnthropicExecutor(Executor):
                 expanded_messages.append(message)
 
         # fresh message list
-        messages_list: List[Dict[str, str]] = self.wrap_messages(expanded_messages)
+        messages_list: List[Dict[str, Any]] = self.wrap_messages(expanded_messages)
 
         if messages_list[0]['role'] == 'system' and messages_list[1]['role'] != 'user':
             logging.error(f'First message must be from the user after a system prompt: {messages_list}')
@@ -373,7 +425,7 @@ class AnthropicExecutor(Executor):
         await stream_async.get_final_message()  # this forces an update to the perf object
         perf.log()
 
-        messages_list.append({'role': 'assistant', 'content': text_response})
+        messages_list.append({'role': 'assistant', 'content': [{'type': 'text', 'text': text_response}]})
         conversation: List[Message] = [self.from_dict(m) for m in messages_list]
 
         assistant = Assistant(

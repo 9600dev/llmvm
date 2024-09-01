@@ -569,6 +569,9 @@ class MarkdownContent(Content):
     def get_str(self) -> str:
         return str(self.sequence)
 
+    def __repr__(self):
+        return f'MarkdownContent({self.url.__str__()} sequence: {self.sequence})'
+
 
 class PdfContent(Content):
     def __init__(
@@ -622,6 +625,7 @@ class Message(AstNode):
     ):
         self.message: Content = message
         self.pinned: int = 0  # 0 is not pinned, -1 is pinned last, anything else is pinned
+        self.prompt_cached: bool = False
 
     @abstractmethod
     def role(self) -> str:

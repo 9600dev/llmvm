@@ -392,6 +392,9 @@ class ExecutionController(Controller):
         elif isinstance(context, User):
             return [context]
 
+        elif isinstance(context, Content):
+            return [User(context)]
+
         elif isinstance(context, list):
             def is_node(n: Any) -> bool:
                 return (
@@ -992,12 +995,18 @@ class ExecutionController(Controller):
             append_token=self.get_executor().append_token(),
         )
 
+        # anthropic prompt caching
+        assistant_reply = Assistant(Content('Yes, I am ready.'))
+        system_message.prompt_cached = True
+        tools_message.prompt_cached = True
+        assistant_reply.prompt_cached = True
+
         # inject the tools_message into the messages, and make sure it's first.
         tools_message.pinned = 0  # pinned as the first message # todo: thread this through the system
         messages_copy = []
         messages_copy.append(system_message)
         messages_copy.append(tools_message)
-        messages_copy.append(Assistant(Content('Yes, I am ready.')))
+        messages_copy.append(assistant_reply)
         messages_copy.extend(copy.deepcopy(messages[0:-1]))
         messages_copy.append(messages[-1])
 
@@ -1082,7 +1091,7 @@ class ExecutionController(Controller):
                 try:
                     _ = ast.parse(code_block)
                 except SyntaxError as ex:
-                    logging.debug('aexecute() SyntaxError: {}'.format(ex))
+                    logging.debug('aexecute() SyntaxError trying to parse code block: {}'.format(ex))
                     code_block = python_runtime.compile_error(
                         python_code=code_block,
                         error=str(ex),
@@ -1101,6 +1110,7 @@ class ExecutionController(Controller):
                     )
                     results.extend(python_runtime.answers)
                 except Exception as ex:
+                    logging.debug('aexecute() Exception executing code block: {}'.format(ex))
                     code_execution_result = Helpers.extract_stacktrace_until(traceback.format_exc(), type(python_runtime))
                     exception_counter += 1
                     if exception_counter == self.exception_limit:
@@ -1108,6 +1118,7 @@ class ExecutionController(Controller):
                         Running any of the previous code again won't work.
                         You have one more shot, try something very different. Feel free to just emit a natural language message instead of code.\n"""
                         code_execution_result = f'{code_execution_result}\n\n{EXCEPTION_PROMPT}'
+                        logging.debug('aexecute() Exception limit reached)')
 
                 # we have the result of the code block execution, now we need to rewrite the assistant
                 # message to include the result of the code block execution and continue

@@ -4,7 +4,7 @@ import os
 import sys
 import time
 from logging import Logger
-from typing import Dict, List
+from typing import Dict, List, Any
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -19,7 +19,7 @@ def trace(content):
             f.write(content)
 
 
-def messages_trace(messages: List[Dict[str, str]]):
+def messages_trace(messages: List[Dict[str, Any]]):
     if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
         for m in messages:
             trace(f"<{m['role'].capitalize()}:>{m['content']}</{m['role'].capitalize()}>\n\n")
