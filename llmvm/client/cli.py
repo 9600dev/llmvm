@@ -785,6 +785,11 @@ def ls(args):
 def cd(args):
     current_dir = os.getcwd()
     args = args.strip()
+
+    if not args:
+        rich.print(current_dir)
+        return
+
     if args[0] == '"' and args[-1] == '"':
         args = args[1:-1]
     if args[0] == '~':

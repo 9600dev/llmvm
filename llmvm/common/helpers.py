@@ -280,8 +280,16 @@ class Helpers():
 
     @staticmethod
     def compare_code_blocks(code1: str, code2: str):
-        tree1 = ast.parse(code1)
-        tree2 = ast.parse(code2)
+        try:
+            tree1 = ast.parse(code1)
+        except SyntaxError:
+            return False
+
+        try:
+            tree2 = ast.parse(code2)
+        except SyntaxError:
+            return False
+
         return Helpers.compare_ast(tree1, tree2)
 
     @staticmethod

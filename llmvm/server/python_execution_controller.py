@@ -1108,6 +1108,7 @@ class ExecutionController(Controller):
                         messages=messages,
                         locals_dict=locals_dict
                     )
+                    exception_counter = 0
                     results.extend(python_runtime.answers)
                 except Exception as ex:
                     logging.debug('aexecute() Exception executing code block: {}'.format(ex))
@@ -1142,7 +1143,11 @@ class ExecutionController(Controller):
 
                 # assistant_response_str will have a code block <code></code> in it, so we need to replace it with the answers
                 # use regex to replace the code block with the original code + answers
-                assistant_response_str = re.sub(r'<code>.*?</code>', code_execution_result, assistant_response_str, flags=re.DOTALL)
+                try:
+                    assistant_response_str = re.sub(r'<code>.*?</code>', code_execution_result, assistant_response_str, flags=re.DOTALL)
+                except Exception as ex:
+                    logging.debug(f'Error replacing code block with code execution result: {ex}')
+                    assistant_response_str = f'{assistant_response_str}\n\n{code_execution_result}'
                 messages_copy.append(Assistant(Content(assistant_response_str)))
             elif response.stop_token and response.stop_token == '</complete>':
                 # if we have a stop token, there are no code blocks, so we can just append the response
