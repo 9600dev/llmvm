@@ -154,7 +154,7 @@ class Pdf():
         if x_tolerance == 0:
             return [Content(PdfHelpers.parse_pdf_image(url_or_file))]
 
-        original = first_page.to_image().original
+        original = first_page.to_image(resolution=150, antialias=True).original
         return_image = BytesIO()
         original.save(return_image, format='PNG')
 
@@ -176,12 +176,12 @@ class Pdf():
                     buf = io.BytesIO()
                     im.save(buf, format='PNG')
                     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-                        im.save(temp_file.name, format='PNG')
+                        im.save(temp_file.name, format='PNG', optimize=False, compression_level=0)
                         page_content.append(ImageContent(buf.getvalue(), url=temp_file.name))
                 else:
                     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
                         image_bbox = (img['x0'], page.height - img['y1'], img['x1'], page.height - img['y0'])
-                        page.crop(image_bbox).to_image().save(temp_file.name, format='PNG')
+                        page.crop(image_bbox).to_image(resolution=150, antialias=True).save(temp_file.name, format='PNG', optimize=False, compression_level=0)
                         im = Image.open(temp_file.name)
                         buf = io.BytesIO()
                         im.save(buf, format='PNG')

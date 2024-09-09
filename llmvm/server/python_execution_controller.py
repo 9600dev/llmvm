@@ -925,7 +925,10 @@ class ExecutionController(Controller):
         response: Assistant = Assistant(Content())
 
         # a single code block is supported as a special case which we execute immediately
-        if PythonRuntime.only_code_block(messages[-1].message.get_str()):
+        if (
+            type(messages[-1]) is Content
+            and PythonRuntime.only_code_block(messages[-1].message.get_str())
+        ):
             response.message = messages[-1].message
             messages.remove(messages[-1])
             raise NotImplementedError('Code block execution is not yet supported.')
@@ -983,12 +986,11 @@ class ExecutionController(Controller):
 
         # inject the python_continuation_execution.prompt prompt
         functions = [Helpers.get_function_description_flat(f) for f in agents]
-        human_query = messages[-1].message.get_str()
+
         system_message, tools_message = Helpers.prompts(
             prompt_name='python_continuation_execution.prompt',
             template={
                 'functions': '\n'.join(functions),
-                'user_input': human_query,
             },
             user_token=self.get_executor().user_token(),
             assistant_token=self.get_executor().assistant_token(),

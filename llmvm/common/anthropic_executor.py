@@ -22,7 +22,7 @@ logging = setup_logging()
 class AnthropicExecutor(Executor):
     def __init__(
         self,
-        api_key: str,
+        api_key: str = cast(str, os.environ.get('ANTHROPIC_API_KEY')),
         default_model: str = 'claude-3-5-sonnet-20240620',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_token_len: int = 200000,

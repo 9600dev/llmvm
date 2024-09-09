@@ -8,9 +8,14 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, TypedDict
+from llmvm.common.logging_helpers import setup_logging
 
 import numpy as np
 from pydantic import BaseModel, Field
+
+
+logging = setup_logging()
+
 
 T = TypeVar('T')
 
@@ -589,7 +594,9 @@ class PdfContent(Content):
         return os.path.isfile(self.url)
 
     def get_str(self) -> str:
-        raise NotImplementedError('PdfContent.get_str() not implemented')
+        logging.debug('PdfContent.get_str() called, [PdfContent] string returned')
+        return str(self)
+        # raise NotImplementedError('PdfContent.get_str() not implemented')
 
 
 class FileContent(Content):
