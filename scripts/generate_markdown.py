@@ -20,7 +20,7 @@ from llmvm.common.helpers import Helpers
 @click.argument('pdf_path', type=str, required=False, default='')
 @click.option('--executor', '-e', default='anthropic', required=True)
 @click.option('--model', '-m', default='', required=False)
-@click.option('--output_path', '-o', default='output', required=True)
+@click.option('--output_path', '-o', default='', required=True)
 def main(
     pdf_path: str,
     executor: str,
@@ -34,6 +34,12 @@ def main(
     if not os.path.exists(pdf_path):
         rich.print(f'[red]File not found: {pdf_path}[/red]')
         sys.exit(1)
+
+    if not output_path:
+        rich.print('[yellow]Output path (default is output): [/yellow]', end='')
+        output_path = input()
+        if not output_path:
+            output_path = 'output'
 
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -65,7 +71,10 @@ def main(
     PROMPT = f"""
     The previous message contains text from a PDF file extracted from the following path: {pdf_path}.
     I want you to convert this text into Markdown. Do a thorough job. Don't miss any text.
-    There are image references in the PDF text that are already in Markdown format (e.g. ![text](image_path) format). Keep them.
+    There are image references in the PDF text that are already in Markdown format (e.g. ![text](image_path) format).
+    These image references have been placed at the bottom of each converted PDF page.
+    If you think you can move these image references to a more appropriate location within the text of the page, feel free to do so.
+    Do not emit any preamble or metadata, just the converted Markdown content.
     """
 
     pdf_content = User(Content(pdf_content))
