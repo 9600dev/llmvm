@@ -20,12 +20,14 @@ from llmvm.common.helpers import Helpers
 @click.argument('pdf_path', type=str, required=False, default='')
 @click.option('--executor', '-e', default='anthropic', required=True)
 @click.option('--model', '-m', default='', required=False)
-@click.option('--output_path', '-o', default='', required=True)
+@click.option('--output_path', '-o', default='./', required=True)
+@click.option('--title_as_dir', '-t', default=False, is_flag=True, required=False)
 def main(
     pdf_path: str,
     executor: str,
     model: str,
     output_path: str,
+    title_as_dir: bool,
 ):
     if not pdf_path:
         rich.print('[red]Please provide a PDF file path[/red]')
@@ -35,11 +37,7 @@ def main(
         rich.print(f'[red]File not found: {pdf_path}[/red]')
         sys.exit(1)
 
-    if not output_path:
-        rich.print('[yellow]Output path (default is output): [/yellow]', end='')
-        output_path = input()
-        if not output_path:
-            output_path = 'output'
+    output_path = os.path.expanduser(output_path)
 
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -56,7 +54,29 @@ def main(
 
     pdf_content = ''
 
+    TITLE_PROMPT = """
+    The previous message contains the first page of a PDF file.
+    I want you to extract the best possible title of the PDF file you can and
+    convert that title into a directory path that will work on macos, linux and windows.
+    For example, if you extract a title like "Greatest Hits of the 80s", the directory path should be "greatest_hits_of_the_80s".
+    Only return the directory name, nothing else. Do not include the full path, just the directory name.
+    """
+
+    generated_title_path = False
+
     for i, message in enumerate(messages):
+        if type(message) is Content and title_as_dir and not generated_title_path:
+            result = message.get_str()
+            title_response = llm(
+                messages=[User(Content(result)), User(Content(TITLE_PROMPT))],
+                executor=e,
+            )
+            output_path += os.path.sep + title_response.get_str().strip()
+            rich.print(f'[green]Title of the PDF extracted and converted to directory path {output_path}[/green]')
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            generated_title_path = True
+
         if type(message) is ImageContent:
             image_path = os.path.join(output_path, f'image_{i}.png')
             image_name = f'image_{i}.png'
