@@ -18,6 +18,11 @@ from llmvm.common.perf import TokenPerf, TokenStreamManager
 
 logging = setup_logging()
 
+prompt_caching_models = [
+    'claude-3-5-sonnet-20240620',
+    'claude-3-opus-20240229',
+    'claude-3-haiku-20240307',
+]
 
 class AnthropicExecutor(Executor):
     def __init__(
@@ -100,7 +105,7 @@ class AnthropicExecutor(Executor):
             return Assistant(content)
         raise ValueError(f'role not found or not supported: {message}')
 
-    def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
+    def wrap_messages(self, model: Optional[str], messages: List[Message]) -> List[Dict[str, str]]:
         # todo: this logic is wrong -- if called from execute_direct
         # it'll unpack the pdf/markdown but not do it properly
         # as those functions will return multiple messages
@@ -130,7 +135,7 @@ class AnthropicExecutor(Executor):
                 'content': [{
                     'type': 'text',
                     'text': system_message.message.get_str(),
-                    **({'cache_control': {'type': 'ephemeral'}} if system_message.prompt_cached else {}),
+                    **({'cache_control': {'type': 'ephemeral'}} if system_message.prompt_cached and model in prompt_caching_models else {}),
                 }]
             })
 
@@ -185,7 +190,7 @@ class AnthropicExecutor(Executor):
                     'content': [{
                         'type': 'text',
                         'text': wrap_message(counter, messages[i].message),
-                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached else {}),
+                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached and model in prompt_caching_models else {}),
                     }]
                 })
                 counter += 1
@@ -204,7 +209,7 @@ class AnthropicExecutor(Executor):
                     'content': [{
                         'type': 'text',
                         'text': messages[i].message.get_str(),
-                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached else {}),
+                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached and model in prompt_caching_models else {}),
                     }]
                 })
             else:
@@ -213,7 +218,7 @@ class AnthropicExecutor(Executor):
                     'content': [{
                         'type': 'text',
                         'text': messages[i].message.get_str(),
-                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached else {}),
+                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached and model in prompt_caching_models else {}),
                     }]
                 })
 
@@ -253,12 +258,12 @@ class AnthropicExecutor(Executor):
             return num_tokens
 
         if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
-            dict_messages = self.wrap_messages(cast(List[Message], messages))
+            dict_messages = self.wrap_messages(model, cast(List[Message], messages))
             return await num_tokens_from_messages(dict_messages)
         elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
             return await num_tokens_from_messages(messages)
         elif isinstance(messages, str):
-            return await num_tokens_from_messages(self.wrap_messages([User(Content(messages))]))
+            return await num_tokens_from_messages(self.wrap_messages(model, [User(Content(messages))]))
         else:
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
@@ -397,7 +402,7 @@ class AnthropicExecutor(Executor):
                 expanded_messages.append(message)
 
         # fresh message list
-        messages_list: List[Dict[str, Any]] = self.wrap_messages(expanded_messages)
+        messages_list: List[Dict[str, Any]] = self.wrap_messages(model, expanded_messages)
 
         if messages_list[0]['role'] == 'system' and messages_list[1]['role'] != 'user':
             logging.error(f'First message must be from the user after a system prompt: {messages_list}')
