@@ -42,12 +42,17 @@ def main(
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
+    if model:
+        rich.print(f'[green]Using model: {model}[/green]')
+
     output_path = os.path.abspath(output_path)
 
     if model:
         e = AnthropicExecutor(default_model=model) if executor == 'anthropic' else OpenAIExecutor(default_model=model)
     else:
         e = AnthropicExecutor() if executor == 'anthropic' else OpenAIExecutor()
+
+    model = e.default_model
 
     pdf = Pdf(e)
     messages: List[Content] = pdf.get_pdf(pdf_path)
@@ -70,6 +75,7 @@ def main(
             title_response = llm(
                 messages=[User(Content(result)), User(Content(TITLE_PROMPT))],
                 executor=e,
+                model=model,
             )
             output_path += os.path.sep + title_response.get_str().strip()
             rich.print(f'[green]Title of the PDF extracted and converted to directory path {output_path}[/green]')
@@ -102,20 +108,34 @@ def main(
 
     response = llm(
         messages=[pdf_content, prompt],
+        model=model,
         executor=e,
     )
 
     responses = [response]
     while response.stop_reason == 'max_tokens':
         rich.print(f'[yellow]Max tokens reached. Asking for continuation.[/yellow]')
+        user_messages: List[Message] = [pdf_content, prompt]
+
+        for m in responses:
+            user_messages.append(m)
+
+        CONTINUE_PROMPT = "Please continue from your last message."
+
         response = llm(
-            messages=Helpers.flatten([pdf_content, prompt, responses]),
+            messages=user_messages,
             executor=e,
+            model=model,
         )
+        responses.append(response)
 
     rich.print('[green]Finished.[/green]')
 
-    markdown_content = response.message.get_str()
+    # go through each response and append the content
+    markdown_content = ''
+    for r in responses:
+        markdown_content += r.message.get_str()
+
     with open(os.path.join(output_path, 'index.md'), 'w') as f:
         f.write(markdown_content)
 

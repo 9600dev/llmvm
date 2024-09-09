@@ -51,5 +51,5 @@ end tell
 EOF
 
 cd ~/dev/llmvm/scripts
-python generate_markdown.py -o ~/work/docs -t $FILE 
+python generate_markdown.py -m claude-3-haiku-20240307 -o ~/work/docs -t $FILE 
 
