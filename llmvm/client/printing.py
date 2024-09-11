@@ -205,7 +205,7 @@ def print_response(messages: List[Message], escape: bool = False):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
             console.print(content.get_str())
-        elif isinstance(content, Content) and Helpers.is_markdown(content.get_str()) and sys.stdout.isatty():
+        elif isinstance(content, Content) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
             console.print(Markdown(content.get_str()))

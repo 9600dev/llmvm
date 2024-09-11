@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import glob
 import importlib
@@ -10,7 +11,10 @@ import itertools
 import math
 import os
 import re
+import signal
 import subprocess
+import sys
+import threading
 import traceback
 import dateparser
 import typing
@@ -128,7 +132,7 @@ class Helpers():
         return ''.join(modified_lines)
 
     @staticmethod
-    def is_markdown(text):
+    def is_markdown_simple(text):
         # Define regex patterns for common markdown elements
         patterns = [
             r'^\s{0,3}#{1,6}\s',  # Headers
@@ -351,7 +355,7 @@ class Helpers():
         # Check if the image exceeds the maximum dimensions
         if original_width > max_width or original_height > max_height:
             # Resize the image
-            image.thumbnail((max_width, max_height), Image.LANCZOS)
+            image.thumbnail((max_width, max_height), Image.LANCZOS)  # type: ignore
 
         # Save or return the image
         resized = io.BytesIO()
@@ -423,6 +427,83 @@ class Helpers():
         min_width: int,
         min_height: int
     ) -> List[Content]:
+        pattern = r'(.*?)!\[(?:.*?)\]\[(.*?)\]|(.+?)$'
+        embedded_image_pattern = r'\[(.*?)\]:\s*<data:image/(.*?);base64,(.+)>'
+        content = markdown_content.get_str()
+        content_list: List[Content] = []
+        embedded_images: Dict[str, ImageContent] = {}
+
+        # First, extract embedded images
+        for match in re.finditer(embedded_image_pattern, content, re.MULTILINE):
+            image_id, image_type, base64_data = match.groups()
+            image_bytes = base64.b64decode(base64_data)
+            embedded_images[image_id] = ImageContent(image_bytes, f"{image_id}.{image_type}")
+
+        # Remove the embedded image definitions from the content
+        content = re.sub(embedded_image_pattern, '', content, flags=re.MULTILINE)
+
+        last_end = 0
+        idx = 0
+        tasks = []
+
+        for match in re.finditer(pattern, content, re.DOTALL):
+            before, image_id, after = match.groups()
+            if before and before != content[last_end:match.start()] and last_end != match.start():
+                content_list.append(Content(content[last_end:match.start()]))
+                idx += 1
+            if before:
+                content_list.append(Content(before))
+                idx += 1
+            if image_id:
+                if image_id in embedded_images:
+                    content_list.append(embedded_images[image_id])
+                else:
+                    # Handle external images as before
+                    task = asyncio.create_task(
+                        Helpers.get_image_fuzzy_url(logging, markdown_content.url, image_id, min_width, min_height)
+                    )
+                    tasks.append((idx, task, image_id))
+                    content_list.append(Content())
+                idx += 1
+            if after:
+                content_list.append(Content(after))
+                idx += 1
+            last_end = match.end()
+
+        if last_end < len(content):
+            content_list.append(Content(content[last_end:]))
+            idx += 1
+
+        for idx, task, image_url in tasks:
+            image_bytes = await task
+            if image_bytes:
+                content_list[idx] = ImageContent(image_bytes, image_url)
+
+        # Collapse the content list
+        collapsed_content_list = [c for c in content_list if c.sequence]
+        combined_content_list = []
+        current_text = ""
+        for c in collapsed_content_list:
+            if isinstance(c, ImageContent):
+                if current_text:
+                    combined_content_list.append(Content(current_text))
+                    current_text = ""
+                combined_content_list.append(c)
+            else:
+                current_text += c.get_str()
+
+        if current_text:
+            combined_content_list.append(Content(current_text))
+
+        return combined_content_list
+
+    @staticmethod
+    async def markdown_content_to_messages_deprecated(
+        logging,
+        markdown_content: MarkdownContent,
+        min_width: int,
+        min_height: int
+    ) -> List[Content]:
         pattern = r'(.*?)!\[(?:.*?)\]\((.*?)\)|(.+?)$'
         chunks = []
         tasks = []
@@ -488,44 +569,6 @@ class Helpers():
             combined_content_list.append(Content(current_text))
 
         return combined_content_list
-
-    @staticmethod
-    async def markdown_content_to_messages_deprecated(
-        logging,
-        markdown_content: MarkdownContent,
-        min_width: int,
-        min_height: int
-    ) -> List[Content]:
-        markdown_str = markdown_content.get_str()
-        tasks = []
-        pattern = r"!\[(.*?)\]\((.*?)\)|([^!]+)"
-
-        content_list: List[Content] = [Content()] * sum(1 for _ in re.finditer(pattern, markdown_str))
-
-        matches = re.finditer(pattern, markdown_str)
-
-        for idx, match in enumerate(matches):
-            if match.group(1) is not None:
-                # This is an image
-                image_url = str(match.group(2))
-                task = asyncio.create_task(
-                    Helpers.get_image_fuzzy_url(logging, markdown_content.url, image_url, min_width, min_height)
-                )
-                tasks.append((idx, task, image_url))
-            elif match.group(3) is not None:
-                # This is text
-                text = match.group(3).strip()
-                if text:
-                    content_list[idx] = Content(text)  # type: ignore
-
-        for idx, task, image_url in tasks:
-            image_bytes = await task
-            if image_bytes:
-                content_list[idx] = ImageContent(image_bytes, image_url)  # type: ignore
-
-        # should we be collapsing the content list here?
-        results = [c for c in content_list if c.sequence]
-        return results
 
     @staticmethod
     def last_day_of_quarter(year, quarter):
@@ -745,6 +788,52 @@ class Helpers():
                 return True
         except Exception:
             return False
+
+    @staticmethod
+    def is_markdown(byte_stream):
+        if isinstance(byte_stream, io.BytesIO):
+            byte_stream = byte_stream.getvalue()
+
+        # Convert the byte stream to a string
+        content = byte_stream.decode('utf-8', errors='ignore')
+
+        # Define regex patterns for common Markdown elements
+        patterns = {
+            'headers': r'^#{1,6}\s',
+            'lists': r'^\s*[-*+]\s',
+            'numbered_lists': r'^\s*\d+\.\s',
+            'code_blocks': r'```[\s\S]*?```',
+            'links': r'\[([^\]]+)\]\(([^\)]+)\)',
+            'images': r'!\[([^\]]+)\]\(([^\)]+)\)',
+            'emphasis': r'\*\*[\s\S]*?\*\*|\*[\s\S]*?\*|__[\s\S]*?__|_[\s\S]*?_',
+            'blockquotes': r'^>\s',
+            'horizontal_rules': r'^(-{3,}|\*{3,}|_{3,})$',
+            'tables': r'\|[^|\r\n]*\|',
+        }
+
+        # Count the number of matches for each pattern
+        matches = {key: len(re.findall(pattern, content, re.MULTILINE)) for key, pattern in patterns.items()}
+
+        # Calculate the total number of matches
+        total_matches = sum(matches.values())
+
+        # Calculate the number of lines in the content
+        num_lines = len(content.splitlines())
+
+        # Check if there are multiple types of Markdown elements
+        diverse_elements = sum(1 for count in matches.values() if count > 0)
+
+        # Define thresholds
+        min_matches = 3
+        min_types = 2
+        # todo: removed this, might have to bring it back
+        # max_ratio = 0.8  # Maximum ratio of matches to lines
+
+        # Make the decision
+        if (total_matches >= min_matches and
+            diverse_elements >= min_types):
+            return True
+        return False
 
     @staticmethod
     def decompress_if_compressed(byte_stream):

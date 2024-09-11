@@ -6,7 +6,7 @@ import asyncio
 import requests
 import tempfile
 import urllib.parse
-from llmvm.common.objects import Content, ImageContent, MessageModel, PdfContent, FileContent, SessionThread, User, Message, Assistant, System
+from llmvm.common.objects import Content, ImageContent, MarkdownContent, MessageModel, PdfContent, FileContent, SessionThread, User, Message, Assistant, System
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from typing import List, Sequence
@@ -303,16 +303,20 @@ def get_path_as_messages(
             continue
 
         if result.scheme == '' or result.scheme == 'file':
-            if '.pdf' in result.path:
+            if result.path.endswith('.pdf'):
                 if upload:
                     with open(file_path, 'rb') as f:
                         files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
                 else:
                     files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
-            elif '.htm' in result.path or '.html' in result.path:
+            elif result.path.endswith('.md'):
+                with open(file_path, 'r') as f:
+                    file_content = f.read()
+                    files.append(User(MarkdownContent(file_content, url=os.path.abspath(file_path))))
+            elif result.path.endswith('.htm') or result.path.endswith('.html'):
                 try:
                     with open(file_path, 'r') as f:
-                        file_content = f.read().encode('utf-8')
+                        file_content = f.read()
                         # try to parse as markdown
                         markdown = Helpers.late_bind(
                             'helpers.webhelpers',
@@ -321,10 +325,10 @@ def get_path_as_messages(
                             file_content,
                         )
                         file_content = markdown if markdown else file_content
-                        files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
+                        files.append(User(MarkdownContent(file_content, url=os.path.abspath(file_path))))
                 except UnicodeDecodeError:
                     raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
-            elif '.pdf' in result.path:
+            elif result.path.endswith('.pdf'):
                 if upload:
                     with open(file_path, 'rb') as f:
                         files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))

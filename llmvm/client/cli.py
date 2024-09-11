@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import time
 from importlib import resources
 from typing import List, Optional, Sequence
@@ -40,7 +41,7 @@ from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Content, DownloadItem,
-                                  ImageContent, Message,
+                                  ImageContent, MarkdownContent, Message,
                                   MessageModel, PdfContent, SessionThread,
                                   User)
 from llmvm.client.parsing import get_string_thread_with_roles, parse_command_string, read_from_pipe, get_path_as_messages, parse_path
@@ -70,8 +71,37 @@ def setup_named_pipe(pid = os.getpid()):
     return FIFO
 
 
+
 pipe_path = setup_named_pipe()
 pipe_event = Event()
+
+
+def tear_down(ctx):
+    pipe_event.set()
+    if os.path.exists(pipe_path):
+        os.remove(pipe_path)
+
+    try:
+        loop = asyncio.get_running_loop()
+        tasks = asyncio.all_tasks(loop)
+
+        for task in tasks:
+            task.cancel()
+
+        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+    except RuntimeError:
+        pass
+
+    current_thread = threading.current_thread()
+    threads = threading.enumerate()
+
+    for thread in threads:
+        if thread is not current_thread and isinstance(thread, threading.Thread):
+            thread.join(timeout=0.3)
+
+    if hasattr(ctx, 'exit'):
+        ctx.exit(0)
+    sys.exit(0)
 
 
 def invoke_context_wrapper(ctx):
@@ -703,7 +733,7 @@ def cli(ctx):
                 param.name: value
                 for param, value in zip(command.params, command.parse_args(ctx, tokens))  # args[1:]))
             })
-            ctx.exit(0)
+            tear_down(ctx)
         else:
             # default message command
             command = ctx.command.get_command(ctx, 'message')  # type: ignore
@@ -713,7 +743,7 @@ def cli(ctx):
                 param.name: value
                 for param, value in zip(command.params, command.parse_args(ctx, tokens))
             })
-            ctx.exit(0)
+            tear_down(ctx)
 
 
 @cli.command('status')
@@ -757,12 +787,7 @@ def mode(
 
 @cli.command('exit', hidden=True)
 def exit():
-    pipe_event.set()
-    time.sleep(0.1)
-    if os.path.exists(pipe_path):
-        os.remove(pipe_path)
-    os._exit(os.EX_OK)
-
+    tear_down(None)
 
 @cli.command('clear', hidden=True)
 def clear():
@@ -1199,6 +1224,12 @@ def message(
     escape: bool,
     context_messages: Sequence[Message] = [],
 ):
+
+    # import debugpy
+    # debugpy.listen(5678)
+    # print('waiting for debugger to attach')
+    # debugpy.wait_for_client()
+
     global thread_id
     global last_thread
     context_messages = list(context_messages)
@@ -1253,11 +1284,12 @@ def message(
                     break
                 lines.append(line)
             # file_content = sys.stdin.buffer.read()
+
             file_content = b''.join(lines)
             with io.BytesIO(file_content) as bytes_buffer:
                 if Helpers.is_image(bytes_buffer):
                     image_bytes = Helpers.load_resize_save(bytes_buffer.getvalue(), 'PNG')
-                    asyncio.run(StreamPrinter('user').display_image(image_bytes))
+                    # asyncio.run(StreamPrinter('user').display_image(image_bytes))
                     tty_message = User(ImageContent(image_bytes, url='cli'))
                     if message:
                         context_messages.insert(0, tty_message)
@@ -1272,6 +1304,12 @@ def message(
                             context_messages.insert(0, tty_message)
                         else:
                             message = tty_message
+                elif Helpers.is_markdown(bytes_buffer):
+                    tty_message = User(MarkdownContent(bytes_buffer.read().decode('utf-8', errors='ignore')))
+                    if message:
+                        context_messages.insert(0, tty_message)
+                    else:
+                        message = tty_message
                 else:
                     tty_message = User(Content(bytes_buffer.read().decode('utf-8', errors='ignore')))
                     if message:
