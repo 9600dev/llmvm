@@ -517,13 +517,20 @@ class Content(AstNode):
             return base64.b64encode(self.sequence).decode('utf-8')
         elif isinstance(self.sequence, str):
             return base64.b64encode(self.sequence.encode('utf-8')).decode('utf-8')
+        elif (
+            isinstance(self.sequence, list)
+            and len(self.sequence) > 0
+            and isinstance(self.sequence[0], Content)
+            and isinstance(self.original_sequence, str)
+        ):
+            return base64.b64encode(self.original_sequence.encode('utf-8')).decode('utf-8')
         elif isinstance(self.sequence, list) and len(self.sequence) > 0 and isinstance(self.sequence[0], Content):
             return base64.b64encode(self.original_sequence).decode('utf-8')  # type: ignore
         else:
             raise ValueError(f'unknown sequence: {self.sequence}')
 
     @staticmethod
-    def decode(base64_str: str):
+    def decode(base64_str: str) -> bytes:
         return base64.b64decode(base64_str)
 
 
@@ -684,6 +691,12 @@ class Message(AstNode):
             # else, it's been transferred from the client to server via b64
             else:
                 content = FileContent(FileContent.decode(str(message_content)), url)
+        elif content_type == 'markdown':
+            if url and not message_content:
+                with open(url, 'r') as f:
+                    content = MarkdownContent(f.read(), url)
+            else:
+                content = MarkdownContent(MarkdownContent.decode(str(message_content)).decode('utf-8'), url)
         else:
             content = Content(message_content, content_type, url)
 
@@ -700,7 +713,7 @@ class Message(AstNode):
 
     @staticmethod
     def to_dict(message: 'Message', server_serialization: bool = False) -> Dict[str, Any]:
-        def file_wrap(message: FileContent | PdfContent):
+        def file_wrap(message: FileContent | PdfContent | MarkdownContent):
             return f'The following data/content is from this url: {message.url}\n\n{message.get_str()}'
 
         # primarily to pass to Anthropic or OpenAI api
@@ -730,6 +743,13 @@ class Message(AstNode):
                 'content': message.message.b64encode() if server_serialization else file_wrap(message.message),
                 **({'url': message.message.url} if server_serialization else {}),
                 **({'content_type': 'file'} if server_serialization else {})
+            }
+        elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
+            return {
+                'role': message.role(),
+                'content': message.message.b64encode() if server_serialization else file_wrap(message.message),
+                **({'url': message.message.url} if server_serialization else {}),
+                **({'content_type': 'markdown'} if server_serialization else {})
             }
         else:
             return {

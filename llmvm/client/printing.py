@@ -16,7 +16,7 @@ from rich.text import Text
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Message, Content, ImageContent, PdfContent, FileContent, AstNode, TokenStopNode, StreamNode, SessionThread, MessageModel
+from llmvm.common.objects import MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TokenStopNode, StreamNode, SessionThread, MessageModel
 
 
 logging = setup_logging()
@@ -201,6 +201,10 @@ def print_response(messages: List[Message], escape: bool = False):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
             console.print(Markdown(f'[FileContent({content.url})]'))
+        elif isinstance(content, MarkdownContent):
+            CodeBlock.__rich_console__ = markdown__rich_console__
+            console.print(f'{prepend}', end='')
+            console.print(Markdown(f'[MarkdownContent({content.url})]'))
         elif isinstance(content, Markdown):
             CodeBlock.__rich_console__ = markdown__rich_console__
             console.print(f'{prepend}', end='')
