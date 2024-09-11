@@ -286,11 +286,12 @@ class AnthropicExecutor(Executor):
 
         message_tokens = await self.count_tokens(messages=messages, model=model)
         if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
-            raise Exception('Prompt too long. input tokens: {}, output tokens: {}, total: {}, max sontext window: {}'
+            raise Exception('Prompt too long. input tokens: {}, requested output tokens: {}, total: {}, models {} max context window is: {}'
                             .format(message_tokens,
                                     max_output_tokens,
                                     message_tokens + max_output_tokens,
-                                    self.max_tokens(model)))
+                                    str(model),
+                                    self.max_input_tokens(model=model)))
 
         # the messages API does not accept System messages, only User and Assistant messages.
         # get the system message from the dictionary, and remove it from the list

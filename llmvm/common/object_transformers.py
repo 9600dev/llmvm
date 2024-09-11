@@ -83,7 +83,10 @@ class ObjectTransformers():
             content.sequence = result
             return [User(content) for content in result]
         else:
-            return [User(Content(content.get_str()))]
+            # turns out, if there are embedded images in the markdown, we should probably strip them out
+            # because otherwise, we're just uploading these things for no reason
+            markdown_content = Helpers.remove_embedded_images(content.get_str())
+            return [User(Content(markdown_content))]
 
     @staticmethod
     def transform_str(content: Content, executor: Executor) -> str:

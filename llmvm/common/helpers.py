@@ -421,6 +421,16 @@ class Helpers():
         return b''
 
     @staticmethod
+    def remove_embedded_images(markdown_string):
+        pattern = r'(\[.*?\]):\s*<data:image/[^;]+;base64,\s*[^>]+>'
+
+        def replace_with_tag(match):
+            return match.group(1)
+
+        cleaned_markdown = re.sub(pattern, replace_with_tag, markdown_string)
+        return cleaned_markdown
+
+    @staticmethod
     async def markdown_content_to_messages(
         logging,
         markdown_content: MarkdownContent,
