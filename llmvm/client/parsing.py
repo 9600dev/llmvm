@@ -11,6 +11,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from typing import List, Sequence
 from urllib.parse import urlparse
+from asyncio import CancelledError
 
 import shlex
 import glob
@@ -48,6 +49,7 @@ def get_string_thread_with_roles(thread: SessionThread):
 
 
 async def read_from_pipe(pipe_path, pipe_event: Event, timeout=0.3):
+    pipe_fd = None
     try:
         pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
         with os.fdopen(pipe_fd, 'r') as pipe:
@@ -65,13 +67,29 @@ async def read_from_pipe(pipe_path, pipe_event: Event, timeout=0.3):
                             return_buffer = buffer
                             buffer = ''
                             yield return_buffer # Return the entire collected message
-                        await asyncio.sleep(0.1)
+
+                    await asyncio.sleep(0.1)
                 except IOError:
                     await asyncio.sleep(0.1)
-        os.unlink(pipe_path)
-        os.remove(pipe_path)
+
+                current_task = asyncio.current_task()
+                if current_task and current_task.cancelled():
+                    raise CancelledError
     except Exception as _:
-        return
+        pass
+    finally:
+        if pipe_fd is not None:
+            try:
+                os.close(pipe_fd)
+            except Exception as _:
+                pass
+        if os.path.exists(pipe_path):
+            try:
+                os.unlink(pipe_path)
+                os.remove(pipe_path)
+            except Exception as _:
+                return
+
 
 
 def parse_action(token) -> Content:

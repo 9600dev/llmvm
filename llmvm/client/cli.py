@@ -77,18 +77,21 @@ pipe_event = Event()
 
 
 def tear_down(ctx):
+    global pipe_event
+
     pipe_event.set()
-    if os.path.exists(pipe_path):
-        os.remove(pipe_path)
 
     try:
         loop = asyncio.get_running_loop()
         tasks = asyncio.all_tasks(loop)
+        # get the current task and avoid that
+        current_task = asyncio.current_task()
+        other_tasks = [t for t in tasks if t is not current_task]
 
-        for task in tasks:
+        for task in other_tasks:
             task.cancel()
 
-        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+        loop.run_until_complete(asyncio.gather(*other_tasks, return_exceptions=True))
     except RuntimeError:
         pass
 
@@ -99,9 +102,9 @@ def tear_down(ctx):
         if thread is not current_thread and isinstance(thread, threading.Thread):
             thread.join(timeout=0.3)
 
-    if hasattr(ctx, 'exit'):
-        ctx.exit(0)
-    sys.exit(0)
+    # todo: force an exit, because for some reason
+    # piping stuff to the cli hangs the process on exit only on Anthropic
+    os._exit(0)
 
 
 def invoke_context_wrapper(ctx):
@@ -1224,12 +1227,6 @@ def message(
     escape: bool,
     context_messages: Sequence[Message] = [],
 ):
-
-    # import debugpy
-    # debugpy.listen(5678)
-    # print('waiting for debugger to attach')
-    # debugpy.wait_for_client()
-
     global thread_id
     global last_thread
     context_messages = list(context_messages)
