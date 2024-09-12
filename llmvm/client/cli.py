@@ -283,9 +283,15 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                     message_str = Helpers.after_end(message_str, '```', '```')
                     continue
 
-            if filename and not os.path.exists(filename):
-                rich.print(f'File {filename} does not exist. Creating...')
+            if prompt and filename and not os.path.exists(filename):
+                rich.print(f'File {filename} does not exist. Create (y/n)? ', end='')
+                answer = input()
+                if answer == 'n':
+                    message_str = Helpers.after_end(message_str, '```', '```')
+                    continue
+            elif not prompt and filename and not os.path.exists(filename):
                 answer = 'y'
+                rich.print(f'File {filename} does not exist. Creating.')
 
             if not filename and prompt:
                 rich.print(f'No filename for diff specified by LLM. Filename? ', end='')
@@ -293,7 +299,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                 answer = 'y'
 
             if answer == 'y' and filename:
-                with open(filename, 'w') as f:
+                with open(os.path.abspath(os.path.expanduser(filename)), 'w') as f:
                     f.write(message_str)
                     f.flush()
             else:

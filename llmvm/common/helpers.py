@@ -1579,45 +1579,54 @@ class Helpers():
     ) -> Dict[str, Any]:
         prompt: Dict[str, Any] = Helpers.load_resources_prompt(prompt_name, module)
 
-        if not template.get('user_token'):
-            template['user_token'] = user_token
-            template['user_colon_token'] = user_token + ':'
-        if not template.get('assistant_token'):
-            template['assistant_token'] = assistant_token
-            template['assistant_colon_token'] = assistant_token + ':'
+        try:
 
-        for key, value in template.items():
-            prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
-            prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
+            if not template.get('user_token'):
+                template['user_token'] = user_token
+                template['user_colon_token'] = user_token + ':'
+            if not template.get('assistant_token'):
+                template['assistant_token'] = assistant_token
+                template['assistant_colon_token'] = assistant_token + ':'
 
-        # deal with exec() statements to inject things like datetime
-        import datetime
-        for message_key in ['system_message', 'user_message']:
-            message = prompt[message_key]
-            while '{{' in message and '}}' in message:
-                start = message.find('{{')
-                end = message.find('}}', start)
-                if end == -1:  # No closing '}}' found
-                    break
+            for key, value in template.items():
+                prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
+                prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
 
-                key = message[start+2:end]
-                replacement = ''
+            # deal with exec() statements to inject things like datetime
+            import datetime
+            for message_key in ['system_message', 'user_message']:
+                message = prompt[message_key]
+                while '{{' in message and '}}' in message:
+                    start = message.find('{{')
+                    end = message.find('}}', start)
+                    if end == -1:  # No closing '}}' found
+                        break
 
-                if key.startswith('exec('):
-                    try:
-                        replacement = str(eval(key[5:-1]))
-                    except Exception as e:
-                        pass
-                else:
-                    replacement = key
+                    key = message[start+2:end]
+                    replacement = ''
 
-                message = message[:start] + replacement + message[end+2:]
+                    if key.startswith('exec('):
+                        try:
+                            replacement = str(eval(key[5:-1]))
+                        except Exception as e:
+                            pass
+                    else:
+                        replacement = key
 
-            prompt[message_key] = message
+                    message = message[:start] + replacement + message[end+2:]
 
-        prompt['user_message'] += f'{append_token}'
-        prompt['prompt_name'] = prompt_name
-        return prompt
+                prompt[message_key] = message
+
+            prompt['user_message'] += f'{append_token}'
+            prompt['prompt_name'] = prompt_name
+            return prompt
+        except Exception as e:
+            result = {
+                'system_message': f'Error loading prompt: {str(e)}',
+                'user_message': f'Error loading prompt: {str(e)}',
+                'templates': []
+            }
+            return result
 
     @staticmethod
     def populate_prompts(

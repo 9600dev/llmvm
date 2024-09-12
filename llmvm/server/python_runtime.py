@@ -7,7 +7,7 @@ import os
 import re
 import sys
 import scipy
-from typing import Any, Callable, Dict, List, Optional, Tuple, cast, Any, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast, Any, Type
 from urllib.parse import urlparse
 
 import astunparse
@@ -282,15 +282,18 @@ class PythonRuntime:
         results = searcher.search(titles_seen=titles_seen)
         return results
 
-    def coerce(self, expr, type_name: str) -> Any:
-        logging.debug(f'coerce({str(expr)[:20]}, {str(type_name)})')
+    def coerce(self, expr, type_name: Union[str, Type]) -> Any:
+        if isinstance(type_name, type):
+            type_name = type_name.__name__
+
+        logging.debug(f'coerce({str(expr)[:50]}, {str(type_name)}) length of expr: {len(str(expr))}')
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
                     prompt_name='coerce.prompt',
                     template={
                         'string': str(expr),
-                        'type': type_name,
+                        'type': str(type_name),
                     },
                     user_token=self.controller.get_executor().user_token(),
                     assistant_token=self.controller.get_executor().assistant_token(),
@@ -307,6 +310,9 @@ class PythonRuntime:
             query='',
             original_query=self.original_query,
         )
+        logging.debug('Coercing {} to {} resulted in {}'.format(expr, type_name, str(assistant.message)))
+        write_client_stream(Content(f'Coercing {expr} to {type_name} resulted in {str(assistant.message)}\n'))
+
         return self.__eval_with_error_wrapper(str(assistant.message))
 
     def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
@@ -840,6 +846,8 @@ class PythonRuntime:
             try:
                 return eval(python_code, self.globals_dict, self.locals_dict)
             except Exception as ex:
+                logging.debug(f'Error evaluating Python code, exception raised: {ex}')
+                logging.debug(f'Python code: {python_code}')
                 python_code = self.rewrite(python_code, str(ex))
             counter += 1
         return None

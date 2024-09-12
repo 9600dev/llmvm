@@ -1164,7 +1164,7 @@ class ExecutionController(Controller):
                 if response.message.get_str().strip() != '':
                     results.append(Answer(
                         conversation=[response],
-                        result=response.message
+                        result=response.message.get_str()
                     ))
                 completed = True
                 results.extend(python_runtime.answers)

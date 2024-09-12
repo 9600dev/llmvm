@@ -2,9 +2,9 @@
 You are a helpful assistant.
 
 [user_message]
-The previous message has markdown content from the website {{url}}. Your task is to figure out if this particular website content completely satisfies a goal the User has. If it does, simply return "YES". If it doesn't, you should return the "a href" or the markdown link that you think has the best chance of progressing forward or achieving the User goal. Usually, we've arrived at this website through a search engine. I will give you the search term that was used if it's available also. The search term may provide more hints on where we are at with the User goal and what the website might be providing.
+The previous message has markdown content from the website {{url}}. Your task is to figure out if this particular website content satisfies a goal, or subgoal the User has. If it does, simply return "YES" and nothing else. If it doesn't, you should return the "a href" or the markdown link that you think has the best chance of progressing forward or achieving the User goal and nothing else. Do not return the same url we are looking at {{url}}. Usually, we've arrived at this website through a search engine. I will give you the search term that was used if it's available also. The search term may provide more hints on where we are at with the User goal and what the website might be providing.
 
-Here's an example of your task. Your response is after "Assistant": 
+Here's an example of your task. Your response is after "Assistant":
 
 Markdown:
 
@@ -42,7 +42,7 @@ https://example.com/python_tutorial.pdf
 
 In the above example, you returned the markdown link "https://example.com/python_tutorial.pdf" which was a link to the full Python Tutorial in PDF format. This link was more likely to have the complete tutorial, as the current webpage only has part of the Python tutorial, and thus more likely satisfying the user goal of finding Python programming tutorials to summarize them.
 
-Okay. Your turn. I'll give you the User Goal and Referring Search Term. Look at the previous message which contains the Markdown and markdown links, and either return "YES", or return the one link that you think will proceed the User goal forward better than the current webpage. 
+Okay. Your turn. I'll give you the User Goal and Referring Search Term. Look at the previous message which contains the Markdown and markdown links, and either return "YES" (and only "YES"), or return one url link that you think will proceed the User goal forward better than the current webpage. Do not explain yourself. Only emit either "YES" or the link, nothing else. Do not return the same url {{url}}.
 
 User Goal: {{user_goal}}
 Referring Search Term: {{referring_search_term}}
