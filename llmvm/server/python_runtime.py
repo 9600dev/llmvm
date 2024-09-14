@@ -530,7 +530,8 @@ class PythonRuntime:
         return answer
 
     def answer(self, expr, check_answer: bool = True) -> Answer:
-        logging.debug(f'answer({str(expr)[:20]}')
+        logging.debug(f'PythonRuntime.answer({str(expr)[:20]})')
+
         # if we have a list of answers, maybe just return them.
         if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
             # collapse the assistant answers and continue
@@ -916,19 +917,22 @@ class PythonRuntime:
         python_code: str,
         error: str,
     ) -> str:
-        logging.debug('compile_error()')
+        logging.debug(f'PythonRuntime.compile_error(): error {error}')
+        write_client_stream(Content(f'Python code failed to compile or run due to the following error or exception: {error}\n'))
+
         # SyntaxError, or other more global error. We should rewrite the entire code.
         # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
         code_prompt = \
-            f'''The following Python code (found under "Original Code") didn't parse or compile.
-            Identify the error in the code below, and re-write the code and only that code.
-            The error is found under "Error" and the code is found under "Code".
-
-            Error: {error}
-
-            Original Code:
+            f'''The following Python code:
 
             {python_code}
+
+            Failed to compile or run due to the following error:
+
+            {error}
+
+            Analyze the error, and rewrite the entire code above to fix the error.
+            Do not explain yourself, do not apologize. Just emit the re-written code and only the code.
             '''
 
         assistant = self.controller.execute_llm_call(
@@ -947,7 +951,8 @@ class PythonRuntime:
         )
 
         lines = str(assistant.message).split('\n')
-        logging.debug('compile_error() Re-written Python code:')
+        write_client_stream(Content(f'Re-writing Python code\n'))
+        logging.debug('PythonRuntime.compile_error() Re-written Python code:')
         for line in lines:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)

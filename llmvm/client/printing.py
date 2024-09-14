@@ -241,13 +241,13 @@ def print_response(messages: List[Message], escape: bool = False):
                 code_result = Helpers.in_between(temp_content.get_str(), '<code_result>', '</code_result>')
                 if len(code_result) > 10000:
                     # using regex, replace the stuff inside of <code_result></code_result> with a 20 character summary string
-                    code_result_str = '<code_result>' + code_result[:300] + ' ... ' + code_result[-300:] + '</code_result>'
+                    code_result_str = '<code_result>\n' + code_result[:300] + ' ... ' + code_result[-300:] + '\n</code_result>'
                     temp_content.sequence = re.sub(r'<code_result>.*?</code_result>', code_result_str, temp_content.get_str(), flags=re.DOTALL)
                 # embed ```python around the code_result
                 if '<code>' in temp_content.get_str() and '</code>' in temp_content.get_str():
                     temp_content.sequence = temp_content.get_str().replace('<code>', '```python\n<code>\n').replace('</code>', '\n</code>\n```')
                 if '<code_result>' in temp_content.get_str() and '</code_result>' in temp_content.get_str():
-                    temp_content.sequence = temp_content.get_str().replace('<code_result>', '<code_result>').replace('</code_result>', '</code_result>')
+                    temp_content.sequence = temp_content.get_str().replace('<code_result>', '```\n<code_result>\n').replace('</code_result>', '\n</code_result>\n```')
             if not escape:
                 pprint('[bold cyan]Assistant[/bold cyan]: ', temp_content)
             else:

@@ -317,7 +317,7 @@ class Helpers():
             # check to see if any of the strings in the list are substrings of another list item, and if so, remove that
             sub_dups = [a for a in result if not any(key_func(a) in key_func(b) for b in result if a != b)]
             return sub_dups
-        except Exception:
+        except Exception as ex:
             return result
 
     @staticmethod

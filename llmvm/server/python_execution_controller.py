@@ -1052,7 +1052,8 @@ class ExecutionController(Controller):
                 response.stop_token = '</complete>'
 
             # we don't want two assistant messages in a row (which is what happens if you're asking
-            # for a continuation), so we remove the last message and replace it with the response
+            # for a continuation), so we remove the last Assistant message and replace it with the Assistant response
+            # we just got, plus the previous Assistant response.
             if isinstance(messages_copy[-1], Assistant):
                 previous_assistant = messages_copy.pop()
                 response.message = Content(previous_assistant.message.get_str() + ' ' + response.message.get_str())
@@ -1061,6 +1062,7 @@ class ExecutionController(Controller):
             if response.stop_token and response.stop_token == '</code>':
                 response.message = Content(response.message.get_str() + response.stop_token)
 
+            # extract any code blocks the Assistant wants to run
             assistant_response_str = response.message.get_str().replace('Assistant:', '').strip()
             code_blocks: List[str] = PythonRuntime.get_code_blocks(assistant_response_str)
             code_blocks_remove = []
@@ -1072,9 +1074,12 @@ class ExecutionController(Controller):
                         code_blocks_remove.append(code_block)
             code_blocks = [code_block for code_block in code_blocks if code_block not in code_blocks_remove]
 
+            # run code blocks we haven't run before
             if code_blocks and not response.stop_token == '</complete>':
                 # emit some debugging
                 code_block = '\n'.join(code_blocks)
+                write_client_stream('</code>\n')
+                write_client_stream('Executing code block locally.\n')
 
                 no_indent_debug(logging, '')
                 no_indent_debug(logging, '** [bold yellow]Python Abstract Syntax Tree:[/bold yellow] **')
@@ -1090,6 +1095,7 @@ class ExecutionController(Controller):
                 # debug output
                 response_writer('llm_call', code_block)
 
+                # make sure the code block is valid and syntactically correct Python
                 try:
                     _ = ast.parse(code_block)
                 except SyntaxError as ex:
@@ -1098,22 +1104,30 @@ class ExecutionController(Controller):
                         python_code=code_block,
                         error=str(ex),
                     )
+                    if code_block.strip().startswith('```'):
+                        code_block_extracted = Helpers.extract_code_blocks(code_block.strip())
+                        code_block = code_block_extracted[0] if code_block_extracted else code_block
 
                 if cookies: locals_dict['cookies'] = cookies
                 code_execution_result = ''
 
                 try:
-                    code_blocks_executed.append(code_block)
+                    # todo: made this change for t2
+                    python_runtime.answers = []
                     locals_dict = python_runtime.run(
                         python_code=code_block,
                         original_query=messages[-1].message.get_str(),
                         messages=messages,
                         locals_dict=locals_dict
                     )
+                    # Python was executed without exceptions, reset the exception counter
+                    # and add any answer() results to the results list
                     exception_counter = 0
-                    results.extend(python_runtime.answers)
+                    code_blocks_executed.append(code_block)
+                    # results.extend(python_runtime.answers)
                 except Exception as ex:
-                    logging.debug('aexecute() Exception executing code block: {}'.format(ex))
+                    # update the code_execution_result to expose the exception for the next iteration
+                    logging.debug('ExecutionController.aexecute_continuation() Exception executing code block: {}'.format(ex))
                     code_execution_result = Helpers.extract_stacktrace_until(traceback.format_exc(), type(python_runtime))
                     exception_counter += 1
                     if exception_counter == self.exception_limit:
@@ -1123,42 +1137,56 @@ class ExecutionController(Controller):
                         code_execution_result = f'{code_execution_result}\n\n{EXCEPTION_PROMPT}'
                         logging.debug('aexecute() Exception limit reached)')
 
-                # we have the result of the code block execution, now we need to rewrite the assistant
-                # message to include the result of the code block execution and continue
-                if not code_execution_result and python_runtime.answers:
+                # code_execution_result will be empty if the code block executed without exceptions
+                # and will include the exception if it threw
+                if python_runtime.answers and not code_execution_result:
+                    # code block successfully executed, grab the result from any answer() blocks and stuff them
+                    # in the code_execution_result var
                     code_execution_result = '\n'.join([str(a.result()) for a in python_runtime.answers])
-                elif not code_execution_result:
-                    # sometimes dove doesn't generate an answer() block, so we'll have to get the last
-                    # assignment of the code and use that.
+                elif not python_runtime.answers and code_execution_result:
+                    # exception!
+                    code_execution_result = f'{code_execution_result}'
+                elif not python_runtime.answers and not code_execution_result:
+                    # sometimes dove doesn't generate an answer() block, so we'll have to get the last assignment of the code and use that.
                     last_assignment = python_runtime.get_last_assignment(code_block, locals_dict)
                     if last_assignment:
                         code_execution_result = f'{str(last_assignment[1])}'
 
+                assert(code_execution_result)
+
                 # we have a <code_result></code_result> block, push it to the user
                 if len(code_execution_result) > 300:
                     # grab the first and last 150 characters
-                    write_client_stream(f'<code_result>{code_execution_result[:150]} ... {code_execution_result[-150:]}</code_result>\n\n')
+                    write_client_stream(f'<code_result>{code_execution_result[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result[-150:]}</code_result>\n\n')
                 else:
                     write_client_stream(f'<code_result>{code_execution_result}</code_result>\n\n')
 
-                code_execution_result = f'<code>{code_block}</code>\n<code_result>{code_execution_result}</code_result>\n\n'
+                # update the code_execution_result to include both the <code> and <code_result> blocks
+                code_execution_result = f'<code>{code_block}</code>\n<code_result>{code_execution_result}</code_result>\n'
 
-                # assistant_response_str will have a code block <code></code> in it, so we need to replace it with the answers
+                # assistant_response_str will have the original code block <code></code> in it, so we need to replace it with the answers
                 # use regex to replace the code block with the original code + answers
                 try:
                     assistant_response_str = re.sub(r'<code>.*?</code>', code_execution_result, assistant_response_str, flags=re.DOTALL)
                 except Exception as ex:
-                    logging.debug(f'Error replacing code block with code execution result: {ex}')
+                    logging.debug(f'ExecutionController.aexecute_continuation() Error in regex replacing code block with code execution result: {ex}')
                     assistant_response_str = f'{assistant_response_str}\n\n{code_execution_result}'
                 messages_copy.append(Assistant(Content(assistant_response_str)))
+
+            # we have a stop token and there are no code blocks. Assistant is finished, so we can just append the response
             elif response.stop_token and response.stop_token == '</complete>':
-                # if we have a stop token, there are no code blocks, so we can just append the response
                 if response.message.get_str().strip() != '':
                     results.append(Answer(
                         conversation=[response],
                         result=response.message.get_str()
                     ))
                 completed = True
+
+            # code_blocks was filtered out, and we have a stop token, so it's trying to repeat the code again
+            elif not code_blocks and response.stop_token == '</code>':
+                assistant_response_str = response.message.get_str()
+                assistant_response_str += '\n\n' + "I've repeated the same code block. I should try something different."
+                messages_copy.append(Assistant(Content(assistant_response_str)))
             else:
                 # if there are no code blocks, we're done
                 if response.message.get_str().strip() != '':
@@ -1167,7 +1195,8 @@ class ExecutionController(Controller):
                         result=response.message.get_str()
                     ))
                 completed = True
-                results.extend(python_runtime.answers)
+                # results.extend(python_runtime.answers)
 
         if model: python_runtime.controller.get_executor().set_default_model(old_model)
-        return (Helpers.remove_duplicates(results, lambda a: a.result()), self.__serialize_locals_dict(locals_dict))
+        dedupped = Helpers.remove_duplicates(results, lambda a: a.result())
+        return list(reversed(dedupped)), self.__serialize_locals_dict(locals_dict)

@@ -157,8 +157,9 @@ class Source:
                     (hasattr(node.func, 'id') and node.func.id == method_name)  # type: ignore
                     or (hasattr(node.func, 'attr') and node.func.attr == method_name)  # type: ignore
                 ):
-                    callsite = Source.Callsite(current_class, current_method, node.lineno, node.col_offset)
-                    references.append(callsite)
+                    if current_class or current_method:
+                        callsite = Source.Callsite(current_class, current_method, node.lineno, node.col_offset)
+                        references.append(callsite)
                 self.generic_visit(node)
 
         Visitor().visit(tree)

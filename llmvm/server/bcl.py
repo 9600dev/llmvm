@@ -203,5 +203,8 @@ class BCL():
         for source in sources:
             references.extend(Source.get_references(source.tree, method_name))
 
-        return '\n'.join(references)
+        if references:
+            return '\n'.join([str(r) for r in references])
+        else:
+            return f"No references found for method {method_name}"
 

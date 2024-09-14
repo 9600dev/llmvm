@@ -136,9 +136,10 @@ class WebAndContentDriver():
         next_action_str = next_action.message.get_str()
         loop.run_until_complete(chrome_helper.close())
         logging.debug(f'WebAndContentDriver.download_with_goal decision: {next_action_str}')
-        write_client_stream(f'{next_action_str}\n')
+
 
         if 'yes' in next_action_str.lower():
+            write_client_stream(f'Yes, the content looks good. "{next_action_str}"\n')
             return markdown_content
         else:
             write_client_stream(f'Decided to proceed to {next_action_str}.\n')
