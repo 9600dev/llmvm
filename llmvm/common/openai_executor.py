@@ -15,9 +15,11 @@ from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor, FileContent, ImageContent, MarkdownContent,
                                   Message, PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
-from llmvm.common.perf import TokenPerf, TokenStreamManager
+from llmvm.common.perf import TokenPerf, TokenStreamManager, O1AsyncIterator
+
 
 logging = setup_logging()
+
 
 class OpenAIExecutor(Executor):
     def __init__(
@@ -166,12 +168,17 @@ class OpenAIExecutor(Executor):
                 "gpt-4o",
                 "gpt-4o-2024-08-06",
                 "gpt-4o-2024-05-13",
+                "chatgpt-4o-latest",
                 "gpt-4o-mini",
                 "gpt-4o-mini-2024-07-18",
                 "gpt-4-1106-preview",
                 "gpt-4-32k-0314",
                 "gpt-4-0613",
                 "gpt-4-32k-0613",
+                "o1-mini",
+                "o1-preview",
+                "o1-preview-2024-09-12",
+                "o1-mini-2024-09-12",
             }:
                 tokens_per_message = 3
                 tokens_per_name = 1
@@ -243,26 +250,51 @@ class OpenAIExecutor(Executor):
                                     message_tokens + max_output_tokens,
                                     self.max_tokens(model)))
 
+        # o1-mini and o1-preview don't support system messages
+        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
+            messages = [m for m in messages if m['role'] != 'system']
+
         messages_cast = cast(List[ChatCompletionMessageParam], messages)
         functions_cast = cast(List[Function], functions)
 
         token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
-        base_params = {
-            "model": model if model else self.default_model,
-            "temperature": temperature,
-            "max_tokens": max_output_tokens,
-            "messages": messages_cast,
-            "stop": stop_tokens if stop_tokens else None,
-            "functions": functions_cast if functions else None,
-            "stream": True
-        }
+        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
+            # temp 1.0 only supported for o1 and max_tokens is not supported
+            # streaming not supported, stop tokens not supported. yikes.
+            temperature = 1.0
+            base_params = {
+                "model": model if model else self.default_model,
+                "temperature": temperature,
+                "max_completion_tokens": max_output_tokens,
+                "messages": messages_cast,
+                # "stop": stop_tokens if stop_tokens else None,
+                "functions": functions_cast if functions else None,
+                "stream": False
+            }
+
+        else:
+            base_params = {
+                "model": model if model else self.default_model,
+                "temperature": temperature,
+                "max_tokens": max_output_tokens,
+                "messages": messages_cast,
+                "stop": stop_tokens if stop_tokens else None,
+                "functions": functions_cast if functions else None,
+                "stream": True
+            }
 
         params = {k: v for k, v in base_params.items() if v is not None}
         response = await self.aclient.chat.completions.create(**params)
 
-        return TokenStreamManager(response, token_trace)  # type: ignore
+        # if the response is an o1 response, it is not a stream, so we need to
+        # manually stream it
+        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
+            return TokenStreamManager(O1AsyncIterator(response), token_trace)  # type: ignore
+
+        else:
+            return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(
         self,

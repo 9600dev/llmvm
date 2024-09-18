@@ -14,13 +14,30 @@ from google.generativeai.types.generation_types import \
 from google.generativeai.types.generation_types import \
     GenerateContentResponse as GeminiCompletion
 from openai.types.chat.chat_completion_chunk import \
-    ChatCompletionChunk as OAICompletion
+    ChatCompletionChunk as OAICompletionChunk
+from openai.types.chat.chat_completion import ChatCompletion as OAICompletion
 
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import TokenPriceCalculator
 
 logging = setup_logging()
+
+
+class O1AsyncIterator:
+    def __init__(self, item):
+        self.item = item
+        self.done = False
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self.done:
+            self.done = True
+            return self.item
+        else:
+            raise StopAsyncIteration
 
 
 class TokenPerf:
@@ -178,10 +195,14 @@ class LoggingAsyncIterator:
 
             if isinstance(result, AnthropicCompletion):
                 return cast(str, result.completion or '')
-            elif isinstance(result, OAICompletion):
+            elif isinstance(result, OAICompletionChunk):
                 if result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
                 return cast(str, result.choices[0].delta.content or '')  # type: ignore
+            elif isinstance(result, OAICompletion):  # o1 mini and o1 preview don't do streaming
+                if result.choices[0].finish_reason:
+                    self.perf.stop_reason = result.choices[0].finish_reason
+                return cast(str, result.choices[0].message.content or '')  # type: ignore
             elif isinstance(result, GeminiCompletion):
                 return cast(str, result.text or '')
             elif isinstance(result, str):
@@ -256,7 +277,7 @@ class TokenStreamManager:
             self.token_perf_wrapper.object = result
 
             return self.token_perf_wrapper
-        elif isinstance(self.stream, openai.AsyncStream):
+        elif isinstance(self.stream, openai.AsyncStream) or isinstance(self.stream, O1AsyncIterator):
             self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
             return self.token_perf_wrapper
         elif isinstance(self.stream, AsyncGeminiStream):

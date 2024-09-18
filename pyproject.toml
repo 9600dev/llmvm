@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "llmvm-cli"
-version = "0.6.7"
+version = "0.6.8"
 description = "Command Line LLM with client-side tools support."
 authors = ["9600 devs <contact@9600.dev>"]
 readme = "README.md"
