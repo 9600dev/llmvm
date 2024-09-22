@@ -662,6 +662,8 @@ Seeing as you life in the Bay Area, it offers a wide range of activities and att
 1. **Museums**: Check out the San Francisco Museum of Modern Art (SFMOMA), the Exploratorium, or the California Academy of Sciences.
 ```
 
+### Scripts directory
+
 The [scripts](https://github.com/9600dev/llmvm/tree/master/scripts) directory also contains some fun stuff to try out:
 
 `scripts/buffer.py`: A simple buffering script that will run a command, wait for the output to stop changing/rendering for a certain amount of time, and then emit the last 'frame' of output, allowing you to send a 'frame' of the command to an LLM:
