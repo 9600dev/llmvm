@@ -4,6 +4,8 @@ LLMVM is a CLI based productivity tool that uses Large Language Models and local
 
 It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) is currently experimental. It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
 
+> Update September 21st 2024: Added GPT o1-preview and o1-mini support, but it's not great. o1 seems to struggle to follow current prompt instructions, and really doesn't want to emit the <code></code> blocks.
+
 > Update July 3rd 2024: I've refactored most of how LLMVM works to use "continuation passing style" execution, where queries result in query -> natural language interleaved with code -> result, rather than the old query -> code -> natural language -> result. This results in significantly better task performance, so will be the default from here.
 
 LLMVM's features are best explored through use case examples. Let's install, then go through some:
@@ -505,6 +507,24 @@ And related narrative extraction + code:
 
 ![](docs/2023-08-29-15-55-13.png)
 
+Using the LLM to inspect a sourcebase also works quite well:
+
+```md
+query>> looking at the source in ~/dev/llmvm, find the best place to add a shutdown() option to the client which shuts down the server.
+
+Assistant: Certainly! Lets examine the source code structure in the ~/dev/llmvm directory to find the best place to add a shutdown() option to
+the client that will shut down the server.
+
+<code>
+  source_code_files = BCL.get_code_structure_summary(["~/dev/llmvm"])
+  answer(source_code_files)
+</code>
+<code_result>
+...
+```
+
+![](docs/2024-09-21-21-08-40.png)
+...
 
 ## Things to do
 
@@ -641,3 +661,56 @@ Seeing as you life in the Bay Area, it offers a wide range of activities and att
 ### Cultural Experiences:
 1. **Museums**: Check out the San Francisco Museum of Modern Art (SFMOMA), the Exploratorium, or the California Academy of Sciences.
 ```
+
+The [scripts](https://github.com/9600dev/llmvm/tree/master/scripts) directory also contains some fun stuff to try out:
+
+`scripts/buffer.py`: A simple buffering script that will run a command, wait for the output to stop changing/rendering for a certain amount of time, and then emit the last 'frame' of output, allowing you to send a 'frame' of the command to an LLM:
+
+```bash
+python buffer.py -s 500 "htop -C" | sonnet "extract the top process"
+
+Based on the htop output, the top process is:
+
+PID: 24234
+CPU%: 55.4
+Command: htop -C
+```
+
+With a quick regex extractor for numbers:
+
+```bash
+function num() {
+    local input
+
+    # Check if there's piped input
+    if [[ -p /dev/stdin ]]; then
+        input=$(cat)
+    else
+        input="$1"
+    fi
+
+    # Use grep to extract the number
+    local number=$(echo "$input" | grep -oE '[+-]?[0-9]*\.?[0-9]+' | head -n1)
+
+    if [[ -n "$number" ]]; then
+        echo "$number"
+        return 0
+    else
+        echo "No number found in the input string." >&2
+        return 1
+    fi
+}
+```
+
+You can do fun things like:
+
+```bash
+python buffer.py -s 500 "htop -C" | sonnet "find spotify pid" | num | xargs kill -9
+```
+
+`scripts/generate_markdown.py`: A script that will convert a PDF (any format, including image) to Markdown. It will also extract the images from the PDF and embed them in the Markdown output.
+
+`scripts/chrome-pdf.sh`: A MacOS osascript script that will create a PDF from the current Chrome tab, save it to a temporary location, and then find a running instance of the llmvm client and paste the PDF into it.
+
+
+

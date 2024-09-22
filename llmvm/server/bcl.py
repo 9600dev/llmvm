@@ -135,7 +135,7 @@ class BCL():
                 elif os.path.isfile(expanded_path) and expanded_path.endswith('.py'):
                     all_python_files.append(expanded_path)
                 else:
-                    raise ValueError(f"Invalid source file path: {path}. Must be a directory or a .py file.")
+                    raise ValueError(f"Invalid source file path: {expanded_path}. Must be a directory or a .py file.")
             return all_python_files
 
         else:
