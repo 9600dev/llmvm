@@ -1,7 +1,10 @@
 import asyncio
 import os
+import tempfile
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
+import httpx
+import aiofiles
 
 from bs4 import BeautifulSoup
 
@@ -21,6 +24,13 @@ class WebAndContentDriver():
         cookies: List[Dict] = [],
     ):
         self.cookies = cookies
+
+    async def __requests_download(self, url, filename: str):
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, follow_redirects=True)
+            async with aiofiles.open(filename, 'wb') as file:
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    await file.write(chunk)
 
     def download(self, download: DownloadParams) -> Content:
         logging.debug('WebAndContentDriver.download: {}'.format(download['url']))
@@ -59,6 +69,13 @@ class WebAndContentDriver():
 
         # deal with websites
         elif result.scheme == 'http' or result.scheme == 'https':
+            # special case for arxiv.org because in headless mode things get weird
+            if 'arxiv.org' in download['url']:
+                download_url = download['url'].replace('/abs/', '/pdf/')
+                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                    asyncio.run(self.__requests_download(download_url, temp_file.name))
+                    return PdfContent(sequence=b'', url=temp_file.name)
+
             chrome_helper = ChromeHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
             task = loop.create_task(chrome_helper.get_url(download['url']))
@@ -93,6 +110,13 @@ class WebAndContentDriver():
             or '.csv' in result.path
         ):
             return self.download(download)
+
+        # special case for arxiv.org because in headless mode things get weird
+        if 'arxiv.org' in download['url']:
+            download_url = download['url'].replace('/abs/', '/pdf/')
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                asyncio.run(self.__requests_download(download_url, temp_file.name))
+                return PdfContent(sequence=b'', url=temp_file.name)
 
         chrome_helper = ChromeHelpers(cookies=self.cookies)
         loop = asyncio.get_event_loop()

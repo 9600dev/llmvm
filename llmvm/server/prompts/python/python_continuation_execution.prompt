@@ -502,6 +502,7 @@ Rules:
 
     - import statements
     - list comprehensions
+    - print statements (you must use the answer() feature to emit results to the user)
     - multi-line f-string or strings that are not """ triple quoted.
 
 * I'm enabling the following Python features and strongly encourage them:

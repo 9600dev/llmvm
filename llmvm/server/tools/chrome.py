@@ -190,7 +190,8 @@ class ChromeHelpersInternal():
         self.wait_fors = {
             'twitter.com': lambda page: self.wait(1500),
             'x.com': lambda page: self.wait(1500),
-            'techmeme.com': lambda page: self.wait(1500)
+            'techmeme.com': lambda page: self.wait(1500),
+            'arxiv.org': lambda page: self.wait(1000),
         }
 
     async def safe_click_element(self, element: ElementHandle, timeout=5000):
@@ -247,6 +248,7 @@ class ChromeHelpersInternal():
         if self.cookies:
             await self._context.add_cookies(self.cookies)  # type: ignore
         page = await self._context.new_page()
+        await page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
         self.is_closed = False
         return page
 
@@ -295,7 +297,10 @@ class ChromeHelpersInternal():
 
     async def get_html(self) -> str:
         result = await (await self.page()).content()
-        if '<embed ' in result and 'application/pdf' in result:
+        if (
+            '<embed ' in result
+            and ('application/pdf' in result or 'x-google-chrome-pdf' in result)
+        ):
             return await self.download((await self.page()).url)
         return result
 
@@ -327,7 +332,7 @@ class ChromeHelpersInternal():
     async def download(self, url: str) -> str:
         logging.debug(f'ChromeHelpersInternal.download({url})')
         async def requests_download(url, filename: str):
-            logging.debug(f'download({url}): using requests to download')
+            logging.debug(f'ChromeHelpersInternal.download({url}): using requests to download')
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, follow_redirects=True)
                 async with aiofiles.open(filename, 'wb') as file:
@@ -343,6 +348,7 @@ class ChromeHelpersInternal():
         try:
             with tempfile.NamedTemporaryFile(suffix=file_extension, delete=False) as temp_file:
                 temp_filename = temp_file.name
+                logging.debug(f'ChromeHelpersInternal.download({url}): force download with html file: {temp_filename}')
 
             # chrome renders the pdf, and you can't download it. So we force it.
             html = '<html><head></head><body><a href="' + url + '">Download</a></body></html>'
@@ -358,7 +364,7 @@ class ChromeHelpersInternal():
                 await download.save_as(temp_filename)
                 return os.path.abspath(temp_filename)
         except Exception as ex:
-            logging.debug(f'download({url}) failed with: {ex}, trying requests')
+            logging.debug(f'ChromeHelpersInternal.download({url}) failed with: {ex}, trying requests')
             return await requests_download(url, temp_filename)
 
     async def pdf_url(self, url: str) -> str:

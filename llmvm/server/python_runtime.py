@@ -1,4 +1,5 @@
 import ast
+import traceback
 import numpy as np
 import datetime as dt
 import inspect
@@ -857,6 +858,17 @@ class PythonRuntime:
         self,
         python_code: str,
     ) -> Dict[Any, Any]:
+        def build_exception_str(tb_string):
+            def extract_relevant_traceback(tb_string):
+                match = re.search(r'File "<ast>",.*', tb_string, re.DOTALL)
+                if match:
+                    str_result = match.group(0)
+                    return str_result
+                return tb_string
+
+            lines = python_code.split('\n')
+            python_code_with_line_numbers = '\n'.join([f'{(line_counter+1):02} {line}' for line_counter, line in enumerate(lines)])
+            return f'An exception occurred while parsing or executing the following Python code in the <ast> module:\n\n{python_code_with_line_numbers}\n\nThe exception was: {extract_relevant_traceback(tb_string)}\n'
 
         # massive hack to make locals globals so that generated functions can access that scope
         class AutoGlobalDict(dict):
@@ -873,17 +885,21 @@ class PythonRuntime:
             def __setitem__(self, key: Any, value: Any) -> None:
                 return super().__setitem__(key, value)
 
-        logging.debug('__compile_and_execute()')
+        logging.debug('PythonRuntime.__compile_and_execute()')
         try:
             parsed_ast = ast.parse(python_code)
         except Exception as ex:
-            logging.error(python_code)
-            logging.error(f'Error parsing Python code: {ex}')
-            raise ex
+            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while parsing: {python_code}, exception: {ex}')
+            raise Exception(build_exception_str(traceback.format_exc()))
 
         context = AutoGlobalDict(self.globals_dict, self.locals_dict)
 
-        exec(compile(parsed_ast, filename="<ast>", mode="exec"), context, context)
+        compilation_result = compile(parsed_ast, filename="<ast>", mode="exec")
+        try:
+            exec(compilation_result, context, context)
+        except Exception as ex:
+            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while executing: {python_code}')
+            raise Exception(build_exception_str(traceback.format_exc()))
 
         self.locals_dict = context
         return self.locals_dict
