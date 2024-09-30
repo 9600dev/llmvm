@@ -163,21 +163,33 @@ class LLMVMClient():
         return thread_messages_copy
 
     def get_executor(self, executor_name: str, model_name: Optional[str], api_key: Optional[str]) -> Executor:
-        if executor_name == 'anthropic' and model_name and (Container.get_config_variable('ANTHROPIC_API_KEY') or api_key):
+        if executor_name == 'anthropic':
+            if Container.get_config_variable('ANTHROPIC_API_KEY') or api_key:
                 return AnthropicExecutor(
                     api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    default_model=cast(str, model_name)
+                    default_model=cast(str, model_name) if model_name else 'claude-3-5-sonnet-20240620'
                 )
-        elif executor_name == 'openai' and model_name and (Container.get_config_variable('OPENAI_API_KEY') or api_key):
+            else:
+                raise ValueError('anthropic executor requested, but unable to find Anthropic API key.')
+
+        elif executor_name == 'openai':
+            if Container.get_config_variable('OPENAI_API_KEY') or api_key:
                 return OpenAIExecutor(
                     api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
-                    default_model=cast(str, model_name)
+                    default_model=cast(str, model_name) if model_name else 'gpt-4o-2024-08-06'
                 )
-        elif executor_name == 'gemini' and model_name and (Container.get_config_variable('GOOGLE_API_KEY') or api_key):
+            else:
+                raise ValueError('openai executor requested, but unable to find OpenAI API key.')
+
+        elif executor_name == 'gemini':
+            if Container.get_config_variable('GOOGLE_API_KEY') or api_key:
                 return GeminiExecutor(
                     api_key=api_key or Container.get_config_variable('GOOGLE_API_KEY'),
-                    default_model=cast(str, model_name)
+                    default_model=cast(str, model_name) if model_name else 'gemini-pro'
                 )
+            else:
+                raise ValueError('GeminiExecutor requires a model name and API key.')
+
         else:
             if Container.get_config_variable('ANTHROPIC_API_KEY'):
                 return AnthropicExecutor(
@@ -194,7 +206,7 @@ class LLMVMClient():
                     api_key=Container.get_config_variable('GOOGLE_API_KEY'),
                     default_model='gemini-pro'
                 )
-        raise ValueError('No API key is set for any executor in ENV. Unable to set default executor.')
+            raise ValueError('No API key is set for any executor in ENV. Unable to set default executor.')
 
     async def call_direct(
         self,
