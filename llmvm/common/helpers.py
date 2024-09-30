@@ -24,7 +24,7 @@ from functools import reduce
 from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlparse
 import zlib
 from zoneinfo import ZoneInfo
@@ -919,38 +919,61 @@ class Helpers():
                     pass
         return cookies
 
-    @staticmethod
-    def get_callable(logging: Logger, method_str) -> Optional[Callable]:
-        parts = method_str.split(".")
-        class_name = ''
 
-        if len(parts) == 1:
-            # If it's a function in the current module
-            module = importlib.import_module("__main__")
-            method_name = parts[0]
-        else:
-            # If it's a method in some other module or class
-            module_name = ".".join(parts[:-2]) if len(parts) > 2 else ".".join(parts[:-1])
+    @staticmethod
+    def get_callables(logging: Logger, input_str: str) -> Optional[Union[List[Callable], Callable]]:
+        parts = input_str.split(".")
+
+        if len(parts) < 2:
+            logging.error(f"Invalid input string: {input_str}")
+            return None
+
+        parts_counter = len(parts) - 1
+        module_name = ''
+        while parts_counter > 0:
+            module_name = ".".join(parts[:parts_counter])
             try:
                 module = importlib.import_module(module_name)
+                break
             except ModuleNotFoundError:
-                logging.error(f"Module '{module_name}' not found")
-                return None
+                pass
+            parts_counter -= 1
 
-            if len(parts) > 2:
-                class_name = parts[-2]
-                class_obj = getattr(module, class_name, None)
-                if class_obj is None:
-                    raise ValueError(f"Class '{class_name}' not found in module '{module_name}'")
-                method_name = parts[-1]
-                method = getattr(class_obj, method_name, None)
-            else:
-                method_name = parts[-1]
-                method = getattr(module, method_name, None)
+        if not module:
+            logging.error(f"Module '{module_name}' not found")
+            return None
 
-            if method is None:
-                logging.error(f"Method '{method_name}' not found in {'class ' + class_name + ' in ' if len(parts) > 2 else ''}module '{module_name}'")  # noqa: E501
-            return method
+        # module_name is the module part of the input string
+        # lets check to see if the rest is a class.static_method or just a class
+        counter = len(parts) - 1
+
+        while counter >= 0:
+            if getattr(module, parts[counter], None) is not None:
+                func_or_class = getattr(module, parts[counter], None)
+                if inspect.isfunction(func_or_class) or inspect.ismethod(func_or_class):
+                    return func_or_class
+
+                elif inspect.isclass(func_or_class):
+                    # could be a static class
+                    if counter < len(parts) - 1:
+                        # it's a static class
+                        return getattr(func_or_class, parts[counter + 1], None)
+                    else:
+                        # it's a class
+                        return Helpers.__get_class_callables(func_or_class)
+            counter -= 1
+
+        logging.error(f"Couldn't resolve '{input_str}'")
+        return None
+
+    @staticmethod
+    def __get_class_callables(class_obj) -> List[Callable]:
+        return [
+            member for name, member in inspect.getmembers(class_obj)
+            if (inspect.isfunction(member) or inspect.ismethod(member))
+            and member.__doc__
+            and not name.startswith('_')
+        ]
 
     @staticmethod
     def tfidf_similarity(query: str, text_list: list[str]) -> str:
@@ -1013,19 +1036,14 @@ class Helpers():
         return text_list[max_index]
 
     @staticmethod
-    def flatten(lst):
-        def __has_list(lst):
-            for item in lst:
-                if isinstance(item, list):
-                    return True
-            return False
-
-        def __inner_flatten(lst):
-            return [item for sublist in lst for item in sublist]
-
-        while __has_list(lst):
-            lst = __inner_flatten(lst)
-        return lst
+    def flatten(items: List[Any]) -> List[Any]:
+        flattened = []
+        for item in items:
+            if isinstance(item, list):
+                flattened.extend(Helpers.flatten(item))
+            else:
+                flattened.append(item)
+        return flattened
 
     @staticmethod
     def extract_token(s, ident):
@@ -1381,6 +1399,17 @@ class Helpers():
         return getattr(func, '__objclass__', None)  # handle special descriptor objects
 
     @staticmethod
+    def is_static_method(func) -> Tuple[bool, Optional[type]]:
+        for cls in inspect.getmro(func.__globals__.get(func.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0], type(None))):
+            if func.__name__ in cls.__dict__:
+                # It's a method, check if it's static
+                if isinstance(cls.__dict__[func.__name__], staticmethod):
+                    return True, None
+                return False, cls
+            # It's a standalone function
+        return True, None
+
+    @staticmethod
     def get_function_description(func, openai_format: bool) -> Dict[str, Any]:
         def parse_type(t):
             if t is str:
@@ -1472,7 +1501,13 @@ class Helpers():
         description = Helpers.get_function_description(function, openai_format=False)
         parameter_type_list = [f"{param}: {typ}" for param, typ in zip(description['parameters'], description['types'])]
         return_type = description['return_type'].__name__ if description['return_type'] else 'Any'
-        return (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"] or "No docstring"}')  # noqa: E501
+
+        is_static, cls = Helpers.is_static_method(function)
+        if not is_static and cls:
+            result = (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # Instantiate by {cls.__name__}(). {description["description"] or "No docstring"}')  # noqa: E501
+        else:
+            result = (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"] or "No docstring"}')  # noqa: E501
+        return result
 
     @staticmethod
     def load_resources_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.python') -> Dict[str, Any]:

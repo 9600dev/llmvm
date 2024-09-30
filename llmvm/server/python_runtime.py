@@ -55,6 +55,32 @@ class PythonRuntime:
         return self.controller.statement_to_message(statement)
 
     def setup(self):
+        class InstantiationWrapper:
+            def __init__(self, wrapped_class, python_runtime: PythonRuntime):
+                self.wrapped_class = wrapped_class
+                self.python_runtime = python_runtime
+
+            def __call__(self, *args, **kwargs):
+                init_method = self.wrapped_class.__init__
+                params_call = {}
+
+                for name, param in inspect.signature(init_method).parameters.items():
+                    if name == 'self':
+                        continue
+
+                    if param.annotation and param.annotation is PythonRuntime:
+                        params_call[name] = self.python_runtime
+                    elif param.annotation and param.annotation is ExecutionController:
+                        params_call[name] = self.python_runtime.controller
+                    elif param.annotation and param.annotation is VectorSearch:
+                        params_call[name] = self.python_runtime.vector_search
+                    elif name == 'cookies':
+                        cookies = self.python_runtime.locals_dict['cookies'] if 'cookies' in self.python_runtime.locals_dict else []
+                        params_call[name] = cookies
+
+                merged_kwargs = {**params_call, **kwargs}
+                return self.wrapped_class(*args, **merged_kwargs)
+
         class CallWrapper:
             def __init__(self, outer_self, wrapped_class):
                 self.wrapped_class = wrapped_class
@@ -107,7 +133,14 @@ class PythonRuntime:
         self.globals_dict['download'] = self.download
         self.globals_dict['pandas_bind'] = self.pandas_bind
         for agent in self.agents:
-            self.globals_dict[agent.__name__] = agent
+            # an agent is either a static method that is directly callable, or an instance method
+            # which needs an instance of the class to be instantiated
+            is_static, cls = Helpers.is_static_method(agent)
+            if not is_static and cls and cls.__name__ not in self.globals_dict:
+                self.globals_dict[cls.__name__] = InstantiationWrapper(cls, python_runtime=self)
+            else:
+                self.globals_dict[agent.__name__] = agent
+
         self.globals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)

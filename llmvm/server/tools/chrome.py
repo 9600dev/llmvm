@@ -105,6 +105,9 @@ class ChromeHelpers():
     def set_cookies(self, cookies: List[Dict]):
         self.chrome.set_cookies(cookies)
 
+    async def url(self) -> str:
+        return self.run_in_loop(self.chrome.url()).result()
+
     async def close(self) -> None:
         return self.run_in_loop(self.chrome.close()).result()
 
@@ -258,6 +261,9 @@ class ChromeHelpersInternal():
             return self._page
         else:
             return cast(Page, self._page)
+
+    async def url(self) -> str:
+        return (await self.page()).url
 
     async def close(self) -> None:
         if self._page is not None:

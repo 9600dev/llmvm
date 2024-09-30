@@ -42,3 +42,4 @@ helper_functions:
   - llmvm.server.bcl.BCL.get_code_structure_summary
   - llmvm.server.bcl.BCL.get_source_code
   - llmvm.server.bcl.BCL.find_all_references
+  - llmvm.server.tools.browser.Browser

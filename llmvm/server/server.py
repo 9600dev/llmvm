@@ -56,11 +56,11 @@ except ValueError:
 
 app = FastAPI()
 
-agents = list(
+agents = Helpers.flatten(list(
     filter(
-        lambda x: x is not None, [Helpers.get_callable(logging, agent) for agent in Container().get('helper_functions')]
+        lambda x: x is not None, [Helpers.get_callables(logging, agent) for agent in Container().get('helper_functions')]
     )
-)
+))
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
