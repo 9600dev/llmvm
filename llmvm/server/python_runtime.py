@@ -3,7 +3,7 @@ import traceback
 import numpy as np
 import datetime as dt
 import inspect
-import zoneinfo
+import pandas as pd
 import os
 import re
 import sys
@@ -153,6 +153,7 @@ class PythonRuntime:
         self.globals_dict['numpy'] = np
         self.globals_dict['scipy'] = scipy
         self.globals_dict['np'] = np
+        self.globals_dict['pd'] = pd
 
     @staticmethod
     def only_code_block(code: str) -> bool:
@@ -199,7 +200,6 @@ class PythonRuntime:
         return ordered_blocks
 
     def pandas_bind(self, expr) -> PandasMeta:
-        import pandas as pd
         logging.debug(f'pandas_bind({expr})')
 
         def bind_with_llm(expr_str: str) -> PandasMeta:

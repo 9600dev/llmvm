@@ -1504,9 +1504,9 @@ class Helpers():
 
         is_static, cls = Helpers.is_static_method(function)
         if not is_static and cls:
-            result = (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # Instantiate by {cls.__name__}(). {description["description"] or "No docstring"}')  # noqa: E501
+            result = (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # Instantiate with {cls.__name__}(). {description["description"] or "No docstring"}')  # noqa: E501
         else:
-            result = (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # {description["description"] or "No docstring"}')  # noqa: E501
+            result = (f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type}  # @staticmethod {description["description"] or "No docstring"}')  # noqa: E501
         return result
 
     @staticmethod

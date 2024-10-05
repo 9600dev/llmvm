@@ -14,47 +14,57 @@ from llmvm.server.base_library.source import Source
 logging = setup_logging()
 
 class BCL():
-    def datetime(self, expr, timezone: Optional[str] = None) -> dt.datetime:
+    @staticmethod
+    def datetime(expr, timezone: Optional[str] = None) -> dt.datetime:
         """
         Returns a datetime object from a string using datetime.strftime().
-        Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days"), datetime("now", "Australia/Brisbane")
+        Examples: BCL.datetime("2020-01-01"), BCL.datetime("now"), BCL.datetime("-1 days"), BCL.datetime("now", "Australia/Brisbane")
         """
         return Helpers.parse_relative_datetime(str(expr), timezone)
 
-    def sample_list(self, data: list) -> Any:
+    @staticmethod
+    def sample_list(data: list) -> Any:
         """
         Returns a random sample from a list.
-        Examples: sample_list([1, 2, 3]), sample_list(["a", "b", "c"])
+        Examples: BCL.sample_list([1, 2, 3]), BCL.sample_list(["a", "b", "c"])
         """
         return np.random.choice(data)
 
-    def sample_normal(self, mean: float = 0.0, std_dev: float = 1.0) -> float:
+    @staticmethod
+    def sample_normal(mean: float = 0.0, std_dev: float = 1.0) -> float:
         """
         Returns a random sample from a normal distribution with the given mean and standard deviation.
-        Examples: sample_normal(0, 1), sample_normal(10, 2)
+        Examples: BCL.sample_normal(0, 1), BCL.sample_normal(10, 2)
         """
         return np.random.normal(mean, std_dev)
 
-    def sample_binomial(self, n: int, p: float) -> float:
+    @staticmethod
+    def sample_binomial(n: int, p: float) -> float:
         """
         Returns a random sample from a binomial distribution with the given number of trials and probability of success.
-        Examples: sample_binomial(10, 0.5), sample_binomial(100, 0.1)
+        Examples: BCL.sample_binomial(10, 0.5), BCL.sample_binomial(100, 0.1)
         """
         return np.random.binomial(n, p)
 
-    def sample_lognormal(self, mean: float = 0.0, std_dev: float = 1.0) -> float:
+    @staticmethod
+    def sample_lognormal(mean: float = 0.0, std_dev: float = 1.0) -> float:
         """
         Returns a random sample from a lognormal distribution with the given mean and standard deviation.
-        Examples: sample_lognormal(0, 1), sample_lognormal(10, 2)
+        Examples: BCL.sample_lognormal(0, 1), BCL.sample_lognormal(10, 2)
         """
         return np.random.lognormal(mean, std_dev)
 
-    def generate_graph_image(self, data: Dict, title: str, x_label: str, y_label: str) -> None:
+    @staticmethod
+    def generate_graph_image(x_y_data_dict: Dict[str, Any], title: str, x_label: str, y_label: str) -> None:
         """
-        Generates a graph image from the given data and returns it as bytes.
+        Generates a graph image from the given x_y_data_dict Dictionary, which has two keys: 'x' and 'y' and a list of int/floats
+        and prints it to the client's screen. It returns None.
 
-        :param data: The data to plot
-        :type data: Dict
+        Example:
+        BCL.generate_graph_image(x_y_data_dict={"x": [1, 2, 3], "y": [4.0, 5.0, 6.0]}, title="My Graph Title", x_label="X Label", y_label="Y Label")
+
+        :param x_y_data_dict: The data to plot
+        :type data: Dict[str, Any]
         :param title: The title of the graph
         :type title: str
         :param x_label: The label for the x-axis
@@ -62,11 +72,8 @@ class BCL():
         :param y_label: The label for the y-axis
         :type y_label: str
         :return: None
-
-        Examples:
-        generate_graph_image({"x": [1, 2, 3], "y": [4, 5, 6]}, "Title", "X Label", "Y Label")
         """
-
+        data = x_y_data_dict
         data_dict = {}
 
         if isinstance(data, list):

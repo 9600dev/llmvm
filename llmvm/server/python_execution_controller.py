@@ -1127,7 +1127,9 @@ class ExecutionController(Controller):
                     if last_assignment:
                         code_execution_result = f'{str(last_assignment[1])}'
 
-                assert(code_execution_result)
+                if not code_execution_result:
+                    # no answer() block, or last assignment was None
+                    code_execution_result = f'No answer() block found in code block, or last assignment was None.'
 
                 # we have a <code_result></code_result> block, push it to the user
                 if len(code_execution_result) > 300:
