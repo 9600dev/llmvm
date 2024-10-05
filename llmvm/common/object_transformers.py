@@ -78,7 +78,7 @@ class ObjectTransformers():
             return ObjectTransformers.transform_markdown_content(cast(MarkdownContent, cache.get(content.url)), executor)
 
         if Container.get_config_variable('LLMVM_FULL_PROCESSING', default=False):
-            result = asyncio.run(Helpers.markdown_content_to_messages(logging, content, 150, 150))
+            result: List[Content] = asyncio.run(Helpers.markdown_content_to_messages(logging, content, 150, 150))
             content.original_sequence = content.sequence
             content.sequence = result
             return [User(content) for content in result]

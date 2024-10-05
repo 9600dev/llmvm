@@ -1160,7 +1160,7 @@ class ExecutionController(Controller):
             # code_blocks was filtered out, and we have a stop token, so it's trying to repeat the code again
             elif not code_blocks and response.stop_token == '</code>':
                 assistant_response_str = response.message.get_str()
-                assistant_response_str += '\n\n' + "I've repeated the same code block. I should try something different."
+                assistant_response_str += '\n\n' + "I've repeated the same code block. I should try something different and not repeat the same code again."
                 messages_copy.append(Assistant(Content(assistant_response_str)))
             else:
                 # if there are no code blocks, we're done

@@ -12,7 +12,7 @@ from PIL import Image
 
 from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Assistant, AstNode, Content, Executor, FileContent, ImageContent, MarkdownContent,
+from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content, Executor, FileContent, ImageContent, MarkdownContent,
                                   Message, PdfContent, System, TokenStopNode, User,
                                   awaitable_none)
 from llmvm.common.perf import TokenPerf, TokenStreamManager, O1AsyncIterator
@@ -41,15 +41,6 @@ class OpenAIExecutor(Executor):
         self.aclient = AsyncOpenAI(api_key=self.openai_key, base_url=self.api_endpoint)
         self.max_images = max_images
 
-    def user_token(self) -> str:
-        return 'User'
-
-    def assistant_token(self) -> str:
-        return 'Assistant'
-
-    def append_token(self) -> str:
-        return ''
-
     def __calculate_image_tokens(self, width: int, height: int):
         from math import ceil
 
@@ -59,7 +50,19 @@ class OpenAIExecutor(Executor):
         total = 85 + 170 * n
         return total
 
-    def wrap_messages(self, messages: List[Message]) -> List[Dict[str, str]]:
+    def user_token(self) -> str:
+        return 'User'
+
+    def assistant_token(self) -> str:
+        return 'Assistant'
+
+    def append_token(self) -> str:
+        return ''
+
+    def name(self) -> str:
+        return 'openai'
+
+    def wrap_messages(self, model: Optional[str], messages: List[Message]) -> List[Dict[str, str]]:
         # todo: this logic is wrong -- if called from execute_direct
         # it'll unpack the pdf/markdown but not do it properly
         # as those functions will return multiple messages
@@ -71,12 +74,15 @@ class OpenAIExecutor(Executor):
                 return f"<pdf url={content.url}>{ObjectTransformers.transform_pdf_content(content, self)}</pdf>"
             elif isinstance(content, MarkdownContent):
                 return f"{ObjectTransformers.transform_markdown_content(content, self)}"
+            elif isinstance(content, BrowserContent):
+                return f"{ObjectTransformers.transform_browser_content(content, self)}"
             else:
                 return f"{content.get_str()}"
 
+        # the Dict[str, str] messages are the messages that will be sent to the OpenAI API
         wrapped = []
 
-        # grab the last system message
+        # deal with the system message
         system_messages = [m for m in messages if m.role() == 'system']
         if len(system_messages) > 1:
             logging.debug('More than one system message in the message list. Using the last one.')
@@ -88,11 +94,19 @@ class OpenAIExecutor(Executor):
 
         messages = [m for m in messages if m.role() != 'system']
 
-        # remove empty messages
+        # expand the PDF, Markdown, and BrowserContent messages
+        expanded_messages = []
         for message in messages:
-            if not message['content'] or message['content'] == '' or message['content'] == b'':
-                logging.warning(f"Removing empty message: {message}")
-                messages.remove(message)
+            if isinstance(message, User) and isinstance(message.message, PdfContent):
+                expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
+            elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
+                expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
+            elif isinstance(message, User) and isinstance(message.message, BrowserContent):
+                expanded_messages.extend(ObjectTransformers.transform_browser_content(message.message, self))
+            else:
+                expanded_messages.append(message)
+
+        messages = expanded_messages
 
         # check to see if there are more than self.max_images images in the message list
         image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
@@ -227,17 +241,14 @@ class OpenAIExecutor(Executor):
         else:
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
 
-    def name(self) -> str:
-        return 'openai'
-
-    async def __aexecute_direct(
+    async def aexecute_direct(
         self,
         messages: List[Dict[str, str]],
         functions: List[Dict[str, str]] = [],
-        stop_tokens: List[str] = [],
         model: Optional[str] = None,
         max_output_tokens: int = 4096,
         temperature: float = 0.0,
+        stop_tokens: List[str] = [],
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
@@ -257,7 +268,7 @@ class OpenAIExecutor(Executor):
         messages_cast = cast(List[ChatCompletionMessageParam], messages)
         functions_cast = cast(List[Function], functions)
 
-        token_trace = TokenPerf('__aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
+        token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
         if model is not None and 'o1-preview' in model or 'o1-mini' in model:
@@ -320,23 +331,10 @@ class OpenAIExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
-        # expanded_messages = []
-        # for message in messages:
-        #     if isinstance(message, User) and isinstance(message.message, PdfContent):
-        #         expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
-        #     elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
-        #         expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
-        #     else:
-        #         expanded_messages.append(message)
-
         # fresh message list, includes system message
-        messages_list: List[Dict[str, str]] = self.wrap_messages(messages)
+        messages_list: List[Dict[str, str]] = self.wrap_messages(model, messages)
 
-        # messages_list.append(Message.to_dict(system_message))
-        # for message in [m for m in expanded_messages if m.role() != 'system']:
-        #     messages_list.append(Message.to_dict(message))
-
-        stream = self.__aexecute_direct(
+        stream = self.aexecute_direct(
             messages_list,
             max_output_tokens=max_output_tokens,
             model=model if model else self.default_model,

@@ -561,7 +561,7 @@ class BrowserContent(Content):
         self.sequence = sequence
 
     def __str__(self):
-        return f'BrowserContent({self.url})'
+        return f'BrowserContent({self.url}) {self.sequence}'
 
     def __repr__(self):
         return f'BrowserContent({self.url})'

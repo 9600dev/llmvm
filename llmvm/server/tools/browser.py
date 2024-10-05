@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, List, Tuple
 from urllib.parse import urljoin, urlparse
 
 from googlesearch import search as google_search
-from playwright.async_api import ElementHandle, Error, Page, async_playwright
+from playwright.async_api import ElementHandle, Error, Page, async_playwright, TimeoutError
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -13,7 +13,7 @@ from llmvm.common.objects import (BrowserContent, Content, ImageContent, LLMCall
                                   TokenCompressionMethod, User, bcl)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime import PythonRuntime
-from llmvm.server.tools.chrome import ChromeHelpers
+from llmvm.server.tools.chrome import ChromeHelpers, ClickableElementHandle
 from llmvm.server.tools.webhelpers import WebHelpers
 
 logging = setup_logging()
@@ -86,18 +86,27 @@ class Browser():
         return None
 
     async def __resolve_selector(self, selector: str) -> None | ElementHandle:
-        if selector.startswith('<'):
-            return await self.__find_html_element_handle(selector)
+        logging.debug(f"Browser.__resolve_selector() resolving {selector}")
+        try:
+            async with asyncio.timeout(2):
+                if selector.startswith('<'):
+                    return await self.__find_html_element_handle(selector)
 
-        locator = self.current_page.locator(selector)
-        if locator:
-            return await locator.element_handle()
-        else:
-            return None
+                locator = self.current_page.locator(selector)
+                if locator:
+                    return await locator.element_handle()
+                else:
+                    return None
+        except asyncio.TimeoutError:
+            logging.debug(f"Browser.__resolve_selector() TimeoutError resolving {selector}")
+            raise Exception(f"Timeout resolving selector {selector}")
+        except Exception as ex:
+            logging.debug(f"Browser.__resolve_selector() Exception resolving {selector}: {ex}")
+            raise Exception(f"Exception resolving selector {selector}: {ex}")
 
     def __handle_navigate_expression(self, selector: str) -> BrowserContent:
         def __internal_click(selector: str) -> BrowserContent:
-            logging.debug(f"Clicking {selector}")
+            logging.debug(f"Browser.__handle_navigate_expression() clicking {selector}")
             element_handle = asyncio.run(self.__resolve_selector(selector))
             asyncio.run(self.browser.click(element_handle))
             asyncio.run(self.browser.wait(500))
@@ -142,15 +151,15 @@ class Browser():
             ))
 
         self.current_screenshot = ImageContent(screenshot)
-        return BrowserContent([self.current_screenshot, self.current_markdown])
+        return BrowserContent(sequence=[self.current_screenshot, self.current_markdown], url=url)
 
-    def __input_boxes(self) -> List[ElementHandle]:
+    def __input_boxes(self) -> List[ClickableElementHandle]:
         logging.debug("Getting input elements")
         return asyncio.run(self.browser.get_input_elements())
 
-    def __clickable(self) -> List[ElementHandle]:
+    def __clickable(self) -> List[ClickableElementHandle]:
         logging.debug("Getting clickable elements")
-        return asyncio.run(self.browser.get_clickable_elements())  # type: ignore
+        return asyncio.run(self.browser.get_clickable_elements())
 
     def __element_markdown(self, url: str = '') -> MarkdownContent:
         html = asyncio.run(self.browser.get_html())

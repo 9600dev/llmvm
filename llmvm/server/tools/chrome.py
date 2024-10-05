@@ -24,18 +24,26 @@ from llmvm.common.singleton import Singleton
 nest_asyncio.apply()
 logging = setup_logging()
 
-class ClickableHandle():
+class ClickableElementHandle():
     def __init__(
         self,
         element_handle: ElementHandle,
         scope_id: int,
-        element_id: str,
+        id: str,
         outer_html: str,
+        html: str,
     ):
         self.element_handle = element_handle
         self.scope_id = scope_id
-        self.element_id = element_id
+        self.id = id
         self.outer_html = outer_html
+        self.html = html
+
+    def __str__(self):
+        return f'ClickableElementHandle(scope_id={self.scope_id}, id={self.id}, html={self.html})'
+
+    def __repr__(self) -> str:
+        return f'ClickableElementHandle(scope_id={self.scope_id}, id={self.id})'
 
 def read_netscape_cookies(cookies_txt_filename: str):
     cookies = []
@@ -163,10 +171,10 @@ class ChromeHelpers():
     async def get_ahrefs(self) -> List[Tuple[str, str]]:
         return self.run_in_loop(self.chrome.get_ahrefs()).result()
 
-    async def get_input_elements(self) -> List[ElementHandle]:
+    async def get_input_elements(self) -> List[ClickableElementHandle]:
         return self.run_in_loop(self.chrome.get_input_elements()).result()
 
-    async def get_clickable_elements(self) -> List[ClickableHandle]:
+    async def get_clickable_elements(self) -> List[ClickableElementHandle]:
         return self.run_in_loop(self.chrome.get_clickable_elements()).result()
 
     async def fill(self, element: ElementHandle, value: str) -> None:
@@ -418,7 +426,7 @@ class ChromeHelpersInternal():
         result = [(await ahref.evaluate('(el) => el.outerHTML'), await ahref.get_attribute('href') or '') for ahref in ahrefs]
         return result
 
-    async def get_clickable_elements(self) -> List[ClickableHandle]:
+    async def get_clickable_elements(self) -> List[ClickableElementHandle]:
         page = await self.page()
         clickable_elements = await page.query_selector_all(
             "a, button, input[type='submit'], input[type='button']"
@@ -428,16 +436,44 @@ class ChromeHelpersInternal():
 
         for element in clickable_elements:
             element_id = await element.get_attribute('id')
+            element_html = await element.evaluate('''(el) => {
+                        const clone = el.cloneNode(false);
+                        return clone.outerHTML;
+                    }''')
             outer_html = await element.evaluate('(el) => el.outerHTML')
-            elements.append(ClickableHandle(element, counter, element_id or '', outer_html))
+            elements.append(ClickableElementHandle(
+                element_handle=element,
+                scope_id=counter,
+                id=element_id or '',
+                html=element_html,
+                outer_html=outer_html
+            ))
             counter+=1
         return elements
 
-    async def get_input_elements(self) -> List[ElementHandle]:
+    async def get_input_elements(self) -> List[ClickableElementHandle]:
         input_elements = await (await self.page()).query_selector_all(
             "input[type='text'], input[type='email'], input[type='password'], textarea"
         )
-        return input_elements
+        elements: List[ClickableElementHandle] = []
+        counter = 0
+
+        for element in input_elements:
+            element_id = await element.get_attribute('id')
+            element_html = await element.evaluate('''(el) => {
+                        const clone = el.cloneNode(false);
+                        return clone.outerHTML;
+                    }''')
+            outer_html = await element.evaluate('(el) => el.outerHTML')
+            elements.append(ClickableElementHandle(
+                element_handle=element,
+                scope_id=counter,
+                id=element_id or '',
+                html=element_html,
+                outer_html=outer_html
+            ))
+            counter+=1
+        return elements
 
     async def fill(self, element: ElementHandle, value: str) -> None:
         if element is None or not isinstance(element, ElementHandle):

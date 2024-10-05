@@ -43,6 +43,18 @@ class AnthropicExecutor(Executor):
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
         self.max_images = max_images
 
+    def user_token(self):
+        return 'User'
+
+    def assistant_token(self) -> str:
+        return 'Assistant'
+
+    def append_token(self) -> str:
+        return ''
+
+    def name(self) -> str:
+        return 'anthropic'
+
     def from_dict(self, message: Dict[str, Any]) -> 'Message':
         role = message['role']
         message_content = message['content']
@@ -117,12 +129,15 @@ class AnthropicExecutor(Executor):
                 return f"<pdf url={content.url}>{ObjectTransformers.transform_pdf_content(content, self)}</pdf>"
             elif isinstance(content, MarkdownContent):
                 return f"<markdown url={content.url}>{ObjectTransformers.transform_markdown_content(content, self)}</markdown>"
+            elif isinstance(content, BrowserContent):
+                return f"<browser url={content.url}>{ObjectTransformers.transform_browser_content(content, self)}</browser>"
             else:
                 return f"{content.get_str()}"
 
+        # the Dict[str, str] messages are the messages that will be sent to the Anthropic API
         wrapped = []
 
-        # grab the last system message
+        # deal with the system message
         system_messages = [m for m in messages if m.role() == 'system']
         if len(system_messages) > 1:
             logging.debug('More than one system message in the message list. Using the last one.')
@@ -140,6 +155,20 @@ class AnthropicExecutor(Executor):
             })
 
         messages = [m for m in messages if m.role() != 'system']
+
+        # expand the PDF, Markdown, and BrowserContent messages
+        expanded_messages = []
+        for message in messages:
+            if isinstance(message, User) and isinstance(message.message, PdfContent):
+                expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
+            elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
+                expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
+            elif isinstance(message, User) and isinstance(message.message, BrowserContent):
+                expanded_messages.extend(ObjectTransformers.transform_browser_content(message.message, self))
+            else:
+                expanded_messages.append(message)
+
+        messages = expanded_messages
 
         # check to see if there are more than self.max_images images in the message list
         image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
@@ -221,17 +250,7 @@ class AnthropicExecutor(Executor):
                         **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached and model in prompt_caching_models else {}),
                     }]
                 })
-
         return wrapped
-
-    def user_token(self):
-        return 'User'
-
-    def assistant_token(self) -> str:
-        return 'Assistant'
-
-    def append_token(self) -> str:
-        return ''
 
     async def count_tokens(
         self,
@@ -266,9 +285,6 @@ class AnthropicExecutor(Executor):
             return await num_tokens_from_messages(self.wrap_messages(model, [User(Content(messages))]))
         else:
             raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
-
-    def name(self) -> str:
-        return 'anthropic'
 
     async def aexecute_direct(
         self,
@@ -393,19 +409,8 @@ class AnthropicExecutor(Executor):
         if not system_message:
             system_message = System(Content('You are a helpful assistant.'))
 
-        expanded_messages = []
-        for message in messages:
-            if isinstance(message, User) and isinstance(message.message, PdfContent):
-                expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
-            elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
-                expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
-            elif isinstance(message, User) and isinstance(message.message, BrowserContent):
-                expanded_messages.extend(ObjectTransformers.transform_browser_content(message.message, self))
-            else:
-                expanded_messages.append(message)
-
         # fresh message list
-        messages_list: List[Dict[str, Any]] = self.wrap_messages(model, expanded_messages)
+        messages_list: List[Dict[str, Any]] = self.wrap_messages(model, messages)
 
         if messages_list[0]['role'] == 'system' and messages_list[1]['role'] != 'user':
             logging.error(f'First message must be from the user after a system prompt: {messages_list}')
