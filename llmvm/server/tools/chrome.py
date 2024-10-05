@@ -440,5 +440,11 @@ class ChromeHelpersInternal():
         return input_elements
 
     async def fill(self, element: ElementHandle, value: str) -> None:
-        await element.fill(value)
+        if element is None or not isinstance(element, ElementHandle):
+            logging.debug(f'ChromeHelpersInternal.fill() Element {element} is not a valid ElementHandle')
+            return
+        if not await element.is_editable():
+            logging.debug(f'ChromeHelpersInternal.fill() Element {element} is not editable')
+            return
+        await element.fill(value, timeout=2000)
 

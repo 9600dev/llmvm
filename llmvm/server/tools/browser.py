@@ -1,6 +1,7 @@
 import asyncio
 import re
 from typing import Any, Callable, Dict, List, Tuple
+from urllib.parse import urljoin, urlparse
 
 from googlesearch import search as google_search
 from playwright.async_api import ElementHandle, Error, Page, async_playwright
@@ -37,6 +38,97 @@ class Browser():
         self.current_screenshot: ImageContent
         self.current_markdown: MarkdownContent
 
+    async def __find_html_element_handle(self, html_string: str) -> ElementHandle | None:
+        # Extract attributes from the HTML string
+        page = self.current_page
+        attr_pattern = r'(\w+)=["\']([^"\']*)["\']'
+        attributes = dict(re.findall(attr_pattern, html_string))
+
+        tag_match = re.match(r'<(\w+)', html_string)
+        tag_name = tag_match.group(1) if tag_match else None
+
+        if not tag_name:
+            return None
+
+        methods = [
+            ('id', lambda v: f'#{v}'),
+            ('name', lambda v: f'[name="{v}"]'),
+            ('class', lambda v: f'.{v.replace(" ", ".")}'),
+            ('type', lambda v: f'{tag_name}[type="{v}"]'),
+            ('value', lambda v: f'{tag_name}[value="{v}"]'),
+            ('placeholder', lambda v: f'{tag_name}[placeholder="{v}"]'),
+        ]
+
+        for attr, selector_func in methods:
+            if attr in attributes:
+                selector = selector_func(attributes[attr])
+                element = await page.query_selector(selector)
+                if element:
+                    print(f"Element found using {attr}: {selector}")
+                    return element
+
+        combined_selector = tag_name
+        for attr, value in attributes.items():
+            combined_selector += f'[{attr}="{value}"]'
+
+        element = await page.query_selector(combined_selector)
+        if element:
+            return element
+
+        xpath = f"//{tag_name}"
+        for attr, value in attributes.items():
+            xpath += f'[@{attr}="{value}"]'
+
+        element = await page.query_selector(f'xpath={xpath}')
+        if element:
+            return element
+
+        return None
+
+    async def __resolve_selector(self, selector: str) -> None | ElementHandle:
+        if selector.startswith('<'):
+            return await self.__find_html_element_handle(selector)
+
+        locator = self.current_page.locator(selector)
+        if locator:
+            return await locator.element_handle()
+        else:
+            return None
+
+    def __handle_navigate_expression(self, selector: str) -> BrowserContent:
+        def __internal_click(selector: str) -> BrowserContent:
+            logging.debug(f"Clicking {selector}")
+            element_handle = asyncio.run(self.__resolve_selector(selector))
+            asyncio.run(self.browser.click(element_handle))
+            asyncio.run(self.browser.wait(500))
+            return self.__get_state()
+
+        result = selector.strip()
+
+        # Check if it's a valid CSS selector
+        if result.startswith('#') or result.startswith('.') or result.startswith(':'):
+            return __internal_click(result)
+
+        # Check if it's a URL or part of a URL
+        url_pattern = re.compile(r'^(https?://)?[\w\-]+(\.[\w\-]+)+[/#?]?.*$')
+        if url_pattern.match(result):
+            # If it's a full URL
+            if result.startswith(('http://', 'https://')):
+                return self.goto(result)
+            # If it's a protocol-relative URL
+            elif result.startswith('//'):
+                return self.goto(f"{urlparse(self.current_url).scheme}:{result}")
+            # If it's a domain or partial URL
+            else:
+                return self.goto(urljoin(self.current_url, '//' + result))
+
+        # Check if it's a relative path
+        elif result.startswith('/'):
+            return self.goto(urljoin(self.current_url, result))
+
+        else:
+            return __internal_click(result)
+
     def __get_state(self) -> BrowserContent:
         url: str = asyncio.run(self.browser.url())
         self.current_markdown: MarkdownContent = self.__element_markdown(url)
@@ -51,10 +143,6 @@ class Browser():
 
         self.current_screenshot = ImageContent(screenshot)
         return BrowserContent([self.current_screenshot, self.current_markdown])
-
-    async def __resolve_selector(self, selector: str) -> ElementHandle:
-        locator = self.current_page.locator(selector)
-        return await locator.element_handle()
 
     def __input_boxes(self) -> List[ElementHandle]:
         logging.debug("Getting input elements")
@@ -138,7 +226,7 @@ class Browser():
                 temperature=1.0,
                 max_prompt_len=self.controller.executor.max_input_tokens(),
                 completion_tokens_len=self.controller.executor.max_output_tokens(),
-                prompt_name='click_on',
+                prompt_name='get_selector',
             ),
             query=expression,
             original_query=expression,
@@ -148,10 +236,9 @@ class Browser():
         result = result.message.get_str().strip()
         return result
 
-    def click_on(self, expression: str) -> BrowserContent:
+    def find_and_click_on(self, expression: str) -> BrowserContent:
         """
-        Clicks on the element specified by the expression. Expressions are textual descriptions
-        of the element you want to click on.
+        Clicks on an element that matches the textual description in expression.
 
         Example:
         <code>
@@ -161,26 +248,16 @@ class Browser():
         </code>
         Now clicking the Race Results button:
         <code>
-        race_results_content= browser.click_on("Race Results")
+        race_results_content = browser.click_on("Race Results button")
         answer(race_results_content)
         </code>
 
-        :param expression: The expression of the element to click
+        :param expression: The natural language description of the element to click
         :return: The current state of the browser
         """
-        logging.debug(f'Browser.click_on({expression}')
-
+        logging.debug(f'Browser.find_and_click_on({expression}')
         result = self.get_selector(expression)
-
-        # check to see if the result is a valid CSS selector
-        if result.startswith('#') or result.startswith('.') or result.startswith(':'):
-            return self.click(result)
-        elif result.startswith('http'):
-            return self.goto(result)
-        elif result.startswith('/'):
-            return self.goto(f'{self.current_url}{result}')
-        else:
-            return self.click(result)
+        return self.__handle_navigate_expression(selector=result)
 
     def goto(self, url: str) -> BrowserContent:
         """
@@ -215,7 +292,7 @@ class Browser():
         <code>
         browser = Browser()
         page_content = browser.goto("https://google.com")
-        selector_id = llm_call([page_content], "What is the id of the search button?")
+        selector_id = browser.get_selector("What is the id of the search button?")
         answer(selector_id)
         </code>
         Now clicking the button:
@@ -228,38 +305,29 @@ class Browser():
         :type selector: str
         :return: The current state of the browser
         """
-
-        # check to see if the result is a valid CSS selector
-        if selector.startswith('http'):
-            return self.goto(selector)
-        elif selector.startswith('/'):
-            return self.goto(f'{self.current_url}{selector}')
-
-        logging.debug(f"Clicking {selector}")
-        element_handle = asyncio.run(self.__resolve_selector(selector))
-        asyncio.run(self.browser.click(element_handle))
-        asyncio.run(self.browser.wait(500))
-        return self.__get_state()
+        logging.debug(f"Browser.click() clicking {selector}")
+        return self.__handle_navigate_expression(selector=selector)
 
     def type_into(
         self,
         selector: str,
         text: str,
+        hit_enter: bool = False,
     ) -> BrowserContent:
         """
-        Inserts text into the element specified by the selector. Selectors are ids of elements on the page.
+        Inserts text into the element specified by the selector, and hits the enter key if required. Selectors are ids of elements on the page.
 
         Example:
         User: search on google for "vegemite"
         <code>
         browser = Browser()
         page_content = browser.goto("https://google.com")
-        selector_id = llm_call([page_content], "What is the id of the search box?")
+        selector_id = browser.get_selector("What is the id of the search box?")
         answer(selector_id)
         </code>
-        Now typing into the search box:
+        Now typing into the search box and hit enter to search:
         <code>
-        type_into_result = browser.type_into(selector_id, "vegemite")
+        type_into_result = browser.type_into(selector_id, "vegemite", hit_enter=True)
         answer(type_into_result)
         </code>
 
@@ -267,15 +335,21 @@ class Browser():
         :type selector: str
         :param text: The text to insert
         :type text: str
+        :param hit_enter: Whether to hit enter after inserting text
+        :type hit_enter: bool
         :return: The current state of the browser
         """
-        # check to see if the result is a valid CSS selector
-        if selector.startswith('http'):
-            return self.goto(selector)
-        elif selector.startswith('/'):
-            return self.goto(f'{self.current_url}{selector}')
 
         logging.debug(f"Inserting {text} into {selector}")
-        asyncio.run(self.browser.fill(asyncio.run(self.__resolve_selector(selector)), text))
-        asyncio.run(self.browser.wait(500))
-        return self.__get_state()
+        element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+        if element_handle:
+            asyncio.run(self.browser.fill(element=element_handle, value=text))
+            asyncio.run(self.browser.wait(500))
+            if hit_enter:
+                asyncio.run(element_handle.press('Enter', timeout=1000))
+                asyncio.run(self.browser.wait(500))
+            return self.__get_state()
+        else:
+            logging.debug(f"Browser.type_into() Element not found for selector {selector}")
+            # todo: this is wrong, we should probably return an error with the current state
+            return self.__get_state()
