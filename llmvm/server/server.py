@@ -74,7 +74,7 @@ os.makedirs(Container().get('cdn_directory'), exist_ok=True)
 os.makedirs(Container().get('log_directory'), exist_ok=True)
 os.makedirs(Container().get('vector_store_index_directory'), exist_ok=True)
 
-cache_session = PersistentCache(Container().get('cache_directory') + '/session.cache')
+cache_session = PersistentCache(cache_directory=Container().get('cache_directory'))
 cache_memory: MemoryCache[int, Dict[str, Any]] = MemoryCache()
 cdn_directory = Container().get('cdn_directory')
 

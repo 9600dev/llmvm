@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Generic, Iterable, TypeVar
+from typing import Dict, Generic, Iterable, List, TypeVar
 
 import dill
 
@@ -30,60 +30,51 @@ class MemoryCache(Generic[K, V]):
 
 
 class PersistentCache:
-    # todo needs to be completely replaced.
-    def __init__(self, filename: str):
-        self.filename = filename
+    def __init__(self, cache_directory: str):
+        if not os.path.exists(cache_directory):
+            os.makedirs(cache_directory)
+
+        if not os.path.exists(cache_directory):
+            raise Exception(f'Cache directory {cache_directory} does not exist')
+
+        self.cache_directory = cache_directory
         self.cache = {}
 
-        if not os.path.isfile(self.filename):
-            with open(self.filename, 'wb') as f:
-                dill.dump({}, f)
-
-    def _serialize_key(self, key):
+    def _serialize_key(self, key: int):
         return dill.dumps(key)
 
-    def _deserialize_key(self, serialized_key):
+    def _deserialize_key(self, serialized_key: int):
         return dill.loads(serialized_key)
 
-    def setup(self):
-        if not os.path.isfile(self.filename):
-            with open(self.filename, 'wb') as f:
-                dill.dump({}, f)
+    def _write_cache(self, key: int, value):
+        with open(self.cache_directory + f'/{key}.cache', 'wb') as f:
+            dill.dump(value, f)
 
-        if not self.cache:
-            with open(self.filename, 'rb') as f:
-                self.cache = dill.load(f)
-
-    def set(self, key, value):
-        self.setup()
+    def set(self, key: int, value):
         serialized_key = self._serialize_key(key)
-
         self.cache[serialized_key] = value
+        self._write_cache(key, value)
 
-        with open(self.filename, 'rb+') as f:
-            dill.dump(self.cache, f)
+    def get(self, key: int):
+        cache_hit = self.cache.get(self._serialize_key(key))
+        if cache_hit:
+            return cache_hit
 
-    def get(self, key):
-        self.setup()
-        return self.cache.get(self._serialize_key(key))
+        with open(self.cache_directory + f'/{key}.cache', 'rb') as f:
+            value = dill.load(f)
+            self.cache[self._serialize_key(key)] = value
+            return value
 
     def delete(self, key):
-        self.setup()
-        with open(self.filename, 'rb+') as f:
-            self.cache = dill.load(f)
-            serialized_key = self._serialize_key(key)
-            if serialized_key in self.cache:
-                del self.cache[serialized_key]
-                f.seek(0)
-                dill.dump(self.cache, f)
+        del self.cache[self._serialize_key(key)]
+        os.remove(self.cache_directory + f'/{key}.cache')
 
     def has_key(self, key):
-        self.setup()
-        return self._serialize_key(key) in self.cache
+        return self._serialize_key(key) in self.cache or os.path.exists(self.cache_directory + f'/{key}.cache')
 
-    def keys(self):
-        self.setup()
-        return [self._deserialize_key(k) for k in self.cache.keys()]
+    def keys(self) -> List[int]:
+        result = [int(f.split('.')[0]) for f in os.listdir(self.cache_directory) if f.endswith('.cache') and f[0].isdigit()]
+        return list(sorted(result))
 
     def gen_key(self):
         keys = self.keys()
