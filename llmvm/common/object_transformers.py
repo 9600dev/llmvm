@@ -5,7 +5,7 @@ from typing import List, cast
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Content, Executor, ImageContent, LLMCall,
+from llmvm.common.objects import (BrowserContent, Content, Executor, ImageContent, LLMCall,
                                   MarkdownContent, Message, PdfContent,
                                   StreamNode, User)
 from llmvm.common.pdf import Pdf, PdfHelpers
@@ -87,6 +87,12 @@ class ObjectTransformers():
             # because otherwise, we're just uploading these things for no reason
             markdown_content = Helpers.remove_embedded_images(content.get_str())
             return [User(Content(markdown_content))]
+
+    @staticmethod
+    def transform_browser_content(content: BrowserContent, executor: Executor) -> List[Message]:
+        # BrowserContent is usually [ImageContent, MarkdownContent]
+        return [User(content) for content in content.sequence]
+
 
     @staticmethod
     def transform_str(content: Content, executor: Executor) -> str:

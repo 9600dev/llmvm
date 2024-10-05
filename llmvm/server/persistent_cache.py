@@ -1,6 +1,32 @@
 import os
+from typing import Dict, Generic, Iterable, TypeVar
 
 import dill
+
+K = TypeVar('K')
+V = TypeVar('V')
+
+class MemoryCache(Generic[K, V]):
+    def __init__(self):
+        self.cache: Dict[K, V] = {}
+
+    def get(self, key: K) -> V | None:
+        return self.cache.get(key)
+
+    def set(self, key: K, value: V) -> None:
+        self.cache[key] = value
+
+    def setup(self) -> None:
+        pass
+
+    def delete(self, key: K) -> None:
+        self.cache.pop(key, None)
+
+    def has_key(self, key: K) -> bool:
+        return key in self.cache
+
+    def keys(self) -> Iterable[K]:
+        return self.cache.keys()
 
 
 class PersistentCache:

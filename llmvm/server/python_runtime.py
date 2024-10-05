@@ -79,7 +79,8 @@ class PythonRuntime:
                         params_call[name] = cookies
 
                 merged_kwargs = {**params_call, **kwargs}
-                return self.wrapped_class(*args, **merged_kwargs)
+                instance = self.wrapped_class(*args, **merged_kwargs)
+                return instance
 
         class CallWrapper:
             def __init__(self, outer_self, wrapped_class):

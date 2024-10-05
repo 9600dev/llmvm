@@ -1,9 +1,13 @@
 import asyncio
+import base64
+import json
+import marshal
 import os
 import shutil
 import sys
 from importlib import resources
-from typing import Callable, List, Optional, cast
+import types
+from typing import Any, Callable, Dict, List, Optional, cast
 
 import async_timeout
 import jsonpickle
@@ -22,13 +26,14 @@ from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
-                                  DownloadItem, DownloadParams, FileContent, MessageModel,
+                                  DownloadItem, DownloadParams, FileContent, Message, MessageModel,
                                   SessionThread, Statement, StopNode,
                                   TokenCompressionMethod, User,
                                   compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
-from llmvm.server.persistent_cache import PersistentCache
+from llmvm.server.persistent_cache import PersistentCache, MemoryCache
 from llmvm.server.python_execution_controller import ExecutionController
+from llmvm.server.python_runtime import PythonRuntime
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.vector_search import VectorSearch
 from llmvm.server.vector_store import VectorStore
@@ -70,6 +75,7 @@ os.makedirs(Container().get('log_directory'), exist_ok=True)
 os.makedirs(Container().get('vector_store_index_directory'), exist_ok=True)
 
 cache_session = PersistentCache(Container().get('cache_directory') + '/session.cache')
+cache_memory: MemoryCache[int, Dict[str, Any]] = MemoryCache()
 cdn_directory = Container().get('cdn_directory')
 
 
@@ -86,6 +92,112 @@ vector_store = VectorStore(
     chunk_overlap=10
 )
 vector_search = VectorSearch(vector_store=vector_store)
+
+def __get_unserializable_locals(locals_dict: Dict[str, Any]) -> Dict[str, Any]:
+    unserializable_locals = {}
+    for key, value in locals_dict.items():
+        if (
+            not isinstance(value, types.FunctionType) and
+            not isinstance(value, types.MethodType) and
+            not isinstance(value, types.ModuleType) and
+            not isinstance(value, types.BuiltinFunctionType) and
+            not isinstance(value, types.BuiltinMethodType) and
+            isinstance(value, object)
+            and not isinstance(value, type)
+            and type(value).__module__ != 'builtins'
+            and type(value).__module__ != PythonRuntime.__module__
+        ):
+            try:
+                json.dumps(value)
+            except:
+                unserializable_locals[key] = value
+    return unserializable_locals
+
+def __serialize_locals_dict(locals_dict: Dict[str, Any]) -> Dict[str, Any]:
+    temp_dict = {}
+    for key, value in locals_dict.items():
+        if isinstance(key, str) and key.startswith('__'):
+            continue
+        elif isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
+            # Serialize the function's code object
+            code_bytes = marshal.dumps(value.__code__)
+            temp_dict[key] = {
+                'type': 'function',
+                'name': value.__name__,
+                'code': base64.b64encode(code_bytes).decode('ascii'),
+                'defaults': value.__defaults__,
+                'closure': value.__closure__
+            }
+        elif isinstance(value, dict):
+            temp_dict[key] = __serialize_locals_dict(value)
+        elif isinstance(value, list):
+            temp_dict[key] = [__serialize_item(v) for v in value]
+        elif isinstance(value, (str, int, float, bool)):
+            temp_dict[key] = value
+        elif isinstance(value, (Content, AstNode, Message, Statement)):
+            temp_dict[key] = value
+        else:
+            try:
+                json.dumps(value)
+                temp_dict[key] = value
+            except:
+                # keep instances of tools alive until the server winds down
+                # if not isinstance(value, types.MethodType) and not isinstance(value, types.FunctionType):
+                    # self.locals_instance_state.append(InstanceState(thread_id=thread_id, locals_dict=value))
+                # actual functions can't be json serialized so we pass here
+                pass
+    return temp_dict
+
+def __serialize_item(item):
+    if isinstance(item, types.FunctionType) and item.__code__.co_filename == '<ast>':
+        code_bytes = marshal.dumps(item.__code__)
+        return {
+            'type': 'function',
+            'name': item.__name__,
+            'code': base64.b64encode(code_bytes).decode('ascii'),
+            'defaults': item.__defaults__,
+            'closure': item.__closure__
+        }
+    elif isinstance(item, (str, int, float, bool)):
+        return item
+    elif isinstance(item, (Content, AstNode, Message, Statement)):
+        return item
+    else:
+        try:
+            json.dumps(item)
+            return item
+        except:
+            # keep instances of tools alive until the server winds down
+            # if not isinstance(item, types.MethodType) and not isinstance(item, types.FunctionType):
+                # self.locals_instance_state.append(InstanceState(thread_id=thread_id, locals_dict=item))
+            # actual functions can't be json serialized so we pass here
+            pass
+
+def __deserialize_locals_dict(serialized_dict: Dict[str, Any]) -> Dict[str, Any]:
+    result = {}
+    for key, value in serialized_dict.items():
+        if isinstance(value, dict) and value.get('type') == 'function':
+            # Deserialize the function's code object
+            code_bytes = base64.b64decode(value['code'])
+            code = marshal.loads(code_bytes)
+            # Recreate the function
+            func = types.FunctionType(code, result, value['name'], value['defaults'], value['closure'])
+            result[key] = func
+        elif isinstance(value, dict):
+            result[key] = __deserialize_locals_dict(value)
+        elif isinstance(value, list):
+            result[key] = [__deserialize_item(v) for v in value]
+        else:
+            result[key] = value
+    return result
+
+def __deserialize_item(item):
+    if isinstance(item, dict) and item.get('type') == 'function':
+        code_bytes = base64.b64decode(item['code'])
+        code = marshal.loads(code_bytes)
+        return types.FunctionType(code, globals(), item['name'], item['defaults'], item['closure'])
+    return item
+
 
 
 def get_controller(controller: Optional[str] = None) -> ExecutionController:
@@ -404,6 +516,10 @@ async def tools_completions(request: SessionThread):
                 queue.put_nowait(StopNode())
                 return result
             else:
+                # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
+                locals_dict = __deserialize_locals_dict(thread.locals_dict)
+                locals_dict.update(cache_memory.get(thread.id) or {})
+
                 # todo: this is a hack
                 result, locals_dict = await controller.aexecute_continuation(
                     messages=messages,
@@ -413,10 +529,13 @@ async def tools_completions(request: SessionThread):
                     compression=compression,
                     cookies=cookies,
                     agents=cast(List[Callable], agents),
-                    locals_dict=thread.locals_dict
+                    locals_dict=locals_dict
                 )
                 queue.put_nowait(StopNode())
-                thread.locals_dict = locals_dict
+
+                # update the in-memory locals_dict with unserializable locals
+                cache_memory.set(thread.id, __get_unserializable_locals(locals_dict))
+                thread.locals_dict = __serialize_locals_dict(locals_dict)
                 return result
 
         task = asyncio.create_task(execute_and_signal())

@@ -108,6 +108,9 @@ class ChromeHelpers():
     async def url(self) -> str:
         return self.run_in_loop(self.chrome.url()).result()
 
+    async def page(self) -> Page:
+        return self.run_in_loop(self.chrome.page()).result()
+
     async def close(self) -> None:
         return self.run_in_loop(self.chrome.close()).result()
 

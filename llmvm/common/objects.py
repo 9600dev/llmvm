@@ -556,6 +556,7 @@ class BrowserContent(Content):
         sequence: List[Content],
         url: str = '',
     ):
+        # browser sequence usually ImageContent, MarkdownContent
         super().__init__(sequence, 'browser', url)
         self.sequence = sequence
 

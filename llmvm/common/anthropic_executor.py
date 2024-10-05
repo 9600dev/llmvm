@@ -10,7 +10,7 @@ from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
+from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content, Executor,
                                   FileContent, ImageContent, MarkdownContent,
                                   Message, PdfContent, System, TokenStopNode,
                                   User, awaitable_none)
@@ -399,6 +399,8 @@ class AnthropicExecutor(Executor):
                 expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
             elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
                 expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
+            elif isinstance(message, User) and isinstance(message.message, BrowserContent):
+                expanded_messages.extend(ObjectTransformers.transform_browser_content(message.message, self))
             else:
                 expanded_messages.append(message)
 

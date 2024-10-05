@@ -41,92 +41,12 @@ class ExecutionController(Controller):
         exception_limit: int = 3
     ):
         super().__init__()
-
         self.executor = executor
         self.agents = agents
         self.vector_search = vector_search
         self.edit_hook = edit_hook
         self.continuation_passing_style = continuation_passing_style
         self.exception_limit = exception_limit
-
-    def __serialize_locals_dict(self, locals_dict: Dict[str, Any]) -> Dict[str, Any]:
-        temp_dict = {}
-        for key, value in locals_dict.items():
-            if isinstance(key, str) and key.startswith('__'):
-                continue
-            elif isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
-                # Serialize the function's code object
-                code_bytes = marshal.dumps(value.__code__)
-                temp_dict[key] = {
-                    'type': 'function',
-                    'name': value.__name__,
-                    'code': base64.b64encode(code_bytes).decode('ascii'),
-                    'defaults': value.__defaults__,
-                    'closure': value.__closure__
-                }
-            elif isinstance(value, dict):
-                temp_dict[key] = self.__serialize_locals_dict(value)
-            elif isinstance(value, list):
-                temp_dict[key] = [self.__serialize_item(v) for v in value]
-            elif isinstance(value, (str, int, float, bool)):
-                temp_dict[key] = value
-            elif isinstance(value, (Content, AstNode, Message, Statement)):
-                temp_dict[key] = value
-            else:
-                try:
-                    json.dumps(value)
-                    temp_dict[key] = value
-                except:
-                    # actual functions can't be json serialized so we pass here
-                    pass
-        return temp_dict
-
-    def __serialize_item(self, item):
-        if isinstance(item, types.FunctionType) and item.__code__.co_filename == '<ast>':
-            code_bytes = marshal.dumps(item.__code__)
-            return {
-                'type': 'function',
-                'name': item.__name__,
-                'code': base64.b64encode(code_bytes).decode('ascii'),
-                'defaults': item.__defaults__,
-                'closure': item.__closure__
-            }
-        elif isinstance(item, (str, int, float, bool)):
-            return item
-        elif isinstance(item, (Content, AstNode, Message, Statement)):
-            return item
-        else:
-            try:
-                json.dumps(item)
-                return item
-            except:
-                # actual functions can't be json serialized so we pass here
-                pass
-
-    def __deserialize_locals_dict(self, serialized_dict: Dict[str, Any]) -> Dict[str, Any]:
-        result = {}
-        for key, value in serialized_dict.items():
-            if isinstance(value, dict) and value.get('type') == 'function':
-                # Deserialize the function's code object
-                code_bytes = base64.b64decode(value['code'])
-                code = marshal.loads(code_bytes)
-                # Recreate the function
-                func = types.FunctionType(code, result, value['name'], value['defaults'], value['closure'])
-                result[key] = func
-            elif isinstance(value, dict):
-                result[key] = self.__deserialize_locals_dict(value)
-            elif isinstance(value, list):
-                result[key] = [self.__deserialize_item(v) for v in value]
-            else:
-                result[key] = value
-        return result
-
-    def __deserialize_item(self, item):
-        if isinstance(item, dict) and item.get('type') == 'function':
-            code_bytes = base64.b64decode(item['code'])
-            code = marshal.loads(code_bytes)
-            return types.FunctionType(code, globals(), item['name'], item['defaults'], item['closure'])
-        return item
 
     async def __llm_call(
         self,
@@ -962,10 +882,6 @@ class ExecutionController(Controller):
         locals_dict: Dict[str, Any] = {},
     ) -> Tuple[List[Statement], Dict[str, Any]]:
 
-        # locals_dict can have functions that are just code, not callable functions
-        # so we need to deserialize them
-        locals_dict = self.__deserialize_locals_dict(locals_dict)
-
         from llmvm.server.python_runtime import PythonRuntime
         python_runtime = PythonRuntime(
             self,
@@ -1258,4 +1174,4 @@ class ExecutionController(Controller):
 
         if model: python_runtime.controller.get_executor().set_default_model(old_model)
         dedupped = Helpers.remove_duplicates(results, lambda a: a.result())
-        return list(reversed(dedupped)), self.__serialize_locals_dict(locals_dict)
+        return list(reversed(dedupped)), locals_dict
