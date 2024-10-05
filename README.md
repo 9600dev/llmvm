@@ -180,7 +180,7 @@ Ensure you have the following environment variables set:
 
 ```bash
 ANTHROPIC_API_KEY   # your Anthropic API key
-OPENAPI_API_KEY     # your Openai API key, or ...
+OPENAI_API_KEY     # your Openai API key, or ...
 GOOGLE_API_KEY      # your Gemini API key
 EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Python code before it gets executed etc.
 ```
