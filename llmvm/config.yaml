@@ -42,4 +42,6 @@ helper_functions:
   - llmvm.server.bcl.BCL.get_code_structure_summary
   - llmvm.server.bcl.BCL.get_source_code
   - llmvm.server.bcl.BCL.find_all_references
+  - llmvm.server.bcl.BCL.get_weather
+  - llmvm.server.bcl.BCL.address_lat_lon
   - llmvm.server.tools.browser.Browser

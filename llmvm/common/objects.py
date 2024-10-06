@@ -7,7 +7,7 @@ import os
 from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
-from typing import Any, Awaitable, Callable, Dict, List, Optional, TypeVar, TypedDict
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar, TypedDict
 from llmvm.common.logging_helpers import setup_logging
 
 import numpy as np
@@ -257,6 +257,12 @@ def coerce_types(a, b):
     if isinstance(b, FunctionCallMeta):
         b = b.result()
 
+    if isinstance(a, Assistant):
+        a = a.message.get_str()
+
+    if isinstance(b, Assistant):
+        b = b.message.get_str()
+
     # If either operand is a string and represents a number, convert it
     if isinstance(a, str) and is_number(a):
         a = int(a) if '.' not in a else float(a)
@@ -303,6 +309,62 @@ def coerce_types(a, b):
 
     raise TypeError(f"Cannot coerce types {type(a)} and {type(b)} to a common type")
 
+def coerce_to(a: Any, type_var: Type[T]) -> Any:
+    # Helper functions
+    def is_number(s: str) -> bool:
+        try:
+            float(s)
+            return True
+        except ValueError:
+            return False
+
+    if isinstance(a, type_var):
+        return a
+
+    if isinstance(a, FunctionCallMeta):
+        a = str(a.result())
+    if isinstance(a, User):
+        a = str(a.message.get_str())
+    if isinstance(a, Assistant):
+        a = str(a.message.get_str())
+
+    if isinstance(a, str):
+        if type_var == bool:
+            return a.lower() in ('true', 'yes', '1', 'on')
+        elif type_var in (int, float) and is_number(a):
+            return type_var(a)
+        elif type_var == dt.datetime:
+            try:
+                return dt.datetime.fromisoformat(a)
+            except ValueError:
+                pass  # If it fails, we'll raise TypeError at the end
+
+    if isinstance(a, dt.date) and type_var == dt.datetime:
+        return dt.datetime(a.year, a.month, a.day)
+
+    if isinstance(a, dt.datetime) and type_var == dt.date:
+        return dt.datetime(a.year, a.month, a.day)
+
+    if type_var == str:
+        if isinstance(a, dt.datetime):
+            return a.isoformat()
+        elif isinstance(a, dt.date):
+            return a.isoformat()
+        elif isinstance(a, list):
+            return ' '.join([str(n) for n in a])
+        elif isinstance(a, dict):
+            return ' '.join([f'{k}: {v}' for k, v in a.items()])
+        return str(a)
+
+    if type_var in (int, float, np.floating, np.number):
+        if isinstance(a, (int, float, np.number, np.floating)):
+            return type_var(a)
+
+    if type_var == bool:
+        if isinstance(a, (int, float, np.number, bool)):
+            return bool(a)
+
+    raise TypeError(f"Cannot coerce type {type(a)} to {type_var}")
 
 class TokenCompressionMethod(Enum):
     AUTO = 0
@@ -1030,10 +1092,12 @@ class PandasMeta(Call):
     def __str__(self):
         str_acc = ''
         if self.df is not None:
+            str_acc += f'info()\n'
             str_acc += f'{self.df.info()}\n\n'  # type: ignore
-            str_acc += f'{self.df.describe()()}\n\n'  # type: ignore
+            str_acc += f'describe()\n'
+            str_acc += f'{self.df.describe()}\n\n'  # type: ignore
+            str_acc += f'head()\n'
             str_acc += f'{self.df.head()}\n\n'  # type: ignore
-            str_acc += 'head()\n'
             return str_acc
         else:
             return '[]'

@@ -597,7 +597,9 @@ if __name__ == '__main__':
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
     rich.print(f'[cyan]Default executor is: {default_controller}[/cyan]')
     rich.print(f'[cyan]Default model is: {default_model}[/cyan]')
+    rich.print()
     rich.print(f'[cyan]Make sure to `playwright install`.[/cyan]')
+    rich.print(f'[cyan]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and agents.[/cyan]')
 
     for agent in agents:
         rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore

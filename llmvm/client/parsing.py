@@ -346,12 +346,6 @@ def get_path_as_messages(
                         files.append(User(MarkdownContent(file_content, url=os.path.abspath(file_path))))
                 except UnicodeDecodeError:
                     raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
-            elif result.path.endswith('.pdf'):
-                if upload:
-                    with open(file_path, 'rb') as f:
-                        files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
-                else:
-                    files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
             elif Helpers.classify_image(open(file_path, 'rb').read()) in ['image/jpeg', 'image/png', 'image/webp']:
                 if upload:
                     with open(file_path, 'rb') as f:

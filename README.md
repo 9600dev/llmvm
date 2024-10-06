@@ -44,6 +44,8 @@ Loaded agent: sample_normal
 Loaded agent: sample_binomial
 Loaded agent: sample_lognormal
 Loaded agent: sample_list
+Loaded agent: get_weather
+Loaded agent: address_lat_lon
 Loaded agent: generate_graph_image
 Loaded agent: get_code_structure_summary
 Loaded agent: get_source_code

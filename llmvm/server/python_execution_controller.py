@@ -19,7 +19,7 @@ from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import (no_indent_debug, response_writer,
                                           role_debug, setup_logging)
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
+from llmvm.common.objects import (Answer, Assistant, AstNode, BrowserContent, Content,
                                   Controller, Executor, FileContent,
                                   FunctionCall, FunctionCallMeta, ImageContent,
                                   LLMCall, MarkdownContent, Message,
@@ -389,6 +389,12 @@ class ExecutionController(Controller):
 
         elif isinstance(context, PdfContent):
             return ObjectTransformers.transform_pdf_content(context, self.executor)
+
+        elif isinstance(context, BrowserContent):
+            return ObjectTransformers.transform_browser_content(context, self.executor)
+
+        elif isinstance(context, FileContent):
+            return [User(Content(context.get_str()))]
 
         elif isinstance(context, FunctionBindable):
             return [User(Content(context._result.result()))]  # type: ignore

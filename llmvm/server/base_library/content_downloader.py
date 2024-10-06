@@ -7,6 +7,8 @@ import httpx
 import aiofiles
 
 from bs4 import BeautifulSoup
+import playwright
+import playwright.async_api
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
@@ -78,17 +80,32 @@ class WebAndContentDriver():
 
             chrome_helper = ChromeHelpers(cookies=self.cookies)
             loop = asyncio.get_event_loop()
-            task = loop.create_task(chrome_helper.get_url(download['url']))
-            result = loop.run_until_complete(task)
-            _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
-            # sometimes results can be a downloaded file (embedded pdf in the chrome browser)
-            # so we have to deal with that.
-            if os.path.exists(result) and Helpers.is_pdf(open(result, 'rb')):
-                return PdfContent(sequence=b'', url=result)
-            elif os.path.exists(result):
-                return FileContent(sequence=b'', url=result)
-            else:
-                return WebHelpers.convert_html_to_markdown(result, url=download['url'])
+            try:
+                task = loop.create_task(chrome_helper.get_url(download['url']))
+                result = loop.run_until_complete(task)
+                _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
+                # sometimes results can be a downloaded file (embedded pdf in the chrome browser)
+                # so we have to deal with that.
+                if os.path.exists(result) and Helpers.is_pdf(open(result, 'rb')):
+                    return PdfContent(sequence=b'', url=result)
+                elif os.path.exists(result):
+                    return FileContent(sequence=b'', url=result)
+                else:
+                    return WebHelpers.convert_html_to_markdown(result, url=download['url'])
+            except Exception as e:
+                logging.debug(f'WebAndContentDriver.download() exception: {e}')
+                # see if the browser is trying to download a file
+                chrome_helper = ChromeHelpers(cookies=self.cookies)
+                loop = asyncio.get_event_loop()
+                task = loop.create_task(chrome_helper.download(download['url']))
+                result = loop.run_until_complete(task)
+                _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
+                if os.path.exists(result) and Helpers.is_pdf(open(result, 'rb')):
+                    return PdfContent(sequence=b'', url=result)
+                elif os.path.exists(result):
+                    return FileContent(sequence=b'', url=result)
+                else:
+                    return WebHelpers.convert_html_to_markdown(result, url=download['url'])
 
         # else, nothing
         return Content(f'WebAndContentDriver.download: nothing found for {download["url"]}')

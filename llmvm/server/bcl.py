@@ -3,8 +3,11 @@ from __future__ import annotations
 import datetime as dt
 import io
 import os
+from urllib.parse import urlencode
+import httpx
+import json
 import numpy as np
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Tuple, Union
 
 
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -21,6 +24,55 @@ class BCL():
         Examples: BCL.datetime("2020-01-01"), BCL.datetime("now"), BCL.datetime("-1 days"), BCL.datetime("now", "Australia/Brisbane")
         """
         return Helpers.parse_relative_datetime(str(expr), timezone)
+
+    @staticmethod
+    def address_lat_lon(address: str) -> Tuple[float, float]:
+        """
+        Returns the latitude and longitude of an address as a Tuple of floats.
+        Examples: lat, lon = BCL.address_lat_lon("1600 Pennsylvania Avenue NW, Washington, DC")
+        """
+        logging.debug(f"BCL.address_lat_lon() address: {address}")
+        address = address.replace(" ", "+")
+        url = f"https://nominatim.openstreetmap.org/search?q={address}&format=json&addressdetails=1"
+        json_data = httpx.get(url).json()
+        try:
+            lat = json_data[0]["lat"]
+            lon = json_data[0]["lon"]
+            return float(lat), float(lon)
+        except Exception as ex:
+            return (0.0, 0.0)
+
+    @staticmethod
+    def get_weather(location: str) -> str:
+        """
+        Returns the weather forecast for a location as natural language string.
+        Examples: weather = BCL.get_weather("New York, NY")
+        """
+        logging.debug(f"BCL.get_weather() location: {location}")
+        lat, lon = BCL.address_lat_lon(location)
+
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": ["temperature_2m", "relative_humidity_2m", "is_day", "precipitation", "rain", "showers", "snowfall", "cloud_cover", "wind_speed_10m", "wind_direction_10m"],
+            "forecast_days": 1
+        }
+        result = httpx.post(url, data=params).json()
+
+        current_weather = result["current"]
+        str_result = f"Weather for {location}:\n"
+        str_result += f"Temperature: {current_weather['temperature_2m']} °C\n"
+        str_result += f"Relative Humidity: {current_weather['relative_humidity_2m']} %\n"
+        str_result += f"Is Day: {bool(current_weather['is_day'])}\n"
+        str_result += f"Precipitation: {current_weather['precipitation']} mm\n"
+        str_result += f"Rain: {current_weather['rain']} mm\n"
+        str_result += f"Showers: {current_weather['showers']} mm\n"
+        str_result += f"Snowfall: {current_weather['snowfall']} mm\n"
+        str_result += f"Cloud Cover: {current_weather['cloud_cover']} %\n"
+        str_result += f"Wind Speed: {current_weather['wind_speed_10m']} m/s\n"
+        str_result += f"Wind Direction: {current_weather['wind_direction_10m']} °\n"
+        return str_result
 
     @staticmethod
     def sample_list(data: list) -> Any:

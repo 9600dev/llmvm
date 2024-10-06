@@ -1,4 +1,5 @@
 import ast
+import builtins
 import traceback
 import numpy as np
 import datetime as dt
@@ -19,7 +20,7 @@ from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Answer, Assistant, Content, DownloadParams, FileContent,
                                   FunctionCallMeta, LLMCall,
                                   Message, PandasMeta,
-                                  User)
+                                  User, coerce_to)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.tools.market import MarketHelpers
@@ -118,6 +119,60 @@ class PythonRuntime:
                         return wrapper
                 raise AttributeError(f"'{self.wrapped_class.__class__.__name__}' object has no attribute '{name}'")
 
+        class float():
+            def __new__(cls, value, *args, **kwargs):
+                return builtins.float.__new__(builtins.float, coerce_to(value, builtins.float), *args, **kwargs)
+
+            def __init__(self, value):
+                self.value = coerce_to(value, builtins.float)
+
+            @classmethod
+            def __instancecheck__(cls, instance):
+                return isinstance(instance, builtins.float)
+
+            def __getattr__(self, name):
+                return getattr(self.value, name)
+
+            def __float__(self):
+                return builtins.float(self.value)
+
+            def __repr__(self):
+                    return builtins.float.__repr__(self.value)
+
+            def __str__(self):
+                return builtins.float.__str__(self.value)
+
+            @property
+            def __class__(self):
+                return builtins.float
+
+        class int(builtins.int):
+            def __new__(cls, value, *args, **kwargs):
+                return builtins.int.__new__(builtins.int, coerce_to(value, builtins.int), *args, **kwargs)
+
+            def __init__(self, value):
+                self.value = coerce_to(value, builtins.int)
+
+            @classmethod
+            def __instancecheck__(cls, instance):
+                return isinstance(instance, builtins.int)
+
+            def __getattr__(self, name):
+                return getattr(self.value, name)
+
+            def __float__(self):
+                return builtins.float(self.value)
+
+            def __repr__(self):
+                    return builtins.int.__repr__(self.value)
+
+            def __str__(self):
+                return builtins.int.__str__(self.value)
+
+            @property
+            def __class__(self):
+                return builtins.int
+
         from llmvm.server.bcl import BCL
 
         self.answers = []
@@ -154,6 +209,8 @@ class PythonRuntime:
         self.globals_dict['scipy'] = scipy
         self.globals_dict['np'] = np
         self.globals_dict['pd'] = pd
+        self.globals_dict['float'] = float
+        self.globals_dict['int'] = int
 
     @staticmethod
     def only_code_block(code: str) -> bool:
@@ -200,7 +257,7 @@ class PythonRuntime:
         return ordered_blocks
 
     def pandas_bind(self, expr) -> PandasMeta:
-        logging.debug(f'pandas_bind({expr})')
+        logging.debug(f'PythonRuntime.pandas_bind({expr})')
 
         def bind_with_llm(expr_str: str) -> PandasMeta:
             assistant = self.controller.execute_llm_call(
@@ -235,7 +292,10 @@ class PythonRuntime:
             except Exception:
                 return bind_with_llm(expr)
 
-        elif isinstance(expr, str) and '.csv' in expr:
+        elif (
+            isinstance(expr, str)
+            and ('.csv' in expr or expr.startswith('http'))
+        ):
             try:
                 result = urlparse(expr)
 
@@ -246,12 +306,19 @@ class PythonRuntime:
                     raise ValueError()
             except Exception:
                 return bind_with_llm(expr)
+
         elif isinstance(expr, list) or isinstance(expr, dict):
             df = pd.DataFrame(expr)
             return PandasMeta(expr_str=str(expr), pandas_df=df)
+
         elif isinstance(expr, FileContent):
             df = pd.read_csv(expr.url)
             return PandasMeta(expr_str=expr.url, pandas_df=df)
+
+        elif isinstance(expr, str) and os.path.exists(os.path.expanduser(expr)):
+            df = pd.read_csv(os.path.expanduser(expr))
+            return PandasMeta(expr_str=os.path.expanduser(expr), pandas_df=df)
+
         else:
             return bind_with_llm(expr)
 
