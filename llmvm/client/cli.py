@@ -318,13 +318,20 @@ class CustomCompleter(PromptCompleter):
         current_dir = os.getcwd()
         # get the files and directories recursively from the current directory
         filter_out = ['.git', '.venv', '.vscode', '.pytest_cache', '__pycache__']
-        files_and_dirs = [os.path.relpath(f, current_dir)
-                          for f in glob.glob(f'{current_dir}/**', recursive=True)
-                          if f not in filter_out]
+        def _get_filtered_files_and_dirs(current_dir, word, filter_out):
+            for root, dirs, files in os.walk(current_dir):
+                # Combine files and directories
+                entries = dirs + files
 
-        filtered_files_and_dirs = [f for f in files_and_dirs if f.startswith(word)]
+                for entry in entries:
+                    full_path = os.path.join(root, entry)
+                    rel_path = os.path.relpath(full_path, current_dir)
 
-        for completion in filtered_files_and_dirs:
+                    # Apply both filters directly
+                    if rel_path not in filter_out:
+                        if len(word) == 0 or rel_path.startswith(word):
+                            yield rel_path
+        for completion in _get_filtered_files_and_dirs(current_dir, word, filter_out):
             yield PromptCompletion(completion, start_position=-len(word))
 
 
