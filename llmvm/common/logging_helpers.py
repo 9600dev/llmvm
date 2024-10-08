@@ -162,6 +162,7 @@ def setup_logging(
     logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
     logging.getLogger('dateparser').setLevel(logging.CRITICAL)
     logging.getLogger('tesseract').setLevel(logging.CRITICAL)
+    logging.getLogger('tzlocal').setLevel(logging.CRITICAL)
 
     logger: Logger = logging.getLogger()
 

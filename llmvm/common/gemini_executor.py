@@ -98,8 +98,11 @@ class GeminiExecutor(Executor):
 
         # deal with the system message
         system_messages = [m for m in messages if m.role() == 'system']
+        system_message: Optional[System] = None
         if len(system_messages) > 1:
             logging.debug('More than one system message in the message list. Using the last one.')
+        if len(system_messages) >= 1:
+            system_message = cast(System, system_messages[-1])
 
         # the system message will be sucked out of the dictionary
         # and added to the GenerativeModel.system_instruction
@@ -118,6 +121,7 @@ class GeminiExecutor(Executor):
                 expanded_messages.append(message)
 
         messages = expanded_messages
+        if system_message: messages.insert(0, system_message)
 
         # check to see if there are more than self.max_images images in the message list
         image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
