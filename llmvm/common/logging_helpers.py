@@ -22,7 +22,14 @@ def trace(content):
 def messages_trace(messages: List[Dict[str, Any]]):
     if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
         for m in messages:
-            trace(f"<{m['role'].capitalize()}:>{m['content']}</{m['role'].capitalize()}>\n\n")
+            if 'content' in m:
+                trace(f"<{m['role'].capitalize()}:>{m['content']}</{m['role'].capitalize()}>\n\n")
+            elif 'parts' in m and isinstance(m['parts'], list) and isinstance(m['parts'][0], dict) and 'inline_data' in m['parts'][0]:
+                # ImageContent todo fix properly
+                trace(f"<{m['role'].capitalize()}:>[ImageContent()]</{m['role'].capitalize()}>\n\n")
+            elif 'parts' in m:
+                content = ' '.join(m['parts'])
+                trace(f"<{m['role'].capitalize()}:>{content}</{m['role'].capitalize()}>\n\n")
 
 
 class TimedLogger(logging.Logger):
@@ -154,6 +161,7 @@ def setup_logging(
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
     logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
     logging.getLogger('dateparser').setLevel(logging.CRITICAL)
+    logging.getLogger('tesseract').setLevel(logging.CRITICAL)
 
     logger: Logger = logging.getLogger()
 

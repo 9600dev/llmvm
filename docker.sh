@@ -1,7 +1,7 @@
 #!/bin/bash
 
-if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GOOGLE_API_KEY" ]]; then
-    echo "Error: Either OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or must be set in your environment."
+if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GEMINI_API_KEY" ]]; then
+    echo "Error: Either OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY or must be set in your environment."
     exit 1
 fi
 
@@ -15,7 +15,7 @@ OPENAI_API_KEY=${OPENAI_API_KEY:-}
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 SEC_API_KEY=${SEC_API_KEY:-}
 SERPAPI_API_KEY=${SERPAPI_API_KEY:-}
-GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+GEMINI_API_KEY=${GEMINI_API_KEY:-}
 
 CONTNAME=llmvm-container
 IMGNAME=llmvm-image
@@ -125,7 +125,7 @@ force_clean() {
 run() {
     echo "running container $CONTNAME with this command:"
     echo ""
-    echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GOOGLE_API_KEY=$GOOGLE_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME -ti -p 2222:22 -p starting -p 8011:8011 --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
+    echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GEMINI_API_KEY=$GEMINI_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME -ti -p 2222:22 -p starting -p 8011:8011 --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
     echo ""
 
     if [ ! "$(docker image ls -a | grep $IMGNAME)" ]; then
@@ -136,7 +136,7 @@ run() {
     docker run \
         -e OPENAI_API_KEY=$OPENAI_API_KEY \
         -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-        -e GOOGLE_API_KEY=$GOOGLE_API_KEY \
+        -e GEMINI_API_KEY=$GEMINI_API_KEY \
         -e SEC_API_KEY=$SEC_API_KEY \
         -e SERPAPI_API_KEY=$SERPAPI_API_KEY \
         --name $CONTNAME \
@@ -179,7 +179,7 @@ build() {
         --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
         --build-arg SEC_API_KEY=$SEC_API_KEY \
         --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY \
-        --build-arg GOOGLE_API_KEY=$GOOGLE_API_KEY \
+        --build-arg GEMINI_API_KEY=$GEMINI_API_KEY \
         -f $BUILDDIR/Dockerfile \
         --platform $PLATFORM \
         -t $IMGNAME \

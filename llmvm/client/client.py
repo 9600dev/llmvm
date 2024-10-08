@@ -182,9 +182,9 @@ class LLMVMClient():
                 raise ValueError('openai executor requested, but unable to find OpenAI API key.')
 
         elif executor_name == 'gemini':
-            if Container.get_config_variable('GOOGLE_API_KEY') or api_key:
+            if Container.get_config_variable('GEMINI_API_KEY') or api_key:
                 return GeminiExecutor(
-                    api_key=api_key or Container.get_config_variable('GOOGLE_API_KEY'),
+                    api_key=api_key or Container.get_config_variable('GEMINI_API_KEY'),
                     default_model=cast(str, model_name) if model_name else 'gemini-pro'
                 )
             else:
@@ -201,9 +201,9 @@ class LLMVMClient():
                     api_key=Container.get_config_variable('OPENAI_API_KEY'),
                     default_model='gpt-4o-2024-08-06'
                 )
-            elif Container.get_config_variable('GOOGLE_API_KEY'):
+            elif Container.get_config_variable('GEMINI_API_KEY'):
                 return GeminiExecutor(
-                    api_key=Container.get_config_variable('GOOGLE_API_KEY'),
+                    api_key=Container.get_config_variable('GEMINI_API_KEY'),
                     default_model='gemini-pro'
                 )
             raise ValueError('No API key is set for any executor in ENV. Unable to set default executor.')

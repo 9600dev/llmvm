@@ -225,7 +225,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         return anthropic_controller
     elif controller == 'gemini':
         gemini_executor = GeminiExecutor(
-            api_key=os.environ.get('GOOGLE_API_KEY', ''),
+            api_key=os.environ.get('GEMINI_API_KEY', ''),
             default_model=Container().get_config_variable('gemini_model', 'LLMVM_MODEL'),
             default_max_token_len=int(Container().get('gemini_max_tokens')),
             default_max_output_len=int(Container().get('gemini_max_output_tokens')),
