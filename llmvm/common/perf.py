@@ -182,7 +182,7 @@ class TokenPerf:
 
 
 class LoggingAsyncIterator:
-    def __init__(self, original_iterator, token_perf):
+    def __init__(self, original_iterator, token_perf: TokenPerf):
         self.original_iterator = original_iterator.__aiter__()
         self.perf = token_perf
 
@@ -204,7 +204,15 @@ class LoggingAsyncIterator:
                     self.perf.stop_reason = result.choices[0].finish_reason
                 return cast(str, result.choices[0].message.content or '')  # type: ignore
             elif isinstance(result, GeminiCompletion):
-                return cast(str, result.text or '')
+                prompt_len = result.usage_metadata.prompt_token_count
+                token_len = result.usage_metadata.total_token_count
+                if result.candidates and len(result.candidates) > 0:
+                    self.perf.stop_reason = result.candidates[0].finish_reason.name.lower()
+                if len(result.parts) == 0:
+                    # something went wrong
+                    logging.debug(result.candidates)
+                else:
+                    return cast(str, result.text or '')
             elif isinstance(result, str):
                 return result
             else:

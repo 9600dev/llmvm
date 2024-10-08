@@ -4,6 +4,8 @@ LLMVM is a CLI based productivity tool that uses Large Language Models and local
 
 It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) is currently experimental (it really really doesn't want to generate code in 'code' tags). It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
 
+> Update October 8th 2024: Gemini. Simply refuses to emit `<code></code>` tags so we've had to switch to `<helpers></helpers>` and `</helpers_result>`. Had to update the tools prompt to really really force gemini to not go out of bounds.
+
 > Update October 5th 2024: Added full Browser API to agents - LLM can click, type and navigate the browser; refactored the agent code so you can build class/instance based agents that keep state between requests (see [browser.py](https://github.com/9600dev/llmvm/blob/master/llmvm/server/tools/browser.py) as an example).
 
 > Update September 21st 2024: Added GPT o1-preview and o1-mini support, but it's not great. o1 seems to struggle to follow current prompt instructions, and really doesn't want to emit the 'code' blocks.
@@ -384,11 +386,11 @@ Let's walk through each line of the generated Python:
 ```
 Assistant: Certainly! I will download the webpage and extract the names of the people who work at Ten13
 
-<code>
+<helpers>
 var1 = download("https://ten13.vc/team")
 ```
 
-The \<code> block creates a Python runtime context and the LLMVM server will extract this code and execute it. Once the code is executed, the \<code>\</code> block is replaced with \<code_result>\</code_result> but the Python runtime context is kept alive for any further execution of \<code> blocks later.
+The \<helpers> block creates a Python runtime context and the LLMVM server will extract this code and execute it. Once the code is executed, the \<helpers>\</helpers> block is replaced with \<helpers_result>\</helpers_result> but the Python runtime context is kept alive for any further execution of \<helpers> blocks later.
 
 The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/python_runtime.py#L392C12-L392C12) function is part of a set of user definable base class libraries that the LLM knows about: download() llm_call() llm_list_bind(), llm_bind(), answer() and so on. download() fires up an instance of Chromium via [Playwright](https://playwright.dev/) to download web or PDF content and convert them to Markdown.
 
@@ -450,9 +452,9 @@ answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the us
 
 The underlying LLM programming model is as follows:
 
-Query -> Natural Language interleaved with \<code> blocks -> stop_token of \<code> -> Python environment execution of \<code> block -> replace \<code> block with the result \<code_result> of code execution -> ask the LLM to continue by passing the entire result in as an "Assistant" message which forces the LLM to continue a completion - natural language or code will continue to be written until the task is complete (repeat until stop_token='stop' or '\</complete>').
+Query -> Natural Language interleaved with \<helpers> blocks -> stop_token of \<helpers> -> Python environment execution of \<helpers> block -> replace \<helpers> block with the result \<helpers_result> of code execution -> ask the LLM to continue by passing the entire result in as an "Assistant" message which forces the LLM to continue a completion - natural language or code will continue to be written until the task is complete (repeat until stop_token='stop' or '\</complete>').
 
-The other 'nifty trick' here is that you give the LLM the ability to call itself within a \<code> block with a fresh "call stack" via the llm_call() API, allowing for arbitrary compute without forcing the LLM to interpret the previous conversational User/Assistant messages.
+The other 'nifty trick' here is that you give the LLM the ability to call itself within a \<helpers> block with a fresh "call stack" via the llm_call() API, allowing for arbitrary compute without forcing the LLM to interpret the previous conversational User/Assistant messages.
 
 ### Debugging Chromium Automation Issues
 
@@ -525,11 +527,11 @@ query>> looking at the source in ~/dev/llmvm, find the best place to add a shutd
 Assistant: Certainly! Lets examine the source code structure in the ~/dev/llmvm directory to find the best place to add a shutdown() option to
 the client that will shut down the server.
 
-<code>
+<helpers>
   source_code_files = BCL.get_code_structure_summary(["~/dev/llmvm"])
   answer(source_code_files)
-</code>
-<code_result>
+</helpers>
+<helpers_result>
 ...
 ```
 

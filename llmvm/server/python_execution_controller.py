@@ -1001,7 +1001,7 @@ class ExecutionController(Controller):
                 max_prompt_len=self.executor.max_input_tokens(),
                 completion_tokens_len=self.executor.max_output_tokens(),
                 prompt_name='',
-                stop_tokens=['</code>', '</complete>'],
+                stop_tokens=['</helpers>', '</complete>'],
                 stream_handler=stream_handler
             )
 
@@ -1012,18 +1012,24 @@ class ExecutionController(Controller):
                 compression=compression
             )
 
-            # openai doesn't return the stop token, so we should check the last message for the <code> token
+            # openai doesn't return the stop token, so we should check the last message for the <helpers> token
             if (
-                '<code>' in response.message.get_str()
+                '<helpers>' in response.message.get_str()
                 and response.stop_token == ''
-                and self.get_executor().name() == 'openai'
+                and (
+                    self.get_executor().name() == 'openai'
+                    or self.get_executor().name() == 'gemini'
+                )
             ):
-                response.stop_token = '</code>'
+                response.stop_token = '</helpers>'
 
             if (
                 response.stop_reason == 'stop'
-                and response.stop_token != '</code>'
-                and self.get_executor().name() == 'openai'
+                and response.stop_token != '</helpers>'
+                and (
+                    self.get_executor().name() == 'openai'
+                    or self.get_executor().name() == 'gemini'
+                )
             ):
                 response.stop_token = '</complete>'
 
@@ -1035,7 +1041,7 @@ class ExecutionController(Controller):
                 response.message = Content(previous_assistant.message.get_str() + ' ' + response.message.get_str())
 
             # add the stop token to the response
-            if response.stop_token and response.stop_token == '</code>':
+            if response.stop_token and response.stop_token == '</helpers>':
                 response.message = Content(response.message.get_str() + response.stop_token)
 
             # extract any code blocks the Assistant wants to run
@@ -1054,7 +1060,7 @@ class ExecutionController(Controller):
             if code_blocks and not response.stop_token == '</complete>':
                 # emit some debugging
                 code_block = '\n'.join(code_blocks)
-                write_client_stream('</code>\n')
+                write_client_stream('</helpers>\n')
                 write_client_stream('Executing code block locally.\n')
 
                 no_indent_debug(logging, '')
@@ -1137,20 +1143,20 @@ class ExecutionController(Controller):
                     # no answer() block, or last assignment was None
                     code_execution_result = f'No answer() block found in code block, or last assignment was None.'
 
-                # we have a <code_result></code_result> block, push it to the user
+                # we have a <helpers_result></helpers_result> block, push it to the user
                 if len(code_execution_result) > 300:
                     # grab the first and last 150 characters
-                    write_client_stream(f'<code_result>{code_execution_result[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result[-150:]}</code_result>\n\n')
+                    write_client_stream(f'<helpers_result>{code_execution_result[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result[-150:]}</helpers_result>\n\n')
                 else:
-                    write_client_stream(f'<code_result>{code_execution_result}</code_result>\n\n')
+                    write_client_stream(f'<helpers_result>{code_execution_result}</helpers_result>\n\n')
 
-                # update the code_execution_result to include both the <code> and <code_result> blocks
-                code_execution_result = f'<code>{code_block}</code>\n<code_result>{code_execution_result}</code_result>\n'
+                # update the code_execution_result to include both the <helpers> and <helpers_result> blocks
+                code_execution_result = f'<helpers>{code_block}</helpers>\n<helpers_result>{code_execution_result}</helpers_result>\n'
 
-                # assistant_response_str will have the original code block <code></code> in it, so we need to replace it with the answers
+                # assistant_response_str will have the original code block <helpers></helpers> in it, so we need to replace it with the answers
                 # use regex to replace the code block with the original code + answers
                 try:
-                    assistant_response_str = re.sub(r'<code>.*?</code>', code_execution_result, assistant_response_str, flags=re.DOTALL)
+                    assistant_response_str = re.sub(r'<helpers>.*?</helpers>', code_execution_result, assistant_response_str, flags=re.DOTALL)
                 except Exception as ex:
                     logging.debug(f'ExecutionController.aexecute_continuation() Error in regex replacing code block with code execution result: {ex}')
                     assistant_response_str = f'{assistant_response_str}\n\n{code_execution_result}'
@@ -1166,7 +1172,7 @@ class ExecutionController(Controller):
                 completed = True
 
             # code_blocks was filtered out, and we have a stop token, so it's trying to repeat the code again
-            elif not code_blocks and response.stop_token == '</code>':
+            elif not code_blocks and response.stop_token == '</helpers>':
                 assistant_response_str = response.message.get_str()
                 assistant_response_str += '\n\n' + "I've repeated the same code block. I should try something different and not repeat the same code again."
                 messages_copy.append(Assistant(Content(assistant_response_str)))

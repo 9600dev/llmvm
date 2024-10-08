@@ -234,20 +234,20 @@ def print_response(messages: List[Message], escape: bool = False):
                 # var1 = search("....")
                 # answer(var1)
                 # and the answer will be a tonne of markdown in the var1 string
-                # remove everything in between <code_result> and </code_result> including the code_result tag
+                # remove everything in between <helpers_result> and </helpers_result> including the code_result tag
                 # todo: I dunno about this
-                # temp_content.sequence = Helpers.outside_of(temp_content.get_str(), '<code_result>', '</code_result>')
-                # temp_content.sequence = temp_content.get_str().replace('<code_result>', '').replace('</code_result>', '')
-                code_result = Helpers.in_between(temp_content.get_str(), '<code_result>', '</code_result>')
+                # temp_content.sequence = Helpers.outside_of(temp_content.get_str(), '<helpers_result>', '</helpers_result>')
+                # temp_content.sequence = temp_content.get_str().replace('<helpers_result>', '').replace('</helpers_result>', '')
+                code_result = Helpers.in_between(temp_content.get_str(), '<helpers_result>', '</helpers_result>')
                 if len(code_result) > 10000:
-                    # using regex, replace the stuff inside of <code_result></code_result> with a 20 character summary string
-                    code_result_str = '<code_result>\n' + code_result[:300] + ' ... ' + code_result[-300:] + '\n</code_result>'
-                    temp_content.sequence = re.sub(r'<code_result>.*?</code_result>', code_result_str, temp_content.get_str(), flags=re.DOTALL)
+                    # using regex, replace the stuff inside of <helpers_result></helpers_result> with a 20 character summary string
+                    code_result_str = '<helpers_result>\n' + code_result[:300] + ' ... ' + code_result[-300:] + '\n</helpers_result>'
+                    temp_content.sequence = re.sub(r'<helpers_result>.*?</helpers_result>', code_result_str, temp_content.get_str(), flags=re.DOTALL)
                 # embed ```python around the code_result
-                if '<code>' in temp_content.get_str() and '</code>' in temp_content.get_str():
-                    temp_content.sequence = temp_content.get_str().replace('<code>', '```python\n<code>\n').replace('</code>', '\n</code>\n```')
-                if '<code_result>' in temp_content.get_str() and '</code_result>' in temp_content.get_str():
-                    temp_content.sequence = temp_content.get_str().replace('<code_result>', '```\n<code_result>\n').replace('</code_result>', '\n</code_result>\n```')
+                if '<helpers>' in temp_content.get_str() and '</helpers>' in temp_content.get_str():
+                    temp_content.sequence = temp_content.get_str().replace('<helpers>', '```python\n<helpers>\n').replace('</helpers>', '\n</helpers>\n```')
+                if '<helpers_result>' in temp_content.get_str() and '</helpers_result>' in temp_content.get_str():
+                    temp_content.sequence = temp_content.get_str().replace('<helpers_result>', '```\n<helpers_result>\n').replace('</helpers_result>', '\n</helpers_result>\n```')
             if not escape:
                 pprint('[bold cyan]Assistant[/bold cyan]: ', temp_content)
             else:

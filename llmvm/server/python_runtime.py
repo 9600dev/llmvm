@@ -216,15 +216,15 @@ class PythonRuntime:
     def only_code_block(code: str) -> bool:
         code = code.strip()
         return (
-            (code.startswith('```python') or code.startswith('<code>'))
-            and (code.endswith('```') or code.endswith('</code>'))
+            (code.startswith('```python') or code.startswith('<helpers>'))
+            and (code.endswith('```') or code.endswith('</helpers>'))
         )
 
     @staticmethod
     def get_code_blocks(code: str) -> List[str]:
         def extract_code_blocks(text):
-            # Pattern to match <code> blocks
-            code_pattern = re.compile(r'<code>(.*?)</code>', re.DOTALL)
+            # Pattern to match <helpers> blocks
+            code_pattern = re.compile(r'<helpers>(.*?)</helpers>', re.DOTALL)
             code_blocks = code_pattern.findall(text)
 
             blocks = []

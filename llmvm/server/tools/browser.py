@@ -195,15 +195,15 @@ class Browser():
         identifies the element on the page.
 
         Example:
-        <code>
+        <helpers>
         browser = Browser()
         page_content = browser.goto("https://formula1.com")
         answer(page_content)
-        </code>
+        </helpers>
         Now find the selector for the Race Results button:
-        <code>
+        <helpers>
         race_results_id = browser.get_selector("Race Results")
-        </code>
+        </helpers>
 
         :param expression: The expression of the element to click
         :return: The best matching element selector
@@ -250,16 +250,16 @@ class Browser():
         Clicks on an element that matches the textual description in expression.
 
         Example:
-        <code>
+        <helpers>
         browser = Browser()
         page_content = browser.goto("https://formula1.com")
         answer(page_content)
-        </code>
+        </helpers>
         Now clicking the Race Results button:
-        <code>
+        <helpers>
         race_results_content = browser.click_on("Race Results button")
         answer(race_results_content)
-        </code>
+        </helpers>
 
         :param expression: The natural language description of the element to click
         :return: The current state of the browser
@@ -298,17 +298,17 @@ class Browser():
         Clicks on the element specified by the selector. Selectors are ids of elements on the page.
 
         Example:
-        <code>
+        <helpers>
         browser = Browser()
         page_content = browser.goto("https://google.com")
         selector_id = browser.get_selector("What is the id of the search button?")
         answer(selector_id)
-        </code>
+        </helpers>
         Now clicking the button:
-        <code>
+        <helpers>
         click_result = browser.click(selector_id)
         answer(click_result)
-        </code>
+        </helpers>
 
         :param selector: The selector of the element to click
         :type selector: str
@@ -328,17 +328,17 @@ class Browser():
 
         Example:
         User: search on google for "vegemite"
-        <code>
+        <helpers>
         browser = Browser()
         page_content = browser.goto("https://google.com")
         selector_id = browser.get_selector("What is the id of the search box?")
         answer(selector_id)
-        </code>
+        </helpers>
         Now typing into the search box and hit enter to search:
-        <code>
+        <helpers>
         type_into_result = browser.type_into(selector_id, "vegemite", hit_enter=True)
         answer(type_into_result)
-        </code>
+        </helpers>
 
         :param selector: The selector of the element to insert text into
         :type selector: str
