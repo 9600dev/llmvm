@@ -1,6 +1,8 @@
 import ast
 from typing import Any, List, Optional
 
+from llmvm.common.helpers import Helpers
+
 
 class Source:
     class Callsite:
@@ -62,7 +64,7 @@ class Source:
         with open(self.file_path, 'r') as file:
             source_code = file.read()
             try:
-                ast_tree = ast.parse(source_code)
+                ast_tree = ast.parse(Helpers.escape_newlines_in_strings(source_code))
             except Exception as ex:
                 return source_code, None
             return source_code, ast_tree

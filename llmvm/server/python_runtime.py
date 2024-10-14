@@ -294,6 +294,20 @@ class PythonRuntime:
 
         elif (
             isinstance(expr, str)
+            and (
+                expr.startswith('gsheet://') or expr.startswith('https://docs.google.com/spreadsheets/')
+            )
+        ):
+            import gspread
+            from gspread_dataframe import get_as_dataframe
+            gp = gspread.oauth()  # type: ignore
+            spreadsheet = gp.open_by_url(expr)
+            ws = spreadsheet.get_worksheet(0)
+            df = get_as_dataframe(ws, drop_empty_rows=True, drop_empty_columns=True)
+            return PandasMeta(expr_str=expr, pandas_df=df)
+
+        elif (
+            isinstance(expr, str)
             and ('.csv' in expr or expr.startswith('http'))
         ):
             try:
@@ -847,7 +861,7 @@ class PythonRuntime:
         Get's the right hand side of a variable assignment
         by walking the abstract syntax tree
         '''
-        tree = ast.parse(code)
+        tree = ast.parse(Helpers.escape_newlines_in_strings(code))
 
         assignment_node = self.__find_variable_assignment(variable_name, tree)
         if assignment_node is None:
@@ -861,7 +875,7 @@ class PythonRuntime:
         code: str,
         locals_dict: Dict[str, Any],
     ) -> Optional[Tuple[str, str]]:
-        ast_parsed_code_block = ast.parse(code)
+        ast_parsed_code_block = ast.parse(Helpers.escape_newlines_in_strings(code))
         last_stmt = ast_parsed_code_block.body[-1]
 
         # Check if it's an assignment
@@ -923,7 +937,7 @@ class PythonRuntime:
 
         # double shot try
         try:
-            _ = ast.parse(str(assistant.message))
+            _ = ast.parse(Helpers.escape_newlines_in_strings(str(assistant.message)))
             return str(assistant.message)
         except SyntaxError as ex:
             logging.debug('SyntaxError: {}'.format(ex))
@@ -967,7 +981,7 @@ class PythonRuntime:
                     return str_result
                 return tb_string
 
-            lines = python_code.split('\n')
+            lines = Helpers.split_on_newline(python_code)  # python_code.split('\n')
             python_code_with_line_numbers = '\n'.join([f'{(line_counter+1):02} {line}' for line_counter, line in enumerate(lines)])
             return f'An exception occurred while parsing or executing the following Python code in the <ast> module:\n\n{python_code_with_line_numbers}\n\nThe exception was: {extract_relevant_traceback(tb_string)}\n'
 
@@ -987,19 +1001,22 @@ class PythonRuntime:
                 return super().__setitem__(key, value)
 
         logging.debug('PythonRuntime.__compile_and_execute()')
+        python_code = Helpers.escape_newlines_in_strings(python_code)
+
         try:
             parsed_ast = ast.parse(python_code)
         except Exception as ex:
-            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while parsing: {python_code}, exception: {ex}')
+            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while parsing:\n{python_code}\n, exception: {ex}')
             raise Exception(build_exception_str(traceback.format_exc()))
 
         context = AutoGlobalDict(self.globals_dict, self.locals_dict)
 
         compilation_result = compile(parsed_ast, filename="<ast>", mode="exec")
+
         try:
             exec(compilation_result, context, context)
         except Exception as ex:
-            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while executing: {python_code}')
+            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while executing:\n{python_code}\n')
             raise Exception(build_exception_str(traceback.format_exc()))
 
         self.locals_dict = context
@@ -1009,7 +1026,7 @@ class PythonRuntime:
         self,
         python_code: str,
     ) -> Dict[Any, Any]:
-        parsed_ast = ast.parse(python_code)
+        parsed_ast = ast.parse(Helpers.escape_newlines_in_strings(python_code))
 
         # todo: this doesn't have the globals/local dictionary merging stuff like above
         for node in parsed_ast.body:

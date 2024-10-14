@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar, TypedDict
+
+import pandas as pd
 from llmvm.common.logging_helpers import setup_logging
 
 import numpy as np
@@ -1074,6 +1076,7 @@ class FunctionCallMeta(Call):
     def __format__(self, format_spec):
         return format(self._result, format_spec)
 
+
 class PandasMeta(Call):
     def __init__(
         self,
@@ -1081,7 +1084,7 @@ class PandasMeta(Call):
         pandas_df,
     ):
         self.expr_str = expr_str
-        self.df: DataFrame = pandas_df
+        self.df: pd.DataFrame = pandas_df
 
     def result(self) -> object:
         return self._result
@@ -1098,6 +1101,8 @@ class PandasMeta(Call):
             str_acc += f'{self.df.describe()}\n\n'  # type: ignore
             str_acc += f'head()\n'
             str_acc += f'{self.df.head()}\n\n'  # type: ignore
+            str_acc += '\n'
+            str_acc += f'call "to_string()" to get the entire DataFrame as a string\n'
             return str_acc
         else:
             return '[]'
@@ -1114,6 +1119,9 @@ class PandasMeta(Call):
 
     def __format__(self, format_spec):
         return format(self.pandas_df, format_spec)
+
+    def to_string(self):
+        return self.df.to_string()
 
 
 class FunctionCall(Call):

@@ -806,7 +806,7 @@ class ExecutionController(Controller):
 
                 # check to see if there is natural language in there or not
                 try:
-                    _ = ast.parse(assistant_response_str)
+                    _ = ast.parse(Helpers.escape_newlines_in_strings(assistant_response_str))
                 except SyntaxError as ex:
                     logging.debug('aexecute() SyntaxError: {}'.format(ex))
                     assistant_response_str = python_runtime.compile_error(
@@ -1066,7 +1066,7 @@ class ExecutionController(Controller):
                 no_indent_debug(logging, '')
                 no_indent_debug(logging, '** [bold yellow]Python Abstract Syntax Tree:[/bold yellow] **')
                 # debug out AST
-                lines = code_block.split('\n')
+                lines = Helpers.split_on_newline(Helpers.escape_newlines_in_strings(code_block))  # code_block.split('\n')
                 line_counter = 1
                 for line in lines:
                     line = line.replace('[', '\\[')
@@ -1079,7 +1079,7 @@ class ExecutionController(Controller):
 
                 # make sure the code block is valid and syntactically correct Python
                 try:
-                    _ = ast.parse(code_block)
+                    _ = ast.parse(Helpers.escape_newlines_in_strings(code_block))
                 except SyntaxError as ex:
                     logging.debug('aexecute() SyntaxError trying to parse code block: {}'.format(ex))
                     code_block = python_runtime.compile_error(

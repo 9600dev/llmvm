@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import tokenize
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
@@ -60,6 +61,70 @@ def write_client_stream(obj):
 
 
 class Helpers():
+    @staticmethod
+    def split_on_newline(text):
+        return re.split(r'(?<!\\)\n', text)
+
+    @staticmethod
+    def escape_newlines_in_strings(code):
+        result = []
+        i = 0
+        n = len(code)
+        in_string = False
+        in_comment = False
+        string_quote = ''
+        while i < n:
+            c = code[i]
+            if not in_string and not in_comment:
+                if c == '#':
+                    # Start of a comment
+                    in_comment = True
+                    result.append(c)
+                    i += 1
+                elif c in ('"', "'"):
+                    # Start of a string
+                    # Check for triple quotes
+                    if i + 2 < n and code[i:i+3] == c * 3:
+                        string_quote = c * 3
+                        in_string = True
+                        result.append(string_quote)
+                        i += 3
+                    else:
+                        string_quote = c
+                        in_string = True
+                        result.append(c)
+                        i += 1
+                else:
+                    # Regular character
+                    result.append(c)
+                    i += 1
+            elif in_string:
+                if c == '\\':
+                    # Escape character, include next character as is
+                    result.append(code[i:i+2])
+                    i += 2
+                elif code[i:i+len(string_quote)] == string_quote:
+                    # End of string
+                    result.append(string_quote)
+                    i += len(string_quote)
+                    in_string = False
+                    string_quote = ''
+                else:
+                    if c == '\n':
+                        # Escape newline
+                        result.append('\\n')
+                        i += 1
+                    else:
+                        result.append(c)
+                        i += 1
+            elif in_comment:
+                if c == '\n':
+                    # End of comment
+                    in_comment = False
+                result.append(c)
+                i += 1
+        return ''.join(result)
+
     @staticmethod
     def apply_unified_diff(original_content, diff_content):
         original_lines = original_content.splitlines()
@@ -286,12 +351,12 @@ class Helpers():
     @staticmethod
     def compare_code_blocks(code1: str, code2: str):
         try:
-            tree1 = ast.parse(code1)
+            tree1 = ast.parse(Helpers.escape_newlines_in_strings(code1))
         except SyntaxError:
             return False
 
         try:
-            tree2 = ast.parse(code2)
+            tree2 = ast.parse(Helpers.escape_newlines_in_strings(code2))
         except SyntaxError:
             return False
 

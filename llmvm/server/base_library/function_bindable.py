@@ -88,7 +88,7 @@ class FunctionBindable():
         function_call: Optional[FunctionCall] = None
 
         def find_string_instantiation(target_string, source_code):
-            parsed_ast = ast.parse(source_code)
+            parsed_ast = ast.parse(Helpers.escape_newlines_in_strings(source_code))
 
             for node in ast.walk(parsed_ast):
                 # Check for direct assignment
