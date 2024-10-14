@@ -4,13 +4,13 @@ LLMVM is a CLI based productivity tool that uses Large Language Models and local
 
 It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) is currently experimental (it really really doesn't want to generate code in 'code' tags). It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
 
-> Update October 8th 2024: Gemini. Simply refuses to emit `<code></code>` tags so we've had to switch to `<helpers></helpers>` and `</helpers_result>`. Had to update the tools prompt to really really force gemini to not go out of bounds.
+> **Update October 8th 2024**: Gemini. Simply refuses to emit `<code></code>` tags so we've had to switch to `<helpers></helpers>` and `</helpers_result>`. Had to update the tools prompt to really really force gemini to not go out of bounds.
 
-> Update October 5th 2024: Added full Browser API to agents - LLM can click, type and navigate the browser; refactored the agent code so you can build class/instance based agents that keep state between requests (see [browser.py](https://github.com/9600dev/llmvm/blob/master/llmvm/server/tools/browser.py) as an example).
+> **Update October 5th 2024**: Added full Browser API to agents - LLM can click, type and navigate the browser; refactored the agent code so you can build class/instance based agents that keep state between requests (see [browser.py](https://github.com/9600dev/llmvm/blob/master/llmvm/server/tools/browser.py) as an example).
 
-> Update September 21st 2024: Added GPT o1-preview and o1-mini support, but it's not great. o1 seems to struggle to follow current prompt instructions, and really doesn't want to emit the 'code' blocks.
+> **Update September 21st 2024**: Added GPT o1-preview and o1-mini support, but it's not great. o1 seems to struggle to follow current prompt instructions, and really doesn't want to emit the 'code' blocks.
 
-> Update July 3rd 2024: I've refactored most of how LLMVM works to use "continuation passing style" execution, where queries result in query -> natural language interleaved with code -> result, rather than the old query -> code -> natural language -> result. This results in significantly better task performance, so will be the default from here.
+> **Update July 3rd 2024**: I've refactored most of how LLMVM works to use "continuation passing style" execution, where queries result in query -> natural language interleaved with code -> result, rather than the old query -> code -> natural language -> result. This results in significantly better task performance, so will be the default from here.
 
 LLMVM's features are best explored through use case examples. Let's install, then go through some:
 
@@ -27,13 +27,9 @@ $ python -m llmvm.server
 
 Default executor is: anthropic
 Default model is: claude-3-5-sonnet-20240620
+
 Make sure to `playwright install`.
-Loaded agent: click
-Loaded agent: close
-Loaded agent: find_and_click_on
-Loaded agent: get_selector
-Loaded agent: goto
-Loaded agent: type_into
+If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and agents.
 Loaded agent: datetime
 Loaded agent: search_linkedin_profile
 Loaded agent: get_linkedin_profile
@@ -46,12 +42,22 @@ Loaded agent: sample_normal
 Loaded agent: sample_binomial
 Loaded agent: sample_lognormal
 Loaded agent: sample_list
-Loaded agent: get_weather
-Loaded agent: address_lat_lon
 Loaded agent: generate_graph_image
 Loaded agent: get_code_structure_summary
 Loaded agent: get_source_code
 Loaded agent: find_all_references
+Loaded agent: get_weather
+Loaded agent: address_lat_lon
+Loaded agent: get_currency_rates
+Loaded agent: get_bitcoin_rates
+Loaded agent: get_central_bank_rates
+Loaded agent: get_tvshow_ratings_and_details
+Loaded agent: click
+Loaded agent: close
+Loaded agent: find_and_click_on
+Loaded agent: get_selector
+Loaded agent: goto
+Loaded agent: type_into
 
 INFO:     Started server process [71093]
 INFO:     Waiting for application startup.
@@ -725,6 +731,4 @@ python buffer.py -s 500 "htop -C" | sonnet "find spotify pid" | num | xargs kill
 `scripts/generate_markdown.py`: A script that will convert a PDF (any format, including image) to Markdown. It will also extract the images from the PDF and embed them in the Markdown output.
 
 `scripts/chrome-pdf.sh`: A MacOS osascript script that will create a PDF from the current Chrome tab, save it to a temporary location, and then find a running instance of the llmvm client and paste the PDF into it.
-
-
 
