@@ -599,10 +599,10 @@ if __name__ == '__main__':
     rich.print(f'[cyan]Default model is: {default_model}[/cyan]')
     rich.print()
     rich.print(f'[cyan]Make sure to `playwright install`.[/cyan]')
-    rich.print(f'[cyan]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and agents.[/cyan]')
+    rich.print(f'[cyan]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.[/cyan]')
 
     for agent in agents:
-        rich.print(f'[green]Loaded agent: {agent.__name__}[/green]')  # type: ignore
+        rich.print(f'[green]Loaded helper: {agent.__name__}[/green]')  # type: ignore
 
     # you can run this using uvicorn to get better asynchronousy, but don't count on it yet.
     # uvicorn server:app --loop asyncio --workers 4 --log-level debug --host 0.0.0.0 --port 8011
