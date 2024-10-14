@@ -1,5 +1,7 @@
 from __future__ import annotations
-
+from bs4 import BeautifulSoup
+from dataclasses import dataclass
+from typing import List
 import datetime as dt
 import io
 import os
@@ -16,6 +18,7 @@ from llmvm.server.base_library.source import Source
 
 logging = setup_logging()
 
+
 class BCL():
     @staticmethod
     def datetime(expr, timezone: Optional[str] = None) -> dt.datetime:
@@ -29,7 +32,7 @@ class BCL():
     def address_lat_lon(address: str) -> Tuple[float, float]:
         """
         Returns the latitude and longitude of an address as a Tuple of floats.
-        Examples: lat, lon = BCL.address_lat_lon("1600 Pennsylvania Avenue NW, Washington, DC")
+        Examples: lat, lon = BCL.address_lat_lon(address="1600 Pennsylvania Avenue NW, Washington, DC")
         """
         logging.debug(f"BCL.address_lat_lon() address: {address}")
         address = address.replace(" ", "+")
@@ -43,10 +46,94 @@ class BCL():
             return (0.0, 0.0)
 
     @staticmethod
+    def get_central_bank_rates() -> str:
+        """
+        Returns the most popular central bank interest rates as a natural language string. Dates are in American format.
+        Examples: rates = BCL.get_central_bank_rates()
+        answer(rates)
+        American Central Bank: 5.00 % as of 09-19-2024
+        ...
+        """
+        html_content = httpx.get("https://www.global-rates.com/en/interest-rates/central-banks/").content
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Find the table with central bank data
+        table = soup.find('table', class_='table')
+        if not table:
+            return 'The API errored out as it did not return any data.'
+
+        results: List[Dict] = []
+
+        # Process each row in the table body
+        for row in table.find('tbody').find_all('tr'):  # type: ignore
+            cells = row.find_all('td')
+            if len(cells) >= 6:  # Ensure we have enough cells
+                name = cells[0].find('a').text.strip()
+                rate = cells[2].div.text.strip().replace(' %', '')
+                date = cells[5].div.text.strip()
+
+                try:
+                    rate_float = float(rate)
+                    results.append({
+                        'name': name,
+                        'current_interest_rate': rate_float,
+                        'change_date': date,
+                    })
+                except ValueError:
+                    # Skip if we can't parse the rate as a float
+                    continue
+
+        if results:
+            str_result = f"Central bank interest rates:\n"
+            for result in results:
+                str_result += f"{result['name']}: {result['current_interest_rate']} %, as of {result['change_date']}\n"
+            return str_result
+        else:
+            return 'The API errored out as it did not return any data.'
+
+    @staticmethod
+    def get_currency_rates(currency_code: str) -> str:
+        """
+        Returns the most popular currency rates for a given currency code as a natural language string. Try and use at least 3 decimal places.
+        Examples: rates = BCL.get_currency_rates(currency_code="AUD")
+        answer(rates)
+        {"rates": {"CAD": 1.4375, "EUR": 0.8675, "GBP": 0.7675, "JPY": 120.0, "NZD": 1.4925, "USD": 1.1625, "CHF": 0.95, "CNY": 6.75, "HKD": 7.75}}
+        """
+        result = httpx.get(f"https://open.er-api.com/v6/latest/{currency_code}").json()
+        str_result = f"Currency rates for {currency_code}:\n"
+        str_result += str(result['rates'])
+        return str_result
+
+    @staticmethod
+    def get_bitcoin_rates() -> str:
+        """
+        Returns the most popular bitcoin rates as a natural language string. Try and use at least 3 decimal places.
+        Examples: rates = BCL.get_bitcoin_rates()
+        answer(rates)
+        """
+        result = httpx.get("https://api.coindesk.com/v1/bpi/currentprice.json").json()
+        str_result = f"Bitcoin rates:\n"
+        str_result += str(result)
+        return str_result
+
+    @staticmethod
+    def get_tvshow_ratings_and_details(tvshow_name: str) -> str:
+        """
+        Returns the ratings and details for a given TV show as a natural language string.
+        Examples: ratings = BCL.get_tvshow_ratings_and_details(tvshow_name="Breaking Bad")
+        answer(ratings)
+        """
+        tvshow_name = tvshow_name.replace(' ', '+')
+        result = httpx.get(f"https://api.tvmaze.com/search/shows?q={tvshow_name}").json()
+        str_result = f"TV show ratings and details for {tvshow_name}:\n"
+        str_result += str(result)
+        return str_result
+
+    @staticmethod
     def get_weather(location: str) -> str:
         """
         Returns the weather forecast for a location as natural language string.
-        Examples: weather = BCL.get_weather("New York, NY")
+        Examples: weather = BCL.get_weather(location="New York, NY")
         """
         logging.debug(f"BCL.get_weather() location: {location}")
         lat, lon = BCL.address_lat_lon(location)
@@ -59,7 +146,6 @@ class BCL():
             "forecast_days": 1
         }
         result = httpx.post(url, data=params).json()
-
         current_weather = result["current"]
         str_result = f"Weather for {location}:\n"
         str_result += f"Temperature: {current_weather['temperature_2m']} °C\n"

@@ -44,4 +44,8 @@ helper_functions:
   - llmvm.server.bcl.BCL.find_all_references
   - llmvm.server.bcl.BCL.get_weather
   - llmvm.server.bcl.BCL.address_lat_lon
+  - llmvm.server.bcl.BCL.get_currency_rates
+  - llmvm.server.bcl.BCL.get_bitcoin_rates
+  - llmvm.server.bcl.BCL.get_central_bank_rates
+  - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
   - llmvm.server.tools.browser.Browser
