@@ -828,6 +828,8 @@ class Helpers():
                     return 'kitty'
                 elif 'tmux' in name:
                     return 'tmux'
+                elif 'wezterm' in name:
+                    return 'wezterm'
                 # If no match, check the next parent
                 return Helpers.__find_terminal_emulator(process.parent())
             else:

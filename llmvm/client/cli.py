@@ -150,21 +150,33 @@ def call_click_message(
 
 
 def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
-    def extract_filename_and_match(markdown_block):
-        # Updated pattern to handle ```diff case correctly
-        pattern = r'```(\w+)?(?:\s+(?:Filename:\s*)?([^\s\n]+\.[^\s\n]+))?'
-        match = re.search(pattern, markdown_block)
-        if match:
-            language = match.group(1) or ''
-            filename = match.group(2) or ''
-            full_match = match.group(0)  # The entire matched string
+    def extract_filename_and_match(text):
+        # Check if text contains both opening and closing ```
+        if not (text.strip().startswith('```') and '```' in text.strip()[3:]):
+            return None, None
 
-            # Don't return a filename for ```diff with no specified filename
-            if language.lower() == 'diff' and not filename:
-                return '', full_match
+        # Get the first line (opening block)
+        first_line = text.strip().split('\n')[0]
 
-            return filename, full_match
-        return '', None
+        # Remove leading ```
+        if len(first_line) <= 3:
+            return None, None
+
+        # Get everything after the ```
+        content = first_line[3:].strip()
+
+        # Split by whitespace (in case there's a filename)
+        parts = content.split()
+
+        # If it's just a language with no filename
+        if len(parts) == 1:
+            return parts[0], None
+
+        # If there's a language and filename
+        elif len(parts) >= 2:
+            return parts[0], parts[1]
+
+        return None, None
 
     def extract_diff_info(markdown_block):
         # Pattern for the entire diff block
@@ -273,27 +285,28 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
             message_str = Helpers.after_end(message_str, '```diff', '```')
             continue
 
-        if extract_filename_and_match(message_str)[0]:
-            filename, _ = extract_filename_and_match(message_str)
+        if extract_filename_and_match(message_str)[1]:
+            language, filename = extract_filename_and_match(message_str)
             answer = 'n' if prompt else 'y'
-            if os.path.exists(filename) and prompt:
+            if prompt and filename and os.path.exists(filename):
                 rich.print(f'File {filename} already exists. Overwrite (y/n)? ', end='')
                 answer = input()
                 if answer == 'n':
                     message_str = Helpers.after_end(message_str, '```', '```')
                     continue
 
-            if prompt and filename and not os.path.exists(filename):
+            elif prompt and filename and not os.path.exists(filename):
                 rich.print(f'File {filename} does not exist. Create (y/n)? ', end='')
                 answer = input()
                 if answer == 'n':
                     message_str = Helpers.after_end(message_str, '```', '```')
                     continue
+
             elif not prompt and filename and not os.path.exists(filename):
                 answer = 'y'
                 rich.print(f'File {filename} does not exist. Creating.')
 
-            if not filename and prompt:
+            elif prompt and not filename:
                 rich.print(f'No filename for diff specified by LLM. Filename? ', end='')
                 filename = input()
                 answer = 'y'

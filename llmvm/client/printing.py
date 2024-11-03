@@ -124,6 +124,34 @@ class StreamPrinter():
                     process.wait()
                     # Now cat the temporary file to stderr
                     subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
+
+                elif (
+                    Helpers.is_emulator('wezterm')
+                    and (
+                        shutil.which('wezterm')
+                    )
+                    or (
+                        Helpers.is_emulator('tmux')
+                        and (
+                            shutil.which('wezterm')
+                        )
+                        and Helpers.is_running('wezterm')
+                    )
+                ):
+                    cmd_path = shutil.which('wezterm')
+                    if not cmd_path:
+                        logging.debug('wezterm not found')
+                        return
+
+                    process = subprocess.Popen(
+                        [cmd_path, 'imgcat'],
+                        stdin=subprocess.PIPE,
+                        stdout=temp_file
+                    )
+                    process.communicate(input=image_bytes)
+                    process.wait()
+                    # Now cat the temporary file to stderr
+                    subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
                 elif (
                     shutil.which('viu')
                 ):

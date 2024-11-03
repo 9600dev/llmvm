@@ -643,11 +643,11 @@ class MarkdownContent(Content):
     def __str__(self):
         return f'MarkdownContent({self.url})'
 
-    def get_str(self) -> str:
-        return str(self.sequence)
-
     def __repr__(self):
         return f'MarkdownContent({self.url.__str__()} sequence: {self.sequence})'
+
+    def get_str(self) -> str:
+        return str(self.sequence)
 
 
 class PdfContent(Content):
@@ -667,8 +667,7 @@ class PdfContent(Content):
 
     def get_str(self) -> str:
         logging.debug('PdfContent.get_str() called, [PdfContent] string returned')
-        return str(self)
-        # raise NotImplementedError('PdfContent.get_str() not implemented')
+        return self.__str__()
 
 
 class FileContent(Content):
@@ -692,7 +691,8 @@ class FileContent(Content):
     def get_str(self):
         if self.is_local():
             with open(self.url, 'r') as f:
-                return f.read()
+                # return f.read()
+                return f"<file url={self.url}>\n{f.read()}\n</file>"
         else:
             return self.sequence
 

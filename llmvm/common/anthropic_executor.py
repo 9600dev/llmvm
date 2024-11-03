@@ -123,7 +123,7 @@ class AnthropicExecutor(Executor):
         # as those functions will return multiple messages
         def wrap_message(index: int, content: Content) -> str:
             if isinstance(content, FileContent):
-                return f"<file url={content.url}>{content.get_str()}</file>"
+                return f"{content.get_str()}"
             elif isinstance(content, PdfContent):
                 # return f"<pdf url={content.url}>{content.get_str()}</pdf>"
                 return f"<pdf url={content.url}>{ObjectTransformers.transform_pdf_content(content, self)}</pdf>"
