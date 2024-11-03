@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import fnmatch
 import glob
 import io
 import os
@@ -313,25 +314,51 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
 
 
 class CustomCompleter(PromptCompleter):
+    def get_path_before_cursor(self, document) -> str:
+            """
+            Custom method to get the full path before cursor, including slashes
+            """
+            # Get text before cursor
+            text_before_cursor = document.text_before_cursor
+
+            # Find the last space or start of line
+            last_space = text_before_cursor.rfind(' ')
+            if last_space == -1:
+                return text_before_cursor
+
+            return text_before_cursor[last_space + 1:]
+
     def get_completions(self, document, complete_event):
-        # Your logic to compute completions
-        word = document.get_word_before_cursor()
+        # get the filename/path before the cursor
+        word = self.get_path_before_cursor(document)
+
         current_dir = os.getcwd()
         # get the files and directories recursively from the current directory
         filter_out = ['.git', '.venv', '.vscode', '.pytest_cache', '__pycache__']
         def _get_filtered_files_and_dirs(current_dir, word, filter_out):
-            for root, dirs, files in os.walk(current_dir):
-                # Combine files and directories
-                entries = dirs + files
+            try:
+                entries = os.listdir(current_dir)
+            except Exception as ex:
+                entries = []
 
-                for entry in entries:
-                    full_path = os.path.join(root, entry)
-                    rel_path = os.path.relpath(full_path, current_dir)
+            for entry in entries:
+                if any(fnmatch.fnmatch(entry, pattern) for pattern in filter_out):
+                    continue
 
-                    # Apply both filters directly
-                    if rel_path not in filter_out:
-                        if len(word) == 0 or rel_path.startswith(word):
-                            yield rel_path
+                full_path = os.path.join(current_dir, entry)
+
+                if len(word) == 0 or entry.startswith(word):
+                    yield entry
+
+                # if it's a directory also yield its immediate contents with directory prefix
+                if os.path.isdir(full_path) and not os.path.islink(full_path):
+                    for subentry in os.listdir(full_path):
+                        if any(fnmatch.fnmatch(subentry, pattern) for pattern in filter_out):
+                            continue
+
+                        if len(word) == 0 or os.path.join(entry, subentry).startswith(word):
+                            yield os.path.join(entry, subentry)
+
         for completion in _get_filtered_files_and_dirs(current_dir, word, filter_out):
             yield PromptCompletion(completion, start_position=-len(word))
 
