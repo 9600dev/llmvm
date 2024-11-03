@@ -62,6 +62,47 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def keep_last_browser_content(text):
+        # Pattern to match <helpers_result> blocks
+        pattern = r'(<helpers_result>(.*?)</helpers_result>)'
+
+        # Find all matches
+        matches = list(re.finditer(pattern, text, re.DOTALL))
+
+        if len(matches) <= 1:
+            return text
+
+        # Collect replacements for all matches except the last one
+        replacements = []
+        for match in matches[:-1]:
+            full_match = match.group(1)  # Entire <helpers_result>...</helpers_result> block
+            content = match.group(2)     # Content inside the block
+
+            # Normalize whitespace for accurate line counting
+            content_lines = content.strip().split('\n')
+
+            # Check if the block has already been processed
+            # Process only if there is more than one line or if the content differs from expected
+            if len(content_lines) > 1 or not content_lines[0].startswith('BrowserContent('):
+                # Extract the BrowserContent(...) line
+                browser_content_match = re.search(r'(BrowserContent\([^)]+\))', content)
+                if browser_content_match:
+                    browser_line = browser_content_match.group(1)
+                else:
+                    browser_line = ''  # If not found, default to empty
+
+                # Prepare the replacement
+                replacement = f"<helpers_result>{browser_line}\n</helpers_result>"
+                replacements.append((match.start(), match.end(), replacement))
+
+        # Apply replacements in reverse order to avoid position shifting
+        result = text
+        for start, end, replacement in reversed(replacements):
+            result = result[:start] + replacement + result[end:]
+
+        return result
+
+    @staticmethod
     def clean_tracking(url: str) -> str:
         patterns = [
             r'utm_[^&]*&?',

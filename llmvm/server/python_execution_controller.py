@@ -988,10 +988,21 @@ class ExecutionController(Controller):
         messages_copy.extend(copy.deepcopy(messages[0:-1]))
         messages_copy.append(messages[-1])
 
+        # todo: hack
+        browser_content_start_token = '<helpers_result>BrowserContent('
+
         # execute the continuation loop
         exception_counter = 0
         code_blocks_executed: List[str] = []
         while not completed and exception_counter <= self.exception_limit:
+            # because BrowserContent can be overly verbose, we'll only allow the last BrowserContent
+            # message to be used in the continuation loop
+            last_message_str = messages_copy[-1].message.get_str()
+            if last_message_str.count(browser_content_start_token) > 1:
+                # remove all but the last BrowserContent message
+                last_message_str = Helpers.keep_last_browser_content(last_message_str)
+                messages_copy[-1] = Assistant(Content(last_message_str))
+
             llm_call = LLMCall(
                 user_message=messages_copy[-1],
                 context_messages=messages_copy[0:-1],
@@ -1156,7 +1167,17 @@ class ExecutionController(Controller):
                 # assistant_response_str will have the original code block <helpers></helpers> in it, so we need to replace it with the answers
                 # use regex to replace the code block with the original code + answers
                 try:
-                    assistant_response_str = re.sub(r'<helpers>.*?</helpers>', code_execution_result, assistant_response_str, flags=re.DOTALL)
+                    # assistant_response_str = re.sub(r'<helpers>.*?</helpers>(?!.*<helpers>)', code_execution_result, assistant_response_str, flags=re.DOTALL)
+                    matches, count = re.subn(r'<helpers>.*?</helpers>', code_execution_result, assistant_response_str, flags=re.DOTALL)
+                    if count > 1:  # if there were multiple matches, only replace the last one
+                        # get the position of the last match
+                        last_match = list(re.finditer(r'<helpers>.*?</helpers>', assistant_response_str, flags=re.DOTALL))[-1]
+                        start, end = last_match.span()
+                        assistant_response_str = assistant_response_str[:start] + code_execution_result + assistant_response_str[end:]
+                    else:  # count == 1 or count == 0
+                        # The substitution from re.subn() is kept as is
+                        assistant_response_str = matches
+
                 except Exception as ex:
                     logging.debug(f'ExecutionController.aexecute_continuation() Error in regex replacing code block with code execution result: {ex}')
                     assistant_response_str = f'{assistant_response_str}\n\n{code_execution_result}'
