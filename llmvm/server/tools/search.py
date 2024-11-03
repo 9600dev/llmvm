@@ -166,8 +166,14 @@ class SerpAPISearcher(Searcher):
             reviews = results.get('reviews', [])
             for review in reviews:
                 if 'comment' in review and 'text' in review['comment']:
-                    name = review['user']['name']
-                    address = review['user']['address']
+                    if 'user' in review and 'name' in review['user']:
+                        name = review['user']['name']
+                    else:
+                        name = ''
+                    if 'user' in review and 'address' in review['user']:
+                        address = review['user']['address']
+                    else:
+                        address = ''
                     reviews_text.append(f"{name} from {address} had this review: {review['comment']['text']}")
 
             return {

@@ -169,13 +169,13 @@ class Browser():
         append_str = ''
         if clickable_elements:
             append_str += '\n\nClickable Elements:\n'
-            for index, element in enumerate(clickable_elements):
-                append_str += f"{index}: {element}\n"
+            for _, element in enumerate(clickable_elements):
+                append_str += f"{element}\n"
 
         if input_elements:
             append_str += '\n\nInput Elements:\n'
-            for index, element in enumerate(input_elements):
-                append_str += f"{index}: {element}\n"
+            for _, element in enumerate(input_elements):
+                append_str += f"{element}\n"
 
         markdown = WebHelpers.convert_html_to_markdown(html, url)
         markdown.sequence += '\n\n\n' + append_str  # type: ignore
@@ -200,10 +200,15 @@ class Browser():
         page_content = browser.goto("https://formula1.com")
         answer(page_content)
         </helpers>
+
         Now find the selector for the Race Results button:
+
         <helpers>
         race_results_id = browser.get_selector("Race Results")
+        answer(race_results_id)
         </helpers>
+
+        The selector_id is #race-results-button-id
 
         :param expression: The expression of the element to click
         :return: The best matching element selector
@@ -274,6 +279,9 @@ class Browser():
         At the start of the Markdown, a list of clickable elements and their selector ids are provided.
         This allows you to see what is on the current web page and either click or fill in text boxes.
         Returns the current state of the browser which you can use in an answer() call.
+        You should not try and complete the page if its returned to you. If you see BrowserContent() in a helper result
+        then you should just stop the completion and allow the user to recommend next steps.
+
         Example:
         browser = Browser()
         page_content = browser.goto("https://google.com")
@@ -296,6 +304,7 @@ class Browser():
     ) -> BrowserContent:
         """
         Clicks on the element specified by the selector. Selectors are ids of elements on the page.
+        You should wrap the result of this call in an answer() call, i.e. answer(browser.click(selector_id))
 
         Example:
         <helpers>
@@ -304,7 +313,10 @@ class Browser():
         selector_id = browser.get_selector("What is the id of the search button?")
         answer(selector_id)
         </helpers>
+
+        The selector_id is #search-button-id
         Now clicking the button:
+
         <helpers>
         click_result = browser.click(selector_id)
         answer(click_result)
@@ -325,6 +337,7 @@ class Browser():
     ) -> BrowserContent:
         """
         Inserts text into the element specified by the selector, and hits the enter key if required. Selectors are ids of elements on the page.
+        You should wrap the result of this call in an answer() call, i.e. answer(browser.type_into(selector_id, "vegemite", hit_enter=True))
 
         Example:
         User: search on google for "vegemite"
@@ -334,7 +347,10 @@ class Browser():
         selector_id = browser.get_selector("What is the id of the search box?")
         answer(selector_id)
         </helpers>
+
+        The selector_id is #search-query-box-id
         Now typing into the search box and hit enter to search:
+
         <helpers>
         type_into_result = browser.type_into(selector_id, "vegemite", hit_enter=True)
         answer(type_into_result)
@@ -350,7 +366,18 @@ class Browser():
         """
 
         logging.debug(f"Inserting {text} into {selector}")
-        element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+        try:
+            element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+        except Exception as ex:
+            logging.debug(f"Browser.type_into() Exception resolving selector {selector}: {ex}")
+            # try again with a # id selector
+            if not selector.startswith('#'):
+                selector = f'#{selector}'
+                element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+            else:
+                selector = f'{selector}[id="{selector}"]'
+                element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+
         if element_handle:
             asyncio.run(self.browser.fill(element=element_handle, value=text))
             asyncio.run(self.browser.wait(500))

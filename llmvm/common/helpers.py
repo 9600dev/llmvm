@@ -62,6 +62,37 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
+    def clean_tracking(url: str) -> str:
+        patterns = [
+            r'utm_[^&]*&?',
+            r'fbclid=[^&]*&?',
+            r'gclid=[^&]*&?',
+            r'_ga=[^&]*&?',
+        ]
+
+        cleaned_url = url
+        for pattern in patterns:
+            cleaned_url = re.sub(pattern, '', cleaned_url)
+
+        cleaned_url = re.sub(r'[?&]$', '', cleaned_url)
+        return cleaned_url
+
+    @staticmethod
+    def clean_url_params(url: str, limit: int = 50) -> str:
+        parsed_url = urlparse(url)
+
+        query_params = parsed_url.query.split('&')
+        cleaned_query_params = []
+
+        for param in query_params:
+            if len(param) <= limit:
+                cleaned_query_params.append(param)
+
+        cleaned_query = '&'.join(cleaned_query_params)
+        cleaned_url = parsed_url._replace(query=cleaned_query).geturl()
+        return cleaned_url
+
+    @staticmethod
     def split_on_newline(text):
         return re.split(r'(?<!\\)\n', text)
 

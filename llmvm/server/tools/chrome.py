@@ -4,6 +4,7 @@ import concurrent
 import concurrent.futures
 import datetime as dt
 import os
+import random
 import threading
 import tempfile
 from typing import Dict, List, Tuple, cast
@@ -16,7 +17,7 @@ import nest_asyncio
 from playwright.async_api import ElementHandle, Error, Page, async_playwright
 
 from llmvm.common.container import Container
-from llmvm.common.helpers import write_client_stream
+from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import StreamNode
 from llmvm.common.singleton import Singleton
@@ -40,7 +41,7 @@ class ClickableElementHandle():
         self.html = html
 
     def __str__(self):
-        return f'ClickableElementHandle(scope_id={self.scope_id}, id={self.id}, html={self.html})'
+        return f'clickable(id={self.id}, html={self.html})'
 
     def __repr__(self) -> str:
         return f'ClickableElementHandle(scope_id={self.scope_id}, id={self.id})'
@@ -193,6 +194,8 @@ class ChromeHelpersInternal():
             '--no-service-autorun',
             '--password-store=basic',
             '--use-mock-keychain',
+            '--enable-webgl',
+            '--enable-automation',
         ]
 
         self.cookies = cookies
@@ -253,7 +256,11 @@ class ChromeHelpersInternal():
                 args=self.args
             )
 
-        self._context = await self.browser.new_context(viewport={'width': 1920, 'height': 1080}, accept_downloads=True)  # type: ignore
+        self._context = await self.browser.new_context(  # type: ignore
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            viewport={'width': 1920, 'height': 1080},
+            accept_downloads=True
+        )
         cookie_file = Container().get('chromium_cookies', '')
         if os.path.exists(cookie_file):
             result = read_netscape_cookies(cookie_file)
@@ -262,7 +269,6 @@ class ChromeHelpersInternal():
         if self.cookies:
             await self._context.add_cookies(self.cookies)  # type: ignore
         page = await self._context.new_page()
-        await page.set_extra_http_headers({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"})
         self.is_closed = False
         return page
 
@@ -295,7 +301,9 @@ class ChromeHelpersInternal():
                     await wait_for_lambda(await self.page())
 
                 # wait some fraction of a second for some rendering
-                await self.wait(250)
+                await self.wait(200)
+                await (await self.page()).mouse.move(random.randint(1, 800), random.randint(1, 600))
+                await self.wait(50)
 
         except Error as _:
             # try new page
@@ -440,6 +448,43 @@ class ChromeHelpersInternal():
                         const clone = el.cloneNode(false);
                         return clone.outerHTML;
                     }''')
+
+            # Convert attributes to an array of {name, value} objects
+            attributes = await element.evaluate('''(el) => {
+                return Array.from(el.attributes).map(attr => ({
+                    name: attr.name,
+                    value: attr.value
+                }));
+            }''')
+
+            # if the element is an a tag
+            tag_name = await element.evaluate('(el) => el.tagName.toLowerCase()')
+            if tag_name == 'a':
+                element_html = '<a '
+                # I only want the href and title
+                for attr in attributes:
+                    if 'name' in attr and 'value' in attr and attr['name'] == 'href':
+                        cleaned_value = Helpers.clean_url_params(Helpers.clean_tracking(attr['value']), limit=50)
+                        element_html += f' href="{cleaned_value}" '
+                    elif 'name' in attr and 'value' in attr and attr['name'] == 'title':
+                        element_html += f' title="{cleaned_value}" '
+                    elif 'name' in attr and 'value' in attr and attr['name'] == 'id':
+                        element_html += f' id="{attr["value"]}" '
+
+                element_html = element_html.strip()
+                element_html += '>'
+                element_html = element_html.replace('  ', ' ')
+
+                if element_html == '<a>':
+                    continue
+            else:
+                for attr in attributes:
+                    if 'name' in attr and 'value' in attr:
+                        attr_name = attr['name']
+                        attr_value = attr['value']
+                        cleaned_value = Helpers.clean_url_params(Helpers.clean_tracking(attr_value), limit=50)
+                        element_html = element_html.replace(attr_value, cleaned_value)
+
             outer_html = await element.evaluate('(el) => el.outerHTML')
             elements.append(ClickableElementHandle(
                 element_handle=element,

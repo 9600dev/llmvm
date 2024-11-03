@@ -1024,12 +1024,12 @@ def url(
     return thread
 
 
-@cli.command('search', help='perform a search on ingested content using the LLMVM search engine.')
+@cli.command('vector_search', help='perform a search on ingested content using the LLMVM search engine.')
 @click.argument('query', type=str, required=False, default='')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-def search(
+def vector_search(
     query: str,
     endpoint: str,
 ):

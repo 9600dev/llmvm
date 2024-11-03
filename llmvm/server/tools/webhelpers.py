@@ -11,10 +11,23 @@ from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Content, DownloadParams, MarkdownContent
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.tools.search import SerpAPISearcher
+from llmvm.common.helpers import Helpers
 
 logging = setup_logging()
 
 class VerboseConverter(MarkdownConverter):
+    def chomp(self, text):
+        """
+        If the text in an inline tag like b, a, or em contains a leading or trailing
+        space, strip the string and return a space as suffix of prefix, if needed.
+        This function is used to prevent conversions like
+        <b> foo</b> => ** foo**
+        """
+        prefix = ' ' if text and text[0] == ' ' else ''
+        suffix = ' ' if text and text[-1] == ' ' else ''
+        text = text.strip()
+        return (prefix, suffix, text)
+
     def convert_script(self, el, text, convert_as_inline):
         return ''
 
@@ -26,6 +39,31 @@ class VerboseConverter(MarkdownConverter):
 
     def convert_label(self, el, text, convert_as_inline):
         return str(el)
+
+    def convert_a(self, el, text, convert_as_inline):
+        prefix, suffix, text = self.chomp(text)
+        if not text:
+            return ''
+        href = el.get('href')
+        title = el.get('title')
+
+        if href:
+            href = Helpers.clean_tracking(href)
+            href = Helpers.clean_url_params(href, limit=50)
+
+        # For the replacement see #29: text nodes underscores are escaped
+        if (self.options['autolinks']
+                and text.replace(r'\_', '_') == href
+                and not title
+                and not self.options['default_title']):
+            # Shortcut syntax
+            return '<%s>' % href
+        if self.options['default_title'] and not title:
+            title = href
+        title_part = ' "%s"' % title.replace('"', r'\"') if title else ''
+        result = '%s[%s](%s%s)%s' % (prefix, text, href, title_part, suffix) if href else text
+        return result
+
 
 class WebHelpers():
     @staticmethod
