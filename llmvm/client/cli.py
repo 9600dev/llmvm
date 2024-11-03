@@ -186,9 +186,6 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
         # Pattern for Git-style diff
         git_pattern = r'(diff\s+--git\s+(\S+)\s+\S+)'
 
-        # Updated pattern for standard patch format
-        patch_pattern = r'---\s+(?:a/)?(\S+)'
-
         # unified diff format, no patch, no git
         # @@ -1,3 +1,3 @@  # no patch, no git, just diff content
         unified_diff_pattern = r'^@@ -(\d+),(\d+) \+(\d+),(\d+) @@'
@@ -210,15 +207,6 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
             return {
                 'command': git_match.group(1),
                 'filename': git_match.group(2).split('/')[-1],
-                'diff_content': diff_content
-            }
-
-        # If not Git-style, try to match standard patch format
-        patch_match = re.search(patch_pattern, diff_content)
-        if patch_match:
-            return {
-                'command': 'patch',
-                'filename': patch_match.group(1),
                 'diff_content': diff_content
             }
 

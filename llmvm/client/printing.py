@@ -245,13 +245,17 @@ def print_response(messages: List[Message], escape: bool = False):
             console.print(escape_string(f'{prepend}{content.get_str()}'))
 
     def fire_helper(s: str):
-        if 'digraph' in s and 'edge' in s and 'node' in s:
+        if '```digraph' in s:
             # fire up graphvis.
-            graphvis_code = 'digraph' + Helpers.in_between(s, 'digraph', '}') + '}\n\n'
+            graphvis_code = Helpers.in_between(s, '```digraph', '```')
             temp_file = tempfile.NamedTemporaryFile(mode='w+')
             temp_file.write(graphvis_code)
             temp_file.flush()
-            cmd = 'dot -Tx11 {}'.format(temp_file.name)
+            # check for linux
+            if sys.platform.startswith('linux'):
+                cmd = 'dot -Tx11 {}'.format(temp_file.name)
+            elif sys.platform.startswith('darwin'):
+                cmd = 'dot -Tpdf {} | open -f -a Preview'.format(temp_file.name)
             subprocess.run(cmd, text=True, shell=True, env=os.environ)
 
     for message in messages:

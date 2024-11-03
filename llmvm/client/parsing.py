@@ -321,7 +321,9 @@ def get_path_as_messages(
             continue
 
         if result.scheme == '' or result.scheme == 'file':
-            if result.path.endswith('.pdf'):
+            if os.path.isdir(file_path):
+                continue
+            elif result.path.endswith('.pdf'):
                 if upload:
                     with open(file_path, 'rb') as f:
                         files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
