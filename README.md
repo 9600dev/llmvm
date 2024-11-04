@@ -81,7 +81,12 @@ For the best experience, turning on all logging and very thorough (but expensive
 LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-3-5-sonnet-20240620" LLMVM_PROFILING="true" python -m llmvm.client  # and llmvm.server
 ```
 
-Let's explore some use cases:
+Quick intro video here:
+
+[![llmvm walkthrough](https://img.youtube.com/vi/Bfq0eSxtOZo/0.jpg)](https://www.youtube.com/watch?v=Bfq0eSxtOZo)
+
+
+Now let's explore some use cases:
 
 ### Tool Use: Controlling the Browser
 
