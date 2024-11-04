@@ -281,6 +281,7 @@ class Browser():
         Returns the current state of the browser which you can use in an answer() call.
         You should not try and complete the page if its returned to you. If you see BrowserContent() in a helper result
         then you should just stop the completion and allow the user to recommend next steps.
+        If the page you are returning contains news, data, or other content, start with a Markdown link [Link](http://example.com)
 
         Example:
         browser = Browser()
