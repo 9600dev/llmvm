@@ -113,43 +113,6 @@ def invoke_context_wrapper(ctx):
     invoke_context = ctx
 
 
-def call_click_message(
-    user_message: Optional[str | bytes | Message],
-    id: int,
-    path: List[str],
-    context: List[str],
-    mode: str,
-    endpoint: str,
-    cookies: str,
-    executor: str,
-    model: str,
-    upload: bool = False,
-    compression: str = 'auto',
-    escape: bool = False,
-    context_messages: list[str] = []
-):
-    params = {
-        'message': user_message,
-        'id': id,
-        'path': path,
-        'context': context,
-        'upload': upload,
-        'mode': mode,
-        'endpoint': endpoint,
-        'cookies': cookies,
-        'executor': executor,
-        'model': model,
-        'compression': compression,
-        'escape': escape,
-        'context_messages': context_messages
-    }
-
-    with click.Context(message) as ctx:
-        ctx.ensure_object(dict)
-        ctx.params = {k: v for k, v in params.items() if v is not None}
-        return message.invoke(ctx)
-
-
 def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
     def extract_filename_and_match(text):
         # Check if text contains both opening and closing ```
@@ -804,7 +767,7 @@ def status(
     rich.print(asyncio.run(llmvm_client.status()))
 
 
-@cli.command('mode', help='Switch between "auto", "tool", "direct" and "code" mode.')
+@cli.command('mode', help='Switch between "auto" and "direct" mode. Direct avoids using LLMVM tools.')
 @click.argument('mode', type=str, required=False, default='')
 def mode(
     mode: str,
@@ -816,11 +779,9 @@ def mode(
         mode = mode[1:-1]
 
     if not mode:
-        if current_mode == 'auto': current_mode = 'tool'
-        elif current_mode == 'tool': current_mode = 'direct'
-        elif current_mode == 'direct': current_mode = 'code'
-        elif current_mode == 'code': current_mode = 'auto'
-    elif mode == 'auto' or mode == 'tool' or mode == 'direct' or mode == 'code':
+        if current_mode == 'auto': current_mode = 'direct'
+        elif current_mode == 'direct': current_mode = 'auto'
+    elif mode == 'auto' or mode == 'direct':
         current_mode = mode
     else:
         rich.print(f'Invalid mode: {mode}')
@@ -907,25 +868,18 @@ def cookies(
 @click.argument('actor', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to retrieve.')
-@click.option('--mode', '-o', type=click.Choice(['direct', 'auto', 'tool'], case_sensitive=False), required=False, default='direct',
-              help='mode to use "auto", "tool" or "direct". Default is "direct".')
-@click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
-              help='executor to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
-@click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
-              help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),  # type: ignore
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-@click.option('--escape', '-s', type=bool, is_flag=True, required=False, default=False)
 def act(
     actor: str,
     id: int,
-    mode: str,
-    executor: str,
-    model: str,
     endpoint: str,
-    escape: bool,
 ):
+    global thread_id
+    global last_thread
+    thread: SessionThread
+
     prompt_file = resources.files('llmvm.client') / 'awesome_prompts.csv'
     rows = []
     with open(prompt_file, 'r') as f:  # type: ignore
@@ -935,9 +889,6 @@ def act(
     column_names = rows[0]
     if actor.startswith('"') and actor.endswith('"') or actor.startswith("'") and actor.endswith("'"):
         actor = actor[1:-1]
-
-    if mode.startswith('"') and mode.endswith('"') or mode.startswith("'") and mode.endswith("'"):
-        mode = mode[1:-1]
 
     if not actor:
         from rich.console import Console
@@ -951,15 +902,56 @@ def act(
 
         console.print(table)
     else:
+        if isinstance(id, str) and id.startswith('"') and id.endswith('"'):
+            int_id = int(id[1:-1])
+        else:
+            int_id = int(id)
+
+        try:
+            llmvm_client = LLMVMClient(
+                api_endpoint=endpoint,
+                default_executor_name='openai',
+                default_model_name='',
+                api_key='',
+            )
+        except Exception as ex:
+            if int_id >=0:
+                raise ex
+            pass
+
+        # if we have a last_thread but the thread_id is 0 or -1, then we don't
+        # have a connection to the server, so we'll just use the last thread
+        if id <= 0 and 'last_thread' in globals() and last_thread:
+            thread = last_thread
+        elif id <= 0 and 'last_thread' in globals():
+            thread = SessionThread(
+                id=-1,
+                executor=last_thread.executor,
+                model=last_thread.model,
+                current_mode=last_thread.current_mode,
+                cookies=last_thread.cookies,
+            )
+        elif id <= 0:
+            thread = SessionThread(id=-1)
+        else:
+            thread = asyncio.run(llmvm_client.get_thread(int_id))
+
         prompt_result = Helpers.tfidf_similarity(actor, [row[0] + ' ' + row[1] for row in rows[1:]])
 
         rich.print()
-        rich.print('[bold green]Setting actor mode.[/bold green]')
+        rich.print('[bold green]Setting actor mode by adding the actor to the current message prompt.[/bold green]')
         rich.print()
         rich.print('Prompt: {}'.format(prompt_result))
         rich.print()
 
-        call_click_message(prompt_result, id, [], [], mode, endpoint, '', executor, model, escape)
+        thread.messages.append(MessageModel.from_message(User(Content(prompt_result))))
+        last_thread = thread
+        thread_id = last_thread.id
+        try:
+            asyncio.run(llmvm_client.set_thread(last_thread))
+        except Exception as ex:
+            pass
+        return last_thread
 
 
 @cli.command('url', help='download a url and insert the content into the message thread.')
@@ -1066,13 +1058,13 @@ def vector_search(
         console.print('\n\n')
 
 
-@cli.command('ingest', help='Ingest a file into the LLMVM search engine.')
+@cli.command('vector_ingest', help='Ingest a file into the LLMVM local vectorsearch engine.')
 @click.option('--path', '-p', callback=parse_path, required=True, multiple=True,
               help='Path to a single file, glob, or url to add to LLMVM server.')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-def ingest(
+def vector_ingest(
     path: List[str],
     endpoint: str,
 ):
@@ -1154,6 +1146,69 @@ def thread(
     return thread
 
 
+@cli.command('strip', help='Strip images, browser content and old code from the current message thread.')
+@click.option('--endpoint', '-e', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
+def strip(
+    endpoint: str,
+):
+    global thread_id
+    global last_thread
+
+    return last_thread
+
+
+@cli.command('count', help='Count tokens in messsage thread.')
+@click.option('--id', '-i', type=int, default=0, required=True, help='Thread ID')
+@click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''))
+@click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
+              help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
+@click.option('--endpoint', '-e', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
+def count(
+    id: int,
+    model: str,
+    executor: str,
+    endpoint: str,
+):
+    global thread_id
+    global last_thread
+
+    if executor:
+        if (executor.startswith('"') and executor.endswith('"')) or (executor.startswith("'") and executor.endswith("'")):
+            executor = executor[1:-1]
+
+    llmvm_client = LLMVMClient(
+        api_endpoint=endpoint,
+        default_executor_name=executor,
+        default_model_name=model,
+        api_key='',
+        throw_if_server_down=False,
+        default_stream_handler=StreamPrinter('').write
+    )
+
+    # we just need an approximation of token count here, so we'll skip the function definitions
+    system_message, tools_message = Helpers.prompts(
+        prompt_name='python_continuation_execution.prompt',
+        template={},
+        user_token='User',
+        assistant_token='Assistant',
+        append_token='',
+    )
+
+    if id <= 0:
+        count = asyncio.run(llmvm_client.count_tokens([system_message, tools_message]))
+        rich.print(count)
+        return count
+    else:
+        thread = asyncio.run(llmvm_client.get_thread(id))
+        count = asyncio.run(llmvm_client.count_tokens([system_message, tools_message] + [MessageModel.to_message(m) for m in thread.messages]))
+        rich.print(count)
+        return count
+
+
 @cli.command('messages', help='List all messages in a message thread.')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
@@ -1191,7 +1246,6 @@ def new(
     endpoint: str,
 ):
     global thread_id
-    global last_thread
     global last_thread
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
@@ -1242,7 +1296,7 @@ def new(
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
-              default='auto', help='context window compression method if the message is too large. Default is "auto".')
+              default='lifo', help='context window compression method if the message is too large. Default is "lifo" last in first out.')
 @click.option('--file-writes', type=bool, required=False, default=False, is_flag=True, help='automatically apply file writes and diffs')
 @click.option('--temperature', type=float, required=False, default=0.0, help='temperature for the call.')
 @click.option('--output_token_len', type=int, required=False, default=4096, help='maximum output tokens for the call.')

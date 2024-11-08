@@ -289,6 +289,17 @@ class LLMVMClient():
             except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
                 return {'status': f'LLMVM server not available at {self.api_endpoint}. Set endpoint using $LLMVM_ENDPOINT.'}
 
+    async def count_tokens(
+        self,
+        messages: list[Message],
+        executor: Optional[Executor] = None,
+    ) -> int:
+        if not executor:
+            executor = self.default_executor
+
+        result = await executor.count_tokens(messages, model=self.model)
+        return result
+
     async def call(
         self,
         thread: int | SessionThread,

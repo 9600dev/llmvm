@@ -204,7 +204,7 @@ class OpenAIExecutor(Executor):
             elif "gpt-4" in model:
                 return num_tokens_from_messages(messages, model="gpt-4-0613")
             else:
-                logging.error(f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens.""")  # noqa: E501
+                logging.error(f"""num_tokens_from_messages() is not implemented for model '{model}'. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens.""")  # noqa: E501
                 tokens_per_message = 3
                 tokens_per_name = 1
             num_tokens = 0

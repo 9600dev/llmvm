@@ -608,10 +608,12 @@ class ImageContent(Content):
         self.sequence = sequence
 
     def __str__(self):
-        return f'ImageContent({self.url})'
+        representation = self.url if self.url else f'{len(self.sequence)} bytes'
+        return f'ImageContent({representation})'
 
     def __repr__(self):
-        return f'ImageContent({self.url})'
+        representation = self.url if self.url else f'{len(self.sequence)} bytes'
+        return f'ImageContent({representation})'
 
 
 class BrowserContent(Content):
