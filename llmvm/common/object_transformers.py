@@ -94,7 +94,7 @@ class ObjectTransformers():
         if Container.get_config_variable('LLMVM_FULL_PROCESSING', default=False):
             return [User(content) for content in content.sequence]
         else:
-            return [User(content) for conteint in content.sequence if not isinstance(conteint, ImageContent)]
+            return [User(content) for content in content.sequence if not isinstance(content, ImageContent)]
 
     @staticmethod
     def transform_str(content: Content, executor: Executor) -> str:

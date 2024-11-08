@@ -87,6 +87,12 @@ class Browser():
 
     async def __resolve_selector(self, selector: str) -> None | ElementHandle:
         logging.debug(f"Browser.__resolve_selector() resolving {selector}")
+
+        if selector.startswith('(') and selector.endswith(')') and ',' in selector:
+            selector = selector[1:-1]
+            x, y = selector.split(',')
+            return await self.browser.get_element_at_position(int(x), int(y))
+
         try:
             async with asyncio.timeout(2):
                 if selector.startswith('<'):
@@ -113,6 +119,11 @@ class Browser():
             return self.__get_state()
 
         result = selector.strip()
+
+        if result.startswith('(') and result.endswith(')') and ',' in result:
+            result = result[1:-1]
+            x, y = result.split(',')
+            return self.mouse_move_x_y_and_click(int(x), int(y))
 
         # Check if it's a valid CSS selector
         if result.startswith('#') or result.startswith('.') or result.startswith(':'):
@@ -188,23 +199,15 @@ class Browser():
         logging.debug("Closing browser")
         asyncio.run(self.browser.close())
 
-    def get_selector(self, expression: str) -> str:
+    def find_selector_or_mouse_x_y(self, expression: str) -> str:
         """
-        Returns the best matching element selector for the expression. It can be
-        an <a href...> link (/path/link.html), a html id (#id), or any other selector that uniquely
-        identifies the element on the page.
+        Returns the best matching element selector for the expression, or the x, y coordinates for a mouse click.
+        It can be either a 1) <a href...> link (/path/link.html), 2) a html id (#id), 3) x, y coordinates for a mouse click in the format of (x,y),
+        or 4) or any other selector that uniquely identifies the element on the page.
 
-        Example:
+        Assistant:
         <helpers>
-        browser = Browser()
-        page_content = browser.goto("https://formula1.com")
-        answer(page_content)
-        </helpers>
-
-        Now find the selector for the Race Results button:
-
-        <helpers>
-        race_results_id = browser.get_selector("Race Results")
+        race_results_id = browser.find_selector_or_mouse_x_y("Race Results")
         answer(race_results_id)
         </helpers>
 
@@ -213,7 +216,6 @@ class Browser():
         :param expression: The expression of the element to click
         :return: The best matching element selector
         """
-
         PROMPT = f"""
         The previous messages contain a screenshot of a Markdown page, and a Markdown page.
         The Markdown page contains a list of clickable elements.
@@ -221,12 +223,13 @@ class Browser():
         You are also given a textual description of an element on the Markdown page at the bottom
         under "Expression".
 
-        Your task is to find the best matching element selector for the expression. It can be
-        an <a href...> link (/path/link.html), a html id (#id), or any other selector that uniquely
-        identifies the element on the page.
+        Your task is to find the best matching element selector for the expression. The selector
+        can be either 1) a <a href...> link (/path/link.html), 2) a html id (#id), 3) x, y coordinates for a mouse click, or
+        4) any other css selector that can uniquely identify the element on the page.
 
-        Return the best matching element selector as a string, and nothing else. Don't apologize.
-        Just return the best matching element selector as a string.
+        Return the best matching element selector or mouse x, y coordinate as a string, and nothing else. Don't apologize.
+        Example: "(140,200)"
+        Example: "#search-button-id"
 
         Expression: {expression}
         """
@@ -240,7 +243,7 @@ class Browser():
                 temperature=1.0,
                 max_prompt_len=self.controller.executor.max_input_tokens(),
                 completion_tokens_len=self.controller.executor.max_output_tokens(),
-                prompt_name='get_selector',
+                prompt_name='find_selector_or_mouse_x_y',
             ),
             query=expression,
             original_query=expression,
@@ -250,27 +253,32 @@ class Browser():
         result = result.message.get_str().strip()
         return result
 
-    def find_and_click_on(self, expression: str) -> BrowserContent:
+    def find_and_click_on_expression(self, expression: str) -> BrowserContent:
         """
-        Clicks on an element that matches the textual description in expression.
+        Finds and then clicks on an element that matches the natural languagedescription in expression.
 
         Example:
+        User: open formula1.com and find the latest race results
+
+        Assistant:
         <helpers>
         browser = Browser()
         page_content = browser.goto("https://formula1.com")
         answer(page_content)
         </helpers>
-        Now clicking the Race Results button:
+
+        I can see a "Race Results" button in the page. Let's click the "Race Results" button:
+
         <helpers>
-        race_results_content = browser.click_on("Race Results button")
+        race_results_content = browser.find_and_click_on_expression("Race Results button")
         answer(race_results_content)
         </helpers>
 
         :param expression: The natural language description of the element to click
         :return: The current state of the browser
         """
-        logging.debug(f'Browser.find_and_click_on({expression}')
-        result = self.get_selector(expression)
+        logging.debug(f'Browser.find_and_click_on_expression({expression}')
+        result = self.find_selector_or_mouse_x_y(expression)
         return self.__handle_navigate_expression(selector=result)
 
     def goto(self, url: str) -> BrowserContent:
@@ -282,11 +290,16 @@ class Browser():
         You should not try and complete the page if its returned to you. If you see BrowserContent() in a helper result
         then you should just stop the completion and allow the user to recommend next steps.
         If the page you are returning contains news, data, or other content, start with a Markdown link [Link](http://example.com)
+        The resolution of the page is 1920x1080 by default.
 
         Example:
+        User: open google.com
+        Assistant:
+        <helpers>
         browser = Browser()
         page_content = browser.goto("https://google.com")
         answer(page_content)
+        </helpers>
 
         :param url: The url to open in the browser
         :type url: str
@@ -299,7 +312,7 @@ class Browser():
         asyncio.run(self.browser.wait(500))
         return self.__get_state()
 
-    def click(
+    def click_selector(
         self,
         selector: str,
     ) -> BrowserContent:
@@ -311,15 +324,15 @@ class Browser():
         <helpers>
         browser = Browser()
         page_content = browser.goto("https://google.com")
-        selector_id = browser.get_selector("What is the id of the search button?")
+        selector_id = browser.find_selector_or_mouse_x_y("What is the id of the search button?")
         answer(selector_id)
         </helpers>
 
         The selector_id is #search-button-id
-        Now clicking the button:
+        Now clicking the button using click_selector:
 
         <helpers>
-        click_result = browser.click(selector_id)
+        click_result = browser.click_selector(selector_id)
         answer(click_result)
         </helpers>
 
@@ -330,30 +343,28 @@ class Browser():
         logging.debug(f"Browser.click() clicking {selector}")
         return self.__handle_navigate_expression(selector=selector)
 
-    def type_into(
+    def type_into_selector_or_mouse_x_y(
         self,
         selector: str,
         text: str,
-        hit_enter: bool = False,
+        hit_enter: bool = True,
     ) -> BrowserContent:
         """
-        Inserts text into the element specified by the selector, and hits the enter key if required. Selectors are ids of elements on the page.
-        You should wrap the result of this call in an answer() call, i.e. answer(browser.type_into(selector_id, "vegemite", hit_enter=True))
+        Inserts text into the element specified by the selector, and hits the enter key if required. Selectors are ids of elements on the page
+        or x, y coordinates for a mouse click. You should wrap the result of this call in an answer() call,
+        i.e. answer(browser.type_into(selector_id, "vegemite", hit_enter=True))
 
         Example:
         User: search on google for "vegemite"
-        <helpers>
-        browser = Browser()
-        page_content = browser.goto("https://google.com")
-        selector_id = browser.get_selector("What is the id of the search box?")
-        answer(selector_id)
-        </helpers>
 
-        The selector_id is #search-query-box-id
+        Assistant:
+        ...
+
+        selector_id is "(180,10)" for the search box
         Now typing into the search box and hit enter to search:
 
         <helpers>
-        type_into_result = browser.type_into(selector_id, "vegemite", hit_enter=True)
+        type_into_result = browser.type_into_selector_or_mouse_x_y(selector_id, "vegemite", hit_enter=True)
         answer(type_into_result)
         </helpers>
 
@@ -365,7 +376,6 @@ class Browser():
         :type hit_enter: bool
         :return: The current state of the browser
         """
-
         logging.debug(f"Inserting {text} into {selector}")
         try:
             element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
@@ -390,3 +400,34 @@ class Browser():
             logging.debug(f"Browser.type_into() Element not found for selector {selector}")
             # todo: this is wrong, we should probably return an error with the current state
             return self.__get_state()
+
+    def mouse_move_x_y_and_click(
+        self,
+        x: int,
+        y: int,
+    ) -> BrowserContent:
+        """
+        Moves the mouse to the specified coordinates and clicks the left mouse button.
+        If you encounter errors with the other Browser helper functions, you should try this one as it usually works.
+        The page is 1920x1080 by default. 0,0 is the top left corner. 1920,1080 is the bottom right corner.
+
+        User: open google travel and find accomodation in "currumbin, qld", december 15th
+
+        Assistant:
+        ... (Example browser page has the search input filled in with "currumbin, qld" and has a date selector button at x=185, y=78:)
+
+        <helpers>
+        click_result = browser.mouse_move_x_y_and_click(x=190, y=80)
+        answer(click_result)
+        </helpers>
+
+        :param x: The x coordinate of the mouse pointer.
+        :type x: int
+        :param y: The y coordinate of the mouse pointer.
+        :type y: int
+        :return: The current state of the browser
+        """
+        asyncio.run(self.browser.mouse_move_x_y_and_click(x, y))
+        asyncio.run(self.browser.wait(500))
+        return self.__get_state()
+

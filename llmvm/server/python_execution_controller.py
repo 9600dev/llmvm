@@ -1044,7 +1044,7 @@ class ExecutionController(Controller):
             ):
                 response.stop_token = '</complete>'
 
-            # we don't want two assistant messages in a row (which is what happens if you're asking
+            # Two Assistant messages in a row: we don't want two assistant messages in a row (which is what happens if you're asking
             # for a continuation), so we remove the last Assistant message and replace it with the Assistant response
             # we just got, plus the previous Assistant response.
             if isinstance(messages_copy[-1], Assistant):
@@ -1154,7 +1154,7 @@ class ExecutionController(Controller):
                     # no answer() block, or last assignment was None
                     code_execution_result = f'No answer() block found in code block, or last assignment was None.'
 
-                # we have a <helpers_result></helpers_result> block, push it to the user
+                # we have a <helpers_result></helpers_result> block, push it to the cli client
                 if len(code_execution_result) > 300:
                     # grab the first and last 150 characters
                     write_client_stream(f'<helpers_result>{code_execution_result[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result[-150:]}</helpers_result>\n\n')

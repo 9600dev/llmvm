@@ -7,7 +7,7 @@ import os
 import random
 import threading
 import tempfile
-from typing import Dict, List, Tuple, cast
+from typing import Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 import aiofiles
@@ -181,6 +181,12 @@ class ChromeHelpers():
     async def fill(self, element: ElementHandle, value: str) -> None:
         return self.run_in_loop(self.chrome.fill(element, value)).result()
 
+    async def mouse_move_x_y_and_click(self, x: int, y: int) -> None:
+        return self.run_in_loop(self.chrome.mouse_move_x_y_and_click(x, y)).result()
+
+    async def get_element_at_position(self, x: int, y: int) -> Optional[ElementHandle]:
+        return self.run_in_loop(self.chrome.get_element_at_position(x, y)).result()
+
 class ChromeHelpersInternal():
     def __init__(self, cookies: List[Dict] = []):
         self.args = [
@@ -269,6 +275,15 @@ class ChromeHelpersInternal():
         if self.cookies:
             await self._context.add_cookies(self.cookies)  # type: ignore
         page = await self._context.new_page()
+        await page.evaluate("""() => {
+                    window.mouseX = 0;
+                    window.mouseY = 0;
+
+                    document.addEventListener('mousemove', (e) => {
+                        window.mouseX = e.clientX;
+                        window.mouseY = e.clientY;
+                    });
+                }""")
         self.is_closed = False
         return page
 
@@ -335,6 +350,28 @@ class ChromeHelpersInternal():
         except asyncio.TimeoutError as ex:
             logging.debug(f'screenshot timed out with: {ex}')
             return b''
+
+    async def get_element_at_position(self, x: int, y: int) -> Optional[ElementHandle]:
+        await (await self.page()).mouse.move(x, y)
+        await self.wait(100)
+
+        # First get the current mouse coordinates using JavaScript
+        mouse_position = await (await self.page()).evaluate("""() => {
+            return {
+                x: window.mouseX || 0,
+                y: window.mouseY || 0
+            };
+        }""")
+
+        # Use evaluateHandle to get a JSHandle of the element
+        element_handle = await (await self.page()).evaluate_handle("""({ x, y }) => {
+            return document.elementFromPoint(x, y);
+        }""", mouse_position)
+
+        # Convert JSHandle to ElementHandle if it's an element
+        if element_handle.as_element() is None:
+            return None
+        return element_handle.as_element()
 
     async def get_url(self, url: str):
         await self.goto(url)
@@ -529,3 +566,7 @@ class ChromeHelpersInternal():
             return
         await element.fill(value, timeout=2000)
 
+    async def mouse_move_x_y_and_click(self, x: int, y: int) -> None:
+        logging.debug(f'ChromeHelpersInternal.mouse_move_x_y_and_click({x}, {y})')
+        await (await self.page()).mouse.move(x, y)
+        await (await self.page()).mouse.click(x, y, delay=30)

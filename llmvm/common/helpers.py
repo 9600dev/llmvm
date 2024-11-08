@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import traceback
+from bs4 import BeautifulSoup
 import dateparser
 import typing
 import tzlocal
@@ -28,6 +29,7 @@ from itertools import cycle, islice
 from logging import Logger
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlparse
+from markdownify import markdownify as md
 import zlib
 from zoneinfo import ZoneInfo
 
@@ -62,7 +64,35 @@ def write_client_stream(obj):
 
 class Helpers():
     @staticmethod
-    def keep_last_browser_content(text):
+    def markdown_to_minimal_text(markdown_content):
+        soup = BeautifulSoup(markdown_content, 'html.parser')
+
+        text = md(str(soup), heading_style="ATX")
+
+        # expressive markdown
+        if 'Clickable Elements' in text:
+            text = text[0:text.find('Clickable Elements:')]
+
+        text = re.sub(r'\n\s*\n', ' ', text)
+        text = re.sub(r'\n', ' ', text)
+        text = re.sub(r'#+\s*', '', text)  # Remove headers
+        text = re.sub(r'[*_~`]', '', text)  # Remove emphasis markers
+        text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)  # Convert links to just text
+        text = re.sub(r'!\[(.*?)\]\(.*?\)', r'\1', text)  # Convert images to just alt text
+        text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)  # Remove list markers
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)  # Remove numbered list markers
+        text = re.sub(r'\|', ' ', text)  # Remove table separators
+        text = re.sub(r'^\s*>+\s*', '', text, flags=re.MULTILINE)  # Remove blockquotes
+        text = re.sub(r'([a-zA-Z])([A-Z])', r'\1 \2', text)  # Add space between camelCase
+        text = re.sub(r'([a-zA-Z0-9])([A-Z][a-z])', r'\1 \2', text)  # Better camelCase handling
+        text = re.sub(r'\s+', ' ', text)  # Collapse multiple spaces
+        text = re.sub(r'\s*([.,!?:;])', r'\1 ', text)  # Add space after punctuation
+        text = re.sub(r'\s+([.,!?:;])\s+', r'\1 ', text)  # Clean up extra spaces around punctuation
+        text = text.strip()
+        return text
+
+    @staticmethod
+    def keep_last_browser_content(text: str, erase: bool = False) -> str:
         # Pattern to match <helpers_result> blocks
         pattern = r'(<helpers_result>(.*?)</helpers_result>)'
 
@@ -83,13 +113,20 @@ class Helpers():
 
             # Check if the block has already been processed
             # Process only if there is more than one line or if the content differs from expected
-            if len(content_lines) > 1 or not content_lines[0].startswith('BrowserContent('):
+            if (
+                len(content_lines) > 1
+                or not content_lines[0].startswith('BrowserContent(')
+                and not content_lines[0].startswith('BrowserContent(processed=true,')
+            ):
                 # Extract the BrowserContent(...) line
                 browser_content_match = re.search(r'(BrowserContent\([^)]+\))', content)
                 if browser_content_match:
-                    browser_line = browser_content_match.group(1)
+                    browser_line = browser_content_match.group(1).replace('BrowserContent(', 'BrowserContent(processed=true, ')
                 else:
                     browser_line = ''  # If not found, default to empty
+
+                if not erase:
+                    browser_line = browser_line + ' ' + Helpers.markdown_to_minimal_text(content)
 
                 # Prepare the replacement
                 replacement = f"<helpers_result>{browser_line}\n</helpers_result>"
