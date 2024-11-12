@@ -1454,7 +1454,7 @@ def message(
         temperature=temperature,
         output_token_len=output_token_len,
         stop_tokens=stop_tokens,
-        mode='tools' if not direct else 'direct',
+        mode='tools',
         compression=compression,
         cookies=cookies_list,
         stream_handler=StreamPrinter('').write,
@@ -1465,7 +1465,7 @@ def message(
         return
 
     if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
-    print_response([MessageModel.to_message(thread.messages[-1]).get_str()], escape)
+    print_response([MessageModel.to_message(thread.messages[-1])], escape)
     if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
     last_thread = thread
     thread_id = thread.id
