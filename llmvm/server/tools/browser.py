@@ -9,7 +9,7 @@ from playwright.async_api import ElementHandle, Error, Page, async_playwright, T
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (BrowserContent, Content, ImageContent, LLMCall, MarkdownContent, Message, StreamNode,
+from llmvm.common.objects import (BrowserContent, Content, ImageContent, LLMCall, MarkdownContent, Message, StreamNode, TextContent,
                                   TokenCompressionMethod, User, bcl)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime import PythonRuntime
@@ -236,8 +236,8 @@ class Browser():
 
         result = asyncio.run(self.controller.aexecute_llm_call(
             llm_call=LLMCall(
-                user_message=User(Content(PROMPT)),
-                context_messages=[User(self.current_screenshot), User(self.current_markdown)],
+                user_message=User(TextContent(PROMPT)),
+                context_messages=[User([self.current_screenshot, self.current_markdown])],
                 executor=self.controller.executor,
                 model=self.controller.executor.default_model,
                 temperature=1.0,
@@ -250,7 +250,7 @@ class Browser():
             compression=TokenCompressionMethod.AUTO,
         ))
 
-        result = result.message.get_str().strip()
+        result = result.get_str().strip()
         return result
 
     def find_and_click_on_expression(self, expression: str) -> BrowserContent:

@@ -19,7 +19,7 @@ from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Answer, Assistant, Content, DownloadParams, FileContent,
                                   FunctionCallMeta, LLMCall,
-                                  Message, PandasMeta,
+                                  Message, PandasMeta, TextContent,
                                   User, coerce_to)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
@@ -384,8 +384,8 @@ class PythonRuntime:
         logging.debug(f'search({str(expr)})')
         from llmvm.server.base_library.searcher import Searcher
 
-        if isinstance(expr, User) and isinstance(expr.message, Content):
-            expr = ObjectTransformers.transform_str(expr.message, self.controller.get_executor())
+        if isinstance(expr, User):
+            expr = ObjectTransformers.transform_content_to_string(expr.message, self.controller.get_executor(), xml_wrapper=False)
 
         searcher = Searcher(
             expr=expr,
@@ -427,7 +427,7 @@ class PythonRuntime:
             original_query=self.original_query,
         )
         logging.debug('Coercing {} to {} resulted in {}'.format(expr, type_name, str(assistant.message)))
-        write_client_stream(Content(f'Coercing {expr} to {type_name} resulted in {str(assistant.message)}\n'))
+        write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {str(assistant.message)}\n'))
 
         return self.__eval_with_error_wrapper(str(assistant.message))
 
@@ -441,7 +441,7 @@ class PythonRuntime:
         # called with llm_call([var], ...), so we need to flatten
         expr_list = Helpers.flatten(expr_list)
 
-        write_client_stream(Content(f'Calling {self.controller.get_executor().get_default_model()} with instruction: "{llm_instruction}"\n'))
+        write_client_stream(TextContent(f'Calling {self.controller.get_executor().get_default_model()} with instruction: "{llm_instruction}"\n'))
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -465,12 +465,12 @@ class PythonRuntime:
             query=llm_instruction,
             original_query=self.original_query,
         )
-        write_client_stream(Content(f'LLM returned: {str(assistant.message)}\n'))
+        write_client_stream(TextContent(f'LLM returned: {str(assistant.message)}\n'))
         return assistant
 
     def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> List[Any]:
         logging.debug(f'llm_list_bind({str(expr)[:20]}, {repr(llm_instruction)}, {count}, {list_type})')
-        context = expr.message.get_str() if isinstance(expr, Message) else str(expr)
+        context = expr.get_str() if isinstance(expr, Message) else str(expr)
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -597,7 +597,6 @@ class PythonRuntime:
         )
 
         answer = Answer(
-            conversation=self.messages_list,
             result=str(answer_assistant.message),
         )
         self.answers.append(answer)
@@ -636,10 +635,9 @@ class PythonRuntime:
         )
         # check for comments
         if "[##]" in str(answer_assistant.message):
-            answer_assistant.message = Content(str(answer_assistant.message).split("[##]")[0].strip())
+            answer_assistant.message = [TextContent(answer_assistant.get_str().split("[##]")[0].strip())]
 
         answer = Answer(
-            conversation=[],
             result=str(answer_assistant.message)
         )
         self.answers.append(answer)
@@ -651,9 +649,10 @@ class PythonRuntime:
         # if we have a list of answers, maybe just return them.
         if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
             # collapse the assistant answers and continue
+            expr = cast(list[Assistant], expr)
             last = expr[-1]
             for e in expr[0:-1]:
-                last.message = Content(f'{last.message}\n\n{e.message}')
+                last.message = [TextContent(f'{last.message}\n\n{e.message}')]
             expr = last
 
         # this typically won't be called, except when the user is passing in
@@ -661,7 +660,6 @@ class PythonRuntime:
         # (i.e. the last message is actually the input to the code)
         if not check_answer:
             answer = Answer(
-                conversation=self.messages_list,
                 result=str(expr)
             )
             self.answers.append(answer)
@@ -671,204 +669,23 @@ class PythonRuntime:
 
         # let's check the answer
         if not self.answer_error_correcting:
-            write_client_stream(Content(f'I am double checking an answer: answer("{snippet} ...")\n'))
+            write_client_stream(TextContent(f'I am double checking an answer: answer("{snippet} ...")\n'))
         else:
-            write_client_stream(Content(f'I have a new answer, double checking it: answer("{snippet} ...")\n'))
+            write_client_stream(TextContent(f'I have a new answer, double checking it: answer("{snippet} ...")\n'))
 
         # if the original query is referring to an image, it's because we were in tool mode
         # so this is a todo: hack to fix answers() so that it works for images
         if "I've just pasted you an image." in self.original_query:
             answer = Answer(
-                conversation=self.messages_list,
                 result=str(expr)
             )
             self.answers.append(answer)
             return answer
 
         # todo: hack for continuations
-        answer = Answer(conversation=self.messages_list, result=str(expr))
+        answer = Answer(result=str(expr))
         self.answers.append(answer)
         return answer
-
-        # if we have a FunctionCallMeta object, it's likely we've called a helper function
-        # and we're just keen to return that.
-        # Handing this to the LLM means that call results that are larger than the context window
-        # will end up being lost or transformed into the smaller output context window.
-        # deal with base types
-        if (
-            isinstance(expr, FunctionCallMeta)
-            or isinstance(expr, float)
-            or isinstance(expr, int)
-            or isinstance(expr, str)
-            or isinstance(expr, bool)
-            or isinstance(expr, dict)
-            or expr is None
-        ):
-            return self.__generate_primitive_answer(expr)
-
-        if self.answer_error_correcting:
-            return self.__single_shot_answer(expr)
-
-        # put the original answer on the answers stack, because we might fail to
-        # correct it, and we want to return it if we do.
-        answer = Answer(
-            conversation=self.messages_list,
-            result=str(expr)
-        )
-        self.answers.append(answer)
-
-        # todo: the 'rewriting' logic down below helps with the prettyness of
-        # the output, and we're missing that here, but this is a nice shortcut.
-        answer_assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='answer_nocontext.prompt',
-                    template={
-                        'original_query': self.original_query,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=self.statement_to_message(expr),  # type: ignore
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='answer_nocontext.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
-
-        # answer satisfies the query/task/question
-        if 'true' in str(answer_assistant.message):
-            return self.answers[-1]
-
-        # answer doesn't satisfy the query/task/question
-        elif 'false' in str(answer_assistant.message) and "[##]" in str(answer_assistant.message):
-            logging.debug(
-                f"Answer deemed unsatisfactory; comment from answer_nocontext.prompt: {answer_assistant.message}"
-            )
-
-            # add the message to answers, just in case the user wants to see it.
-            self.answers.append(Answer(
-                conversation=self.messages_list,
-                result=self.statement_to_message(expr)[-1].message  # type: ignore
-            ))
-
-            # try and perform the error correction
-            dictionary = ''
-            for key, value in self.locals_dict.items():
-                dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
-
-            rewriter_assistant = self.controller.execute_llm_call(
-                llm_call=LLMCall(
-                    user_message=Helpers.prompt_message(
-                        prompt_name='answer_regen_code_or_rewrite.prompt',
-                        template={
-                            'original_query': self.original_query,
-                            'code': self.original_code,
-                            'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
-                            'dictionary': dictionary,
-                        },
-                        user_token=self.controller.get_executor().user_token(),
-                        assistant_token=self.controller.get_executor().assistant_token(),
-                        append_token=self.controller.get_executor().append_token(),
-                    ),
-                    context_messages=self.messages_list + self.statement_to_message(expr) + [answer_assistant],
-                    executor=self.controller.get_executor(),
-                    model=self.controller.get_executor().get_default_model(),
-                    temperature=0.0,
-                    max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                    completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                    prompt_name='answer_regen_code_or_rewrite.prompt',
-                ),
-                query=self.original_query,
-                original_query=self.original_query,
-            )
-
-            # determine if the assistant has given us a new code snippet or a re-written answer
-            if PythonRuntime.get_code_blocks(rewriter_assistant.message.get_str()):
-                # re-written code
-                logging.debug(f'Answer() re-written code: {rewriter_assistant.message}')
-                re_written_code_blocks = PythonRuntime.get_code_blocks(str(rewriter_assistant.message))
-                self.setup()
-                locals_dict = self.locals_dict
-                # the re-written code will likely call answer() again, so we need to
-                # set the error_correcting flag to False to prevent it getting into
-                # a loop
-                try:
-                    for block in re_written_code_blocks:
-                        runtime = PythonRuntime(
-                            controller=self.controller,
-                            agents=self.agents,
-                            vector_search=self.vector_search,
-                            answer_error_correcting=True,
-                        )
-                        runtime.run(block, self.original_query, locals_dict=locals_dict)
-                        # we will have a new answer on the runtime.answers list
-                        self.answers.extend(runtime.answers)
-                        return self.answers[-1]
-                except Exception as ex:
-                    logging.debug(f'Error running re-written code: {ex}, returning original answer')
-                    return self.answers[-1]
-            elif rewriter_assistant.message.get_str().startswith('false'):
-                logging.debug('Answer() is unlikely correct, but nothing can be done')
-                return self.answers[-1]
-            else:
-                # LLM gave us a re-written answer, hopefully it's good:
-                new_answer = str(rewriter_assistant.message)
-                logging.debug(f'Answer() re-written answer: {new_answer}')
-                answer = Answer(
-                    conversation=self.messages_list,
-                    result=f"{answer_assistant.message.get_str()}"
-                )
-                self.answers.append(answer)
-                return answer
-        else:
-            # LLM didn't give us a clear answer, so we'll just return the original
-            # answer and hope for the best.
-            return self.answers[-1]
-
-    def __find_variable_assignment(
-        self,
-        var_name,
-        tree
-    ):
-        class AssignmentFinder(ast.NodeVisitor):
-            def __init__(self, var_name):
-                self.var_name = var_name
-                self.assignment_node = None
-
-            def visit_Assign(self, node):
-                for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id == self.var_name:
-                        self.assignment_node = node.value
-                self.generic_visit(node)
-
-        finder = AssignmentFinder(var_name)
-        finder.visit(tree)
-        return finder.assignment_node
-
-    def __get_assignment(
-        self,
-        variable_name,
-        code,
-    ) -> Optional[Tuple[ast.expr, ast.expr]]:
-        '''
-        Get's the right hand side of a variable assignment
-        by walking the abstract syntax tree
-        '''
-        tree = ast.parse(Helpers.escape_newlines_in_strings(code))
-
-        assignment_node = self.__find_variable_assignment(variable_name, tree)
-        if assignment_node is None:
-            return None
-
-        var_node = ast.Name(variable_name, ctx=ast.Load())
-        return var_node, assignment_node
 
     def get_last_assignment(
         self,
@@ -1052,7 +869,7 @@ class PythonRuntime:
         error: str,
     ) -> str:
         logging.debug(f'PythonRuntime.compile_error(): error {error}')
-        write_client_stream(Content(f'Python code failed to compile or run due to the following error or exception: {error}\n'))
+        write_client_stream(TextContent(f'Python code failed to compile or run due to the following error or exception: {error}\n'))
 
         # SyntaxError, or other more global error. We should rewrite the entire code.
         # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
@@ -1071,7 +888,7 @@ class PythonRuntime:
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=User(Content(code_prompt)),
+                user_message=User(TextContent(code_prompt)),
                 context_messages=[],
                 executor=self.controller.get_executor(),
                 model=self.controller.get_executor().get_default_model(),
@@ -1085,7 +902,7 @@ class PythonRuntime:
         )
 
         lines = str(assistant.message).split('\n')
-        write_client_stream(Content(f'Re-writing Python code\n'))
+        write_client_stream(TextContent(f'Re-writing Python code\n'))
         logging.debug('PythonRuntime.compile_error() Re-written Python code:')
         for line in lines:
             logging.debug(f'  {str(line)}')

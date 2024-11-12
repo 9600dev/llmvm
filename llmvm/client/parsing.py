@@ -6,7 +6,7 @@ import asyncio
 import requests
 import tempfile
 import urllib.parse
-from llmvm.common.objects import Content, ImageContent, MarkdownContent, MessageModel, PdfContent, FileContent, SessionThread, User, Message, Assistant, System
+from llmvm.common.objects import Content, ImageContent, MarkdownContent, MessageModel, PdfContent, FileContent, SessionThreadModel, User, Message, Assistant, System
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from typing import List, Sequence
@@ -20,7 +20,7 @@ import glob
 logging = setup_logging()
 
 
-def get_string_thread_with_roles(thread: SessionThread):
+def get_string_thread_with_roles(thread: SessionThreadModel):
     string_result = ''
     for message in [MessageModel.to_message(message) for message in thread.messages]:
         if message.role() == 'assistant':

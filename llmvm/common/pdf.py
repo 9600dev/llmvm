@@ -16,7 +16,7 @@ from pytesseract import Output
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Content, Executor, ImageContent, LLMCall,
-                                  PdfContent, StreamNode, User)
+                                  PdfContent, StreamNode, TextContent, User)
 
 logging = setup_logging()
 
@@ -39,7 +39,7 @@ class PdfHelpers():
             return PdfHelpers.parse_pdf(temp.name)
 
     @staticmethod
-    def parse_pdf_image(url_or_file: str) -> str:
+    def parse_pdf_image_to_text(url_or_file: str) -> str:
         result = urlparse(url_or_file)
 
         text_chunks: List[str] = []
@@ -80,7 +80,7 @@ class PdfHelpers():
             text_result = text_result.replace(char, ' ').strip()
 
         if text_result == '':
-            text_result = PdfHelpers.parse_pdf_image(url_or_file)
+            text_result = PdfHelpers.parse_pdf_image_to_text(url_or_file)
 
         if stream:
             write_client_stream(
@@ -110,10 +110,11 @@ class Pdf():
 
         Content: {text}
         """
+        logging.debug(f'Pdf.__check_rendering({text[:50]})')
 
         text = text[:1500]
 
-        assistant = await self.executor.aexecute([User(Content(prompt))])
+        assistant = await self.executor.aexecute([User(TextContent(prompt))])
         return 'yes' in str(assistant.message).lower()
 
     def parse_pdf(self, byte_stream: bytes, url_or_file: str) -> List[Content]:
@@ -138,7 +139,7 @@ class Pdf():
 
         if pages_count <= 0:
             # try the old way
-            return [Content(PdfHelpers.parse_pdf_image(url_or_file))]
+            return [TextContent(PdfHelpers.parse_pdf_image_to_text(url_or_file))]
 
         # determine the the space tolerance
         first_page = pdf.pages[0]
@@ -152,7 +153,7 @@ class Pdf():
                 x_tolerance -= 1
 
         if x_tolerance == 0:
-            return [Content(PdfHelpers.parse_pdf_image(url_or_file))]
+            return [TextContent(PdfHelpers.parse_pdf_image_to_text(url_or_file))]
 
         original = first_page.to_image(resolution=150, antialias=True).original
         return_image = BytesIO()
@@ -164,7 +165,7 @@ class Pdf():
             page = pdf.pages[i]
             text = page.extract_text(x_tolerance=x_tolerance)
             if text:
-                page_content.append(Content(text))
+                page_content.append(TextContent(text))
 
             images = page.images
             for img in images:

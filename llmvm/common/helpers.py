@@ -41,7 +41,7 @@ from docstring_parser import parse
 from PIL import Image
 
 from llmvm.common.objects import (Content, FunctionCall, ImageContent, MarkdownContent,
-                                  Message, StreamNode, System, User)
+                                  Message, StreamNode, SupportedMessageContent, System, TextContent, User)
 
 
 def write_client_stream(obj):
@@ -606,16 +606,16 @@ class Helpers():
         return cleaned_markdown
 
     @staticmethod
-    async def markdown_content_to_messages(
+    async def markdown_content_to_supported_content(
         logging,
         markdown_content: MarkdownContent,
         min_width: int,
         min_height: int
-    ) -> List[Content]:
+    ) -> list[SupportedMessageContent]:
         pattern = r'(.*?)!\[(?:.*?)\]\[(.*?)\]|(.+?)$'
         embedded_image_pattern = r'\[(.*?)\]:\s*<data:image/(.*?);base64,(.+)>'
         content = markdown_content.get_str()
-        content_list: List[Content] = []
+        content_list: List[SupportedMessageContent] = []
         embedded_images: Dict[str, ImageContent] = {}
 
         # First, extract embedded images
@@ -634,10 +634,10 @@ class Helpers():
         for match in re.finditer(pattern, content, re.DOTALL):
             before, image_id, after = match.groups()
             if before and before != content[last_end:match.start()] and last_end != match.start():
-                content_list.append(Content(content[last_end:match.start()]))
+                content_list.append(TextContent(content[last_end:match.start()]))
                 idx += 1
             if before:
-                content_list.append(Content(before))
+                content_list.append(TextContent(before))
                 idx += 1
             if image_id:
                 if image_id in embedded_images:
@@ -648,15 +648,15 @@ class Helpers():
                         Helpers.get_image_fuzzy_url(logging, markdown_content.url, image_id, min_width, min_height)
                     )
                     tasks.append((idx, task, image_id))
-                    content_list.append(Content())
+                    content_list.append(TextContent(''))
                 idx += 1
             if after:
-                content_list.append(Content(after))
+                content_list.append(TextContent(after))
                 idx += 1
             last_end = match.end()
 
         if last_end < len(content):
-            content_list.append(Content(content[last_end:]))
+            content_list.append(TextContent(content[last_end:]))
             idx += 1
 
         for idx, task, image_url in tasks:
@@ -671,87 +671,14 @@ class Helpers():
         for c in collapsed_content_list:
             if isinstance(c, ImageContent):
                 if current_text:
-                    combined_content_list.append(Content(current_text))
+                    combined_content_list.append(TextContent(current_text))
                     current_text = ""
                 combined_content_list.append(c)
             else:
                 current_text += c.get_str()
 
         if current_text:
-            combined_content_list.append(Content(current_text))
-
-        return combined_content_list
-
-    @staticmethod
-    async def markdown_content_to_messages_deprecated(
-        logging,
-        markdown_content: MarkdownContent,
-        min_width: int,
-        min_height: int
-    ) -> List[Content]:
-        pattern = r'(.*?)!\[(?:.*?)\]\((.*?)\)|(.+?)$'
-        chunks = []
-        tasks = []
-        last_end = 0
-        content = markdown_content.get_str()
-        content_list: List[Content] = []
-        idx = 0
-
-        for match in re.finditer(pattern, content, re.DOTALL):
-            before, url, after = match.groups()
-
-            if before and before != content[last_end:match.start()] and last_end != match.start():
-                content_list.append(Content(content[last_end:match.start()]))
-                idx += 1
-
-            if before:
-                content_list.append(Content(before + '![]('))
-                idx += 1
-
-            if url:
-                task = asyncio.create_task(
-                    Helpers.get_image_fuzzy_url(logging, markdown_content.url, url, min_width, min_height)
-                )
-                tasks.append((idx, task, url))
-                content_list.append(Content())
-                idx += 1
-
-            if after:
-                content_list.append(Content(after))
-                idx += 1
-
-            last_end = match.end()
-
-        if last_end < len(content):
-            content_list.append(Content(content[last_end:]))
-            idx += 1
-
-        for idx, task, image_url in tasks:
-            image_bytes = await task
-            if image_bytes:
-                content_list[idx] = ImageContent(image_bytes, image_url)  # type: ignore
-
-        # we're going to collapse the content list here. if there is two text items in a row, we're going to combine them
-        # first, drop all empty content
-        collapsed_content_list = [c for c in content_list if c.sequence]
-        combined_content_list = []
-        current_text = ""
-
-        for c in collapsed_content_list:
-            if not isinstance(c, ImageContent):
-                # If it's a Content instance, add its text to current_text
-                current_text += c.get_str()
-            else:
-                # If current_text has accumulated content, add it to the list as a new Content instance
-                if current_text:
-                    combined_content_list.append(Content(current_text))
-                    current_text = ""  # Reset current_text for the next batch of text
-                # Add the non-text content directly to the list
-                combined_content_list.append(c)
-
-        # If there's any remaining text in current_text, add it to the list as a new Content instance
-        if current_text:
-            combined_content_list.append(Content(current_text))
+            combined_content_list.append(TextContent(current_text))
 
         return combined_content_list
 
@@ -1778,7 +1705,7 @@ class Helpers():
                 message = message[:start] + replacement + message[end+2:]
 
             prompt[message_key] = message
-        return (System(Content(prompt['system_message'])), User(Content(prompt['user_message'] + append_token)))
+        return (System(prompt['system_message']), User(TextContent(prompt['user_message'] + append_token)))
 
     @staticmethod
     def load_and_populate_prompt(
@@ -1862,7 +1789,7 @@ class Helpers():
         module: str = 'llmvm.server.prompts.python'
     ) -> Message:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
-        return User(Content(prompt['user_message']))
+        return User(TextContent(prompt['user_message']))
 
     @staticmethod
     def prompts(
@@ -1874,4 +1801,4 @@ class Helpers():
         module: str = 'llmvm.server.prompts.python'
     ) -> Tuple[System, User]:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
-        return (System(Content(prompt['system_message'])), User(Content(prompt['user_message'])))
+        return (System(prompt['system_message']), User(TextContent(prompt['user_message'])))

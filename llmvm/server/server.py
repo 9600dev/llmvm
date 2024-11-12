@@ -25,9 +25,9 @@ from llmvm.common.container import Container
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Answer, Assistant, AstNode, Content,
-                                  DownloadItem, DownloadParams, FileContent, Message, MessageModel,
-                                  SessionThread, Statement, StopNode,
+from llmvm.common.objects import (Assistant, AstNode, Content,
+                                  DownloadItemModel, Message, MessageModel,
+                                  SessionThreadModel, Statement, TokenStopNode, QueueBreakNode, TextContent,
                                   TokenCompressionMethod, User,
                                   compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
@@ -257,12 +257,12 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         return openai_controller
 
 
-def __get_thread(id: int) -> SessionThread:
+def __get_thread(id: int) -> SessionThreadModel:
     if not cache_session.has_key(id) or id <= 0:
         id = cache_session.gen_key()
-        thread = SessionThread(id=id)
+        thread = SessionThreadModel(id=id)
         cache_session.set(thread.id, thread)
-    return cast(SessionThread, cache_session.get(id))
+    return cast(SessionThreadModel, cache_session.get(id))
 
 
 async def stream_response(response):
@@ -346,7 +346,7 @@ async def ingest(file: UploadFile = File(...), background_tasks: BackgroundTasks
 
 @app.post('/download')
 async def download(
-    download_item: DownloadItem,
+    download_item: DownloadItemModel,
     background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     thread = __get_thread(download_item.id)
@@ -374,7 +374,7 @@ async def download(
                 'goal': '',
                 'search_term': ''
             })
-            queue.put_nowait(StopNode())
+            queue.put_nowait(QueueBreakNode())
 
             if content:
                 background_tasks.add_task(
@@ -390,27 +390,27 @@ async def download(
 
         while True:
             data = await queue.get()
-            if isinstance(data, StopNode):
+            if isinstance(data, QueueBreakNode):
                 break
             yield data
 
         await task
 
         content = task.result()
-        thread.messages.append(MessageModel.from_message(User(Content(content))))
+        thread.messages.append(MessageModel.from_message(User(content)))
         cache_session.set(thread.id, thread)
         yield thread.model_dump()
 
     return StreamingResponse(stream_response(stream()), media_type='text/event-stream')  # media_type="application/json")
 
 @app.get('/v1/chat/get_thread')
-async def get_thread(id: int) -> SessionThread:
+async def get_thread(id: int) -> SessionThreadModel:
     logging.debug(f'/v1/chat/get_thread?id={id}')
     thread = __get_thread(id)
     return thread
 
 @app.post('/v1/chat/set_thread')
-async def set_thread(request: SessionThread) -> SessionThread:
+async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     thread = request
 
     if not cache_session.has_key(thread.id) or thread.id <= 0:
@@ -418,11 +418,11 @@ async def set_thread(request: SessionThread) -> SessionThread:
         thread.id = temp.id
 
     cache_session.set(thread.id, thread)
-    return cast(SessionThread, cache_session.get(thread.id))
+    return cast(SessionThreadModel, cache_session.get(thread.id))
 
 @app.get('/v1/chat/get_threads')
-async def get_threads() -> List[SessionThread]:
-    result = [cast(SessionThread, cache_session.get(id)) for id in cache_session.keys()]
+async def get_threads() -> List[SessionThreadModel]:
+    result = [cast(SessionThreadModel, cache_session.get(id)) for id in cache_session.keys()]
     return result
 
 @app.get('v1/chat/clear_threads')
@@ -455,7 +455,7 @@ async def set_cookies(requests: Request):
     return thread
 
 @app.post('/v1/tools/completions', response_model=None)
-async def tools_completions(request: SessionThread):
+async def tools_completions(request: SessionThreadModel):
     thread = request
 
     if not cache_session.has_key(thread.id) or thread.id == 0:
@@ -500,7 +500,7 @@ async def tools_completions(request: SessionThread):
         def handle_exception(task):
             if not task.cancelled() and task.exception() is not None:
                 Helpers.log_exception(logging, task.exception())
-                queue.put_nowait(StopNode())
+                queue.put_nowait(QueueBreakNode())
 
         async def execute_and_signal():
             if thread.current_mode == 'direct':
@@ -508,12 +508,10 @@ async def tools_completions(request: SessionThread):
                     messages=messages,
                     temperature=thread.temperature,
                     model=model,
-                    mode=thread.current_mode,
                     compression=compression,
-                    cookies=cookies,
                     stream_handler=callback,
                 )
-                queue.put_nowait(StopNode())
+                queue.put_nowait(QueueBreakNode())
                 return result
             else:
                 # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
@@ -531,7 +529,7 @@ async def tools_completions(request: SessionThread):
                     agents=cast(List[Callable], agents),
                     locals_dict=locals_dict
                 )
-                queue.put_nowait(StopNode())
+                queue.put_nowait(QueueBreakNode())
 
                 # update the in-memory locals_dict with unserializable locals
                 cache_memory.set(thread.id, __get_unserializable_locals(locals_dict))
@@ -544,7 +542,7 @@ async def tools_completions(request: SessionThread):
         while True:
             data = await queue.get()
 
-            if isinstance(data, StopNode):
+            if isinstance(data, QueueBreakNode):
                 break
             yield data
 
@@ -555,7 +553,7 @@ async def tools_completions(request: SessionThread):
 
         # error handling
         if task.exception() is not None:
-            thread.messages.append(MessageModel.from_message(Assistant(Content(f'Error: {str(task.exception())}'))))
+            thread.messages.append(MessageModel.from_message(Assistant(TextContent(f'Error: {str(task.exception())}'))))
             yield thread.model_dump()
             return
 
@@ -565,7 +563,7 @@ async def tools_completions(request: SessionThread):
         results = []
 
         assistant_result = '\n\n'.join([str(statement) for statement in reversed(statements)])
-        results.append(Assistant(Content(assistant_result)))
+        results.append(Assistant(TextContent(assistant_result)))
 
         # for statement in reversed(statements):
         #     if isinstance(statement, Answer):

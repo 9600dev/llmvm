@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from markdownify import MarkdownConverter
 
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Content, DownloadParams, MarkdownContent
+from llmvm.common.objects import Content, DownloadParams, MarkdownContent, TextContent
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.tools.search import SerpAPISearcher
 from llmvm.common.helpers import Helpers
@@ -109,7 +109,7 @@ class WebHelpers():
 
         result = VerboseConverter().convert_soup(soup)
         cleaned_result = clean_markdown(result)
-        return MarkdownContent(sequence=unicodedata.normalize('NFKD', cleaned_result), url=url)
+        return MarkdownContent(sequence=[TextContent(unicodedata.normalize('NFKD', cleaned_result))], url=url)
 
     @staticmethod
     def get_linkedin_profile(linkedin_url: str) -> str:

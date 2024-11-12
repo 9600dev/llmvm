@@ -19,7 +19,7 @@ from openai.types.chat.chat_completion import ChatCompletion as OAICompletion
 
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import TokenPriceCalculator
+from llmvm.common.objects import TokenPriceCalculator, TokenPerf
 
 logging = setup_logging()
 
@@ -39,146 +39,6 @@ class O1AsyncIterator:
         else:
             raise StopAsyncIteration
 
-
-class TokenPerf:
-    # class to measure time taken between start() and stop() for a given task
-    def __init__(
-        self,
-        name: str,
-        executor_name: str,
-        model_name: str,
-        prompt_len: int = 0,
-        enabled: bool = Container.get_config_variable('profiling', 'LLMVM_PROFILING', default=False),
-        log_file: str = Container.get_config_variable(
-            'profiling_file',
-            'LLMVM_PROFILING_FILE',
-            default='~/.local/share/llmvm/trace.log'
-        ),
-        request_id: str = ''
-    ):
-        self._name: str = name
-        self._executor: str = executor_name
-        self._model: str = model_name
-        self._start: float = 0.0
-        self._stop: float = 0.0
-        self._prompt_len: int = prompt_len
-        self._completion_len: int = 0
-        self._ticks: List[float] = []
-        self.enabled = enabled
-        self.log_file = log_file
-        self.calculator = TokenPriceCalculator()
-        self.request_id = request_id
-        self.stop_reason = ''
-        self.stop_token = ''
-        self.object = None
-
-    def start(self):
-        if self.enabled:
-            self._start = time.perf_counter()
-
-    def stop(self):
-        if self.enabled:
-            self._stop = time.perf_counter()
-
-        return self.result()
-
-    def reset(self):
-        self._ticks = []
-
-    def result(self):
-        def avg(list):
-            return sum(list) / len(list)
-
-        if self.enabled:
-            ttlt = self._stop - self._start
-            ttft = self._ticks[0] - self._start if self._ticks else 0
-            completion_time = ttlt - ttft
-            try:
-                s_tok_sec = len(self._ticks) / ttlt
-            except ZeroDivisionError:
-                s_tok_sec = 0.0
-            try:
-                p_tok_sec = self._prompt_len / ttft
-            except ZeroDivisionError:
-                p_tok_sec = 0.0
-            return {
-                'name': self._name,
-                'executor': self._executor,
-                'model': self._model,
-                'ttlt': ttlt,
-                'ttft': ttft,
-                'completion_time': completion_time,
-                'prompt_len': self._prompt_len,
-                'completion_len': self._completion_len if self._completion_len > 0 else len(self._ticks),
-                's_tok_sec': s_tok_sec,
-                'p_tok_sec': p_tok_sec,
-                'p_cost': self._prompt_len * self.calculator.input_price(self._model, self._executor),
-                's_cost': len(self._ticks) * self.calculator.output_price(self._model, self._executor),
-                'request_id': self.request_id,
-                'stop_reason': self.stop_reason,
-                'stop_token': self.stop_token,
-                'ticks': self.ticks()
-            }
-        else:
-            return {}
-
-    def tick(self):
-        if self.enabled:
-            self._ticks.append(time.perf_counter())
-
-    def ticks(self):
-        if self.enabled:
-            return [self._ticks[i] - self._ticks[i - 1] for i in range(1, len(self._ticks))]
-        else:
-            return []
-
-    def __str__(self):
-        if self.enabled:
-            res = self.result()
-            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["ttlt"]},{res["ttft"]},{res["completion_time"]},{res["prompt_len"]},{res["completion_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{res["request_id"]},{res["stop_reason"]},{res["stop_token"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
-            return result
-        else:
-            return ''
-
-    def debug(self):
-        if self.enabled:
-            res = self.result()
-            # output \n to the debug stream without using logging.debug
-            import sys
-            sys.stderr.write('\n')
-            logging.debug(f"ttft: {res['ttft']:.2f} ttlt: {res['ttlt']:.2f} completion_time: {res['completion_time']:.2f}")
-            logging.debug(f"prompt_len: {res['prompt_len']} completion_len: {res['completion_len']} model: {res['model']}")
-            logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f} stop_reason: {res['stop_reason']}")
-            logging.debug(f"p_cost: ${res['p_cost']:.5f} s_cost: ${res['s_cost']:.5f} request_id: {res['request_id']}")
-
-    def log(self):
-        if self.enabled:
-            self.debug()
-            if not os.path.exists(os.path.expanduser(self.log_file)):
-                with open(os.path.expanduser(self.log_file), 'w') as f:
-                    f.write('name,executor,model,ttlt,ttft,prompt_tokens,completion_time,prompt_len,completion_len,p_tok_sec,s_tok_sec,p_cost,s_cost,request_id,stop_reason,stop_token,ticks\n')
-            with open(os.path.expanduser(self.log_file), 'a') as f:
-                result = str(self)
-                f.write(result + '\n')
-                return self.result()
-        else:
-            return {
-                'name': self._name,
-                'executor': self._executor,
-                'ttlt': 0.0,
-                'ttft': 0.0,
-                'completion_time': 0.0,
-                'prompt_len': 0,
-                'completion_len': 0,
-                'p_tok_sec': 0.0,
-                's_tok_sec': 0.0,
-                'p_cost': 0.0,
-                's_cost': 0.0,
-                'request_id': '',
-                'stop_reason': '',
-                'stop_token': '',
-                'ticks': []
-            }
 
 
 class LoggingAsyncIterator:
@@ -208,11 +68,14 @@ class LoggingAsyncIterator:
                 token_len = result.usage_metadata.total_token_count
                 if result.candidates and len(result.candidates) > 0:
                     self.perf.stop_reason = result.candidates[0].finish_reason.name.lower()
+
                 if len(result.parts) == 0:
                     # something went wrong
-                    logging.debug(result.candidates)
+                    logging.error('GeminiCompletion.parts is empty')
+                    return ''
                 else:
                     return cast(str, result.text or '')
+
             elif isinstance(result, str):
                 return result
             else:

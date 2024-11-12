@@ -16,7 +16,7 @@ from rich.text import Text
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TokenStopNode, StreamNode, SessionThread, MessageModel
+from llmvm.common.objects import MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
 
 
 logging = setup_logging()
@@ -215,34 +215,35 @@ def print_response(messages: List[Message], escape: bool = False):
         else:
             return input_str
 
-    def pprint(prepend: str, content: Content):
+    def pprint(prepend: str, content_list: list[Content]):
         console = Console()
 
-        if isinstance(content, ImageContent):
-            console.print(f'{prepend}\n', end='')
-            asyncio.run(StreamPrinter('user').display_image(content.sequence))
-        elif isinstance(content, PdfContent):
-            CodeBlock.__rich_console__ = markdown__rich_console__
-            console.print(f'{prepend}', end='')
-            console.print(Markdown(f'[PdfContent({content.url})]'))
-        elif isinstance(content, FileContent):
-            CodeBlock.__rich_console__ = markdown__rich_console__
-            console.print(f'{prepend}', end='')
-            console.print(Markdown(f'[FileContent({content.url})]'))
-        elif isinstance(content, MarkdownContent):
-            CodeBlock.__rich_console__ = markdown__rich_console__
-            console.print(f'{prepend}', end='')
-            console.print(Markdown(f'[MarkdownContent({content.url})]'))
-        elif isinstance(content, Markdown):
-            CodeBlock.__rich_console__ = markdown__rich_console__
-            console.print(f'{prepend}', end='')
-            console.print(content.get_str())
-        elif isinstance(content, Content) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
-            CodeBlock.__rich_console__ = markdown__rich_console__
-            console.print(f'{prepend}', end='')
-            console.print(Markdown(content.get_str()))
-        else:
-            console.print(escape_string(f'{prepend}{content.get_str()}'))
+        for content in content_list:
+            if isinstance(content, ImageContent):
+                console.print(f'{prepend}\n', end='')
+                asyncio.run(StreamPrinter('user').display_image(content.sequence))
+            elif isinstance(content, PdfContent):
+                CodeBlock.__rich_console__ = markdown__rich_console__
+                console.print(f'{prepend}', end='')
+                console.print(Markdown(f'[PdfContent({content.url})]'))
+            elif isinstance(content, FileContent):
+                CodeBlock.__rich_console__ = markdown__rich_console__
+                console.print(f'{prepend}', end='')
+                console.print(Markdown(f'[FileContent({content.url})]'))
+            elif isinstance(content, MarkdownContent):
+                CodeBlock.__rich_console__ = markdown__rich_console__
+                console.print(f'{prepend}', end='')
+                console.print(Markdown(f'[MarkdownContent({content.url})]'))
+            elif isinstance(content, Markdown):
+                CodeBlock.__rich_console__ = markdown__rich_console__
+                console.print(f'{prepend}', end='')
+                console.print(content.get_str())
+            elif isinstance(content, Content) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
+                CodeBlock.__rich_console__ = markdown__rich_console__
+                console.print(f'{prepend}', end='')
+                console.print(Markdown(content.get_str()))
+            else:
+                console.print(escape_string(f'{prepend}{content.get_str()}'))
 
     def fire_helper(s: str):
         if '```digraph' in s:
@@ -260,7 +261,7 @@ def print_response(messages: List[Message], escape: bool = False):
 
     for message in messages:
         if message.role() == 'assistant':
-            temp_content = message.message
+            temp_content = message.message[-1]
             if type(temp_content) is Content:
                 # sometimes openai will do a funny thing where it:
                 # var1 = search("....")
@@ -281,9 +282,9 @@ def print_response(messages: List[Message], escape: bool = False):
                 if '<helpers_result>' in temp_content.get_str() and '</helpers_result>' in temp_content.get_str():
                     temp_content.sequence = temp_content.get_str().replace('<helpers_result>', '```\n<helpers_result>\n').replace('</helpers_result>', '\n</helpers_result>\n```')
             if not escape:
-                pprint('[bold cyan]Assistant[/bold cyan]: ', temp_content)
+                pprint('[bold cyan]Assistant[/bold cyan]: ', [temp_content])
             else:
-                pprint('', temp_content)
+                pprint('', [temp_content])
             fire_helper(str(message))
         elif message.role() == 'system':
             if not escape:
@@ -297,6 +298,6 @@ def print_response(messages: List[Message], escape: bool = False):
                 pprint('', message.message)
 
 
-def print_thread(thread: SessionThread, escape: bool = False):
+def print_thread(thread: SessionThreadModel, escape: bool = False):
     print_response([MessageModel.to_message(message) for message in thread.messages], escape)
 

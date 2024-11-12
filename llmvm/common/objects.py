@@ -7,10 +7,12 @@ import os
 from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Type, TypeVar, TypedDict
+import time
+from typing import Any, Awaitable, Callable, Optional, Type, TypeVar, TypedDict, cast
 
 import pandas as pd
 from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.container import Container
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -124,12 +126,585 @@ def none(a: 'AstNode') -> None:
     pass
 
 
+class TokenPerf:
+    def __init__(
+        self,
+        name: str,
+        executor_name: str,
+        model_name: str,
+        prompt_len: int = 0,
+        enabled: bool = Container.get_config_variable('profiling', 'LLMVM_PROFILING', default=False),
+        log_file: str = Container.get_config_variable(
+            'profiling_file',
+            'LLMVM_PROFILING_FILE',
+            default='~/.local/share/llmvm/trace.log'
+        ),
+        request_id: str = ''
+    ):
+        self._name: str = name
+        self._executor: str = executor_name
+        self._model: str = model_name
+        self._start: float = 0.0
+        self._stop: float = 0.0
+        self._prompt_len: int = prompt_len
+        self._completion_len: int = 0
+        self._ticks: list[float] = []
+        self.enabled = enabled
+        self.log_file = log_file
+        self.calculator = TokenPriceCalculator()
+        self.request_id = request_id
+        self.stop_reason = ''
+        self.stop_token = ''
+        self.object = None
+
+    def start(self):
+        if self.enabled:
+            self._start = time.perf_counter()
+
+    def stop(self):
+        if self.enabled:
+            self._stop = time.perf_counter()
+
+        return self.result()
+
+    def reset(self):
+        self._ticks = []
+
+    def result(self):
+        def avg(list):
+            return sum(list) / len(list)
+
+        if self.enabled:
+            ttlt = self._stop - self._start
+            ttft = self._ticks[0] - self._start if self._ticks else 0
+            completion_time = ttlt - ttft
+            try:
+                s_tok_sec = len(self._ticks) / ttlt
+            except ZeroDivisionError:
+                s_tok_sec = 0.0
+            try:
+                p_tok_sec = self._prompt_len / ttft
+            except ZeroDivisionError:
+                p_tok_sec = 0.0
+            return {
+                'name': self._name,
+                'executor': self._executor,
+                'model': self._model,
+                'ttlt': ttlt,
+                'ttft': ttft,
+                'completion_time': completion_time,
+                'prompt_len': self._prompt_len,
+                'completion_len': self._completion_len if self._completion_len > 0 else len(self._ticks),
+                's_tok_sec': s_tok_sec,
+                'p_tok_sec': p_tok_sec,
+                'p_cost': self._prompt_len * self.calculator.input_price(self._model, self._executor),
+                's_cost': len(self._ticks) * self.calculator.output_price(self._model, self._executor),
+                'request_id': self.request_id,
+                'stop_reason': self.stop_reason,
+                'stop_token': self.stop_token,
+                'ticks': self.ticks()
+            }
+        else:
+            return {}
+
+    def tick(self):
+        if self.enabled:
+            self._ticks.append(time.perf_counter())
+
+    def ticks(self):
+        if self.enabled:
+            return [self._ticks[i] - self._ticks[i - 1] for i in range(1, len(self._ticks))]
+        else:
+            return []
+
+    def __str__(self):
+        if self.enabled:
+            res = self.result()
+            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["ttlt"]},{res["ttft"]},{res["completion_time"]},{res["prompt_len"]},{res["completion_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{res["request_id"]},{res["stop_reason"]},{res["stop_token"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
+            return result
+        else:
+            return ''
+
+    def debug(self):
+        if self.enabled:
+            res = self.result()
+            # output \n to the debug stream without using logging.debug
+            import sys
+            sys.stderr.write('\n')
+            logging.debug(f"ttft: {res['ttft']:.2f} ttlt: {res['ttlt']:.2f} completion_time: {res['completion_time']:.2f}")
+            logging.debug(f"prompt_len: {res['prompt_len']} completion_len: {res['completion_len']} model: {res['model']}")
+            logging.debug(f"p_tok_sec: {res['p_tok_sec']:.2f} s_tok_sec: {res['s_tok_sec']:.2f} stop_reason: {res['stop_reason']}")
+            logging.debug(f"p_cost: ${res['p_cost']:.5f} s_cost: ${res['s_cost']:.5f} request_id: {res['request_id']}")
+
+    def log(self):
+        if self.enabled:
+            self.debug()
+            if not os.path.exists(os.path.expanduser(self.log_file)):
+                with open(os.path.expanduser(self.log_file), 'w') as f:
+                    f.write('name,executor,model,ttlt,ttft,prompt_tokens,completion_time,prompt_len,completion_len,p_tok_sec,s_tok_sec,p_cost,s_cost,request_id,stop_reason,stop_token,ticks\n')
+            with open(os.path.expanduser(self.log_file), 'a') as f:
+                result = str(self)
+                f.write(result + '\n')
+                return self.result()
+        else:
+            return {
+                'name': self._name,
+                'executor': self._executor,
+                'ttlt': 0.0,
+                'ttft': 0.0,
+                'completion_time': 0.0,
+                'prompt_len': 0,
+                'completion_len': 0,
+                'p_tok_sec': 0.0,
+                's_tok_sec': 0.0,
+                'p_cost': 0.0,
+                's_cost': 0.0,
+                'request_id': '',
+                'stop_reason': '',
+                'stop_token': '',
+                'ticks': []
+            }
+
+
+########################################################################################
+## Model classes
+########################################################################################
 class Visitor(ABC):
     @abstractmethod
     def visit(self, node: 'AstNode') -> 'AstNode':
         pass
 
 
+class AstNode(ABC):
+    def __init__(
+        self
+    ):
+        pass
+
+    def accept(self, visitor: Visitor) -> 'AstNode':
+        return visitor.visit(self)
+
+
+class Content(AstNode):
+    def __init__(
+        self,
+        sequence: str | bytes | list['Content'],
+        content_type: str = 'text',
+        url: str = '',
+    ):
+        self.sequence = sequence
+        self.url = url
+        self.content_type = content_type
+        self.original_sequence: object = None
+
+    def __repr__(self):
+        return f'Content({self.sequence.__repr__()})'
+
+    @abstractmethod
+    def get_str(self) -> str:
+        pass
+
+    def to_json(self) -> dict:
+        sequence_json = ''
+        if isinstance(self.sequence, bytes):
+            sequence_json = base64.b64encode(self.sequence).decode('utf-8')
+        elif isinstance(self.sequence, str):
+            sequence_json = self.sequence
+        elif isinstance(self.sequence, list):
+            sequence_json = [c.to_json() for c in self.sequence]
+
+        return {
+            'type': self.__class__.__name__,
+            'sequence': sequence_json,
+            'content_type': self.content_type,
+            'url': self.url,
+            'original_sequence': self.original_sequence,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict) -> 'Content':
+        content_type = data.get('content_type', 'text')
+        sequence = data['sequence']
+        url = data.get('url', '')
+
+        if content_type == 'text':
+            return TextContent(sequence, url)
+        elif content_type == 'image':
+            image_type = cast(str, data.get('image_type', 'image/png'))
+            return ImageContent(
+                base64.b64decode(sequence),
+                url,
+                image_type,
+            )
+        elif content_type == 'pdf':
+            return PdfContent(
+                base64.b64decode(sequence),
+                url
+            )
+        elif content_type == 'file':
+            return FileContent(
+                base64.b64decode(sequence),
+                url,
+            )
+        # container types
+        elif content_type == 'browser':
+            # Handle BrowserContent's list of Content
+            sequence_contents = [Content.from_json(content_data) for content_data in sequence]
+            return BrowserContent(sequence_contents, url)
+        elif content_type == 'markdown':
+            # Handle MarkdownContent's list of Content
+            sequence_contents = [Content.from_json(content_data) for content_data in sequence]
+            return MarkdownContent(sequence_contents, url)
+        else:
+            raise ValueError(f"Unknown content type: {content_type}")
+
+
+class SupportedMessageContent(Content):
+    pass
+
+class BinaryContent(Content):
+    def __init__(
+        self,
+        sequence: bytes,
+        content_type: str = '',
+        url: str = '',
+    ):
+        if not isinstance(sequence, bytes):
+            raise ValueError('sequence must be a bytes object')
+
+        super().__init__(sequence, content_type, url)
+
+    @abstractmethod
+    def get_str(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_bytes(self) -> bytes:
+        pass
+
+
+class TextContent(SupportedMessageContent):
+    def __init__(
+        self,
+        sequence: str,
+        url: str = '',
+    ):
+        if not isinstance(sequence, str):
+            raise ValueError('sequence must be a string')
+
+        super().__init__(sequence, 'text', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return self.sequence
+
+    def __repr__(self):
+        return f'TextContent({self.sequence})'
+
+    def get_str(self) -> str:
+        return self.sequence
+
+
+class ImageContent(BinaryContent, SupportedMessageContent):
+    def __init__(
+        self,
+        sequence: bytes,
+        url: str = '',
+        image_type: str = '',
+    ):
+        super().__init__(sequence, 'image', url)
+        self.sequence = sequence
+        self.image_type = image_type
+
+    def __str__(self):
+        representation = self.url if self.url else f'{len(self.sequence)} bytes'
+        return f'ImageContent({representation})'
+
+    def __repr__(self):
+        representation = self.url if self.url else f'{len(self.sequence)} bytes'
+        return f'ImageContent({representation})'
+
+    def get_str(self) -> str:
+        return self.__str__()
+
+    def get_bytes(self) -> bytes:
+        return self.sequence
+
+
+class PdfContent(BinaryContent):
+    def __init__(
+        self,
+        sequence: bytes,
+        url: str = '',
+    ):
+        super().__init__(sequence, 'pdf', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return f'PdfContent({self.url})'
+
+    def is_local(self):
+        return os.path.isfile(self.url)
+
+    def get_str(self) -> str:
+        logging.debug('PdfContent.get_str() called, [PdfContent] string returned')
+        return self.__str__()
+
+    def get_bytes(self) -> bytes:
+        return self.sequence
+
+
+class FileContent(BinaryContent):
+    def __init__(
+        self,
+        sequence: bytes,
+        url: str = '',
+    ):
+        super().__init__(sequence, 'file', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return f'FileContent({self.url.__str__()} is_local: {self.is_local()})'
+
+    def __repr__(self):
+        return f'FileContent({self.url.__str__()} is_local: {self.is_local()})'
+
+    def is_local(self):
+        return os.path.isfile(self.url)
+
+    def get_str(self) -> str:
+        if self.is_local():
+            with open(self.url, 'r') as f:
+                # return f.read()
+                return f"<file url={self.url}>\n{f.read()}\n</file>"
+        elif isinstance(self.sequence, bytes):
+            # convert the bytes to a string and return
+            return self.sequence.decode('utf-8')
+        else:
+            raise ValueError('FileContent.get_str() called on non-local file')
+
+    def get_bytes(self) -> bytes:
+        return super().get_bytes()
+
+
+class ContainerContent(Content):
+    def __init__(
+        self,
+        sequence: list[Content],
+        content_type: str,
+        url: str = '',
+    ):
+        super().__init__(sequence, content_type, url)
+
+    def to_json(self) -> dict:
+        return {
+            "content_type": self.content_type,
+            "url": self.url,
+            "sequence": [cast(Content, content).to_json() for content in self.sequence]
+        }
+
+class BrowserContent(ContainerContent):
+    def __init__(
+        self,
+        sequence: list[Content],
+        url: str = '',
+    ):
+        # browser sequence usually ImageContent, MarkdownContent
+        super().__init__(sequence, 'browser', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return f'BrowserContent({self.url}) {self.sequence}'
+
+    def __repr__(self):
+        return f'BrowserContent({self.url})'
+
+    def get_str(self):
+        return '\n'.join([c.get_str() for c in self.sequence])
+
+
+class MarkdownContent(ContainerContent):
+    def __init__(
+        self,
+        sequence: list[Content],
+        url: str = '',
+    ):
+        super().__init__(sequence, 'markdown', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return f'MarkdownContent({self.url})'
+
+    def __repr__(self):
+        return f'MarkdownContent({self.url.__str__()} sequence: {self.sequence})'
+
+    def get_str(self) -> str:
+        return str(self.sequence)
+
+
+class Message(AstNode):
+    def __init__(
+        self,
+        message: list[Content],
+    ):
+        self.message: list[Content] = message
+        self.pinned: int = 0  # 0 is not pinned, -1 is pinned last, anything else is pinned
+        self.prompt_cached: bool = False
+
+    @abstractmethod
+    def role(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_str(self) -> str:
+        pass
+
+    def to_json(self) -> dict:
+        return {
+            "role": self.role(),
+            "message": [cast(Content, content).to_json() for content in self.message],
+            "pinned": self.pinned,
+            "prompt_cached": self.prompt_cached,
+        }
+
+    @classmethod
+    def from_json(cls, data: dict) -> 'Message':
+        role = data.get('role')
+        messages = [Content.from_json(content_data) for content_data in data.get('message', [])]
+        if role == 'user':
+            return User(messages)
+        elif role == 'system':
+            return System(messages[0].get_str())
+        elif role == 'assistant':
+            return Assistant(messages[0])
+        else:
+            raise ValueError(f'Role type not supported {role}, from {data}')
+
+class User(Message):
+    def __init__(
+        self,
+        message: Content | list[Content]
+    ):
+        if isinstance(message, list):
+            super().__init__(message)
+        else:
+            super().__init__([message])
+
+    def role(self) -> str:
+        return 'user'
+
+    def __str__(self):
+        raise NotImplementedError('User messages cannot be converted to strings')
+
+    def get_str(self):
+        return '\n'.join([c.get_str() for c in self.message])
+
+    def __repr__(self):
+        return f'User({self.message.__repr__()})'
+
+    def __add__(self, other):
+        a, b = coerce_types(str(self), other)
+        return a + b  # type: ignore
+
+    def __radd__(self, other):
+        a, b = coerce_types(other, str(self))
+        return a + b  # type: ignore
+
+
+class System(Message):
+    def __init__(
+        self,
+        message: str = '''
+            You are a helpful assistant.
+            Dont make assumptions about what values to plug into functions.
+            Ask for clarification if a user request is ambiguous.
+        '''
+    ):
+        if not isinstance(message, str):
+            raise ValueError('System message must be a string')
+
+        super().__init__([TextContent(message)])
+
+    def role(self) -> str:
+        return 'system'
+
+    def __str__(self):
+        return self.message[0].get_str()
+
+    def __repr__(self):
+        return f'System({self.message.__repr__()})'
+
+    def get_str(self) -> str:
+        return self.message[0].get_str()
+
+
+class Assistant(Message):
+    def __init__(
+        self,
+        message: Content,
+        error: bool = False,
+        system_context: object = None,
+        llm_call_context: object = None,
+        stop_reason: str = '',
+        stop_token: str = '',
+        perf_trace: object = None,
+    ):
+        super().__init__([message])
+        self.error = error
+        self._system_context = system_context,
+        self._llm_call_context: object = llm_call_context
+        self.stop_reason: str = stop_reason
+        self.stop_token: str = stop_token
+        self.perf_trace: object = perf_trace
+
+    def role(self) -> str:
+        return 'assistant'
+
+    def __str__(self):
+        return f'{self.message}'
+
+    def get_str(self):
+        return str(self.message)
+
+    def __add__(self, other):
+        other_message = str(other)
+
+        assistant = Assistant(
+            message=TextContent(str(self.message) + other_message),
+            system_context=self._system_context,
+            llm_call_context=self._llm_call_context,
+            stop_reason=self.stop_reason,
+            stop_token=self.stop_token,
+        )
+        return assistant
+
+    def __repr__(self):
+        if self.error:
+            return f'Assistant({self.message.__repr__()} {self.error})'
+        else:
+            return f'Assistant({self.message.__repr__()})'
+
+    def to_json(self):
+        json_result = super().to_json()
+        json_result['error'] = self.error
+        json_result['system_context'] = self._system_context
+        json_result['stop_reason'] = self.stop_reason
+        json_result['stop_token'] = self.stop_token
+        return json_result
+
+    @classmethod
+    def from_json(cls, data: dict) -> 'Assistant':
+        assistant = cast(Assistant, super().from_json(data))
+        assistant.error = data.get('error')
+        assistant._system_context = data.get('system_context')
+        assistant.stop_reason = cast(str, data.get('stop_reason'))
+        assistant.stop_token = cast(str, data.get('stop_token'))
+        return assistant
+
+
+########################################################################################
+## Interface classes
+########################################################################################
 class Executor(ABC):
     def __init__(
         self,
@@ -144,15 +719,18 @@ class Executor(ABC):
         self.default_max_output_len = default_max_output_len
 
     @abstractmethod
+    def name(self) -> str:
+        pass
+
+    @abstractmethod
     async def aexecute(
         self,
-        messages: List['Message'],
+        messages: list['Message'],
         max_output_tokens: int = 4096,
         temperature: float = 0.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
-        template_args: Optional[Dict[str, Any]] = None,
     ) -> 'Assistant':
         pass
 
@@ -198,25 +776,34 @@ class Executor(ABC):
     @abstractmethod
     def execute(
         self,
-        messages: List['Message'],
+        messages: list['Message'],
         max_output_tokens: int = 2048,
         temperature: float = 1.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[['AstNode'], None]] = None,
-        template_args: Optional[Dict[str, Any]] = None,
     ) -> 'Assistant':
         pass
 
     @abstractmethod
-    def name(self) -> str:
+    def to_dict(self, message: 'Message') -> dict:
+        pass
+
+    @abstractmethod
+    def from_dict(self, message: dict) -> 'Message':
         pass
 
     @abstractmethod
     async def count_tokens(
         self,
-        messages: List['Message'] | str,
-        model: Optional[str] = None,
+        messages: list['Message'] | str,
+    ) -> int:
+        pass
+
+    @abstractmethod
+    async def count_tokens_dict(
+        self,
+        messages: list['Message'] | str,
     ) -> int:
         pass
 
@@ -260,10 +847,10 @@ def coerce_types(a, b):
         b = b.result()
 
     if isinstance(a, Assistant):
-        a = a.message.get_str()
+        a = a.get_str()
 
     if isinstance(b, Assistant):
-        b = b.message.get_str()
+        b = b.get_str()
 
     # If either operand is a string and represents a number, convert it
     if isinstance(a, str) and is_number(a):
@@ -326,9 +913,9 @@ def coerce_to(a: Any, type_var: Type[T]) -> Any:
     if isinstance(a, FunctionCallMeta):
         a = str(a.result())
     if isinstance(a, User):
-        a = str(a.message.get_str())
+        a = a.get_str()
     if isinstance(a, Assistant):
-        a = str(a.message.get_str())
+        a = a.get_str()
 
     if isinstance(a, str):
         if type_var == bool:
@@ -388,14 +975,14 @@ class LLMCall():
     def __init__(
         self,
         user_message: 'Message',
-        context_messages: List['Message'],
+        context_messages: list['Message'],
         executor: Executor,
         model: str,
         temperature: float,
         max_prompt_len: int,
         completion_tokens_len: int,
         prompt_name: str,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         stream_handler: Callable[['AstNode'], Awaitable[None]] = awaitable_none
     ):
         self.user_message = user_message
@@ -455,14 +1042,32 @@ class Controller():
         pass
 
 
-class AstNode(ABC):
+class TokenNode(AstNode):
     def __init__(
-        self
+        self,
+        token: str,
     ):
-        pass
+        super().__init__()
+        self.token = token
 
-    def accept(self, visitor: Visitor) -> 'AstNode':
-        return visitor.visit(self)
+    def __str__(self):
+        return self.token
+
+    def __repr__(self):
+        return f'TokenStopNode({self.token})'
+
+
+class QueueBreakNode(AstNode):
+    def __init__(
+        self,
+    ):
+        super().__init__()
+
+    def __str__(self):
+        return '\n'
+
+    def __repr__(self):
+        return 'QueueBreakNode()'
 
 
 class TokenStopNode(AstNode):
@@ -476,19 +1081,6 @@ class TokenStopNode(AstNode):
 
     def __repr__(self):
         return 'TokenStopNode()'
-
-
-class StopNode(AstNode):
-    def __init__(
-        self,
-    ):
-        super().__init__()
-
-    def __str__(self):
-        return 'StopNode'
-
-    def __repr__(self):
-        return 'StopNode()'
 
 
 class StreamNode(AstNode):
@@ -525,410 +1117,11 @@ class DebugNode(AstNode):
         return 'DebugNode()'
 
 
-class Content(AstNode):
-    def __init__(
-        self,
-        sequence: Optional[AstNode | List[AstNode] | List['Content'] | str | bytes | Any] = None,
-        content_type: str = 'text',
-        url: str = '',
-    ):
-        if sequence is None:
-            self.sequence = ''
-            return
-
-        self.content_type = content_type
-        self.url = url
-        self.original_sequence: object = None
-
-        if isinstance(sequence, str):
-            self.sequence = [sequence]
-        elif isinstance(sequence, bytes):
-            self.sequence = sequence
-        elif isinstance(sequence, Content):
-            self.sequence = sequence.sequence  # type: ignore
-        elif isinstance(sequence, list) and len(sequence) > 0 and isinstance(sequence[0], Content):
-            self.sequence = sequence
-        elif isinstance(sequence, AstNode):
-            self.sequence = [sequence]
-        elif isinstance(sequence, list) and len(sequence) > 0 and isinstance(sequence[0], AstNode):
-            self.sequence = sequence
-        elif (
-            isinstance(sequence, list)
-            and len(sequence) > 0
-            and isinstance(sequence[0], dict)
-            and 'type' in sequence[0]
-            and sequence[0]['type'] == 'image_url'
-        ):
-            base = sequence[0]['image_url']['url'].split(',')[1]
-            self.sequence = base64.b64decode(base)  # bytes
-        else:
-            raise ValueError(f'type {type(sequence)} is not supported')
-
-    def __str__(self):
-        if isinstance(self.sequence, list):
-            return ' '.join([str(n) for n in self.sequence])
-        else:
-            return str(self.sequence)
-
-    def __repr__(self):
-        return f'Content({self.sequence.__repr__()})'
-
-    def get_str(self) -> str:
-        return self.__str__()
-
-    def b64encode(self) -> str:
-        if isinstance(self.sequence, bytes):
-            return base64.b64encode(self.sequence).decode('utf-8')
-        elif isinstance(self.sequence, str):
-            return base64.b64encode(self.sequence.encode('utf-8')).decode('utf-8')
-        elif (
-            isinstance(self.sequence, list)
-            and len(self.sequence) > 0
-            and isinstance(self.sequence[0], Content)
-            and isinstance(self.original_sequence, str)
-        ):
-            return base64.b64encode(self.original_sequence.encode('utf-8')).decode('utf-8')
-        elif isinstance(self.sequence, list) and len(self.sequence) > 0 and isinstance(self.sequence[0], Content):
-            return base64.b64encode(self.original_sequence).decode('utf-8')  # type: ignore
-        else:
-            raise ValueError(f'unknown sequence: {self.sequence}')
-
-    @staticmethod
-    def decode(base64_str: str) -> bytes:
-        return base64.b64decode(base64_str)
-
-
-class ImageContent(Content):
-    def __init__(
-        self,
-        sequence: bytes,
-        url: str = '',
-    ):
-        super().__init__(sequence, 'image', url)
-        self.sequence = sequence
-
-    def __str__(self):
-        representation = self.url if self.url else f'{len(self.sequence)} bytes'
-        return f'ImageContent({representation})'
-
-    def __repr__(self):
-        representation = self.url if self.url else f'{len(self.sequence)} bytes'
-        return f'ImageContent({representation})'
-
-
-class BrowserContent(Content):
-    def __init__(
-        self,
-        sequence: List[Content],
-        url: str = '',
-    ):
-        # browser sequence usually ImageContent, MarkdownContent
-        super().__init__(sequence, 'browser', url)
-        self.sequence = sequence
-
-    def __str__(self):
-        return f'BrowserContent({self.url}) {self.sequence}'
-
-    def __repr__(self):
-        return f'BrowserContent({self.url})'
-
-
-class MarkdownContent(Content):
-    def __init__(
-        self,
-        sequence: str | List[Content],
-        url: str = '',
-    ):
-        super().__init__(sequence, 'markdown', url)
-        self.sequence = sequence
-
-    def __str__(self):
-        return f'MarkdownContent({self.url})'
-
-    def __repr__(self):
-        return f'MarkdownContent({self.url.__str__()} sequence: {self.sequence})'
-
-    def get_str(self) -> str:
-        return str(self.sequence)
-
-
-class PdfContent(Content):
-    def __init__(
-        self,
-        sequence: bytes | List[Content],
-        url: str = '',
-    ):
-        super().__init__(sequence, 'pdf', url)
-        self.sequence = sequence
-
-    def __str__(self):
-        return f'PdfContent({self.url})'
-
-    def is_local(self):
-        return os.path.isfile(self.url)
-
-    def get_str(self) -> str:
-        logging.debug('PdfContent.get_str() called, [PdfContent] string returned')
-        return self.__str__()
-
-
-class FileContent(Content):
-    def __init__(
-        self,
-        sequence: bytes | List[Content],
-        url: str = '',
-    ):
-        super().__init__(sequence, 'file', url)
-        self.sequence = sequence
-
-    def __str__(self):
-        return f'FileContent({self.url.__str__()} is_local: {self.is_local()})'
-
-    def __repr__(self):
-        return f'FileContent({self.url.__str__()} is_local: {self.is_local()})'
-
-    def is_local(self):
-        return os.path.isfile(self.url)
-
-    def get_str(self):
-        if self.is_local():
-            with open(self.url, 'r') as f:
-                # return f.read()
-                return f"<file url={self.url}>\n{f.read()}\n</file>"
-        else:
-            return self.sequence
-
-
-class Message(AstNode):
-    def __init__(
-        self,
-        message: Content,
-    ):
-        self.message: Content = message
-        self.pinned: int = 0  # 0 is not pinned, -1 is pinned last, anything else is pinned
-        self.prompt_cached: bool = False
-
-    @abstractmethod
-    def role(self) -> str:
-        pass
-
-    @staticmethod
-    def from_dict(message: Dict[str, Any]) -> 'Message':
-        role = message['role']
-        message_content = message['content']
-
-        # this can be from a MessageModel, which has a url and content_type
-        # or from the LLM, which doesn't.
-        url = message['url'] if 'url' in message else ''
-        content_type = message['content_type'] if 'content_type' in message else ''
-
-        # when converting from MessageModel, there can be an embedded image
-        # in the content parameter that needs to be converted back to bytes
-        if (
-            isinstance(message_content, list)
-            and len(message_content) > 0
-            and 'type' in message_content[0]
-            and message_content[0]['type'] == 'image_url'
-            and 'image_url' in message_content[0]
-            and 'url' in message_content[0]['image_url']
-        ):
-            byte_content = base64.b64decode(message_content[0]['image_url']['url'].split(',')[1])
-            content = ImageContent(byte_content, message_content[0]['image_url']['url'])
-
-        elif (
-            isinstance(message_content, list)
-            and len(message_content) > 0
-            and 'type' in message_content[0]
-            and message_content[0]['type'] == 'image'
-        ):
-            byte_content = base64.b64decode(message_content[0]['source']['data'])
-            content = ImageContent(byte_content, message_content[0]['source']['data'])
-
-        elif content_type == 'pdf':
-            if url and not message_content:
-                with open(url, 'rb') as f:
-                    content = PdfContent(f.read(), url)
-            else:
-                content = PdfContent(FileContent.decode(str(message_content)), url)
-        elif content_type == 'file':
-            # if there's a url here, but no content, then it's a file local to the server
-            if url and not message_content:
-                with open(url, 'r') as f:
-                    content = FileContent(f.read().encode('utf-8'), url)
-            # else, it's been transferred from the client to server via b64
-            else:
-                content = FileContent(FileContent.decode(str(message_content)), url)
-        elif content_type == 'markdown':
-            if url and not message_content:
-                with open(url, 'r') as f:
-                    content = MarkdownContent(f.read(), url)
-            else:
-                content = MarkdownContent(MarkdownContent.decode(str(message_content)).decode('utf-8'), url)
-        else:
-            content = Content(message_content, content_type, url)
-
-        if role == 'user':
-            return User(content)
-        elif role == 'system':
-            return System(content)
-        elif role == 'assistant':
-            return Assistant(content)
-        raise ValueError(f'role not found or not supported: {message}')
-
-    def __getitem__(self, key):
-        return {'role': self.role(), 'content': self.message}
-
-    @staticmethod
-    def to_dict(message: 'Message', server_serialization: bool = False) -> Dict[str, Any]:
-        def file_wrap(message: FileContent | PdfContent | MarkdownContent):
-            return f'The following data/content is from this url: {message.url}\n\n{message.get_str()}'
-
-        # primarily to pass to Anthropic or OpenAI api
-        if isinstance(message, User) and isinstance(message.message, ImageContent):
-            return {
-                'role': message.role(),
-                'content': [{
-                    'type': 'image_url',
-                    'image_url': {
-                        'url': f"data:image/jpeg;base64,{base64.b64encode(message.message.sequence).decode('utf-8')}",
-                        'detail': 'high'
-                    }
-                }],
-                **({'url': message.message.url} if server_serialization else {}),
-                **({'content_type': 'image'} if server_serialization else {})
-            }
-        elif isinstance(message, User) and isinstance(message.message, PdfContent):
-            return {
-                'role': message.role(),
-                'content': message.message.b64encode() if server_serialization else file_wrap(message.message),
-                **({'url': message.message.url} if server_serialization else {}),
-                **({'content_type': 'pdf'} if server_serialization else {})
-            }
-        elif isinstance(message, User) and isinstance(message.message, FileContent):
-            return {
-                'role': message.role(),
-                'content': message.message.b64encode() if server_serialization else file_wrap(message.message),
-                **({'url': message.message.url} if server_serialization else {}),
-                **({'content_type': 'file'} if server_serialization else {})
-            }
-        elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
-            return {
-                'role': message.role(),
-                'content': message.message.b64encode() if server_serialization else file_wrap(message.message),
-                **({'url': message.message.url} if server_serialization else {}),
-                **({'content_type': 'markdown'} if server_serialization else {})
-            }
-        else:
-            return {
-                'role': message.role(),
-                'content': str(message.message),
-                **({'url': message.message.url} if server_serialization else {}),
-                **({'content_type': ''} if server_serialization else {})
-            }
-
-
-class User(Message):
-    def __init__(
-        self,
-        message: Content
-    ):
-        super().__init__(message)
-
-    def role(self) -> str:
-        return 'user'
-
-    def __str__(self):
-        return str(self.message)
-
-    def __repr__(self):
-        return f'User({self.message.__repr__()})'
-
-    def __add__(self, other):
-        a, b = coerce_types(str(self), other)
-        return a + b  # type: ignore
-
-    def __radd__(self, other):
-        a, b = coerce_types(other, str(self))
-        return a + b  # type: ignore
-
-
-class System(Message):
-    def __init__(
-        self,
-        message: Content = Content('''
-            You are a helpful assistant.
-            Dont make assumptions about what values to plug into functions.
-            Ask for clarification if a user request is ambiguous.
-        ''')
-    ):
-        super().__init__(message)
-
-    def role(self) -> str:
-        return 'system'
-
-    def __str__(self):
-        return str(self.message)
-
-    def __repr__(self):
-        return f'System({self.message.__repr__()})'
-
-
-class Assistant(Message):
-    def __init__(
-        self,
-        message: Content,
-        error: bool = False,
-        messages_context: List[Message] = [],
-        system_context: object = None,
-        llm_call_context: object = None,
-        stop_reason: str = '',
-        stop_token: str = '',
-    ):
-        super().__init__(message)
-        self.error = error
-        self._llm_call_context: object = llm_call_context
-        self._system_context = system_context,
-        self._messages_context: List[Message] = messages_context
-        self.stop_reason: str = stop_reason
-        self.stop_token: str = stop_token
-        self.perf_trace: object = None
-
-    def role(self) -> str:
-        return 'assistant'
-
-    def __str__(self):
-        return f'{self.message}'
-
-    def get_str(self):
-        return str(self.message)
-
-    def __add__(self, other):
-        other_message = str(other)
-
-        assistant = Assistant(
-            message=Content(str(self.message) + other_message),
-            messages_context=self._messages_context,
-            system_context=self._system_context,
-            llm_call_context=self._llm_call_context,
-            stop_reason=self.stop_reason,
-            stop_token=self.stop_token,
-        )
-        return assistant
-
-    def __repr__(self):
-        if self.error:
-            return f'Assistant({self.message.__repr__()} {self.error})'
-        else:
-            return f'Assistant({self.message.__repr__()})'
-
-
 class Statement(AstNode):
     def __init__(
         self,
-        ast_text: Optional[str] = None,
     ):
         self._result: object = None
-        self._ast_text: Optional[str] = ast_text
 
     def __str__(self):
         if self._result:
@@ -946,10 +1139,9 @@ class Statement(AstNode):
 class DataFrame(Statement):
     def __init__(
         self,
-        elements: List,
-        ast_text: Optional[str] = None,
+        elements: list,
     ):
-        super().__init__(ast_text)
+        super().__init__()
         self.elements = elements
 
     def token(self):
@@ -959,9 +1151,8 @@ class DataFrame(Statement):
 class Call(Statement):
     def __init__(
         self,
-        ast_text: Optional[str] = None,
     ):
-        super().__init__(ast_text)
+        super().__init__()
 
 
 class FunctionCallMeta(Call):
@@ -1130,13 +1321,12 @@ class FunctionCall(Call):
     def __init__(
         self,
         name: str,
-        args: List[Dict[str, object]],
-        types: List[Dict[str, object]],
-        context: Content = Content(),
+        args: list[dict[str, object]],
+        types: list[dict[str, object]],
+        context: 'Content' = TextContent(''),
         func: Optional[Callable] = None,
-        ast_text: Optional[str] = None,
     ):
-        super().__init__(ast_text)
+        super().__init__()
         self.name = name
         self.args = args
         self.types = types
@@ -1168,13 +1358,10 @@ class FunctionCall(Call):
 class Answer(Statement):
     def __init__(
         self,
-        conversation: List[Message] = [],
         result: object = None,
         error: object = None,
-        ast_text: Optional[str] = None,
     ):
-        super().__init__(ast_text)
-        self.conversation: List[Message] = conversation
+        super().__init__()
         self._result = result
         self.error = error
 
@@ -1191,34 +1378,72 @@ class Answer(Statement):
         return 'answer'
 
 
-class DownloadItem(BaseModel):
+########################################################################################
+## Pydantic classes
+########################################################################################
+class DownloadItemModel(BaseModel):
     id: int
     url: str
 
 
+class ContentModel(BaseModel):
+    type: str
+    sequence: list[dict] | str
+    content_type: str
+    original_sequence: Optional[list[dict] | str]
+    url: str
+
+    def to_content(self) -> Content:
+        return Content.from_json(data=self.model_dump())
+
+    @classmethod
+    def from_content(cls, content: Content) -> 'ContentModel':
+        return ContentModel.model_validate(content.to_json())
+
+
 class MessageModel(BaseModel):
     role: str
-    content_type: Optional[str] = None
-    content: str | List[Dict[str, Any]]
-    url: Optional[str] = None
+    content: list[ContentModel]
+    pinned: int = 0
+    prompt_cached: bool = False
 
     def to_message(self) -> Message:
-        return Message.from_dict(self.model_dump())
+        content_objects = [c.to_content() for c in self.content]
 
-    @staticmethod
-    def from_message(message: Message) -> 'MessageModel':
-        return MessageModel(**Message.to_dict(message, server_serialization=True))
+        if self.role == 'user':
+            msg = User(content_objects)
+        elif self.role == 'system':
+            msg = System(content_objects[0].get_str())
+        elif self.role == 'assistant':
+            msg = Assistant(content_objects[0])
+        else:
+            raise ValueError(f"Unsupported role: {self.role}")
+
+        msg.pinned = self.pinned
+        msg.prompt_cached = self.prompt_cached
+        return msg
+
+    @classmethod
+    def from_message(cls, message: Message) -> 'MessageModel':
+        content_models = [ContentModel.from_content(content) for content in message.message]
+
+        return cls(
+            role=message.role(),
+            content=content_models,
+            pinned=message.pinned,
+            prompt_cached=message.prompt_cached
+        )
 
 
-class SessionThread(BaseModel):
+class SessionThreadModel(BaseModel):
     id: int = -1
     executor: str = ''
     model: str = ''
-    current_mode: str = ''
     compression: str = ''
     temperature: float = 0.0
     stop_tokens: list[str] = []
     output_token_len: int = 0
-    cookies: List[Dict[str, Any]] = []
-    messages: List[MessageModel] = []
-    locals_dict: Dict[str, Any] = Field(default_factory=dict, exclude=True)
+    current_mode: str = 'tools'
+    cookies: list[dict[str, Any]] = []
+    messages: list[MessageModel] = []
+    locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True)

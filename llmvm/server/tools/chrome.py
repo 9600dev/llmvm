@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
 import aiofiles
-from bs4 import BeautifulSoup
 import httpx
 import nest_asyncio
 from playwright.async_api import ElementHandle, Error, Page, async_playwright
@@ -20,7 +19,6 @@ from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import StreamNode
-from llmvm.common.singleton import Singleton
 
 nest_asyncio.apply()
 logging = setup_logging()
@@ -237,12 +235,12 @@ class ChromeHelpersInternal():
                 return False
 
             # Get the page associated with this element
-            page = await element.owner_frame() or await element.page()
+            page = await element.owner_frame() or await element.page() # type: ignore
 
             # Click in the center of the element
             x = box['x'] + box['width'] / 2
             y = box['y'] + box['height'] / 2
-            await page.mouse.click(x, y)
+            await page.mouse.click(x, y)  # type: ignore
 
             logging.debug("Successfully clicked element")
             return True

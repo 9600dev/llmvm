@@ -12,7 +12,7 @@ import textwrap
 import threading
 import time
 from importlib import resources
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, cast
 
 import click
 import httpx
@@ -41,9 +41,9 @@ from llmvm.client.client import LLMVMClient
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Content, DownloadItem,
+from llmvm.common.objects import (Assistant, DownloadItemModel,
                                   ImageContent, MarkdownContent, Message,
-                                  MessageModel, PdfContent, SessionThread,
+                                  MessageModel, PdfContent, SessionThreadModel, TextContent,
                                   User)
 from llmvm.client.parsing import get_string_thread_with_roles, parse_command_string, read_from_pipe, get_path_as_messages, parse_path
 
@@ -418,7 +418,7 @@ class Repl():
         console = Console()
         history = FileHistory(os.path.expanduser('~/.local/share/llmvm/.repl_history'))
         kb = KeyBindings()
-        current_mode = 'auto'
+        current_mode = 'tools'
 
         @kb.add('c-e')
         def _(event):
@@ -430,7 +430,7 @@ class Repl():
         @kb.add('c-y', 'y')
         async def _(event):
             if 'last_thread' in globals():
-                last_thread_t: SessionThread = last_thread
+                last_thread_t: SessionThreadModel = last_thread
                 pyperclip.copy(str(last_thread_t.messages[-1].content))
                 rich.print('Last message copied to clipboard.')
                 self.__redraw(event)
@@ -441,7 +441,7 @@ class Repl():
         @kb.add('c-y', 'a')
         def _(event):
             if 'last_thread' in globals():
-                last_thread_t: SessionThread = last_thread
+                last_thread_t: SessionThreadModel = last_thread
                 whole_thread = get_string_thread_with_roles(last_thread_t)
                 pyperclip.copy(str(whole_thread))
                 rich.print('Thread copied to clipboard.')
@@ -453,7 +453,7 @@ class Repl():
         @kb.add('c-y', 'c')
         def _(event):
             if 'last_thread' in globals():
-                last_thread_t: SessionThread = last_thread
+                last_thread_t: SessionThreadModel = last_thread
                 last_message = str(last_thread_t.messages[-1].content)
 
                 code_blocks = Helpers.extract_code_blocks(last_message)
@@ -608,12 +608,13 @@ class Repl():
             ):
                 tokens = ['--id', str(thread_id)] + tokens
             if (
-                (has_option('--mode', command))
+                (has_option('--direct', command))
                 and (
-                    ('--mode' not in tokens) or ('-o' not in tokens)
+                    ('--direct' not in tokens) or ('-d' not in tokens)
                 )
             ):
-                tokens = ['--mode', current_mode] + tokens
+                if current_mode == 'direct':
+                    tokens = ['--direct'] + tokens
             return tokens
 
         command_executing = False
@@ -647,7 +648,7 @@ class Repl():
                 # there are a few special commands that aren't 'clickified'
                 if query == 'yy':
                     # copy the last assistant message to the clipboard
-                    last_thread_t: SessionThread = last_thread
+                    last_thread_t: SessionThreadModel = last_thread
                     pyperclip.copy(str(last_thread_t.messages[-1].content))
                     rich.print('Last message copied to clipboard.')
                     continue
@@ -656,7 +657,7 @@ class Repl():
                 if query.startswith(':w ') and len(query) > 3:
                     # save the current thread to a file
                     filename = query[3:]
-                    last_thread_t: SessionThread = last_thread
+                    last_thread_t: SessionThreadModel = last_thread
                     thread_text = get_string_thread_with_roles(last_thread_t)
                     with open(filename, 'w') as f:
                         f.write(thread_text)
@@ -677,7 +678,7 @@ class Repl():
                         for param, value in zip(command.params, command.parse_args(ctx, tokens))  # args[1:]))
                     })
                     command_executing = False
-                    if thread and isinstance(thread, SessionThread):
+                    if thread and isinstance(thread, SessionThreadModel):
                         thread_id = thread.id
                 else:
                     # default message command
@@ -691,7 +692,7 @@ class Repl():
                         for param, value in zip(command.params, command.parse_args(ctx, tokens))
                     })
                     command_executing = False
-                    if thread and isinstance(thread, SessionThread):
+                    if thread and isinstance(thread, SessionThreadModel):
                         thread_id = thread.id
 
             except KeyboardInterrupt:
@@ -767,7 +768,7 @@ def status(
     rich.print(asyncio.run(llmvm_client.status()))
 
 
-@cli.command('mode', help='Switch between "auto" and "direct" mode. Direct avoids using LLMVM tools.')
+@cli.command('mode', help='Switch between "tools" and "direct" mode. Direct avoids using LLMVM tools.')
 @click.argument('mode', type=str, required=False, default='')
 def mode(
     mode: str,
@@ -779,9 +780,9 @@ def mode(
         mode = mode[1:-1]
 
     if not mode:
-        if current_mode == 'auto': current_mode = 'direct'
-        elif current_mode == 'direct': current_mode = 'auto'
-    elif mode == 'auto' or mode == 'direct':
+        if current_mode == 'tools': current_mode = 'direct'
+        elif current_mode == 'direct': current_mode = 'tools'
+    elif mode == 'tools' or mode == 'direct':
         current_mode = mode
     else:
         rich.print(f'Invalid mode: {mode}')
@@ -856,7 +857,7 @@ def cookies(
     async def cookies_helper():
         async with httpx.AsyncClient(timeout=400.0) as client:
             response = await client.post(f'{endpoint}/v1/chat/cookies', json={'id': id, 'cookies': cookies})  # type: ignore
-            session_thread = SessionThread.model_validate(response.json())
+            session_thread = SessionThreadModel.model_validate(response.json())
         return session_thread
 
     thread = asyncio.run(cookies_helper())
@@ -878,7 +879,7 @@ def act(
 ):
     global thread_id
     global last_thread
-    thread: SessionThread
+    thread: SessionThreadModel
 
     prompt_file = resources.files('llmvm.client') / 'awesome_prompts.csv'
     rows = []
@@ -924,7 +925,7 @@ def act(
         if id <= 0 and 'last_thread' in globals() and last_thread:
             thread = last_thread
         elif id <= 0 and 'last_thread' in globals():
-            thread = SessionThread(
+            thread = SessionThreadModel(
                 id=-1,
                 executor=last_thread.executor,
                 model=last_thread.model,
@@ -932,7 +933,7 @@ def act(
                 cookies=last_thread.cookies,
             )
         elif id <= 0:
-            thread = SessionThread(id=-1)
+            thread = SessionThreadModel(id=-1)
         else:
             thread = asyncio.run(llmvm_client.get_thread(int_id))
 
@@ -944,7 +945,7 @@ def act(
         rich.print('Prompt: {}'.format(prompt_result))
         rich.print()
 
-        thread.messages.append(MessageModel.from_message(User(Content(prompt_result))))
+        thread.messages.append(MessageModel.from_message(User(TextContent(prompt_result))))
         last_thread = thread
         thread_id = last_thread.id
         try:
@@ -966,7 +967,7 @@ def url(
     id: int,
     endpoint: str,
 ):
-    item = DownloadItem(url=url, id=id)
+    item = DownloadItemModel(url=url, id=id)
     global thread_id
     global last_thread
 
@@ -986,7 +987,7 @@ def url(
                     objs = await stream_response(response, StreamPrinter('').write)
             await response.aclose()
 
-            session_thread = SessionThread.model_validate(objs[-1])
+            session_thread = SessionThreadModel.model_validate(objs[-1])
             return session_thread
 
         except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
@@ -1000,7 +1001,7 @@ def url(
             message = get_path_as_messages([url])[0]
             rich.print(f'Downloaded content from {url}.')
 
-            new_thread = SessionThread(
+            new_thread = SessionThreadModel(
                 id=-1,
                 executor=last_thread.executor,
                 model=last_thread.model,
@@ -1011,7 +1012,7 @@ def url(
             last_thread = new_thread
             return new_thread
 
-    thread: SessionThread = asyncio.run(download_helper())
+    thread: SessionThreadModel = asyncio.run(download_helper())
     thread_id = thread.id
     return thread
 
@@ -1146,19 +1147,6 @@ def thread(
     return thread
 
 
-@cli.command('strip', help='Strip images, browser content and old code from the current message thread.')
-@click.option('--endpoint', '-e', type=str, required=False,
-              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
-              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-def strip(
-    endpoint: str,
-):
-    global thread_id
-    global last_thread
-
-    return last_thread
-
-
 @cli.command('count', help='Count tokens in messsage thread.')
 @click.option('--id', '-i', type=int, default=0, required=True, help='Thread ID')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''))
@@ -1261,7 +1249,7 @@ def new(
     except ConnectError:
         rich.print('LLMVM server not available. Creating new local thread.')
         if 'last_thread' in globals():
-            new_thread = SessionThread(
+            new_thread = SessionThreadModel(
                 id=-1,
                 executor=last_thread.executor,
                 model=last_thread.model,
@@ -1270,7 +1258,7 @@ def new(
             )
             last_thread = new_thread
         else:
-           last_thread = SessionThread(id=-1)
+           last_thread = SessionThreadModel(id=-1)
 
 
 @cli.command('message')
@@ -1283,9 +1271,8 @@ def new(
               help='a string to add as a context message to the User message stack. Use quotes \"\' .. \'\" for multi-word strings.')
 @click.option('--upload', '-u', is_flag=True, required=True, default=False,
               help='upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
-@click.option('--mode', '-o', type=click.Choice(['auto', 'direct', 'tool', 'code'], case_sensitive=False),
-              required=False, default='auto',
-              help='mode to use "auto", "tool", "code", or "direct". Default is "auto".')
+@click.option('--direct', '-d', is_flag=True, required=False, default=False,
+              help='avoid using LLMVM tools and talk directly to the LLM provider. Default is false.')
 @click.option('--endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
@@ -1302,6 +1289,7 @@ def new(
 @click.option('--output_token_len', type=int, required=False, default=4096, help='maximum output tokens for the call.')
 @click.option('--stop_tokens', type=str, required=False, multiple=True, help='stop tokens for the call.')
 @click.option('--escape', type=bool, is_flag=True, required=False, help='escape the message content.')
+@click.option('--throw', type=bool, is_flag=True, required=False, default=False, help='throw an exception if the LLMVM server is down. Default is false.')
 @click.option('--context_messages', required=False, multiple=True, hidden=True)
 def message(
     message: Optional[str | bytes | Message],
@@ -1309,7 +1297,7 @@ def message(
     path: List[str],
     context: List[str],
     upload: bool,
-    mode: str,
+    direct: bool,
     endpoint: str,
     cookies: str,
     executor: str,
@@ -1320,14 +1308,12 @@ def message(
     output_token_len: int,
     stop_tokens: List[str],
     escape: bool,
+    throw: bool,
     context_messages: Sequence[Message] = [],
 ):
     global thread_id
     global last_thread
     context_messages = list(context_messages)
-
-    if mode == 'code' and not path:
-        raise MissingParameter('path')
 
     if not stop_tokens:
         stop_tokens = []
@@ -1348,15 +1334,14 @@ def message(
             compression = compression[1:-1]
 
     if path:
-        allowed_extensions = ['.py', '.md', 'Dockerfile', '.sh', '.txt'] if mode == 'code' else []
-        context_messages = get_path_as_messages(path, upload, allowed_extensions)
+        context_messages = get_path_as_messages(path, upload, [])
         logging.debug(f'path: {path}')
 
     if context:
         for c in reversed(context):
             if (c.startswith('"') and c.endswith('"')) or (c.startswith("'") and c.endswith("'")):
                 c = c[1:-1]
-            context_messages.insert(0, User(Content(c)))
+            context_messages.insert(0, User(TextContent(c)))
 
     # if we have files, but no message, grab the last file and use it as the message
     if not message and context_messages:
@@ -1397,93 +1382,98 @@ def message(
                         else:
                             message = tty_message
                 elif Helpers.is_markdown(bytes_buffer):
-                    tty_message = User(MarkdownContent(bytes_buffer.read().decode('utf-8', errors='ignore')))
+                    tty_message = User(MarkdownContent([TextContent(bytes_buffer.read().decode('utf-8', errors='ignore'))]))
                     if message:
                         context_messages.insert(0, tty_message)
                     else:
                         message = tty_message
                 else:
-                    tty_message = User(Content(bytes_buffer.read().decode('utf-8', errors='ignore')))
+                    tty_message = User(TextContent(bytes_buffer.read().decode('utf-8', errors='ignore')))
                     if message:
                         context_messages.insert(0, tty_message)
                     else:
                         message = tty_message
 
-    if message:
-        if isinstance(message, str) and (
-            (message.startswith('"') and message.endswith('"'))
-            or (message.startswith("'") and message.endswith("'"))
-        ):
-            message = message[1:-1]
+    # if we don't have a message here, something went wrong.
+    if not message:
+        raise MissingParameter('message')
 
-        if id <= 0:
-            id = thread_id  # type: ignore
+    if isinstance(message, str) and (
+        (message.startswith('"') and message.endswith('"'))
+        or (message.startswith("'") and message.endswith("'"))
+    ):
+        message = message[1:-1]
 
-        # if we have a last_thread but the thread_id is 0 or -1, then we don't
-        # have a connection to the server, so we'll just use the last thread
-        if thread_id <= 0 and 'last_thread' in globals() and last_thread:
-            # unless we have a full parsable thread
-            # hacky as anything todo: lift this logic somehwere else as llm() does the same thing
-            role_strings = ['Assistant: ', 'System: ', 'User: ']
-            if isinstance(message, str) and any(role_string in message for role_string in role_strings):
-                pass
-            else:
-                context_messages = [MessageModel.to_message(m) for m in last_thread.messages] + list(context_messages)
+    if id <= 0:
+        id = thread_id  # type: ignore
 
-        cookies_list = []
-        if cookies:
-            with open(cookies, 'r') as f:
-                cookies_list = Helpers.read_netscape_cookies(f.read())
-
-        throw_if_server_down = mode == 'tool' or mode == 'code'
-
-        # we used to do context_messages + [User(Content(message))] but this is wrong
-        # because we might swap the context message to be the message and it's already a Message object
-        thread_messages: List[Message] = []
-        if isinstance(message, Message):
-            thread_messages = context_messages + [message]
-        elif isinstance(message, list) and all(isinstance(m, Message) for m in message):
-            thread_messages = context_messages + message  # type: ignore
+    # if we have a last_thread but the thread_id is 0 or -1, then we don't
+    # have a connection to the server, so we'll just use the last thread
+    if thread_id <= 0 and 'last_thread' in globals() and last_thread:
+        # unless we have a full parsable thread
+        # hacky as anything todo: lift this logic somehwere else as llm() does the same thing
+        role_strings = ['Assistant: ', 'System: ', 'User: ']
+        if isinstance(message, str) and any(role_string in message for role_string in role_strings):
+            pass
         else:
-            thread_messages = context_messages + [User(Content(message))]
+            context_messages = [MessageModel.to_message(m) for m in last_thread.messages] + list(context_messages)
 
-        llmvm_client = LLMVMClient(
-            api_endpoint=endpoint,
-            default_executor_name=executor,
-            default_model_name=model,
-            api_key='',
-            throw_if_server_down=throw_if_server_down,
-            default_stream_handler=StreamPrinter('').write
-        )
+    cookies_list = []
+    if cookies:
+        with open(cookies, 'r') as f:
+            cookies_list = Helpers.read_netscape_cookies(f.read())
 
-        thread = asyncio.run(llmvm_client.call(
-            thread=id,
-            messages=thread_messages,
-            executor_name=executor,
-            model_name=model,
-            temperature=temperature,
-            output_token_len=output_token_len,
-            stop_tokens=stop_tokens,
-            mode=mode,
-            compression=compression,
-            cookies=cookies_list,
-            stream_handler=StreamPrinter('').write,
-        ))
+    # we used to do context_messages + [User(Content(message))] but this is wrong
+    # because we might swap the context message to be the message and it's already a Message object
+    thread_messages: list[Message] = []
+    if isinstance(message, Message):
+        thread_messages = context_messages + [message]
+    elif isinstance(message, list) and all(isinstance(m, Message) for m in message):
+        thread_messages = context_messages + message  # type: ignore
+    elif isinstance(message, str):
+        thread_messages = cast(list[Message], context_messages + [User(TextContent(message))])
+    else:
+        raise ValueError('not supported')
 
-        if not thread.messages:
-            rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')
-            return
+    llmvm_client = LLMVMClient(
+        api_endpoint=endpoint,
+        default_executor_name=executor,
+        default_model_name=model,
+        api_key='',
+        throw_if_server_down=throw,
+        default_stream_handler=StreamPrinter('').write
+    )
 
-        if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
-        print_response([MessageModel.to_message(thread.messages[-1])], escape)
-        if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
-        last_thread = thread
-        thread_id = thread.id
+    thread: SessionThreadModel = SessionThreadModel()
 
-        # apply file writes with or without prompting
-        apply_file_writes_and_diffs(thread.messages[-1].to_message().message.get_str(), not file_writes)
+    thread = asyncio.run(llmvm_client.call(
+        thread=id,
+        messages=thread_messages,
+        executor_name=executor,
+        model_name=model,
+        temperature=temperature,
+        output_token_len=output_token_len,
+        stop_tokens=stop_tokens,
+        mode='tools' if not direct else 'direct',
+        compression=compression,
+        cookies=cookies_list,
+        stream_handler=StreamPrinter('').write,
+    ))
 
-        return thread
+    if not thread.messages:
+        rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')
+        return
+
+    if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
+    print_response([MessageModel.to_message(thread.messages[-1]).get_str()], escape)
+    if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
+    last_thread = thread
+    thread_id = thread.id
+
+    # apply file writes with or without prompting
+    apply_file_writes_and_diffs(thread.messages[-1].to_message().get_str(), not file_writes)
+
+    return thread
 
 
 if __name__ == '__main__':

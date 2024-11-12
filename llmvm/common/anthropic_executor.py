@@ -12,23 +12,25 @@ from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content, Executor,
                                   FileContent, ImageContent, MarkdownContent,
-                                  Message, PdfContent, System, TokenStopNode,
-                                  User, awaitable_none)
-from llmvm.common.perf import TokenPerf, TokenStreamManager
+                                  Message, PdfContent, System, TextContent, TokenNode, TokenStopNode,
+                                  User, awaitable_none, TokenPerf)
+from llmvm.common.perf import TokenStreamManager
 
 logging = setup_logging()
 
 prompt_caching_models = [
     'claude-3-5-sonnet-20240620',
+    'claude-3-5-sonnet-20241022',
     'claude-3-opus-20240229',
     'claude-3-haiku-20240307',
+    'claude-3-haiku-20241022',
 ]
 
 class AnthropicExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('ANTHROPIC_API_KEY')),
-        default_model: str = 'claude-3-5-sonnet-20240620',
+        default_model: str = 'claude-3-5-sonnet-20241022',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_token_len: int = 200000,
         default_max_output_len: int = 4096,
@@ -55,236 +57,147 @@ class AnthropicExecutor(Executor):
     def name(self) -> str:
         return 'anthropic'
 
-    def from_dict(self, message: Dict[str, Any]) -> 'Message':
+    def to_dict(self, message: 'Message', model: Optional[str], server_serialization: bool = False) -> dict[str, Any]:
+        content_list = []
+        for content in message.message:
+            if isinstance(content, ImageContent) and content.sequence:
+                if 'image/unknown' not in Helpers.classify_image(content.get_bytes()):
+                    content_list.append({
+                        'type': 'image',
+                        'source': {
+                            "type": "base64",
+                            "media_type": Helpers.classify_image(content.get_bytes()),
+                            "data": base64.b64encode(Helpers.anthropic_resize(content.get_bytes()).decode('utf-8')) # type: ignore
+                        },
+                        **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models else {}),
+                        **({'url': content.url} if server_serialization else {}),
+                        **({'content_type': 'image'} if server_serialization else {})
+                    })
+                else:
+                    logging.warning(f"Image content type not supported for {model}")
+            elif isinstance(content, TextContent) and content.sequence:  # is not last message, context messages
+                content_list.append({
+                    'type': 'text',
+                    'text': content.get_str(),
+                    **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models else {}),
+                    **({'url': content.url} if server_serialization else {}),
+                    **({'content_type': 'text'} if server_serialization else {})
+                })
+            elif not content.sequence:
+                logging.warning(f'Content {content} for message {message} was empty.')
+            else:
+                raise ValueError(f"Cannot serialize unknown content type: {type(content)}")
+
+        dict_message = {
+            'role': message.role(),
+            'content': content_list,
+        }
+        return dict_message
+
+    def from_dict(self, message: dict[str, Any]) -> 'Message':
+        # pull out Message related content
         role = message['role']
         message_content = message['content']
 
-        url = message['url'] if 'url' in message else ''
-        content_type = message['content_type'] if 'content_type' in message else ''
+        # force content to be a list
+        if not isinstance(message_content, list):
+            message_content = [message_content]
 
-        # when converting from MessageModel, there can be an embedded image
-        # in the content parameter that needs to be converted back to bytes
-        if (
-            isinstance(message_content, list)
-            and len(message_content) > 0
-            and 'type' in message_content[0]
-            and message_content[0]['type'] == 'image'
-        ):
-            byte_content = base64.b64decode(message_content[0]['source']['data'])
-            content = ImageContent(byte_content, message_content[0]['source']['data'])
+        content_list: list[Content] = []
 
-        # to support the extra {'type': 'text'} key in the content ala explicit prompt caching
-        elif (
-            isinstance(message_content, list)
-            and len(message_content) > 0
-            and 'type' in message_content[0]
-            and message_content[0]['type'] == 'text'
-        ):
-            content = Content(message_content[0]['text'])
-
-        elif content_type == 'pdf':
-            if url and not message_content:
-                with open(url, 'rb') as f:
-                    content = PdfContent(f.read(), url)
+        for i in range(len(message_content)):
+            if 'type' in message_content[i] and message_content[i]['type'] == 'text':
+                url = message_content[i]['url'] if 'url' in message_content[i] else ''
+                content_list.append(TextContent(message_content[i]['text'], url=url))
+            elif 'type' in message_content[i] and message_content[i]['type'] == 'image':
+                byte_content = base64.b64decode(message_content[i]['source']['data'])
+                url = message_content[i]['url'] if 'url' in message_content[i] else ''
+                content_list.append(ImageContent(byte_content, url=url))
             else:
-                content = PdfContent(FileContent.decode(str(message_content[0]['text'])), url)
+                raise ValueError(f'Unknown content type: {message_content[i]}')
 
-        elif content_type == 'file':
-            # if there's a url here, but no content, then it's a file local to the server
-            if url and not message_content:
-                with open(url, 'r') as f:
-                    content = FileContent(f.read().encode('utf-8'), url)
-            # else, it's been transferred from the client to server via b64
-            else:
-                content = FileContent(FileContent.decode(str(message_content[0]['text'])), url)
-
-        else:
-            if (
-                isinstance(message_content, list)
-                and len(message_content) > 0
-                and 'type' in message_content[0]
-                and message_content[0]['type'] == 'text'
-            ):
-                content = Content(message_content[0]['text'])
-            else:
-                content = Content(str(message_content))
-
-        if role == 'user':
-            return User(content)
+        if role == 'assistant':
+            return Assistant(content_list[0])
+        elif role == 'user':
+            return User(content_list)
         elif role == 'system':
-            return System(content)
-        elif role == 'assistant':
-            return Assistant(content)
-        raise ValueError(f'role not found or not supported: {message}')
+            return System(cast(TextContent, content_list[0]).get_str())
+        else:
+            raise ValueError(f'role not found or not supported: {message}')
 
-    def wrap_messages(self, model: Optional[str], messages: List[Message]) -> List[Dict[str, str]]:
-        # todo: this logic is wrong -- if called from execute_direct
-        # it'll unpack the pdf/markdown but not do it properly
-        # as those functions will return multiple messages
-        def wrap_message(index: int, content: Content) -> str:
-            if isinstance(content, FileContent):
-                return f"{content.get_str()}"
-            elif isinstance(content, PdfContent):
-                # return f"<pdf url={content.url}>{content.get_str()}</pdf>"
-                return f"<pdf url={content.url}>{ObjectTransformers.transform_pdf_content(content, self)}</pdf>"
-            elif isinstance(content, MarkdownContent):
-                return f"<markdown url={content.url}>{ObjectTransformers.transform_markdown_content(content, self)}</markdown>"
-            elif isinstance(content, BrowserContent):
-                return f"<browser url={content.url}>{ObjectTransformers.transform_browser_content(content, self)}</browser>"
-            else:
-                return f"{content.get_str()}"
-
-        # the Dict[str, str] messages are the messages that will be sent to the Anthropic API
-        wrapped = []
+    def unpack_and_wrap_messages(self, model: Optional[str], messages: list[Message]) -> list[dict[str, str]]:
+        wrapped: list[dict[str, str]] = []
 
         # deal with the system message
-        system_messages = [m for m in messages if m.role() == 'system']
+        system_messages = cast(list[System], filter(lambda m: m.role() == 'system', messages))
         if len(system_messages) > 1:
-            logging.debug('More than one system message in the message list. Using the last one.')
+            logging.warning('More than one system message in the message list. Using the last one.')
 
-        system_message = ''
         if len(system_messages) > 0:
-            system_message = system_messages[-1]
-            wrapped.append({
-                'role': 'system',
-                'content': [{
-                    'type': 'text',
-                    'text': system_message.message.get_str(),
-                    **({'cache_control': {'type': 'ephemeral'}} if system_message.prompt_cached and model in prompt_caching_models else {}),
-                }]
-            })
+            wrapped.append(self.to_dict(system_messages[-1], model, server_serialization=False))
 
-        messages = [m for m in messages if m.role() != 'system']
+        # expand the PDF, Markdown, BrowserContent, and FileContent messages
+        expanded_messages: list[Message] = [m for m in messages if m.role() != 'system'].copy()
 
-        # expand the PDF, Markdown, and BrowserContent messages
-        expanded_messages = []
-        for message in messages:
-            if isinstance(message, User) and isinstance(message.message, PdfContent):
-                expanded_messages.extend(ObjectTransformers.transform_pdf_content(message.message, self))
-            elif isinstance(message, User) and isinstance(message.message, MarkdownContent):
-                expanded_messages.extend(ObjectTransformers.transform_markdown_content(message.message, self))
-            elif isinstance(message, User) and isinstance(message.message, BrowserContent):
-                expanded_messages.extend(ObjectTransformers.transform_browser_content(message.message, self))
-            else:
-                expanded_messages.append(message)
+        if expanded_messages[0].role() != 'user':
+            raise ValueError('First message must be from User')
 
-        messages = expanded_messages
+        for message in expanded_messages:
+            for i in range(len(message.message)):
+                if isinstance(message.message[i], PdfContent):
+                    message.message = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                elif isinstance(message.message[i], MarkdownContent):
+                    message.message = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
+                elif isinstance(message.message[i], BrowserContent):
+                    message.message = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
+                elif isinstance(message.message[i], FileContent):
+                    message.message = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
 
         # check to see if there are more than self.max_images images in the message list
-        image_count = len([m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)])
+        images = [c for c in Helpers.flatten([m.message for m in expanded_messages]) if isinstance(c, ImageContent)]
+        image_count = len(images)
+
+        # remove smaller images if there are too many
         if image_count >= self.max_images:
             logging.debug(f'Image count is {image_count}, filtering.')
 
-            # get the top self.max_images ordered by size, then remove the rest
-            images = [m for m in messages if isinstance(m, User) and isinstance(m.message, ImageContent)]
-            images.sort(key=lambda x: len(x.message.sequence), reverse=True)
+            # get the top self.max_images ordered by byte array size, then remove the rest
+            images.sort(key=lambda x: len(x.sequence), reverse=True)
             smaller_images = images[self.max_images:]
 
-            # remove the images from the messages list and collapse the previous and next message
-            # if there is no other images in between
             for image in smaller_images:
-                index = messages.index(image)
-                if (
-                    index > 0
-                    and not isinstance(messages[index - 1].message, ImageContent)
-                    and not isinstance(messages[index + 1].message, ImageContent)
-                ):
-                    previous = messages[index - 1]
-                    next = messages[index + 1]
-                    previous.message = Content(previous.message.get_str() + next.message.get_str())
-                    messages.remove(image)
-                    messages.remove(next)
-                else:
-                    messages.remove(image)
+                for i in range(len(expanded_messages)):
+                    for j in range(len(expanded_messages[i].message)):
+                        if expanded_messages[i].message[j] == image:
+                            expanded_messages[i].message.pop(j)
+                            break
 
-        counter = 1
-        for i in range(len(messages)):
-            if isinstance(messages[i], User) and isinstance(messages[i].message, ImageContent):
-                # figure out
-                if 'image/unknown' not in Helpers.classify_image(messages[i].message.sequence):
-                    wrapped.append({
-                        'role': 'user',
-                        'content': [{
-                                'type': 'image',
-                                'source': {
-                                    "type": "base64",
-                                    "media_type": Helpers.classify_image(messages[i].message.sequence),
-                                    "data": base64.b64encode(Helpers.anthropic_resize(messages[i].message.sequence)).decode('utf-8')  # type: ignore
-                                }
-                        }]
-                    })
-            elif isinstance(messages[i], User) and i < len(messages) - 1:  # is not last message, context messages
-                wrapped.append({
-                    'role': 'user',
-                    'content': [{
-                        'type': 'text',
-                        'text': wrap_message(counter, messages[i].message),
-                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached and model in prompt_caching_models else {}),
-                    }]
-                })
-                counter += 1
-            elif (
-                isinstance(messages[i], User)
-                and i == len(messages) - 1
-                and (
-                    isinstance(messages[i].message, PdfContent)
-                    or isinstance(messages[i].message, ImageContent)
-                )
-            ):  # is the last message, and it's a pdf or image
-                wrapped.append({'role': 'user', 'content': [{'type': 'text', 'text': wrap_message(counter, messages[i].message)}]})
-            elif isinstance(messages[i], User) and i == len(messages) - 1:  # is the last message
-                wrapped.append({
-                    'role': 'user',
-                    'content': [{
-                        'type': 'text',
-                        'text': messages[i].message.get_str(),
-                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached and model in prompt_caching_models else {}),
-                    }]
-                })
-            else:
-                wrapped.append({
-                    'role': messages[i].role(),
-                    'content': [{
-                        'type': 'text',
-                        'text': messages[i].message.get_str(),
-                        **({'cache_control': {'type': 'ephemeral'}} if messages[i].prompt_cached and model in prompt_caching_models else {}),
-                    }]
-                })
+        # now build the json dictionary and return
+        for i in range(len(expanded_messages)):
+            wrapped.append(self.to_dict(expanded_messages[i], model, server_serialization=False))
+
         return wrapped
 
     async def count_tokens(
         self,
-        messages: List[Message] | List[Dict[str, str]] | str,
-        model: Optional[str] = None,
+        messages: List[Message],
     ) -> int:
-        async def tokenizer_len(content: str | List) -> int:
-            # image should have already been resized
-            if isinstance(content, list) and len(content) > 0 and isinstance(content[0], dict) and 'source' in content[0]:
-                token_count = Helpers.anthropic_image_tok_count(content[0]['source']['data'])
-                return token_count
+        num_tokens = 0
+        for message in messages:
+            for content in message.message:
+                if isinstance(content, ImageContent):
+                    num_tokens += len(base64.b64encode(Helpers.anthropic_resize(content.sequence)).decode('utf-8'))
+                elif isinstance(content, TextContent):
+                    num_tokens += await self.client.count_tokens(content.get_str())
+                else:
+                    raise ValueError(f'Unknown content type: {content.__class__.__name__}')
+        return num_tokens
 
-            token_count = await self.client.count_tokens(str(content))
-            return token_count
-
-        async def num_tokens_from_messages(messages):
-            # this is inexact, but it's a reasonable approximation
-            num_tokens = 0
-            tokens_per_message = 4
-            for message in messages:
-                num_tokens += tokens_per_message
-                for _, value in message.items():
-                    num_tokens += await tokenizer_len(value)
-            return num_tokens
-
-        if isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], Message):
-            dict_messages = self.wrap_messages(model, cast(List[Message], messages))
-            return await num_tokens_from_messages(dict_messages)
-        elif isinstance(messages, list) and len(messages) > 0 and isinstance(messages[0], dict):
-            return await num_tokens_from_messages(messages)
-        elif isinstance(messages, str):
-            return await num_tokens_from_messages(self.wrap_messages(model, [User(Content(messages))]))
-        else:
-            raise ValueError('cannot calculate tokens for messages: {}'.format(messages))
+    async def count_tokens_dict(
+        self,
+        messages: List[Dict[str, Any]],
+    ) -> int:
+        raise NotImplementedError('count_tokens_dict is not implemented for ClaudeExecutor')
 
     async def aexecute_direct(
         self,
@@ -300,7 +213,8 @@ class AnthropicExecutor(Executor):
         if functions:
             raise NotImplementedError('functions are not implemented for ClaudeExecutor')
 
-        message_tokens = await self.count_tokens(messages=messages, model=model)
+        message_tokens = await self.count_tokens_dict(messages=messages)
+
         if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
             raise Exception('Prompt too long. input tokens: {}, requested output tokens: {}, total: {}, models {} max context window is: {}'
                             .format(message_tokens,
@@ -317,32 +231,6 @@ class AnthropicExecutor(Executor):
                 system_message = message['content']
                 messages.remove(message)
 
-        # anthropic disallows empty messages, so we're going to remove any Message that doesn't contain content
-        for message in messages:
-            if (
-                message['content']
-                and message['content'][0]['type'] == 'text'
-                and (message['content'][0]['text'] == '' or message['content'][0]['text'] == b'')
-            ):
-                logging.warning(f"Removing empty textmessage: {message}")
-                messages.remove(message)
-
-        if Container(throw=False).get_config_variable('ANTHROPIC_COLLAPSE_MESSAGES', default=False):
-            collapsed_messages = []
-            accumulator = ''
-            for i in range(len(messages)):
-                if messages[i]['role'] == 'user' and not isinstance(messages[i]['content'], list):
-                    accumulator += messages[i]['content'] + '\n\n'
-                elif messages[i]['role'] == 'user' and isinstance(messages[i]['content'], list) and accumulator:
-                    collapsed_messages.append({'role': 'user', 'content': [{'type': 'text', 'text': accumulator}]})
-                    collapsed_messages.append(messages[i])
-                    accumulator = ''
-                else:
-                    collapsed_messages.append(messages[i])
-            if accumulator:
-                collapsed_messages.append({'role': 'user', 'content': [{'type': 'text', 'text': accumulator}]})
-            messages = collapsed_messages
-
         # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
         # going to add an Assistant message in between two User messages, and a User message between two Assistant.
         messages_list: List[Dict[str, Any]] = []
@@ -358,11 +246,13 @@ class AnthropicExecutor(Executor):
         # todo, this is a busted hack. if a helper function returns nothing, then usually that
         # message get stripped away
         if messages_list[0]['role'] != 'system' and messages_list[0]['role'] != 'user':
+            logging.warning('First message was not a system or user message. This is a bug. Adding a default empty message.')
             messages_list.insert(0, {'role': 'user', 'content': [{'type': 'text', 'text': 'None.'}]})
 
         # ugh, anthropic api can't have an assistant message with trailing whitespace...
         if messages_list[-1]['role'] == 'assistant':
-            messages_list[-1]['content'][0]['text'] = messages_list[-1]['content'][0]['text'].rstrip()
+            for j in range(len(messages_list[-1]['content'])):
+                messages_list[-1]['content'][j]['text'] = messages_list[-1]['content'][j]['text'].rstrip()
 
         messages_trace([{'role': 'system', 'content': [{'type': 'text', 'text': system_message}]}] + messages_list)
 
@@ -387,35 +277,17 @@ class AnthropicExecutor(Executor):
 
     async def aexecute(
         self,
-        messages: List[Message],
+        messages: list[Message],
         max_output_tokens: int = 4096,
-        temperature: float = 0.0,
+        temperature: float = 1.0,
         stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
-        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         model = model if model else self.default_model
 
-        def last(predicate, iterable):
-            result = [x for x in iterable if predicate(x)]
-            if result:
-                return result[-1]
-            return None
-
-        # find the system message and append to the front
-        system_message = last(lambda x: x.role() == 'system', messages)
-
-        if not system_message:
-            system_message = System(Content('You are a helpful assistant.'))
-
-        # fresh message list
-        messages_list: List[Dict[str, Any]] = self.wrap_messages(model, messages)
-
-        if messages_list[0]['role'] == 'system' and messages_list[1]['role'] != 'user':
-            logging.error(f'First message must be from the user after a system prompt: {messages_list}')
-        elif messages_list[0]['role'] == 'assistant':
-            logging.error(f'First message must be from the user, not assistant: {messages_list}')
+        # wrap and check message list
+        messages_list: list[Dict[str, Any]] = self.unpack_and_wrap_messages(model, messages)
 
         stream = self.aexecute_direct(
             messages_list,
@@ -425,12 +297,12 @@ class AnthropicExecutor(Executor):
             stop_tokens=stop_tokens,
         )
 
-        text_response = ''
+        text_response: str = ''
         perf = None
 
         async with await stream as stream_async:  # type: ignore
             async for text in stream_async:
-                await stream_handler(Content(text))
+                await stream_handler(TokenNode(text))
                 text_response += text
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
@@ -438,33 +310,28 @@ class AnthropicExecutor(Executor):
         await stream_async.get_final_message()  # this forces an update to the perf object
         perf.log()
 
-        messages_list.append({'role': 'assistant', 'content': [{'type': 'text', 'text': text_response}]})
-        conversation: List[Message] = [self.from_dict(m) for m in messages_list]
-
         assistant = Assistant(
-            message=conversation[-1].message,
-            messages_context=conversation,
+            message=TextContent(text_response),
+            error=False,
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,
+            perf_trace=perf,
         )
-        assistant.perf_trace = perf
-        if assistant.message.get_str() == '':
-            logging.error(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')
 
+        if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')
         return assistant
 
     def execute(
         self,
         messages: List[Message],
         max_output_tokens: int = 4096,
-        temperature: float = 0.0,
+        temperature: float = 1.0,
         stop_tokens: List[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
-        template_args: Optional[Dict[str, Any]] = None,
     ) -> Assistant:
         async def stream_pipe(node: AstNode):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe, template_args))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))

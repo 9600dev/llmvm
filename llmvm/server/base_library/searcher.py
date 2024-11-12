@@ -6,7 +6,7 @@ from googlesearch import search as google_search
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Content, DownloadParams, LLMCall, Message,
+from llmvm.common.objects import (Content, TextContent, DownloadParams, LLMCall, Message,
                                   TokenCompressionMethod, User, bcl)
 from llmvm.server.base_library.content_downloader import WebAndContentDriver
 from llmvm.server.python_execution_controller import ExecutionController
@@ -39,7 +39,7 @@ class Searcher():
             # search_term: Optional[str],
             # controller: ExecutionController,
 
-        self.parser: Callable = lambda x: Content('Searcher().search() parser: no parser found.')
+        self.parser: Callable = lambda x: TextContent('Searcher().search() parser: no parser found.')
         self.ordered_snippets: List = []
         self.index = 0
         self._result = None
@@ -51,7 +51,7 @@ class Searcher():
 
     def search_hook(self, url: str, query: str):
         write_client_stream(
-            Content("$SERPAPI_API_KEY not found, using googlesearch-python to talk to Google Search.\n")
+            TextContent("$SERPAPI_API_KEY not found, using googlesearch-python to talk to Google Search.\n")
         )
 
         results = list(google_search(query, advanced=True))
@@ -160,31 +160,31 @@ class Searcher():
                 else:
                     return WebHelpers.get_url(str(result['link']))
             else:
-                return Content('Searcher().search() url_to_text: no link found in result, so no content to return.')
+                return TextContent('Searcher().search() url_to_text: no link found in result, so no content to return.')
 
         def yelp_to_text(reviews: Dict[Any, Any]) -> Content:
             return_str = f"{reviews['title']} in {reviews['neighborhood']}."
             return_str += '\n\n'
             return_str += f"{reviews['reviews']}\n"
-            return Content(return_str)
+            return TextContent(return_str)
 
         def local_to_text(document: Dict[Any, Any]) -> Content:
             return_str = f"Title: \"{document['title']}\".\n"
             return_str += f"Link: {document['link']}\n"
             return_str += '\n\n'
             return_str += f"Snippet: \"{document['snippet']}\"\n"
-            return Content(return_str)
+            return TextContent(return_str)
 
         def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> Content:
             if not results:
-                return Content()
+                return TextContent('')
 
             title = results[0]['title']
             url = results[0]['url']
             return_str = f'For the Hacker News article: {title} which has a url of: {url}, the comments are as follows:\n\n'
             for comment in results[:num_comments]:
                 return_str += f"{comment['author']} said {comment['comment_text']}.\n"
-            return Content(return_str)
+            return TextContent(return_str)
 
         engines = {
             'Google Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
@@ -228,7 +228,7 @@ class Searcher():
                 self.parser = engines[key]['parser']
                 searcher = engines[key]['searcher']
 
-        write_client_stream(Content(f"I think the {engine} engine is best to perform a search for {self.query}\n"))
+        write_client_stream(TextContent(f"I think the {engine} engine is best to perform a search for {self.query}\n"))
 
         # perform the search
         search_results = []
@@ -331,9 +331,9 @@ class Searcher():
 
         self.ordered_snippets = [snippets[key] for key in ranked_results if key in snippets]
 
-        write_client_stream(Content(f"I found and ranked #{len(self.ordered_snippets)} results. Returning the top {self.total_links_to_return}:\n\n"))  # noqa:E501
+        write_client_stream(TextContent(f"I found and ranked #{len(self.ordered_snippets)} results. Returning the top {self.total_links_to_return}:\n\n"))  # noqa:E501
         for snippet in self.ordered_snippets[0:self.total_links_to_return]:
-            write_client_stream(Content(f"{snippet['title']}\n{snippet['link']}\n\n"))
+            write_client_stream(TextContent(f"{snippet['title']}\n{snippet['link']}\n\n"))
 
         return self.results()
 
@@ -358,4 +358,4 @@ class Searcher():
         return return_results
 
     def result(self) -> Content:
-        return Content('\n\n\n'.join([str(result) for result in self.results()]))
+        return TextContent('\n\n\n'.join([str(result) for result in self.results()]))

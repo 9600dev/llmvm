@@ -1,7 +1,7 @@
 import asyncio
 import os
 import tempfile
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 import httpx
 import aiofiles
@@ -12,7 +12,7 @@ import playwright.async_api
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import Content, DownloadParams, FileContent, LLMCall, MarkdownContent, PdfContent, User
+from llmvm.common.objects import Assistant, ContainerContent, Content, Message, TextContent, DownloadParams, FileContent, LLMCall, MarkdownContent, PdfContent, User
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.webhelpers import ChromeHelpers, WebHelpers
 from llmvm.common.helpers import write_client_stream
@@ -108,7 +108,7 @@ class WebAndContentDriver():
                     return WebHelpers.convert_html_to_markdown(result, url=download['url'])
 
         # else, nothing
-        return Content(f'WebAndContentDriver.download: nothing found for {download["url"]}')
+        return TextContent(f'WebAndContentDriver.download: nothing found for {download["url"]}')
 
     def download_with_goal(
             self,
@@ -145,11 +145,11 @@ class WebAndContentDriver():
         elif os.path.exists(result):
             return FileContent(sequence=b'', url=result)
 
-        markdown_content = MarkdownContent(sequence=WebHelpers.convert_html_to_markdown(result, url=download['url']).get_str(), url=download['url'])
+        markdown_content = WebHelpers.convert_html_to_markdown(result, url=download['url'])
 
         write_client_stream(f'Checking the content of {download["url"]} against the original user query of \"{download["goal"]}\".\n')
 
-        next_action = controller.execute_llm_call(
+        next_action: Assistant = controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
                     prompt_name='download_and_validate.prompt',
@@ -162,7 +162,7 @@ class WebAndContentDriver():
                     assistant_token=controller.get_executor().assistant_token(),
                     append_token=controller.get_executor().append_token(),
                 ),
-                context_messages=[User(markdown_content)],
+                context_messages=cast(list[Message], [User(markdown_content)]),
                 executor=controller.get_executor(),
                 model=controller.get_executor().get_default_model(),
                 temperature=0.0,
@@ -174,7 +174,7 @@ class WebAndContentDriver():
             original_query=download['goal'],
         )
 
-        next_action_str = next_action.message.get_str()
+        next_action_str = next_action.get_str()
         loop.run_until_complete(chrome_helper.close())
         logging.debug(f'WebAndContentDriver.download_with_goal decision: {next_action_str}')
 

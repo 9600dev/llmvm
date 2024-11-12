@@ -5,7 +5,7 @@ import nest_asyncio
 
 from pydantic import TypeAdapter
 
-from llmvm.common.objects import Message, User, Content, Assistant, Executor, AstNode, SessionThread, MessageModel
+from llmvm.common.objects import Message, TextContent, User, Content, Assistant, Executor, AstNode, SessionThreadModel, MessageModel
 from llmvm.common.container import Container
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.common.anthropic_executor import AnthropicExecutor
@@ -47,9 +47,10 @@ def llm(
         raise ValueError('messages must be a list of Message objects or a string')
 
     if isinstance(messages, str):
-        messages = cast(list[Message], [User(Content(messages))])
+        messages = cast(list[Message], [User(TextContent(messages))])
     elif isinstance(messages, list) and all(isinstance(message, str) for message in messages):
-        messages = cast(list[Message], [User(Content(message)) for message in messages])
+        messages = cast(list[str], messages)
+        messages = cast(list[Message], [User(TextContent(message)) for message in messages])
 
     return asyncio.run(
         LLMVMClient(
@@ -82,7 +83,7 @@ def llmvm(
     mode: str = 'auto',
     stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
     template_args: Optional[Dict[str, Any]] = None,
-) -> SessionThread:
+) -> SessionThreadModel:
     if (
         not isinstance(messages, list)
         and not isinstance(messages, str)
@@ -90,9 +91,10 @@ def llmvm(
         raise ValueError('messages must be a list of Message objects or a string')
 
     if isinstance(messages, str):
-        messages = cast(list[Message], [User(Content(messages))])
+        messages = cast(list[Message], [User(TextContent(messages))])
     elif isinstance(messages, list) and all(isinstance(message, str) for message in messages):
-        messages = cast(list[Message], [User(Content(message)) for message in messages])
+        messages = cast(list[str], messages)
+        messages = cast(list[Message], [User(TextContent(message)) for message in messages])
 
     return asyncio.run(
         LLMVMClient(
@@ -222,6 +224,8 @@ class LLMVMClient():
         async def null_handler(node: AstNode):
             pass
 
+        # todo: deal with template_args
+
         if not stream_handler:
             stream_handler = null_handler
 
@@ -240,45 +244,44 @@ class LLMVMClient():
             stop_tokens=stop_tokens,
             model=model,
             stream_handler=stream_handler,
-            template_args=template_args,
         )
         return assistant
 
     async def get_thread(
         self,
         id: int,
-    ) -> SessionThread:
+    ) -> SessionThreadModel:
         params = {
             'id': id,
         }
         response: httpx.Response = httpx.get(f'{self.api_endpoint}/v1/chat/get_thread', params=params)
-        thread = SessionThread.model_validate(response.json())
+        thread = SessionThreadModel.model_validate(response.json())
         return thread
 
     async def set_thread(
         self,
-        thread: SessionThread,
-    ) -> SessionThread:
+        thread: SessionThreadModel,
+    ) -> SessionThreadModel:
         async with httpx.AsyncClient(timeout=400.0) as client:
             response = await client.post(
                 f'{self.api_endpoint}/v1/chat/set_thread',
                 json=thread.model_dump()
             )
-            session_thread = SessionThread.model_validate(response.json())
+            session_thread = SessionThreadModel.model_validate(response.json())
             return session_thread
 
     async def get_threads(
         self,
-    ) -> List[SessionThread]:
+    ) -> List[SessionThreadModel]:
         response: httpx.Response = httpx.get(f'{self.api_endpoint}/v1/chat/get_threads')
-        threads = cast(List[SessionThread], TypeAdapter(List[SessionThread]).validate_python(response.json()))
+        threads = cast(List[SessionThreadModel], TypeAdapter(List[SessionThreadModel]).validate_python(response.json()))
 
         return threads
 
     async def call_with_session(
         self,
-        session_thread: SessionThread,
-    ) -> SessionThread:
+        session_thread: SessionThreadModel,
+    ) -> SessionThreadModel:
         return await self.call(thread=session_thread)
 
     async def status(self) -> Dict[str, str]:
@@ -297,12 +300,12 @@ class LLMVMClient():
         if not executor:
             executor = self.default_executor
 
-        result = await executor.count_tokens(messages, model=self.model)
+        result = await executor.count_tokens(messages)
         return result
 
     async def call(
         self,
-        thread: int | SessionThread,
+        thread: int | SessionThreadModel,
         messages: Union[List[Message], None] = None,
         executor_name: Optional[str] = None,
         model_name: Optional[str] = None,
@@ -314,7 +317,7 @@ class LLMVMClient():
         mode: str = '',
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
         template_args: Optional[Dict[str, Any]] = None,
-    ) -> SessionThread:
+    ) -> SessionThreadModel:
         if (
             (isinstance(messages, list) and len(messages) > 0 and not isinstance(messages[0], Message))
             and not isinstance(messages, type(None))
@@ -324,7 +327,7 @@ class LLMVMClient():
         # deal with weird message types and inputs
         thread_messages: List[Message] = []
 
-        if isinstance(thread, SessionThread):
+        if isinstance(thread, SessionThreadModel):
             thread_messages = [MessageModel.to_message(session_message) for session_message in thread.messages]
         elif isinstance(messages, list):
             thread_messages = messages
@@ -363,13 +366,10 @@ class LLMVMClient():
             # attach the messages to the thread
             thread.messages = [MessageModel.from_message(message) for message in thread_messages]
 
-            if mode == 'direct' or mode == 'tool' or mode == 'auto':
-                endpoint = '/tools/completions'
-
             async with httpx.AsyncClient(timeout=400.0) as client:
                 async with client.stream(
                     'POST',
-                    f'{self.api_endpoint}/v1{endpoint}',
+                    f'{self.api_endpoint}/v1/tools/completions',
                     json=thread.model_dump(),
                 ) as response:
                     objs = await stream_response(response, StreamPrinter('').write)
@@ -377,7 +377,7 @@ class LLMVMClient():
             await response.aclose()
 
             if objs:
-                session_thread = SessionThread.model_validate(objs[-1])
+                session_thread = SessionThreadModel.model_validate(objs[-1])
                 return session_thread
             return thread
 
@@ -405,7 +405,7 @@ class LLMVMClient():
             stream_handler=stream_handler,
             template_args=template_args,
         )
-        return SessionThread(
+        return SessionThreadModel(
             id=-1,
             messages=[MessageModel.from_message(message) for message in thread_messages + [assistant]],
             current_mode='direct',

@@ -1,14 +1,14 @@
 import ast
 import re
 import time
-from typing import Any, Callable, Dict, Generator, List, Optional, cast
+from typing import Any, Callable, Dict, Generator, Optional, cast
 
 import astunparse
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, Content, FunctionCall, LLMCall,
-                                  Message, System, User)
+                                  Message, System, TextContent, User)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime import PythonRuntime
 
@@ -20,8 +20,8 @@ class FunctionBindable():
         self,
         expr,
         func: str,
-        agents: List[Callable],
-        messages: List[Message],
+        agents: list[Callable],
+        messages: list[Message],
         lineno: int,
         expr_instantiation,
         scope_dict: Dict[Any, Any],
@@ -32,7 +32,7 @@ class FunctionBindable():
     ):
         self.expr = expr
         self.expr_instantiation = expr_instantiation
-        self.messages: List[Message] = messages
+        self.messages: list[Message] = messages
         self.func = func.replace('"', '')
         self.agents = agents
         self.lineno = lineno
@@ -83,7 +83,7 @@ class FunctionBindable():
     ) -> Generator['FunctionBindable', None, None]:
         bound = False
         global_counter = 0
-        messages: List[Message] = []
+        messages: list[Message] = []
         bindable = ''
         function_call: Optional[FunctionCall] = None
 
@@ -106,21 +106,19 @@ class FunctionBindable():
 
         # the following code determines the progressive scope exposure to the LLM
         # to help it determine the binding
-        expr_instantiation_message = User(Content())
+        expr_instantiation_message = User(TextContent(''))
         if isinstance(expr, str) and find_string_instantiation(expr, self.original_code):
             node, parent = find_string_instantiation(expr, self.original_code)
             if parent:
-                expr_instantiation_message.message = Content(
+                expr_instantiation_message.message = [TextContent(
                     f"The data in the next message was instantiated via this Python code: {astunparse.unparse(parent)}"
-                )
+                )]
             elif node:
-                expr_instantiation_message.message = Content(
+                expr_instantiation_message.message = [TextContent(
                     f"The data in the next message was instantiated via this Python code: {astunparse.unparse(node.value)}"
-                )
+                )]
 
-        messages.append(System(Content(
-            '''You are a Python compiler and code generator. You generate parsable Python code.'''
-        )))
+        messages.append(System('''You are a Python compiler and code generator. You generate parsable Python code.'''))
 
         # get the binder prompt message
         messages.append(self.__bind_helper(
@@ -132,10 +130,10 @@ class FunctionBindable():
         if str(expr_instantiation_message.message):
             messages.append(expr_instantiation_message)
         # goal
-        messages.append(User(Content(
+        messages.append(User(TextContent(
             f"""The overall goal of the Python program is to: {self.original_query}."""
         )))
-        messages.append(User(Content(
+        messages.append(User(TextContent(
             f"""The Python code that is currently being executed is: {self.original_code}"""
         )))
 
@@ -148,7 +146,7 @@ class FunctionBindable():
             return str(value)
 
         scope = '\n'.join(['{} = "{}"'.format(key, expand_str(value)) for key, value in self.scope_dict.items()])
-        messages.append(User(Content(
+        messages.append(User(TextContent(
             f"""The Python program's running global scope for all variables is:
 
             {scope}
@@ -167,7 +165,7 @@ class FunctionBindable():
 
                 llm_bind_result = self.controller.execute_llm_call(
                     llm_call=LLMCall(
-                        user_message=User(Content()),  # we can pass an empty message here and the context_messages contain everything  # noqa:E501
+                        user_message=User(TextContent('')),  # we can pass an empty message here and the context_messages contain everything  # noqa:E501
                         context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
                         executor=self.controller.get_executor(),
                         model=self.controller.get_executor().get_default_model(),
@@ -208,10 +206,10 @@ class FunctionBindable():
                         Using the data found in previous messages, answer the question "{question}", and then bind the callsite
                         using the same reply rules as in previous messages. Reply with only Python code.
                         '''
-                        messages.insert(0, User(Content(prompt)))
+                        messages.insert(0, User(TextContent(prompt)))
                     else:
                         # todo figure this out
-                        messages.insert(0, Assistant(message=Content(bindable)))
+                        messages.insert(0, Assistant(message=TextContent(bindable)))
                     if counter > len(messages) - assistant_counter:
                         # we've run out of messages, so we'll just use the original code
                         break
@@ -220,8 +218,8 @@ class FunctionBindable():
                     break
                 else:
                     # no function_call result, so bump the counter
-                    messages.insert(0, Assistant(message=Content(bindable)))
-                    messages.insert(0, User(message=Content(
+                    messages.insert(0, Assistant(message=TextContent(bindable)))
+                    messages.insert(0, User(message=TextContent(
                         """Please try harder to bind the callsite.
                         Look thoroughly through the previous messages for data and then reply with your best guess at the bounded
                         callsite. Reply only with Python code that can be parsed by the Python compiler.

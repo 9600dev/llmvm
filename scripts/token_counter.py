@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from llmvm.client.client import execute_llm_call, execute_llm_call_direct, llm
 from llmvm.common.anthropic_executor import AnthropicExecutor
 from llmvm.common.objects import (Assistant, Content, Message, MessageModel,
-                                  SessionThread, User)
+                                  SessionThreadModel, User)
 
 
 class TokenizerModel(nn.Module):

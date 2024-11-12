@@ -5,9 +5,9 @@ from typing import List, cast
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (BrowserContent, Content, Executor, ImageContent, LLMCall,
+from llmvm.common.objects import (BrowserContent, Content, Executor, FileContent, ImageContent, LLMCall,
                                   MarkdownContent, Message, PdfContent,
-                                  StreamNode, User)
+                                  StreamNode, SupportedMessageContent, TextContent, User)
 from llmvm.common.pdf import Pdf, PdfHelpers
 
 logging = setup_logging()
@@ -46,12 +46,12 @@ cache = ObjectCache()
 
 class ObjectTransformers():
     @staticmethod
-    def transform_pdf_content(content: PdfContent, executor: Executor) -> List[Message]:
+    def transform_pdf_to_content(content: PdfContent, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
         if content.original_sequence is not None and isinstance(content.sequence, list):
-            return [User(c) for c in content.sequence]
+            return content.sequence
 
         if cache.get(content.url):
-            return ObjectTransformers.transform_pdf_content(cast(PdfContent, cache.get(content.url)), executor)
+            return ObjectTransformers.transform_pdf_to_content(cast(PdfContent, cache.get(content.url)), executor, xml_wrapper)
 
         if not content.sequence and content.is_local():
             content.sequence = open(content.url, 'rb').read()
@@ -59,49 +59,89 @@ class ObjectTransformers():
         if content.original_sequence is None and Container.get_config_variable('LLMVM_FULL_PROCESSING', default=False):
             # avoid circular import
             pdf = Pdf(executor=executor)
-            result = pdf.get_pdf_content(content)
+            result: list[content] = pdf.get_pdf_content(content)
             content.original_sequence = content.sequence
             content.sequence = result
             cache.set(content.url, content)
-
-            return [User(content) for content in result]
+            if xml_wrapper:
+                return [TextContent(f'<pdf url={content.url}>')] + result + [TextContent('</pdf>')]
+            else:
+                return result
         else:
-            result = PdfHelpers.parse_pdf_bytes(cast(bytes, content.sequence))
-            return [User(Content(result))]
+            text_result: str = PdfHelpers.parse_pdf_bytes(cast(bytes, content.sequence))
+            if xml_wrapper:
+                return cast(list[SupportedMessageContent], [TextContent(f'<pdf url={content.url}>')] + [TextContent(text_result)] + [TextContent('</pdf>')])
+            else:
+                return [TextContent(text_result)]
 
     @staticmethod
-    def transform_markdown_content(content: MarkdownContent, executor: Executor) -> List[Message]:
-        if content.original_sequence is not None and isinstance(content.sequence, list):
-            return [User(content) for content in content.sequence]
+    def transform_markdown_to_content(content: MarkdownContent, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
+        if content.original_sequence is not None and isinstance(content.sequence, list) and all([isinstance(c, SupportedMessageContent) for c in content.sequence]):
+            return cast(list[SupportedMessageContent], content.sequence)
 
         if cache.get(content.url):
-            return ObjectTransformers.transform_markdown_content(cast(MarkdownContent, cache.get(content.url)), executor)
+            return ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, cache.get(content.url)), executor, xml_wrapper)
 
         if Container.get_config_variable('LLMVM_FULL_PROCESSING', default=False):
-            result: List[Content] = asyncio.run(Helpers.markdown_content_to_messages(logging, content, 150, 150))
+            result: list[SupportedMessageContent] = asyncio.run(Helpers.markdown_content_to_supported_content(logging, content, 150, 150))
             content.original_sequence = content.sequence
-            content.sequence = result
-            return [User(content) for content in result]
+            content.sequence = cast(list[Content], result)
+            if xml_wrapper:
+                return [TextContent(f'<markdown url={content.url}>')] + result + [TextContent('</markdown>')]
+            else:
+                return result
         else:
             # turns out, if there are embedded images in the markdown, we should probably strip them out
             # because otherwise, we're just uploading these things for no reason
             markdown_content = Helpers.remove_embedded_images(content.get_str())
-            return [User(Content(markdown_content))]
+            if xml_wrapper:
+                return cast(list[SupportedMessageContent], [TextContent(f'<markdown url={content.url}>')] + [TextContent(markdown_content)] + [TextContent('</markdown>')])
+            else:
+                return [TextContent(markdown_content)]
 
     @staticmethod
-    def transform_browser_content(content: BrowserContent, executor: Executor) -> List[Message]:
-        # BrowserContent is usually [ImageContent, MarkdownContent]
+    def transform_browser_to_content(content: BrowserContent, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
+        if content.original_sequence is not None and isinstance(content.sequence, list) and all([isinstance(c, SupportedMessageContent) for c in content.sequence]):
+            return cast(list[SupportedMessageContent], content.sequence)
+
+        if cache.get(content.url):
+            return ObjectTransformers.transform_browser_to_content(cast(BrowserContent, cache.get(content.url)), executor)
+
         if Container.get_config_variable('LLMVM_FULL_PROCESSING', default=False):
-            return [User(content) for content in content.sequence]
+            result: list[SupportedMessageContent] = []
+            content.original_sequence = content.sequence
+            supported_contents = Helpers.flatten([ObjectTransformers.transform_to_supported_content(c, executor, xml_wrapper) for c in content.sequence])
+            content.sequence = cast(list[Content], supported_contents)
+            return supported_contents
         else:
-            return [User(content) for content in content.sequence if not isinstance(content, ImageContent)]
+            non_image_content = [content for content in content.sequence if not isinstance(content, ImageContent)]
+            return Helpers.flatten([ObjectTransformers.transform_to_supported_content(c, executor, xml_wrapper) for c in non_image_content])
 
     @staticmethod
-    def transform_str(content: Content, executor: Executor) -> str:
+    def transform_file_to_content(content: FileContent, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
+        if xml_wrapper:
+            return cast(list[SupportedMessageContent], [TextContent(f'<file url={content.url}>')] + [TextContent(content.get_str())] + [TextContent('</file>')])
+        else:
+            return [TextContent(content.get_str())]
+
+    @staticmethod
+    def transform_content_to_string(content: list[Content], executor: Executor, xml_wrapper: bool = False) -> str:
+        result = Helpers.flatten([ObjectTransformers.transform_to_supported_content(c, executor, xml_wrapper) for c in content])
+        return '\n'.join([c.get_str() for c in result])
+
+    @staticmethod
+    def transform_to_supported_content(content: Content, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
         if isinstance(content, PdfContent):
-            result = ObjectTransformers.transform_pdf_content(cast(PdfContent, content), executor)
-            '\n'.join([c.message.get_str() for c in result])
-        if isinstance(content, MarkdownContent):
-            result = ObjectTransformers.transform_markdown_content(cast(MarkdownContent, content), executor)
-            '\n'.join([c.message.get_str() for c in result])
-        return content.get_str()
+            return ObjectTransformers.transform_pdf_to_content(cast(PdfContent, content), executor, xml_wrapper)
+        elif isinstance(content, MarkdownContent):
+            return ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, content), executor, xml_wrapper)
+        elif isinstance(content, BrowserContent):
+            return ObjectTransformers.transform_browser_to_content(cast(BrowserContent, content), executor)
+        elif isinstance(content, FileContent):
+            return ObjectTransformers.transform_file_to_content(cast(FileContent, content), executor, xml_wrapper)
+        elif isinstance(content, ImageContent):
+            return [content]
+        elif isinstance(content, TextContent):
+            return [content]
+        else:
+            raise ValueError(f"Unknown content type: {type(content)}")
