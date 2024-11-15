@@ -1454,7 +1454,7 @@ def message(
         temperature=temperature,
         output_token_len=output_token_len,
         stop_tokens=stop_tokens,
-        mode='tools',
+        mode='direct' if direct else 'tools',
         compression=compression,
         cookies=cookies_list,
         stream_handler=StreamPrinter('').write,

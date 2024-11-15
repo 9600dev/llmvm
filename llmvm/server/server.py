@@ -565,12 +565,6 @@ async def tools_completions(request: SessionThreadModel):
         assistant_result = '\n\n'.join([str(statement) for statement in reversed(statements)])
         results.append(Assistant(TextContent(assistant_result)))
 
-        # for statement in reversed(statements):
-        #     if isinstance(statement, Answer):
-        #         results.append(Assistant(Content(str(cast(Answer, statement).result()))))
-        #     elif isinstance(statement, Assistant):
-        #         results.append(statement)
-
         if len(results) > 0:
             for result in results:
                 thread.messages.append(MessageModel.from_message(result))

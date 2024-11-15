@@ -68,10 +68,10 @@ class ExecutionController(Controller):
                 model=llm_call.model,
                 stop_tokens=llm_call.stop_tokens,
             )
-            role_debug(logging, llm_call.prompt_name, 'User', str(llm_call.user_message.message))
-            role_debug(logging, llm_call.prompt_name, 'Assistant', str(assistant.message))
+            role_debug(logging, llm_call.prompt_name, 'User', llm_call.user_message.get_str())
+            role_debug(logging, llm_call.prompt_name, 'Assistant', assistant.get_str())
         except Exception as ex:
-            role_debug(logging, llm_call.prompt_name, 'User', str(llm_call.user_message.message))
+            role_debug(logging, llm_call.prompt_name, 'User', llm_call.user_message.get_str())
             raise ex
         response_writer(llm_call.prompt_name, assistant)
         return assistant
@@ -661,6 +661,8 @@ class ExecutionController(Controller):
             elif isinstance(result, list) and len(result) > 1:
                 logging.debug('parse_code_block_result() called with list of AstNodes')
                 return cast(list[AstNode], result)
+            elif isinstance(result, Assistant):
+                return cast(list[AstNode], result.message)
             else:
                 raise ValueError(f'Unknown content type: {type(result)}')
 
@@ -888,19 +890,34 @@ class ExecutionController(Controller):
                     # no answer() block, or last assignment was None
                     code_execution_result = parse_code_block_result(f'No answer() block found in code block, or last assignment was None.')
 
-                assert(isinstance(code_execution_result, Content))
+                assert(isinstance(code_execution_result, list) and len(code_execution_result) > 0)
+
+                # todo: this should be AstNode or TextNode or ...
+                # but for now we're just making it a str()
+                code_execution_result_str = '\n'.join([str(c) for c in code_execution_result])
 
                 # we have a <helpers_result></helpers_result> block, push it to the cli client
-                if len(code_execution_result.get_str()) > 300:
+                if len(code_execution_result_str) > 300:
                     # grab the first and last 150 characters
-                    write_client_stream(f'<helpers_result>{code_execution_result.get_str()[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result.get_str()[-150:]}</helpers_result>\n\n')
+                    write_client_stream(f'<helpers_result>{code_execution_result_str[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result_str[-150:]}</helpers_result>\n\n')
                 else:
-                    write_client_stream(f'<helpers_result>{code_execution_result.get_str()}</helpers_result>\n\n')
+                    write_client_stream(f'<helpers_result>{code_execution_result_str}</helpers_result>\n\n')
 
+                # todo: we're using a string here to embed the answer in the helpers_result
+                # but I think we can probably have all sorts of stuff in here, including images.
                 messages_copy.append(response)
-                messages_copy.append(User(TextContent(f'<helpers_result>')))
-                messages_copy.append(User(code_execution_result))
-                messages_copy.append(User(TextContent('</helpers_result>')))
+                content_messages = []
+                content_messages.append(TextContent(f'<helpers_result>'))
+                if isinstance(code_execution_result, Content):
+                    content_messages.append(code_execution_result)
+                else:
+                    content_messages.append(TextContent(code_execution_result_str))
+                content_messages.append(TextContent('</helpers_result>'))
+                completed_code_user_message = User(content_messages)
+                # required to complete the continuation
+                messages_copy.append(completed_code_user_message)
+                # required to make messages() work
+                python_runtime.messages_list.append(completed_code_user_message)
 
             # we have a stop token and there are no code blocks. Assistant is finished, so we can just append the response
             elif response.stop_token and response.stop_token == '</complete>':

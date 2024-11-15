@@ -472,7 +472,7 @@ class PythonRuntime:
         logging.debug(f'llm_list_bind({str(expr)[:20]}, {repr(llm_instruction)}, {count}, {list_type})')
         context = expr.get_str() if isinstance(expr, Message) else str(expr)
 
-        assistant = self.controller.execute_llm_call(
+        assistant: Assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_message(
                     prompt_name='llm_list_bind.prompt',
@@ -497,7 +497,7 @@ class PythonRuntime:
             original_query=self.original_query,
         )
 
-        list_result = str(assistant.message)
+        list_result = assistant.get_str()
 
         # for anthropic
         if not list_result.startswith('['):
@@ -508,20 +508,21 @@ class PythonRuntime:
 
         try:
             result = cast(list, eval(list_result))
-            if not isinstance(result, list):
-                raise ValueError('llm_list_bind result is not a list, or is malformed')
             return result[:count]
         except Exception as ex:
-            logging.debug('llm_list_bind error: {}'.format(ex))
+            logging.debug('PythonRuntime.llm_list_bind error: {}'.format(ex))
+            logging.debug('PythonRuntime.llm_list_bind list_result: {}, llm_instruction'.format(list_result, llm_instruction))
+
             new_python_code = self.rewrite_python_error_correction(
                 query=llm_instruction,
-                python_code=str(assistant.message),
+                python_code=assistant.get_str(),
                 error=str(ex),
                 locals_dictionary=self.locals_dict,
             )
-            logging.debug('llm_list_bind new_python_code: {}'.format(new_python_code))
+            logging.debug('PythonRuntime.llm_list_bind rewrote Python code: {}'.format(new_python_code))
             result = cast(list, eval(new_python_code))
             if not isinstance(result, list):
+                logging.error('PythonRuntime.llm_list_bind result is not a list')
                 return []
             return result[:count]
 

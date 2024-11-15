@@ -212,7 +212,8 @@ class ChromeHelpersInternal():
             'twitter.com': lambda page: self.wait(1500),
             'x.com': lambda page: self.wait(1500),
             'techmeme.com': lambda page: self.wait(1500),
-            'arxiv.org': lambda page: self.wait(1000),
+            'arxiv.org': lambda page: self.wait(1500),
+            'instagram.com': lambda page: self.wait(2000),
         }
 
     async def safe_click_element(self, element: ElementHandle, timeout=5000):

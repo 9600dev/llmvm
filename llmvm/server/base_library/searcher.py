@@ -115,14 +115,14 @@ class Searcher():
 
         # double shot try
         try:
-            queries = eval(str(query_expander.message))[:self.query_expansion]
+            queries = eval(query_expander.get_str())[:self.query_expansion]
         except SyntaxError as ex:
             logging.debug(f"search() query expansion parsing SyntaxError: {ex}")
             logging.debug("search() trying again with regex list extractor")
 
             # try and extract a list
             pattern = r'\[\s*("(?:\\.|[^"\\])*"\s*,\s*)*"(?:\\.|[^"\\])*"\s*\]'
-            match = re.search(pattern, str(query_expander.message))
+            match = re.search(pattern, query_expander.get_str())
 
             if match:
                 try:
@@ -220,7 +220,7 @@ class Searcher():
             original_query=self.original_query,
         )
 
-        engine = str(engine_rank.message).split('\n')[0]
+        engine = engine_rank.get_str().split('\n')[0]
         searcher = self.search_google_hook
 
         for key, _ in engines.items():
@@ -260,7 +260,7 @@ class Searcher():
                 compression=TokenCompressionMethod.SUMMARY,
             )
 
-            query_result, location = eval(str(location.message))
+            query_result, location = eval(location.get_str())
             yelp_result = SerpAPISearcher().search_yelp(query_result, location)
             return [yelp_to_text(yelp_result)]
 
@@ -313,11 +313,11 @@ class Searcher():
         # double shot try
         ranked_results = []
         try:
-            ranked_results = eval(str(result_rank.message))
+            ranked_results = eval(result_rank.get_str())
         except SyntaxError as ex:
             logging.debug(f"Searcher.search() SyntaxError: {ex}, trying again with regex list extractor")
             pattern = r'\[(?:"[^"]*"(?:,\s*)?)+\]'
-            match = re.search(pattern, str(result_rank.message))
+            match = re.search(pattern, result_rank.get_str())
 
             if match:
                 try:
@@ -339,6 +339,7 @@ class Searcher():
 
     def results(self) -> List[Content]:
         return_results = []
+        error_count = 0
 
         while len(return_results) < self.total_links_to_return and self.index < len(self.ordered_snippets):
             for result in self.ordered_snippets[self.index:]:
@@ -353,7 +354,11 @@ class Searcher():
                     if len(return_results) >= self.total_links_to_return:
                         break
                 except Exception as e:
+                    # this exception can swallow the total_links_to_return check
                     logging.error(e)
+                    error_count += 1
+                    if error_count >= self.total_links_to_return:
+                        break
                     pass
         return return_results
 

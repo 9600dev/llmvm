@@ -16,7 +16,7 @@ from rich.text import Text
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
+from llmvm.common.objects import MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
 
 
 logging = setup_logging()
@@ -35,8 +35,10 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
             data = jsonpickle.decode(content)
 
             # tokens
-            if isinstance(data, Content):
-                await print_lambda(str(cast(Content, data)))
+            if isinstance(data, TokenNode):
+                await print_lambda(data.token)
+            elif isinstance(data, TextContent):
+                await print_lambda(data.get_str())
             elif isinstance(data, TokenStopNode):
                 await print_lambda(str(cast(TokenStopNode, data)))
             elif isinstance(data, StreamNode):
@@ -173,8 +175,10 @@ class StreamPrinter():
 
             string = ''
 
-            if isinstance(node, Content):
-                string = str(node)
+            if isinstance(node, TokenNode):
+                string = node.token
+            if isinstance(node, TextContent):
+                string = node.get_str()
             elif isinstance(node, TokenStopNode):
                 string = '\n'
             elif isinstance(node, StreamNode):
@@ -238,7 +242,7 @@ def print_response(messages: List[Message], escape: bool = False):
                 CodeBlock.__rich_console__ = markdown__rich_console__
                 console.print(f'{prepend}', end='')
                 console.print(content.get_str())
-            elif isinstance(content, Content) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
+            elif isinstance(content, TextContent) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
                 CodeBlock.__rich_console__ = markdown__rich_console__
                 console.print(f'{prepend}', end='')
                 console.print(Markdown(content.get_str()))
@@ -262,7 +266,7 @@ def print_response(messages: List[Message], escape: bool = False):
     for message in messages:
         if message.role() == 'assistant':
             temp_content = message.message[-1]
-            if type(temp_content) is Content:
+            if type(temp_content) is TextContent:
                 # sometimes openai will do a funny thing where it:
                 # var1 = search("....")
                 # answer(var1)

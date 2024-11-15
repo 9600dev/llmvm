@@ -182,6 +182,9 @@ class WebAndContentDriver():
         if 'yes' in next_action_str.lower():
             write_client_stream(f'Yes, the content looks good. "{next_action_str}"\n')
             return markdown_content
+        elif 'no' in next_action_str.lower():
+            write_client_stream('No, the content does not look good, and does not provide a path forward.\n')
+            return TextContent('No, the content does not look good, and does not provide a path forward.')
         else:
             write_client_stream(f'Decided to proceed to {next_action_str}.\n')
 

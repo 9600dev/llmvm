@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import os
 from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
 
@@ -67,7 +68,7 @@ class AnthropicExecutor(Executor):
                         'source': {
                             "type": "base64",
                             "media_type": Helpers.classify_image(content.get_bytes()),
-                            "data": base64.b64encode(Helpers.anthropic_resize(content.get_bytes()).decode('utf-8')) # type: ignore
+                            "data": base64.b64encode(Helpers.anthropic_resize(content.get_bytes())).decode('utf-8') # type: ignore
                         },
                         **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models else {}),
                         **({'url': content.url} if server_serialization else {}),
@@ -125,11 +126,17 @@ class AnthropicExecutor(Executor):
         else:
             raise ValueError(f'role not found or not supported: {message}')
 
-    def unpack_and_wrap_messages(self, model: Optional[str], messages: list[Message]) -> list[dict[str, str]]:
+    def unpack_and_wrap_messages(self, messages: list[Message], model: Optional[str] = None) -> list[dict[str, str]]:
         wrapped: list[dict[str, str]] = []
 
+        if not messages or not all(isinstance(m, Message) for m in messages):
+            logging.error('Messages must be a list of Message objects.')
+            for m in [m for m in messages if not isinstance(m, Message)]:
+                logging.error(f'Invalid message: {m}')
+            raise ValueError('Messages must be a list of Message objects.')
+
         # deal with the system message
-        system_messages = cast(list[System], filter(lambda m: m.role() == 'system', messages))
+        system_messages = cast(list[System], Helpers.filter(lambda m: m.role() == 'system', messages))
         if len(system_messages) > 1:
             logging.warning('More than one system message in the message list. Using the last one.')
 
@@ -180,24 +187,25 @@ class AnthropicExecutor(Executor):
 
     async def count_tokens(
         self,
-        messages: List[Message],
+        messages: list[Message],
     ) -> int:
-        num_tokens = 0
-        for message in messages:
-            for content in message.message:
-                if isinstance(content, ImageContent):
-                    num_tokens += len(base64.b64encode(Helpers.anthropic_resize(content.sequence)).decode('utf-8'))
-                elif isinstance(content, TextContent):
-                    num_tokens += await self.client.count_tokens(content.get_str())
-                else:
-                    raise ValueError(f'Unknown content type: {content.__class__.__name__}')
-        return num_tokens
+        unpacked_messages: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages=messages)
+        return await self.count_tokens_dict(unpacked_messages)
 
     async def count_tokens_dict(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[Dict[str, Any]],
     ) -> int:
-        raise NotImplementedError('count_tokens_dict is not implemented for ClaudeExecutor')
+        num_tokens = 0
+        json_accumulator = ''
+        for message in messages:
+            for content in message['content']:
+                if 'image' in content['type'] and 'source' in content and 'data' in content['source']:
+                    b64data = content['source']['data']
+                    num_tokens += Helpers.anthropic_image_tok_count(b64data)
+                else:
+                    json_accumulator += json.dumps(content, indent=2)
+        return num_tokens + await self.client.count_tokens(json_accumulator)
 
     async def aexecute_direct(
         self,
@@ -287,7 +295,7 @@ class AnthropicExecutor(Executor):
         model = model if model else self.default_model
 
         # wrap and check message list
-        messages_list: list[Dict[str, Any]] = self.unpack_and_wrap_messages(model, messages)
+        messages_list: list[Dict[str, Any]] = self.unpack_and_wrap_messages(messages, model)
 
         stream = self.aexecute_direct(
             messages_list,

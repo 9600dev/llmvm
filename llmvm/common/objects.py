@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
 import time
-from typing import Any, Awaitable, Callable, Optional, Type, TypeVar, TypedDict, cast
+from typing import Any, Awaitable, Callable, Optional, Type, TypeVar, TypedDict, Union, cast
 
 import pandas as pd
 from llmvm.common.logging_helpers import setup_logging
@@ -289,7 +289,7 @@ class Content(AstNode):
     def __init__(
         self,
         sequence: str | bytes | list['Content'],
-        content_type: str = 'text',
+        content_type: str = '',
         url: str = '',
     ):
         self.sequence = sequence
@@ -299,6 +299,10 @@ class Content(AstNode):
 
     def __repr__(self):
         return f'Content({self.sequence.__repr__()})'
+
+    @abstractmethod
+    def __str__(self):
+        pass
 
     @abstractmethod
     def get_str(self) -> str:
@@ -323,7 +327,7 @@ class Content(AstNode):
 
     @classmethod
     def from_json(cls, data: dict) -> 'Content':
-        content_type = data.get('content_type', 'text')
+        content_type = data.get('content_type', '')
         sequence = data['sequence']
         url = data.get('url', '')
 
@@ -396,7 +400,7 @@ class TextContent(SupportedMessageContent):
         self.sequence = sequence
 
     def __str__(self):
-        return self.sequence
+        return self.get_str()
 
     def __repr__(self):
         return f'TextContent({self.sequence})'
@@ -437,6 +441,7 @@ class PdfContent(BinaryContent):
         sequence: bytes,
         url: str = '',
     ):
+
         super().__init__(sequence, 'pdf', url)
         self.sequence = sequence
 
@@ -494,6 +499,9 @@ class ContainerContent(Content):
         content_type: str,
         url: str = '',
     ):
+        if not isinstance(sequence, list):
+            raise ValueError('sequence must be a list of Content objects')
+
         super().__init__(sequence, content_type, url)
 
     def to_json(self) -> dict:
@@ -539,7 +547,7 @@ class MarkdownContent(ContainerContent):
         return f'MarkdownContent({self.url.__str__()} sequence: {self.sequence})'
 
     def get_str(self) -> str:
-        return str(self.sequence)
+        return '\n'.join([c.get_str() for c in self.sequence])
 
 
 class Message(AstNode):
@@ -547,6 +555,9 @@ class Message(AstNode):
         self,
         message: list[Content],
     ):
+        if not isinstance(message, list):
+            raise ValueError('message must be a list of Content objects')
+
         self.message: list[Content] = message
         self.pinned: int = 0  # 0 is not pinned, -1 is pinned last, anything else is pinned
         self.prompt_cached: bool = False
@@ -586,6 +597,10 @@ class User(Message):
         message: Content | list[Content]
     ):
         if isinstance(message, list):
+            # check to see if all elements are Content
+            if not all(isinstance(m, Content) for m in message):
+                raise ValueError('User message must be a Content object or list of Content objects')
+
             super().__init__(message)
         else:
             super().__init__([message])
@@ -594,10 +609,23 @@ class User(Message):
         return 'user'
 
     def __str__(self):
-        raise NotImplementedError('User messages cannot be converted to strings')
+        return self.get_str()
 
     def get_str(self):
-        return '\n'.join([c.get_str() for c in self.message])
+        def content_str(content) -> str:
+            if isinstance(content, Content):
+                return content.get_str()
+            elif isinstance(content, list):
+                return '\n'.join([content_str(c) for c in content])
+            elif isinstance(content, AstNode):
+                return str(content)
+            else:
+                raise ValueError(f'Unsupported content type for User.get_str(): {type(content)}')
+
+        if isinstance(self.message, Content):
+            return self.message.get_str()
+
+        return '\n'.join([content_str(c) for c in self.message])
 
     def __repr__(self):
         return f'User({self.message.__repr__()})'
@@ -629,7 +657,7 @@ class System(Message):
         return 'system'
 
     def __str__(self):
-        return self.message[0].get_str()
+        return self.get_str()
 
     def __repr__(self):
         return f'System({self.message.__repr__()})'
@@ -661,10 +689,10 @@ class Assistant(Message):
         return 'assistant'
 
     def __str__(self):
-        return f'{self.message}'
+        return self.get_str()
 
     def get_str(self):
-        return str(self.message)
+        return str(self.message[0].get_str())
 
     def __add__(self, other):
         other_message = str(other)
@@ -680,9 +708,9 @@ class Assistant(Message):
 
     def __repr__(self):
         if self.error:
-            return f'Assistant({self.message.__repr__()} {self.error})'
+            return f'Assistant({self.message[0].__repr__()} {self.error})'
         else:
-            return f'Assistant({self.message.__repr__()})'
+            return f'Assistant({self.message[0].__repr__()})'
 
     def to_json(self):
         json_result = super().to_json()
@@ -1054,7 +1082,7 @@ class TokenNode(AstNode):
         return self.token
 
     def __repr__(self):
-        return f'TokenStopNode({self.token})'
+        return f'TokenNode({self.token})'
 
 
 class QueueBreakNode(AstNode):
@@ -1096,7 +1124,7 @@ class StreamNode(AstNode):
         self.metadata = metadata
 
     def __str__(self):
-        return 'StreamNode'
+        return f'StreamNode{str(self.obj)}'
 
     def __repr__(self):
         return 'StreamNode()'
@@ -1111,7 +1139,7 @@ class DebugNode(AstNode):
         self.debug_str = debug_str
 
     def __str__(self):
-        return 'DebugNode'
+        return f'DebugNode({self.debug_str})'
 
     def __repr__(self):
         return 'DebugNode()'
@@ -1387,18 +1415,20 @@ class DownloadItemModel(BaseModel):
 
 
 class ContentModel(BaseModel):
-    type: str
-    sequence: list[dict] | str
+    sequence: Union[list[dict], str, bytes]
     content_type: str
-    original_sequence: Optional[list[dict] | str]
+    original_sequence: Optional[Union[list[dict], str, bytes]] = None
     url: str
+
+    class Config:
+        from_attributes = True
 
     def to_content(self) -> Content:
         return Content.from_json(data=self.model_dump())
 
     @classmethod
     def from_content(cls, content: Content) -> 'ContentModel':
-        return ContentModel.model_validate(content.to_json())
+        return cls.model_validate(content.to_json())
 
 
 class MessageModel(BaseModel):

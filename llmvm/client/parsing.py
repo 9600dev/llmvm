@@ -6,7 +6,7 @@ import asyncio
 import requests
 import tempfile
 import urllib.parse
-from llmvm.common.objects import Content, ImageContent, MarkdownContent, MessageModel, PdfContent, FileContent, SessionThreadModel, User, Message, Assistant, System
+from llmvm.common.objects import Content, ImageContent, MarkdownContent, MessageModel, PdfContent, FileContent, SessionThreadModel, TextContent, User, Message, Assistant, System
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from typing import List, Sequence
@@ -122,13 +122,13 @@ def parse_message_actions(role_type: type, message: str, actions: list[str]) -> 
     for token in tokens:
         if any(token.startswith(action) for action in actions):
             if accumulated_tokens:
-                messages.append(role_type(Content(' '.join(accumulated_tokens))))
+                messages.append(role_type(TextContent(' '.join(accumulated_tokens))))
             messages.append(role_type(parse_action(token)))
             accumulated_tokens = []
         elif token:
             accumulated_tokens.append(token)
     if accumulated_tokens:
-        messages.append(role_type(Content(' '.join(accumulated_tokens))))
+        messages.append(role_type(TextContent(' '.join(accumulated_tokens))))
     return messages
 
 
@@ -332,7 +332,7 @@ def get_path_as_messages(
             elif result.path.endswith('.md'):
                 with open(file_path, 'r') as f:
                     file_content = f.read()
-                    files.append(User(MarkdownContent(file_content, url=os.path.abspath(file_path))))
+                    files.append(User(MarkdownContent([TextContent(file_content)], url=os.path.abspath(file_path))))
             elif result.path.endswith('.htm') or result.path.endswith('.html'):
                 try:
                     with open(file_path, 'r') as f:
@@ -345,7 +345,7 @@ def get_path_as_messages(
                             file_content,
                         )
                         file_content = markdown if markdown else file_content
-                        files.append(User(MarkdownContent(file_content, url=os.path.abspath(file_path))))
+                        files.append(User(MarkdownContent([TextContent(file_content)], url=os.path.abspath(file_path))))
                 except UnicodeDecodeError:
                     raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
             elif Helpers.classify_image(open(file_path, 'rb').read()) in ['image/jpeg', 'image/png', 'image/webp']:

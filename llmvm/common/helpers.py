@@ -612,7 +612,8 @@ class Helpers():
         min_width: int,
         min_height: int
     ) -> list[SupportedMessageContent]:
-        pattern = r'(.*?)!\[(?:.*?)\]\[(.*?)\]|(.+?)$'
+        pattern = r'(.*?)!\[(.*?)\]\((.*?)\)|(.+?)$'
+        # pattern = r'(.*?)!\[(?:.*?)\]\[(.*?)\]|(.+?)$'
         embedded_image_pattern = r'\[(.*?)\]:\s*<data:image/(.*?);base64,(.+)>'
         content = markdown_content.get_str()
         content_list: List[SupportedMessageContent] = []
@@ -632,17 +633,18 @@ class Helpers():
         tasks = []
 
         for match in re.finditer(pattern, content, re.DOTALL):
-            before, image_id, after = match.groups()
+            before, alt_text, image_id, after = match.groups()
             if before and before != content[last_end:match.start()] and last_end != match.start():
                 content_list.append(TextContent(content[last_end:match.start()]))
                 idx += 1
             if before:
                 content_list.append(TextContent(before))
                 idx += 1
-            if image_id:
-                if image_id in embedded_images:
+            if alt_text:
+                if alt_text in embedded_images:
                     content_list.append(embedded_images[image_id])
                 else:
+                    logging.debug(f"Downloading image from {markdown_content.url[:25]} {image_id}")
                     # Handle external images as before
                     task = asyncio.create_task(
                         Helpers.get_image_fuzzy_url(logging, markdown_content.url, image_id, min_width, min_height)
