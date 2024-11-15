@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.objects import ImageContent
 from llmvm.server.base_library.source import Source
 
 logging = setup_logging()
@@ -193,13 +194,13 @@ class BCL():
         return np.random.lognormal(mean, std_dev)
 
     @staticmethod
-    def generate_graph_image(x_y_data_dict: Dict[str, Any], title: str, x_label: str, y_label: str) -> None:
+    def generate_graph_image(x_y_data_dict: Dict[str, Any], title: str, x_label: str, y_label: str) -> ImageContent:
         """
         Generates a graph image from the given x_y_data_dict Dictionary, which has two keys: 'x' and 'y' and a list of int/floats
         and prints it to the client's screen. It returns None.
 
         Example:
-        BCL.generate_graph_image(x_y_data_dict={"x": [1, 2, 3], "y": [4.0, 5.0, 6.0]}, title="My Graph Title", x_label="X Label", y_label="Y Label")
+        image_content = BCL.generate_graph_image(x_y_data_dict={"x": [1, 2, 3], "y": [4.0, 5.0, 6.0]}, title="My Graph Title", x_label="X Label", y_label="Y Label")
 
         :param x_y_data_dict: The data to plot
         :type data: Dict[str, Any]
@@ -209,7 +210,7 @@ class BCL():
         :type x_label: str
         :param y_label: The label for the y-axis
         :type y_label: str
-        :return: None
+        :return: ImageContent which can be observed by both the client and the LLM
         """
         data = x_y_data_dict
         data_dict = {}
@@ -229,11 +230,13 @@ class BCL():
             data_dict = data
 
         from matplotlib import pyplot as plt
-        plt.figure(figsize=(10.24, 7.68))
+        plt.figure(figsize=(24.0, 16.0))
         plt.plot(data_dict['x'], data_dict['y'])  # type: ignore
-        plt.title(title)
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
+        plt.title(title, fontsize=24)
+        plt.xlabel(x_label, fontsize=20)
+        plt.ylabel(y_label, fontsize=20)
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
 
         # Create a bytes buffer
         buffer = io.BytesIO()
@@ -251,6 +254,7 @@ class BCL():
         buffer.close()
 
         write_client_stream(image_bytes)
+        return ImageContent(image_bytes)
 
     @staticmethod
     def __source_paths(source_file_paths: Union[List[str], str]) -> List[str]:

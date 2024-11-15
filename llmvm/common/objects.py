@@ -1328,6 +1328,36 @@ class PandasMeta(Call):
         else:
             return '[]'
 
+    def __gt__(self, other):
+        return self.df > other
+
+    def __lt__(self, other):
+        return self.df < other
+
+    def __ge__(self, other):
+        return self.df >= other
+
+    def __le__(self, other):
+        return self.df <= other
+
+    def __rgt__(self, other):
+        return self.df > other
+
+    def __rlt__(self, other):
+        return self.df < other
+
+    def __rge__(self, other):
+        return self.df >= other
+
+    def __rle__(self, other):
+        return self.df <= other
+
+    def __add__(self, other):
+        return self.df + other
+
+    def __len__(self):
+        return len(self.df)
+
     def __getattr__(self, name):
         if name in self.__dict__:
             return getattr(self.df, name)
@@ -1337,6 +1367,12 @@ class PandasMeta(Call):
 
     def __getitem__(self, key):
         return self.df.__getitem__(key)  # type: ignore
+
+    def __setitem__(self, key, value):
+        self.df.__setitem__(key, value)
+
+    def __iter__(self):
+        return iter(self.df)
 
     def __format__(self, format_spec):
         return format(self.pandas_df, format_spec)

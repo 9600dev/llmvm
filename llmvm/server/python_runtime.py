@@ -259,8 +259,8 @@ class PythonRuntime:
     def pandas_bind(self, expr) -> PandasMeta:
         logging.debug(f'PythonRuntime.pandas_bind({expr})')
 
-        def bind_with_llm(expr_str: str) -> PandasMeta:
-            assistant = self.controller.execute_llm_call(
+        def pandas_bind_with_llm(expr_str: str) -> PandasMeta:
+            assistant: Assistant = self.controller.execute_llm_call(
                 llm_call=LLMCall(
                     user_message=Helpers.prompt_message(
                         prompt_name='pandas_bind.prompt',
@@ -280,7 +280,7 @@ class PythonRuntime:
                 query=self.original_query,
                 original_query=self.original_query,
             )
-            return PandasMeta(expr_str=expr_str, pandas_df=pd.DataFrame(str(assistant.message)))
+            return PandasMeta(expr_str=expr_str, pandas_df=pd.DataFrame(assistant.get_str()))
 
         if isinstance(expr, str) and 'FileContent' in expr:
             # sometimes the LLM generates code which is the "FileContent(...)" representation of the variable
@@ -290,7 +290,7 @@ class PythonRuntime:
                 df = pd.read_csv(file_content_url)
                 return PandasMeta(expr_str=expr, pandas_df=df)
             except Exception:
-                return bind_with_llm(expr)
+                return pandas_bind_with_llm(expr)
 
         elif (
             isinstance(expr, str)
@@ -317,9 +317,12 @@ class PythonRuntime:
                     df = pd.read_csv(expr)
                     return PandasMeta(expr_str=expr, pandas_df=df)
                 else:
-                    raise ValueError()
-            except Exception:
-                return bind_with_llm(expr)
+                    logging.error(f'PythonRuntime.pandas_bind({expr}) expr is an invalid URL')
+                    raise Exception(f'PythonRuntime.pandas_bind({expr}) expr is an invalid URL')
+            except FileNotFoundError as _:
+                raise Exception(f'PythonRuntime.pandas_bind({expr}) file or url {expr} not found')
+            except Exception as _:
+                return pandas_bind_with_llm(expr)
 
         elif isinstance(expr, list) or isinstance(expr, dict):
             df = pd.DataFrame(expr)
@@ -334,7 +337,7 @@ class PythonRuntime:
             return PandasMeta(expr_str=os.path.expanduser(expr), pandas_df=df)
 
         else:
-            return bind_with_llm(expr)
+            return pandas_bind_with_llm(expr)
 
     def messages(self) -> List[Message]:
         logging.debug('messages()')
@@ -426,10 +429,10 @@ class PythonRuntime:
             query='',
             original_query=self.original_query,
         )
-        logging.debug('Coercing {} to {} resulted in {}'.format(expr, type_name, str(assistant.message)))
-        write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {str(assistant.message)}\n'))
+        logging.debug('Coercing {} to {} resulted in {}'.format(expr, type_name, assistant.get_str()))
+        write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {assistant.get_str()}\n'))
 
-        return self.__eval_with_error_wrapper(str(assistant.message))
+        return self.__eval_with_error_wrapper(assistant.get_str())
 
     def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
         logging.debug(f'llm_call({str(expr_list)[:20]}, {repr(llm_instruction)})')
@@ -465,7 +468,7 @@ class PythonRuntime:
             query=llm_instruction,
             original_query=self.original_query,
         )
-        write_client_stream(TextContent(f'LLM returned: {str(assistant.message)}\n'))
+        write_client_stream(TextContent(f'LLM returned: {assistant.get_str()}\n'))
         return assistant
 
     def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> List[Any]:
@@ -570,7 +573,7 @@ class PythonRuntime:
             original_query=self.original_query,
         )
 
-        return str(assistant.message)
+        return assistant.get_str()
 
     def __generate_primitive_answer(self, expr) -> Answer:
         answer_assistant = self.controller.execute_llm_call(
@@ -598,7 +601,7 @@ class PythonRuntime:
         )
 
         answer = Answer(
-            result=str(answer_assistant.message),
+            result=answer_assistant.get_str(),
         )
         self.answers.append(answer)
         return answer
@@ -635,11 +638,11 @@ class PythonRuntime:
             original_query=self.original_query,
         )
         # check for comments
-        if "[##]" in str(answer_assistant.message):
+        if "[##]" in answer_assistant.get_str():
             answer_assistant.message = [TextContent(answer_assistant.get_str().split("[##]")[0].strip())]
 
         answer = Answer(
-            result=str(answer_assistant.message)
+            result=answer_assistant.get_str()
         )
         self.answers.append(answer)
         return answer
@@ -661,7 +664,7 @@ class PythonRuntime:
         # (i.e. the last message is actually the input to the code)
         if not check_answer:
             answer = Answer(
-                result=str(expr)
+                result=expr
             )
             self.answers.append(answer)
             return answer
@@ -678,13 +681,13 @@ class PythonRuntime:
         # so this is a todo: hack to fix answers() so that it works for images
         if "I've just pasted you an image." in self.original_query:
             answer = Answer(
-                result=str(expr)
+                result=expr
             )
             self.answers.append(answer)
             return answer
 
         # todo: hack for continuations
-        answer = Answer(result=str(expr))
+        answer = Answer(result=expr)
         self.answers.append(answer)
         return answer
 
@@ -755,18 +758,18 @@ class PythonRuntime:
 
         # double shot try
         try:
-            _ = ast.parse(Helpers.escape_newlines_in_strings(str(assistant.message)))
-            return str(assistant.message)
+            _ = ast.parse(Helpers.escape_newlines_in_strings(assistant.get_str()))
+            return assistant.get_str()
         except SyntaxError as ex:
             logging.debug('SyntaxError: {}'.format(ex))
             try:
                 _ = self.rewrite_python_error_correction(
                     query=query,
-                    python_code=str(assistant.message),
+                    python_code=assistant.get_str(),
                     error=str(ex),
                     locals_dictionary=locals_dictionary,
                 )
-                return str(assistant.message)
+                return assistant.get_str()
             except Exception as ex:
                 logging.debug('Second exception rewriting Python code: {}'.format(ex))
                 return ''
@@ -902,7 +905,7 @@ class PythonRuntime:
             original_query=self.original_query,
         )
 
-        lines = str(assistant.message).split('\n')
+        lines = assistant.get_str().split('\n')
         write_client_stream(TextContent(f'Re-writing Python code\n'))
         logging.debug('PythonRuntime.compile_error() Re-written Python code:')
         for line in lines:
@@ -956,11 +959,11 @@ class PythonRuntime:
             query=self.original_query,
             original_query=self.original_query,
         )
-        lines = str(assistant.message).split('\n')
+        lines = assistant.get_str().split('\n')
         logging.debug('rewrite() Re-written Python code:')
         for line in lines:
             logging.debug(f'  {str(line)}')
-        return str(assistant.message)
+        return assistant.get_str()
 
     def run(
         self,
