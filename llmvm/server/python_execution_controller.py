@@ -444,7 +444,7 @@ class ExecutionController(Controller):
             return [User(cast(list[Content], ObjectTransformers.transform_file_to_content(context, self.executor)))]
 
         elif isinstance(context, FunctionBindable):
-            return [User(Content(context._result.result()))]  # type: ignore
+            return [User(Content(context.result()))]  # type: ignore
 
         elif isinstance(context, User):
             return [context]

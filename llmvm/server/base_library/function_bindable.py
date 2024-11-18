@@ -9,6 +9,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, Content, FunctionCall, LLMCall,
                                   Message, System, TextContent, User)
+from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime import PythonRuntime
 
@@ -47,6 +48,11 @@ class FunctionBindable():
     def __call__(self, *args, **kwargs):
         if self._result:
             return self._result
+
+    def result(self) -> object:
+        if self._result is not None and hasattr(self._result, 'result'):
+            return self._result.result()  # type: ignore
+        return self._result
 
     def __bind_helper(
         self,
@@ -104,31 +110,32 @@ class FunctionBindable():
                                     return (element, node)
             return None, None
 
-        # the following code determines the progressive scope exposure to the LLM
-        # to help it determine the binding
-        expr_instantiation_message = User(TextContent(''))
-        if isinstance(expr, str) and find_string_instantiation(expr, self.original_code):
-            node, parent = find_string_instantiation(expr, self.original_code)
-            if parent:
-                expr_instantiation_message.message = [TextContent(
-                    f"The data in the next message was instantiated via this Python code: {astunparse.unparse(parent)}"
-                )]
-            elif node:
-                expr_instantiation_message.message = [TextContent(
-                    f"The data in the next message was instantiated via this Python code: {astunparse.unparse(node.value)}"
-                )]
-
         messages.append(System('''You are a Python compiler and code generator. You generate parsable Python code.'''))
 
         # get the binder prompt message
         messages.append(self.__bind_helper(
             func=func,
         ))
+
         # start with just the expression binding
         messages.extend(self.controller.statement_to_message(expr))
-        # instantiation
-        if str(expr_instantiation_message.message):
-            messages.append(expr_instantiation_message)
+
+        # find any string instantiation of expr in the original code
+        if isinstance(expr, str) and find_string_instantiation(expr, self.original_code):
+            node, parent = find_string_instantiation(expr, self.original_code)
+            if parent:
+                messages.append(User(TextContent(
+                    f"The data in the next message was instantiated via this Python code: {astunparse.unparse(parent)}"
+                )))
+            elif node:
+                messages.append(User(TextContent(
+                    f"The data in the next message was instantiated via this Python code: {astunparse.unparse(node.value)}"
+                )))
+            else:
+                messages.append(User(TextContent(
+                    f"I couldn't figure out where the data in the next message was instantiated."
+                )))
+
         # goal
         messages.append(User(TextContent(
             f"""The overall goal of the Python program is to: {self.original_query}."""
@@ -137,19 +144,20 @@ class FunctionBindable():
             f"""The Python code that is currently being executed is: {self.original_code}"""
         )))
 
-        # program scope
-        def expand_str(value):
-            if isinstance(value, str):
-                return value
+        # program scope - look through the scope dict and find anything with get_str() or is a primitive type
+        program_scope = {}
+        for key, value in self.scope_dict.items():
             if hasattr(value, 'get_str'):
-                return value.get_str()
-            return str(value)
+                program_scope[key] = value.get_str()[0:500]
+            if isinstance(value, (int, float, str, bool, list, dict)) and key not in ['AutoGlobalDict', '__builtins__']:
+                program_scope[key] = str(value)[0:500]
 
-        scope = '\n'.join(['{} = "{}"'.format(key, expand_str(value)) for key, value in self.scope_dict.items()])
+        program_scope_str = '\n'.join([f'{key} = "{value}"' for key, value in program_scope.items()])
+
         messages.append(User(TextContent(
             f"""The Python program's running global scope for all variables is:
 
-            {scope}
+            {program_scope_str}
 
             You might find data you need to bind function arguments in the values of these variables.
             """
@@ -165,7 +173,7 @@ class FunctionBindable():
 
                 llm_bind_result = self.controller.execute_llm_call(
                     llm_call=LLMCall(
-                        user_message=User(TextContent('')),  # we can pass an empty message here and the context_messages contain everything  # noqa:E501
+                        user_message=User(TextContent('Okay, please try binding the callsite.')),  # we can pass an empty message here and the context_messages contain everything  # noqa:E501
                         context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
                         executor=self.controller.get_executor(),
                         model=self.controller.get_executor().get_default_model(),
@@ -178,7 +186,7 @@ class FunctionBindable():
                     original_query=self.original_query,
                 )
 
-                bindable = str(llm_bind_result.message)
+                bindable = llm_bind_result.get_str()
 
                 # the LLM can get confused and generate a function definition instead of a callsite
                 # or enclose the result in ```python ... ``` code blocks.
@@ -193,7 +201,7 @@ class FunctionBindable():
                 # get function definition
                 function_call = Helpers.get_callsite(bindable, self.agents)
 
-                if 'None' in str(bindable):
+                if 'None' in bindable:
                     # move forward a stage and add the latest assistant response
                     # as the assistant response will have a # based question in it
                     # which will help bind the unbindable arguments.
@@ -214,7 +222,7 @@ class FunctionBindable():
                         # we've run out of messages, so we'll just use the original code
                         break
 
-                elif 'None' not in str(bindable) and function_call:
+                elif 'None' not in bindable and function_call:
                     break
                 else:
                     # no function_call result, so bump the counter
@@ -281,8 +289,7 @@ class FunctionBindable():
                 )
 
         # we should probably return uncertain_or_error here.
-        # raise ValueError('could not bind and or execute the function: {} expr: {}'.format(func, expr))
-        self._result = f'could not bind and or execute the function: {func} expr: {expr}'
+        self._result = f'Could not bind and or execute the function: {func} with expr: {expr}'
         yield self
 
     def bind(

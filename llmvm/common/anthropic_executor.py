@@ -85,9 +85,9 @@ class AnthropicExecutor(Executor):
                     **({'content_type': 'text'} if server_serialization else {})
                 })
             elif not content.sequence:
-                logging.warning(f'Content {content} for message {message} was empty.')
+                logging.warning(f'Content inside message {message.to_json()} was empty.')
             else:
-                raise ValueError(f"Cannot serialize unknown content type: {type(content)}")
+                raise ValueError(f"Cannot serialize unknown content type: {type(content)} in message {message.to_json()}")
 
         dict_message = {
             'role': message.role(),

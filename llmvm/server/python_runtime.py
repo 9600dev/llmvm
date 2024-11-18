@@ -23,6 +23,7 @@ from llmvm.common.objects import (Answer, Assistant, Content, DownloadParams, Fi
                                   User, coerce_to, awaitable_none)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
+from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.tools.market import MarketHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
@@ -808,94 +809,6 @@ class PythonRuntime:
             lines = Helpers.split_on_newline(python_code)  # python_code.split('\n')
             python_code_with_line_numbers = '\n'.join([f'{(line_counter+1):02} {line}' for line_counter, line in enumerate(lines)])
             return f'An exception occurred while parsing or executing the following Python code in the <ast> module:\n\n{python_code_with_line_numbers}\n\nThe exception was: {extract_relevant_traceback(tb_string)}\n'
-
-        class AutoGlobalDict(dict):
-            def __init__(self, globals_dict: Optional[dict] = None, locals_dict: Optional[dict] = None):
-                """
-                Initialize the AutoGlobalDict with optional globals and locals dictionaries.
-
-                Args:
-                    globals_dict: Optional dictionary of global variables
-                    locals_dict: Optional dictionary of local variables
-                """
-                super().__init__()
-                import builtins
-
-                # Add builtins first
-                for name in dir(builtins):
-                    attr = getattr(builtins, name)
-                    if callable(attr):
-                        self[name] = attr
-
-                # Add any provided globals/locals
-                if globals_dict is not None:
-                    self.update(globals_dict)
-                if locals_dict is not None:
-                    self.update(locals_dict)
-
-                # Add self reference
-                self['AutoGlobalDict'] = self
-
-            def __missing__(self, key):
-                """Handle missing keys by checking globals."""
-                global_vars = globals()
-                if key in global_vars:
-                    value = global_vars[key]
-                    self[key] = value  # Cache the value
-                    return value
-                raise KeyError(f"name '{key}' is not defined")
-
-            def __getitem__(self, key):
-                """Get an item, falling back to __missing__ if not found."""
-                try:
-                    return super().__getitem__(key)
-                except KeyError:
-                    return self.__missing__(key)
-
-            def copy(self) -> 'AutoGlobalDict':
-                """Create a new AutoGlobalDict with the same contents."""
-                return AutoGlobalDict(dict(self))
-
-        # # massive hack to make locals globals so that generated functions can access that scope
-        # class AutoGlobalDict(dict):
-        #     def __init__(self, globals_dict = None, locals_dict = None):
-        #         import builtins
-        #         super().__init__()
-
-        #         self.__add_builtin_callables()
-        #         self.__add_globals()
-
-        #         if globals_dict is not None:
-        #             self.update(globals_dict)
-        #         if locals_dict is not None:
-        #             self.update(locals_dict)
-
-        #         self['AutoGlobalDict'] = self
-
-        #     def __add_builtin_callables(self):
-        #         for name in dir(builtins):
-        #             attr = getattr(builtins, name)
-        #             if callable(attr) and name not in self:
-        #                 self[name] = attr
-
-        #     def __add_globals(self):
-        #         for key in globals():
-        #             if key not in self:
-        #                 self[key] = globals()[key]
-
-        #     def __missing__(self, key):
-        #         if key in globals():
-        #             value = globals()[key]
-        #             self[key] = value
-        #             return value
-        #         else:
-        #             raise KeyError(f"name '{key}' is not defined")
-
-        #     def __getitem__(self, key):
-        #         super(AutoGlobalDict, self).__getitem__(key)
-
-        #     def __setitem__(self, key: Any, value: Any) -> None:
-        #         super(AutoGlobalDict, self).__setitem__(key, value)
 
         logging.debug('PythonRuntime.__compile_and_execute()')
         python_code = Helpers.escape_newlines_in_strings(python_code)
