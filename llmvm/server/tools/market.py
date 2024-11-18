@@ -10,9 +10,12 @@ class MarketHelpers():
     ) -> float:
         """
         Get the closing price of the specified stock symbol at the specified date
+        Example:
+        price: float = MarketHelpers.get_stock_price('NVDA', BCL.datetime('now'))
 
         :param symbol: The symbol of the stock
         :param date: The date and time to get the stock price
+        :return: The closing price of the stock symbol at the specified date
         """
         import pandas as pd
         import yfinance as yf
@@ -33,11 +36,11 @@ class MarketHelpers():
         date_only = adjust_weekend(date_only)
         result = pd.DataFrame()
 
-        result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5), repair=True)
+        result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5), repair=True, multi_level_index=False, ignore_tz=True)
 
         if len(result) == 0:
             date_only = adjust_weekend(subtract_day(date_only))
-            result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5), repair=True)
+            result = yf.download(symbol, start=date_only, end=date_only + dt.timedelta(days=5), repair=True, multi_level_index=False, ignore_tz=True)
 
         if len(result) == 0:
             raise ValueError(f'either the symbol {symbol} does not exist, or there is no price data for date {date_only}.')
@@ -63,7 +66,11 @@ class MarketHelpers():
         end_date: dt.datetime
     ) -> Dict[dt.datetime, float]:
         """
-        Get the closing prices of the specified stock symbol between the specified start and end dates
+        Get the closing prices of the specified stock symbol between the specified start and end dates.
+        Example:
+        stock_data = MarketHelpers.get_stock_price_history('NVDA', BCL.datetime('-365 days'), BCL.datetime('now'))
+        dates: list[dt.datetime] = list(stock_data.keys())
+        prices: list[float] = list(stock_data.values())
 
         :param symbol: The symbol of the stock
         :type symbol: str
@@ -71,14 +78,14 @@ class MarketHelpers():
         :type start_date: dt.datetime
         :param end_date: The end date and time of the price series
         :type end_date: dt.datetime
-        :return: A dict[dt.datetime, float] mapping dates to closing prices. Keys are datetimes and values are floats.
+        :return: A dict[dt.datetime, float] mapping dates to closing prices. keys are datetimes and values are floats.
         :rtype: Dict[dt.datetime, float]
         """
         import pandas as pd
         import yfinance as yf
 
-        start_date_only = dt.datetime(start_date.year, start_date.month, start_date.day)
-        end_date_only = dt.datetime(end_date.year, end_date.month, end_date.day)
+        start_date_only = dt.datetime(start_date.year, start_date.month, start_date.day, tzinfo=None)
+        end_date_only = dt.datetime(end_date.year, end_date.month, end_date.day, tzinfo=None)
 
         def adjust_weekend(date):
             if date.weekday() == 5:  # Saturday
@@ -95,18 +102,21 @@ class MarketHelpers():
         end_date_only = adjust_weekend(end_date_only)
         result = pd.DataFrame()
 
-        result = yf.download(symbol, start=start_date_only, end=end_date_only + dt.timedelta(days=5), repair=True)
+        result = yf.download(symbol, start=start_date_only, end=end_date_only + dt.timedelta(days=5), repair=True, ignore_tz=True, multi_level_index=False)
+        result.index = result.index.tz_localize(None)
 
         if len(result) == 0:
             date_only = adjust_weekend(subtract_day(start_date_only))
-            result = yf.download(symbol, start=date_only, end=end_date_only + dt.timedelta(days=5), repair=True)
+            result = yf.download(symbol, start=date_only, end=end_date_only + dt.timedelta(days=5), repair=True, ignore_tz=True, multi_level_index=False)
+            result.index = result.index.tz_localize(None)
 
         if len(result) == 0:
             raise ValueError(f'either the symbol {symbol} does not exist, or there is no price data for date {date_only}.')
 
         result = result.loc[start_date_only:end_date_only]
         # return result as a dictionary
-        return result['Close'].to_dict()
+        close_results = result['Close'].to_dict()
+        return close_results
 
     @staticmethod
     def get_stock_volatility(symbol: str, days: int) -> float:
@@ -131,7 +141,7 @@ class MarketHelpers():
         start_date = end_date - dt.timedelta(days=days)
 
         # Download the stock data
-        stock_data = yf.download(symbol, start=start_date, end=end_date, repair=True)
+        stock_data = yf.download(symbol, start=start_date, end=end_date, repair=True, multi_level_index=False, ignore_tz=True)
 
         # Calculate daily returns
         daily_returns = stock_data['Close'].pct_change().dropna()
@@ -144,3 +154,44 @@ class MarketHelpers():
 
         # Convert to percentage
         return annualized_volatility
+
+    @staticmethod
+    def get_stock_analysis(symbol: str) -> str:
+        """
+        Returns a string containing a summary of financial analysis for the specified stock symbol, including:
+        - Company information (address, business summary, company officers, etc)
+        - Ratios (price-to-book, price-to-earnings, price-to-sales, price-to-cash flow, etc)
+        - Earnings estimates
+        - Revenue estimates
+        - EPS trends
+        - Income Statement
+        - Balance Sheet
+        - Cash Flow Statement
+        - Earnings
+
+        :param symbol: The stock symbol
+        :type symbol: str
+        :return: A full financial analysis and reports for the specified stock symbol
+        :rtype: str
+        """
+        import yfinance as yf
+        import numpy as np
+
+        builder = ""
+        ticker = yf.Ticker(symbol)
+        builder += f"Stock Symbol: {symbol}\n\n"
+        builder += f"Company information and key metrics:\n"
+        builder += f"{str(ticker.info)}\n\n"
+        builder += f"Income Statement:\n"
+        builder += f"{str(ticker.income_stmt)}\n\n"
+        builder += f"Balance Sheet:\n"
+        builder += f"{str(ticker.balance_sheet)}\n\n"
+        builder += f"Cash Flow Statement:\n"
+        builder += f"{str(ticker.cash_flow)}\n\n"
+        builder += f"Earnings Estimates:\n"
+        builder += f"{str(ticker.earnings_estimate)}\n\n"
+        builder += f"EPS Trends:\n"
+        builder += f"{str(ticker.eps_trend)}\n\n"
+        builder += f"Revenue Estimates:\n"
+        builder += f"{str(ticker.revenue_estimate)}\n\n"
+        return builder

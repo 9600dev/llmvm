@@ -118,6 +118,10 @@ def __serialize_locals_dict(locals_dict: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in locals_dict.items():
         if isinstance(key, str) and key.startswith('__'):
             continue
+        elif type(value).__module__ == 'builtins':
+            continue
+        elif key == 'AutoGlobalDict':
+            continue
         elif isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
             # Serialize the function's code object
             code_bytes = marshal.dumps(value.__code__)

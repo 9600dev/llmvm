@@ -213,7 +213,8 @@ class ChromeHelpersInternal():
             'x.com': lambda page: self.wait(1500),
             'techmeme.com': lambda page: self.wait(1500),
             'arxiv.org': lambda page: self.wait(1500),
-            'instagram.com': lambda page: self.wait(2000),
+            'instagram.com': lambda page: self.wait(4000),
+            'bsky.app': lambda page: self.wait(4000),
         }
 
     async def safe_click_element(self, element: ElementHandle, timeout=5000):
@@ -311,6 +312,7 @@ class ChromeHelpersInternal():
                 domain = urlparse(url).netloc
 
                 if domain in self.wait_fors:
+                    logging.debug(f'ChromeHelpersInternal.goto() waiting for {domain} for {self.wait_fors[domain]} ms')
                     wait_for_lambda = self.wait_fors[domain]
                     await wait_for_lambda(await self.page())
 

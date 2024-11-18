@@ -27,7 +27,7 @@ from functools import reduce
 from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Generator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlparse
 from markdownify import markdownify as md
 import zlib
@@ -40,7 +40,7 @@ from dateutil.relativedelta import relativedelta
 from docstring_parser import parse
 from PIL import Image
 
-from llmvm.common.objects import (Content, FunctionCall, ImageContent, MarkdownContent,
+from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent,
                                   Message, StreamNode, SupportedMessageContent, System, TextContent, User)
 
 
@@ -60,6 +60,20 @@ def write_client_stream(obj):
             asyncio.run(instance.stream_handler(obj))
             return
         frame = frame.f_back
+
+
+def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
+    frame = inspect.currentframe()
+    while frame:
+        # Check if 'self' exists in the frame's local namespace
+        if 'stream_handler' in frame.f_locals:
+            return frame.f_locals['stream_handler']
+
+        instance = frame.f_locals.get('self', None)
+        if hasattr(instance, 'stream_handler'):
+            return instance.stream_handler
+        frame = frame.f_back
+    return None
 
 
 class Helpers():
@@ -308,6 +322,9 @@ class Helpers():
 
     @staticmethod
     def is_markdown_simple(text):
+        if '```markdown' in text:
+            return True
+
         # Define regex patterns for common markdown elements
         patterns = [
             r'^\s{0,3}#{1,6}\s',  # Headers
@@ -564,6 +581,16 @@ class Helpers():
         if stream:
             return stream.decode('utf-8')
         return ''
+
+    @staticmethod
+    async def download_bytes(url_or_file: str) -> Optional[bytes]:
+        if url_or_file.startswith('http'):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url_or_file)
+                    return response.content
+            except Exception as ex:
+                return None
 
     @staticmethod
     async def get_image_fuzzy_url(logging, url: str, image_url: str, min_width: int, min_height: int) -> bytes:

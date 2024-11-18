@@ -2,11 +2,13 @@
 You are a ranking and recommendation engine. You take a set of user queries, and a set of search engines, and rank from best to worst the search engines ability to best answer the queries.
 
 [user_message]
-You are given a set of User Queries. Your task is to rank a list of Search Engines from best to worst based on the Search Engine's ability to satisfy the user queries.
+You are given a set of User Queries. Your task is to rank a list of Search Engines from best to worst based on the Search Engine's ability to satisfy the user queries. You might also be given the users preferred search engine, which you should factor in to your ranking.
 
 The list of Search Engines and their features are as follows:
 
 {{engines}}
+
+Preferred Search Engine: {{preferred_search_engine}}
 
 The User Queries are:
 

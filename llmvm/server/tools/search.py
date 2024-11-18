@@ -46,10 +46,10 @@ class SerpAPISearcher(Searcher):
     ) -> List[Dict]:
         hn = SearchHN()
         # clean up the query
-        if 'site:' in query:
-            query = query.split('site:')[0].strip()
+        if query.startswith('site:') and not 'site: ' in query and ' ' in query:
+            query = ' '.join(query.split(' ')[1:])
 
-        return hn.search(query).created_before(dt.datetime.now() - dt.timedelta(days=365)).stories().get()  # type: ignore
+        return hn.search(query).stories().get()  # type: ignore
 
     def search_hackernews(
         self,
@@ -69,11 +69,12 @@ class SerpAPISearcher(Searcher):
     def search_hackernews_comments(
         self,
         query: str,
-        token_length: int = 8192,
+        token_length: int = 2048,
     ) -> List[Dict]:
         stories = self.__search_hackernews_helper(query)
         result = []
         token_count = 0
+        comment_count = 0
         if stories:
             # only get the top result.
             for story in stories:
@@ -81,12 +82,15 @@ class SerpAPISearcher(Searcher):
                 for comment in comments:
                     token_count += len(comment.comment_text.split(' '))
                     result.append({
-                        'title': stories[0].title,  # type: ignore
-                        'url': stories[0].url,  # type: ignore
-                        'author': comment.author,
-                        'comment_text': comment.comment_text,
-                        'created_at': comment.created_at,
+                        'title': story.title if hasattr(story, 'title') else '',  # type: ignore
+                        'url': story.url if hasattr(story, 'url') else '',  # type: ignore
+                        'author': comment.author if hasattr(comment, 'author') else '',
+                        'comment_text': comment.comment_text if hasattr(comment, 'comment_text') else '',
+                        'created_at': comment.created_at if hasattr(comment, 'created_at') else '',
                     })
+                    comment_count += 1
+                    if comment_count > 20:
+                        break
                 if token_count > token_length:
                     break
         return result

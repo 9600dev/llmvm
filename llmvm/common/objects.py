@@ -1208,7 +1208,14 @@ class FunctionCallMeta(Call):
     def __getattr__(self, name):
         if self._result is not None:
             return getattr(self._result, name)
+
         raise AttributeError(f"'self._result isn't set, and {self.__class__.__name__}' object has no attribute '{name}'")
+
+    def __getitem__(self, key):
+        if self._result is not None and hasattr(self._result, '__getitem__'):
+            return self._result[key]  # type: ignore
+
+        raise AttributeError(f"{type(self._result)} is not subscriptable")
 
     def __setstate__(self, state):
         # Directly set _data without going through __getattr__

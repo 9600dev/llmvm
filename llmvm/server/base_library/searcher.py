@@ -1,3 +1,4 @@
+import asyncio
 import re
 from typing import Any, Callable, Dict, List, TypedDict
 
@@ -6,7 +7,7 @@ from googlesearch import search as google_search
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Content, TextContent, DownloadParams, LLMCall, Message,
+from llmvm.common.objects import (Assistant, Content, TextContent, DownloadParams, LLMCall, Message,
                                   TokenCompressionMethod, User, bcl)
 from llmvm.server.base_library.content_downloader import WebAndContentDriver
 from llmvm.server.python_execution_controller import ExecutionController
@@ -27,12 +28,14 @@ class Searcher():
         original_query: str,
         vector_search: VectorSearch,
         total_links_to_return: int = 3,
+        preferred_search_engine: str = '',
     ):
         self.query = expr
         self.original_code = original_code
         self.original_query = original_query
         self.controller = controller
         self.query_expansion = 2
+        self.preferred_search_engine = preferred_search_engine
 
             # url: str,
             # goal: str,
@@ -71,6 +74,10 @@ class Searcher():
         else:
             return SerpAPISearcher().search_internet(query)
 
+    def search_bluesky(self, query: str) -> str:
+        content: Content = WebHelpers.get_url(f'https://bsky.app/search?q={query.replace(" ", "+")}')
+        return content.get_str()
+
     def search_news_hook(self, query: str):
         if not Container().get_config_variable('SERPAPI_API_KEY'):
             return self.search_hook('https://news.google.com/search?q=', query)
@@ -87,6 +94,60 @@ class Searcher():
         self,
         titles_seen: List[str] = [],
     ) -> List[Content]:
+        def url_to_text(result: Dict[str, Any]) -> Content:
+            if 'link' in result and isinstance(result['link'], Dict) and 'link' in result['link']:
+                if Container().get_config_variable('LLMVM_FULL_PROCESSING', default=False):
+                    return WebAndContentDriver().download_with_goal(download = {
+                        'url': str(result['link']['link']),
+                        'goal': self.original_query,
+                        'search_term': self.query
+                        },
+                        controller=self.controller
+                    )
+                else:
+                    return WebHelpers.get_url(result['link']['link'])
+            elif 'link' in result:
+                if Container().get_config_variable('LLMVM_FULL_PROCESSING', default=False):
+                    return WebAndContentDriver().download_with_goal(download = {
+                        'url': str(result['link']),
+                        'goal': self.original_query,
+                        'search_term': self.query
+                        },
+                        controller=self.controller
+                    )
+                else:
+                    return WebHelpers.get_url(str(result['link']))
+            else:
+                return TextContent('Searcher().search() url_to_text: no link found in result, so no content to return.')
+
+        def bsky_to_text(content: Content) -> Content:
+            return content
+
+        def yelp_to_text(reviews: Dict[Any, Any]) -> Content:
+            return_str = f"{reviews['title']} in {reviews['neighborhood']}."
+            return_str += '\n\n'
+            return_str += f"{reviews['reviews']}\n"
+            return TextContent(return_str)
+
+        def local_to_text(document: Dict[Any, Any]) -> Content:
+            return_str = f"Title: \"{document['title']}\".\n"
+            return_str += f"Link: {document['link']}\n"
+            return_str += '\n\n'
+            return_str += f"Snippet: \"{document['snippet']}\"\n"
+            return TextContent(return_str)
+
+        def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> Content:
+            if not results:
+                return TextContent('')
+
+            title = results[0]['title']
+            url = results[0]['url']
+            return_str = f'For the Hacker News article: {title} which has a url of: {url}, the comments on the article are as follows:\n\n'
+            for comment in results[:num_comments]:
+                return_str += f"{comment['author']} said {comment['comment_text']}.\n"
+            return_str += '\n\n'
+            return TextContent(return_str)
+
         # todo: we should probably return the Search instance, so we can futz with it later on.
         query_expander = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -136,62 +197,13 @@ class Searcher():
             queries.insert(0, self.query)
             queries = queries[:self.query_expansion]
 
-        def url_to_text(result: Dict[str, Any]) -> Content:
-            if 'link' in result and isinstance(result['link'], Dict) and 'link' in result['link']:
-                if Container().get_config_variable('LLMVM_FULL_PROCESSING', default=False):
-                    return WebAndContentDriver().download_with_goal(download = {
-                        'url': str(result['link']['link']),
-                        'goal': self.original_query,
-                        'search_term': self.query
-                        },
-                        controller=self.controller
-                    )
-                else:
-                    return WebHelpers.get_url(result['link']['link'])
-            elif 'link' in result:
-                if Container().get_config_variable('LLMVM_FULL_PROCESSING', default=False):
-                    return WebAndContentDriver().download_with_goal(download = {
-                        'url': str(result['link']),
-                        'goal': self.original_query,
-                        'search_term': self.query
-                        },
-                        controller=self.controller
-                    )
-                else:
-                    return WebHelpers.get_url(str(result['link']))
-            else:
-                return TextContent('Searcher().search() url_to_text: no link found in result, so no content to return.')
-
-        def yelp_to_text(reviews: Dict[Any, Any]) -> Content:
-            return_str = f"{reviews['title']} in {reviews['neighborhood']}."
-            return_str += '\n\n'
-            return_str += f"{reviews['reviews']}\n"
-            return TextContent(return_str)
-
-        def local_to_text(document: Dict[Any, Any]) -> Content:
-            return_str = f"Title: \"{document['title']}\".\n"
-            return_str += f"Link: {document['link']}\n"
-            return_str += '\n\n'
-            return_str += f"Snippet: \"{document['snippet']}\"\n"
-            return TextContent(return_str)
-
-        def hackernews_comments_to_text(results: List[Dict[str, str]], num_comments: int = 100) -> Content:
-            if not results:
-                return TextContent('')
-
-            title = results[0]['title']
-            url = results[0]['url']
-            return_str = f'For the Hacker News article: {title} which has a url of: {url}, the comments are as follows:\n\n'
-            for comment in results[:num_comments]:
-                return_str += f"{comment['author']} said {comment['comment_text']}.\n"
-            return TextContent(return_str)
-
         engines = {
             'Google Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
             'Google Patent Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
             'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
+            'BlueSky Search': {'searcher': self.search_bluesky, 'parser': bsky_to_text, 'description': 'Searches BlueSky, X and Twitter for content.'},
             'Google Scholar Search': {'searcher': self.search_research_hook, 'parser': url_to_text, 'description': 'Google Scholar Search is a search engine to help find and summarize academic papers, studies, and research about particular topics'},  # noqa:E501
         }  # noqa:E501
 
@@ -203,6 +215,7 @@ class Searcher():
                     template={
                         'query': '\n'.join(queries),
                         'engines': '\n'.join([f'* {key}: {value["description"]}' for key, value in engines.items()]),
+                        'preferred_search_engine': self.preferred_search_engine,
                     },
                     user_token=self.controller.get_executor().user_token(),
                     assistant_token=self.controller.get_executor().assistant_token(),
@@ -228,7 +241,7 @@ class Searcher():
                 self.parser = engines[key]['parser']
                 searcher = engines[key]['searcher']
 
-        write_client_stream(TextContent(f"I think the {engine} engine is best to perform a search for {self.query}\n"))
+        write_client_stream(TextContent(f"It seems {engine} is best to perform a search for {self.query}\n"))
 
         # perform the search
         search_results = []
@@ -267,6 +280,31 @@ class Searcher():
         if 'Hacker' in engine:
             result = SerpAPISearcher().search_hackernews_comments(queries[0])
             return [hackernews_comments_to_text(result)]
+
+        if 'BlueSky' in engine:
+            PROMPT = f"""
+            I have a goal of "{self.original_query}" and a user search query of "{self.query}". I need you to rewrite this search query
+            to be very short and specific for the Twitter search engine. It does not like general queries.
+            Only return the rewritten query, nothing else, don't apologize, don't add commentary, don't explain yourself.
+            """
+            search_term_assistant: Assistant = self.controller.execute_llm_call(
+                llm_call=LLMCall(
+                    user_message=User(TextContent(PROMPT)),
+                    context_messages=[],
+                    executor=self.controller.get_executor(),
+                    model=self.controller.get_executor().get_default_model(),
+                    temperature=0.0,
+                    max_prompt_len=self.controller.get_executor().max_input_tokens(),
+                    completion_tokens_len=self.controller.get_executor().max_output_tokens(),
+                    prompt_name='search_location.prompt',
+                ),
+                query=self.query,
+                original_query=self.original_query,
+                compression=TokenCompressionMethod.SUMMARY,
+            )
+
+            search_term = search_term_assistant.get_str()
+            return [bsky_to_text(WebHelpers.get_url(f'https://bsky.app/search?q={search_term.replace(" ", "+")}'))]
 
         for query in queries:
             search_results.extend(list(searcher(query))[:10])

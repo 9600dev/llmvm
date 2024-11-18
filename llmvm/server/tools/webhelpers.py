@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+from typing import cast
 import unicodedata
 from urllib.parse import urlparse
 
@@ -167,3 +168,11 @@ class WebHelpers():
         downloader = WebAndContentDriver()
         download_params: DownloadParams = {'url': url, 'goal': '', 'search_term': ''}
         return downloader.download(download_params)
+
+    @staticmethod
+    def get_hackernews_latest() -> Content:
+        """
+        Returns the latest Hacker News articles as a big blob of string text (a loose json format).
+        """
+        from llmvm.server.tools.search_hn import SearchHN
+        return TextContent('\n\n'.join([str(story) for story in cast(list, SearchHN().get_latest_stories())]))

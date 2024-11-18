@@ -1,7 +1,7 @@
 from __future__ import annotations
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from typing import List
+from typing import List, cast
 import datetime as dt
 import io
 import os
@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import ImageContent
+from llmvm.common.objects import FunctionCallMeta, ImageContent
 from llmvm.server.base_library.source import Source
 
 logging = setup_logging()
@@ -215,6 +215,9 @@ class BCL():
         data = x_y_data_dict
         data_dict = {}
 
+        if isinstance(data, FunctionCallMeta):
+            data: dict = cast(dict, data.result())
+
         if isinstance(data, list):
             list_data = [float(item) for item in data if isinstance(item, (int, float))]
             data_dict['x'] = list(range(len(list_data)))
@@ -230,19 +233,19 @@ class BCL():
             data_dict = data
 
         from matplotlib import pyplot as plt
-        plt.figure(figsize=(24.0, 16.0))
+        plt.figure(figsize=(28.0, 18.0))
         plt.plot(data_dict['x'], data_dict['y'])  # type: ignore
-        plt.title(title, fontsize=24)
-        plt.xlabel(x_label, fontsize=20)
-        plt.ylabel(y_label, fontsize=20)
-        plt.xticks(fontsize=16)
-        plt.yticks(fontsize=16)
+        plt.title(title, fontsize=28)
+        plt.xlabel(x_label, fontsize=24)
+        plt.ylabel(y_label, fontsize=24)
+        plt.xticks(fontsize=20)
+        plt.yticks(fontsize=20)
 
         # Create a bytes buffer
         buffer = io.BytesIO()
 
         # Save the plot to the buffer in PNG format
-        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+        plt.savefig(buffer, format='png', dpi=130, bbox_inches='tight')
 
         # Close the plot to free up memory
         plt.close()
@@ -356,4 +359,3 @@ class BCL():
             return '\n'.join([str(r) for r in references])
         else:
             return f"No references found for method {method_name}"
-

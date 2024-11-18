@@ -105,7 +105,7 @@ class WebAndContentDriver():
                 elif os.path.exists(result):
                     return FileContent(sequence=b'', url=result)
                 else:
-                    return WebHelpers.convert_html_to_markdown(result, url=download['url'])
+                    return cast(MarkdownContent, WebHelpers.convert_html_to_markdown(result, url=download['url']))
 
         # else, nothing
         return TextContent(f'WebAndContentDriver.download: nothing found for {download["url"]}')

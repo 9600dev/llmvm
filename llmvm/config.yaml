@@ -29,11 +29,13 @@ helper_functions:
   - llmvm.server.bcl.BCL.datetime
   - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
   - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
+  - llmvm.server.tools.webhelpers.WebHelpers.get_hackernews_latest
   - llmvm.server.tools.edgar.EdgarHelpers.get_report
   - llmvm.server.tools.market.MarketHelpers.get_stock_price
   - llmvm.server.tools.market.MarketHelpers.get_current_market_capitalization
   - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
   - llmvm.server.tools.market.MarketHelpers.get_stock_price_history
+  - llmvm.server.tools.market.MarketHelpers.get_stock_analysis
   - llmvm.server.bcl.BCL.sample_normal
   - llmvm.server.bcl.BCL.sample_binomial
   - llmvm.server.bcl.BCL.sample_lognormal

@@ -14,13 +14,13 @@ from urllib.parse import urlparse
 
 import astunparse
 
-from llmvm.common.helpers import Helpers, write_client_stream
+from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handler
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Answer, Assistant, Content, DownloadParams, FileContent,
                                   FunctionCallMeta, LLMCall,
                                   Message, PandasMeta, TextContent,
-                                  User, coerce_to)
+                                  User, coerce_to, awaitable_none)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.tools.market import MarketHelpers
@@ -212,6 +212,7 @@ class PythonRuntime:
         self.globals_dict['float'] = float
         self.globals_dict['int'] = int
 
+
     @staticmethod
     def only_code_block(code: str) -> bool:
         code = code.strip()
@@ -383,8 +384,8 @@ class PythonRuntime:
         }
         return downloader.download(download=download_params)
 
-    def search(self, expr: str, total_links_to_return: int = 3, titles_seen: List[str] = []) -> List[Content]:
-        logging.debug(f'search({str(expr)})')
+    def search(self, expr: str, total_links_to_return: int = 3, titles_seen: List[str] = [], preferred_search_engine: str = '') -> List[Content]:
+        logging.debug(f'PythonRuntime.search({str(expr)})')
         from llmvm.server.base_library.searcher import Searcher
 
         if isinstance(expr, User):
@@ -396,7 +397,8 @@ class PythonRuntime:
             original_code=self.original_code,
             original_query=self.original_query,
             vector_search=self.vector_search,
-            total_links_to_return=total_links_to_return
+            total_links_to_return=total_links_to_return,
+            preferred_search_engine=preferred_search_engine
         )
         results = searcher.search(titles_seen=titles_seen)
         return results
@@ -444,7 +446,7 @@ class PythonRuntime:
         # called with llm_call([var], ...), so we need to flatten
         expr_list = Helpers.flatten(expr_list)
 
-        write_client_stream(TextContent(f'Calling {self.controller.get_executor().get_default_model()} with instruction: "{llm_instruction}"\n'))
+        write_client_stream(TextContent(f'llm_call() calling {self.controller.get_executor().get_default_model()} with instruction: "{llm_instruction}"\n'))
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -464,11 +466,12 @@ class PythonRuntime:
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
                 prompt_name='llm_call.prompt',
+                stream_handler=get_stream_handler() or awaitable_none,
             ),
             query=llm_instruction,
             original_query=self.original_query,
         )
-        write_client_stream(TextContent(f'LLM returned: {assistant.get_str()}\n'))
+        write_client_stream(TextContent(f'llm_call() finished...\n\n'))
         return assistant
 
     def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> List[Any]:
@@ -806,20 +809,93 @@ class PythonRuntime:
             python_code_with_line_numbers = '\n'.join([f'{(line_counter+1):02} {line}' for line_counter, line in enumerate(lines)])
             return f'An exception occurred while parsing or executing the following Python code in the <ast> module:\n\n{python_code_with_line_numbers}\n\nThe exception was: {extract_relevant_traceback(tb_string)}\n'
 
-        # massive hack to make locals globals so that generated functions can access that scope
         class AutoGlobalDict(dict):
-            def __init__(self, globals_dict = {}, locals_dict = {}):
-                super().__init__(globals_dict)
-                self.update(locals_dict)
-                self.__dict__ = self
+            def __init__(self, globals_dict: Optional[dict] = None, locals_dict: Optional[dict] = None):
+                """
+                Initialize the AutoGlobalDict with optional globals and locals dictionaries.
+
+                Args:
+                    globals_dict: Optional dictionary of global variables
+                    locals_dict: Optional dictionary of local variables
+                """
+                super().__init__()
+                import builtins
+
+                # Add builtins first
+                for name in dir(builtins):
+                    attr = getattr(builtins, name)
+                    if callable(attr):
+                        self[name] = attr
+
+                # Add any provided globals/locals
+                if globals_dict is not None:
+                    self.update(globals_dict)
+                if locals_dict is not None:
+                    self.update(locals_dict)
+
+                # Add self reference
+                self['AutoGlobalDict'] = self
+
+            def __missing__(self, key):
+                """Handle missing keys by checking globals."""
+                global_vars = globals()
+                if key in global_vars:
+                    value = global_vars[key]
+                    self[key] = value  # Cache the value
+                    return value
+                raise KeyError(f"name '{key}' is not defined")
 
             def __getitem__(self, key):
-                if key not in self and key in globals():
-                    self[key] = globals()[key]
-                return super().__getitem__(key)
+                """Get an item, falling back to __missing__ if not found."""
+                try:
+                    return super().__getitem__(key)
+                except KeyError:
+                    return self.__missing__(key)
 
-            def __setitem__(self, key: Any, value: Any) -> None:
-                return super().__setitem__(key, value)
+            def copy(self) -> 'AutoGlobalDict':
+                """Create a new AutoGlobalDict with the same contents."""
+                return AutoGlobalDict(dict(self))
+
+        # # massive hack to make locals globals so that generated functions can access that scope
+        # class AutoGlobalDict(dict):
+        #     def __init__(self, globals_dict = None, locals_dict = None):
+        #         import builtins
+        #         super().__init__()
+
+        #         self.__add_builtin_callables()
+        #         self.__add_globals()
+
+        #         if globals_dict is not None:
+        #             self.update(globals_dict)
+        #         if locals_dict is not None:
+        #             self.update(locals_dict)
+
+        #         self['AutoGlobalDict'] = self
+
+        #     def __add_builtin_callables(self):
+        #         for name in dir(builtins):
+        #             attr = getattr(builtins, name)
+        #             if callable(attr) and name not in self:
+        #                 self[name] = attr
+
+        #     def __add_globals(self):
+        #         for key in globals():
+        #             if key not in self:
+        #                 self[key] = globals()[key]
+
+        #     def __missing__(self, key):
+        #         if key in globals():
+        #             value = globals()[key]
+        #             self[key] = value
+        #             return value
+        #         else:
+        #             raise KeyError(f"name '{key}' is not defined")
+
+        #     def __getitem__(self, key):
+        #         super(AutoGlobalDict, self).__getitem__(key)
+
+        #     def __setitem__(self, key: Any, value: Any) -> None:
+        #         super(AutoGlobalDict, self).__setitem__(key, value)
 
         logging.debug('PythonRuntime.__compile_and_execute()')
         python_code = Helpers.escape_newlines_in_strings(python_code)

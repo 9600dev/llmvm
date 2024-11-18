@@ -36,7 +36,8 @@ from rich.markdown import CodeBlock, Markdown
 from rich.text import Text
 from threading import Event
 
-from llmvm.client.printing import StreamPrinter, markdown__rich_console__, print_response, print_thread, stream_response
+from llmvm.client.printing import StreamPrinter, print_messages, print_thread, stream_response
+from llmvm.client.markdown_renderer import markdown__rich_console__, code_block__rich_console__
 from llmvm.client.client import LLMVMClient
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
@@ -645,6 +646,14 @@ class Repl():
                     # command substitution
                     query = Helpers.command_substitution(query)
 
+                if query.strip() == '':
+                    continue
+
+                if query == ':q':
+                    # quit the assistant
+                    tear_down(ctx)
+                    break
+
                 # there are a few special commands that aren't 'clickified'
                 if query == 'yy':
                     # copy the last assistant message to the clipboard
@@ -1049,7 +1058,7 @@ def vector_search(
         console.print(f'    [link={link}]{link}[/link]')
         if link.endswith('.py'):
             markdown_snippet = f'```python\n{snippet}\n```'
-            CodeBlock.__rich_console__ = markdown__rich_console__
+            Markdown.__rich_console__ = markdown__rich_console__
             console.print(Markdown(markdown_snippet))
         else:
             wrapped_text = textwrap.wrap(snippet, width=console.width - 6)
@@ -1465,7 +1474,7 @@ def message(
         return
 
     if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
-    print_response([MessageModel.to_message(thread.messages[-1])], escape)
+    print_messages([MessageModel.to_message(thread.messages[-1])], escape)
     if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
     last_thread = thread
     thread_id = thread.id
