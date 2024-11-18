@@ -853,6 +853,10 @@ class Executor(ABC):
     ) -> str:
         pass
 
+    @abstractmethod
+    def unpack_and_wrap_messages(self, messages: list[Message], model: Optional[str] = None) -> list[dict[str, str]]:
+        pass
+
 def coerce_types(a, b):
     # Function to check if a string can be converted to an integer or a float
     def is_number(s):

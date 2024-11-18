@@ -224,7 +224,7 @@ class AnthropicExecutor(Executor):
         message_tokens = await self.count_tokens_dict(messages=messages)
 
         if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
-            raise Exception('Prompt too long. input tokens: {}, requested output tokens: {}, total: {}, models {} max context window is: {}'
+            raise Exception('Prompt too long. input tokens: {}, requested output tokens: {}, total: {}, model: {} max context window is: {}'
                             .format(message_tokens,
                                     max_output_tokens,
                                     message_tokens + max_output_tokens,

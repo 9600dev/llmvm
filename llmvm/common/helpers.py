@@ -513,6 +513,22 @@ class Helpers():
             return result
 
     @staticmethod
+    def openai_image_tok_count(base64_encoded: str):
+        def __calculate_image_tokens(width: int, height: int):
+                from math import ceil
+
+                h = ceil(height / 512)
+                w = ceil(width / 512)
+                n = w * h
+                total = 85 + 170 * n
+                return total
+        # go from base64 encoded to bytes
+        image = base64.b64decode(base64_encoded)
+        # open the image
+        img = Image.open(io.BytesIO(image))
+        return __calculate_image_tokens(img.width, img.height)
+
+    @staticmethod
     def anthropic_image_tok_count(base64_encoded: str):
         # go from base64 encoded to bytes
         image = base64.b64decode(base64_encoded)
@@ -581,16 +597,6 @@ class Helpers():
         if stream:
             return stream.decode('utf-8')
         return ''
-
-    @staticmethod
-    async def download_bytes(url_or_file: str) -> Optional[bytes]:
-        if url_or_file.startswith('http'):
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url_or_file)
-                    return response.content
-            except Exception as ex:
-                return None
 
     @staticmethod
     async def get_image_fuzzy_url(logging, url: str, image_url: str, min_width: int, min_height: int) -> bytes:

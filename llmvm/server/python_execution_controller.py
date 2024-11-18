@@ -706,7 +706,7 @@ class ExecutionController(Controller):
             append_token=self.get_executor().append_token(),
         )
 
-        # anthropic prompt caching
+        # anthropic prompt caching through the first three messages
         assistant_reply = Assistant(TextContent('Yes, I am ready.'))
         system_message.prompt_cached = True
         tools_message.prompt_cached = True
@@ -720,6 +720,8 @@ class ExecutionController(Controller):
         messages_copy.append(assistant_reply)
         messages_copy.extend(copy.deepcopy(messages[0:-1]))
         messages_copy.append(messages[-1])
+        # apply prompt caching to the last message
+        messages[-1].prompt_cached = True
 
         # todo: hack
         browser_content_start_token = '<helpers_result>BrowserContent('
@@ -735,6 +737,14 @@ class ExecutionController(Controller):
                 # remove all but the last BrowserContent message
                 last_message_str = Helpers.keep_last_browser_content(last_message_str)
                 messages_copy[-1] = Assistant(TextContent(last_message_str))
+
+            # undo the last prompt cached flag, because we're moving the cache checkpoint to the end
+            for message in reversed(messages_copy):
+                if message.prompt_cached:
+                    message.prompt_cached = False
+                    break
+
+            messages_copy[-1].prompt_cached = True
 
             llm_call = LLMCall(
                 user_message=messages_copy[-1],

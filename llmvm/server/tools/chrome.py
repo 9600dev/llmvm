@@ -321,8 +321,9 @@ class ChromeHelpersInternal():
                 await (await self.page()).mouse.move(random.randint(1, 800), random.randint(1, 600))
                 await self.wait(50)
 
-        except Error as _:
+        except Error as ex:
             # try new page
+            logging.debug(f'ChromeHelpersInternal.goto() exception: {ex}')
             self._page = await self.__new_page()
             await (await self.page()).goto(url)
 
