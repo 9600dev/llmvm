@@ -206,7 +206,7 @@ class LLMVMClient():
             elif Container.get_config_variable('GEMINI_API_KEY'):
                 return GeminiExecutor(
                     api_key=Container.get_config_variable('GEMINI_API_KEY'),
-                    default_model='gemini-pro'
+                    default_model='gemini-1.5-pro-latest'
                 )
             raise ValueError('No API key is set for any executor in ENV. Unable to set default executor.')
 

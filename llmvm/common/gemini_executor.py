@@ -9,7 +9,7 @@ class GeminiExecutor(OpenAIExecutor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('GEMINI_API_KEY')),
-        default_model: str = 'gemini-1.5-pro-002',
+        default_model: str = 'gemini-1.5-pro-latest',
         api_endpoint: str = 'https://generativelanguage.googleapis.com/v1beta',
         default_max_token_len: int = 2097152,
         default_max_output_len: int = 8192,

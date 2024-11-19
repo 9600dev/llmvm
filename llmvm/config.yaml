@@ -23,7 +23,7 @@ anthropic_max_tokens: 200000
 anthropic_max_output_tokens: 4096
 gemini_max_tokens: 2097152
 gemini_max_output_tokens: 8192
-gemini_model: 'gemini-1.5-pro-002'
+gemini_model: 'gemini-1.5-pro-latest'
 executor: 'openai'  # openai, anthropic, gemini
 helper_functions:
   - llmvm.server.bcl.BCL.datetime

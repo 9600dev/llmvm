@@ -9,10 +9,6 @@ from anthropic import AsyncMessageStream, AsyncMessageStreamManager
 from anthropic import AsyncStream as AnthropicAsyncStream
 from anthropic.types import Completion as AnthropicCompletion
 from anthropic.types import Message as AnthropicMessage
-from google.generativeai.types.generation_types import \
-    AsyncGenerateContentResponse as AsyncGeminiStream
-from google.generativeai.types.generation_types import \
-    GenerateContentResponse as GeminiCompletion
 from openai.types.chat.chat_completion_chunk import \
     ChatCompletionChunk as OAICompletionChunk
 from openai.types.chat.chat_completion import ChatCompletion as OAICompletion
@@ -63,19 +59,6 @@ class LoggingAsyncIterator:
                 if result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
                 return cast(str, result.choices[0].message.content or '')  # type: ignore
-            elif isinstance(result, GeminiCompletion):
-                prompt_len = result.usage_metadata.prompt_token_count
-                token_len = result.usage_metadata.total_token_count
-                if result.candidates and len(result.candidates) > 0:
-                    self.perf.stop_reason = result.candidates[0].finish_reason.name.lower()
-
-                if len(result.parts) == 0:
-                    # something went wrong
-                    logging.error('GeminiCompletion.parts is empty')
-                    return ''
-                else:
-                    return cast(str, result.text or '')
-
             elif isinstance(result, str):
                 return result
             else:
@@ -149,9 +132,6 @@ class TokenStreamManager:
 
             return self.token_perf_wrapper
         elif isinstance(self.stream, openai.AsyncStream) or isinstance(self.stream, O1AsyncIterator):
-            self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
-            return self.token_perf_wrapper
-        elif isinstance(self.stream, AsyncGeminiStream):
             self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
             return self.token_perf_wrapper
         elif isinstance(self.stream, AnthropicAsyncStream):
