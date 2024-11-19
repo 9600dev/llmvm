@@ -333,7 +333,6 @@ class Helpers():
             r'^\s{0,3}\d+\.\s',   # Ordered lists
             r'\[.*?\]\(.*?\)',    # Links
             r'!\[.*?\]\(.*?\)',   # Images
-            r'`.*?`',             # Inline code
             r'^\s{0,3}```',       # Code blocks
         ]
         # Check if any pattern matches the text
@@ -926,6 +925,31 @@ class Helpers():
             byte_stream.seek(0)
         # Return True if the signature matches
         return first_bytes == pdf_signature
+
+    @staticmethod
+    def convert_image_to_png(byte_stream: bytes) -> bytes:
+        try:
+            if isinstance(byte_stream, io.BytesIO):
+                byte_stream = byte_stream.getvalue()
+
+            buffer = io.BytesIO()
+            with Image.open(io.BytesIO(byte_stream)) as im:
+                im.save(buffer, format='PNG')
+                buffer.seek(0)
+                return buffer.getvalue()
+        except Exception:
+            return byte_stream
+
+    @staticmethod
+    def is_webp(byte_stream):
+        try:
+            if isinstance(byte_stream, io.BytesIO):
+                byte_stream = byte_stream.getvalue()
+
+            with Image.open(io.BytesIO(byte_stream)) as im:
+                return im.format == 'WEBP'
+        except Exception:
+            return False
 
     @staticmethod
     def is_image(byte_stream):

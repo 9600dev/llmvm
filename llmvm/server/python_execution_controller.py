@@ -36,16 +36,12 @@ class ExecutionController(Controller):
         executor: Executor,
         tools: list[Callable],
         vector_search: VectorSearch,
-        edit_hook: Optional[Callable[[str], str]] = None,
-        continuation_passing_style: bool = False,
         exception_limit: int = 3
     ):
         super().__init__()
         self.executor = executor
         self.tools = tools
         self.vector_search = vector_search
-        self.edit_hook = edit_hook
-        self.continuation_passing_style = continuation_passing_style
         self.exception_limit = exception_limit
 
     async def __llm_call(
@@ -633,9 +629,7 @@ class ExecutionController(Controller):
             original_query='',
             compression=compression
         )
-
         return [response]
-        # return [Answer(result=response.message)]
 
     async def aexecute_continuation(
         self,
@@ -800,7 +794,7 @@ class ExecutionController(Controller):
 
             # add the stop token to the response
             if response.stop_token and response.stop_token == '</helpers>':
-                response.message = [TextContent(response.get_str() + response.stop_token)]
+                response.message = [TextContent(response.get_str() + '\n' + response.stop_token)]
 
             # extract any code blocks the Assistant wants to run
             assistant_response_str = response.get_str().replace('Assistant:', '').strip()
@@ -937,10 +931,15 @@ class ExecutionController(Controller):
 
             # we have a stop token and there are no code blocks. Assistant is finished, so we can just append the response
             elif response.stop_token and response.stop_token == '</complete>':
-                if response.get_str().strip() != '':
+                # oh gemini, why do you do this? returning </complete> as a string not as a stop token. sigh.
+                if response.get_str().strip() != '' and response.get_str().strip() != '</complete>':
                     results.append(Answer(
                         result=response.get_str()
                     ))
+                # empty assistant, maybe we got a </helpers_result> that was correct. this should be in the code_execution_result
+                elif code_execution_result:
+                    results.extend([answer for answer in cast(list, code_execution_result) if isinstance(answer, Answer)])
+
                 completed = True
 
             # code_blocks was filtered out, and we have a stop token, so it's trying to repeat the code again

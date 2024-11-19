@@ -52,21 +52,17 @@ class ObjectTransformers():
         def split_markdown_images(text: str) -> list[SupportedMessageContent]:
             result: list[SupportedMessageContent] = []
 
-            if '```markdown' not in text:
-                return [TextContent(text)]
-
             while text:
                 # Pattern to match markdown images: ![alt_text](url)
                 pattern = r'!\[(.*?)\]\((.*?)\)'
                 match = re.search(pattern, text)
 
                 if not match:
+                    if not result:
+                        return [TextContent(text)]
+
                     # No more images found, add remaining text as final result
                     if text:
-                        if '```markdown' not in text:
-                            text = '```markdown\n' + text
-                        if '```' not in text[3:]:
-                            text += '\n```'
                         result.append(TextContent(text))
                     break
 
@@ -80,10 +76,7 @@ class ObjectTransformers():
                 before = text[:start]
                 after = text[end:]
 
-                if '```markdown' not in before:
-                    before = '```markdown\n' + before
-                if '```' not in before[3:]:
-                    before += '\n```'
+                before += full_match + '\n'
 
                 result.append(TextContent(before))
                 if os.path.exists(url):
@@ -103,7 +96,8 @@ class ObjectTransformers():
                 text = after
             return result
 
-        if isinstance(content, TextContent):
+        # todo: hack
+        if isinstance(content, TextContent) and not content.get_str().startswith('BrowserContent('):
             return cast(list[Content], split_markdown_images(content.get_str()))
 
         return [content]

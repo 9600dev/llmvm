@@ -29,7 +29,6 @@ from prompt_toolkit.completion import WordCompleter, merge_completers
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
-from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
 from threading import Event
@@ -56,11 +55,13 @@ global current_mode
 global last_thread
 global pipe_event
 global escape
+global console_printer
 
 
 thread_id: int = 0
 current_mode = 'auto'
 escape = False
+console = ConsolePrinter()
 
 
 def setup_named_pipe(pid = os.getpid()):
@@ -412,9 +413,9 @@ class Repl():
         global thread_id
         global current_mode
         global last_thread
+        global console
 
         ctx = click.Context(cli)
-        console = Console()
         history = FileHistory(os.path.expanduser('~/.local/share/llmvm/.repl_history'))
         kb = KeyBindings()
         current_mode = 'tools'
@@ -886,6 +887,7 @@ def act(
 ):
     global thread_id
     global last_thread
+    global console
     thread: SessionThreadModel
 
     prompt_file = resources.files('llmvm.client') / 'awesome_prompts.csv'
@@ -899,9 +901,7 @@ def act(
         actor = actor[1:-1]
 
     if not actor:
-        from rich.console import Console
         from rich.table import Table
-        console = Console()
         table = Table(show_header=True, header_style="bold magenta")
         for column in column_names:
             table.add_column(column)
@@ -1033,11 +1033,12 @@ def vector_search(
     query: str,
     endpoint: str,
 ):
+    global console
+
     results = LLMVMClient(
         api_endpoint=endpoint, default_executor_name='openai', default_model_name='', api_key='',
     ).search(query)
 
-    console = Console()
 
     if len(results) == 0:
         console.print(f'No results found for query: {query}')
@@ -1059,7 +1060,7 @@ def vector_search(
             Markdown.__rich_console__ = markdown__rich_console__
             console.print(Markdown(markdown_snippet))
         else:
-            wrapped_text = textwrap.wrap(snippet, width=console.width - 6)
+            wrapped_text = textwrap.wrap(snippet, width=console.width() - 6)
             wrapped_lines = '\n'.join('    ' + line for line in wrapped_text[:4])
             console.print(f'{wrapped_lines}')
         console.print(f'    [italic]Score: {score}[/italic]')
@@ -1136,6 +1137,8 @@ def thread(
     endpoint: str,
 ):
     global thread_id
+    global console
+
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
         default_executor_name='openai',
@@ -1149,7 +1152,7 @@ def thread(
         int_id = int(id)
 
     thread = asyncio.run(llmvm_client.get_thread(int_id))
-    ConsolePrinter.print_thread(thread=thread)
+    console.print_thread(thread=thread)
     thread_id = thread.id
     return thread
 
@@ -1215,6 +1218,8 @@ def messages(
 ):
     global thread_id
     global last_thread
+    global console
+
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
         default_executor_name='openai',
@@ -1224,11 +1229,11 @@ def messages(
 
     try:
         thread = asyncio.run(llmvm_client.get_thread(thread_id))
-        ConsolePrinter.print_thread(thread=thread, escape=escape)
+        console.print_thread(thread=thread, escape=escape)
     except Exception:
         if 'last_thread' in globals():
             rich.print('LLMVM server not available. Showing local thread:')
-            ConsolePrinter.print_thread(thread=last_thread, escape=escape)
+            console.print_thread(thread=last_thread, escape=escape)
         else:
             rich.print('LLMVM server not available.')
 
@@ -1321,6 +1326,8 @@ def message(
     global thread_id
     global last_thread
     context_messages = list(context_messages)
+
+    console = ConsolePrinter()
 
     if not stop_tokens:
         stop_tokens = []
@@ -1471,7 +1478,7 @@ def message(
         rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')
         return
 
-    ConsolePrinter.print_messages([MessageModel.to_message(thread.messages[-1])], escape)
+    console.print_messages([MessageModel.to_message(thread.messages[-1])], escape)
 
     last_thread = thread
     thread_id = thread.id

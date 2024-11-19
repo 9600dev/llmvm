@@ -27,7 +27,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content,
                                   DownloadItemModel, Message, MessageModel,
-                                  SessionThreadModel, Statement, QueueBreakNode, TextContent, User, compression_enum)
+                                  SessionThreadModel, Statement, QueueBreakNode, StreamingStopNode, TextContent, User, compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.persistent_cache import PersistentCache, MemoryCache
 from llmvm.server.python_execution_controller import ExecutionController
@@ -221,8 +221,6 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             executor=anthropic_executor,
             tools=tools,  # type: ignore
             vector_search=vector_search,
-            edit_hook=None,
-            continuation_passing_style=False,
         )
         return anthropic_controller
     elif controller == 'gemini':
@@ -236,8 +234,6 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             executor=gemini_executor,
             tools=tools,  # type: ignore
             vector_search=vector_search,
-            edit_hook=None,
-            continuation_passing_style=False,
         )
         return gemini_controller
     else:
@@ -253,8 +249,6 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             executor=openai_executor,
             tools=tools,  # type: ignore
             vector_search=vector_search,
-            edit_hook=None,
-            continuation_passing_style=False,
         )
         return openai_controller
 
@@ -514,7 +508,6 @@ async def tools_completions(request: SessionThreadModel):
                     stream_handler=callback,
                 )
                 queue.put_nowait(QueueBreakNode())
-                raise NotImplemented('not yet')
                 return result
             else:
                 # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
@@ -545,8 +538,12 @@ async def tools_completions(request: SessionThreadModel):
         while True:
             data = await queue.get()
 
+            # this controls the end of the stream
             if isinstance(data, QueueBreakNode):
+                # this tells the client to deal with carriage returns etc for pretty printing
+                yield StreamingStopNode('\n\n' if thread.executor == 'openai' else '\n')
                 break
+
             yield data
 
         try:

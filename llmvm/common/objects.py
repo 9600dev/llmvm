@@ -1103,6 +1103,36 @@ class TokenNode(AstNode):
         return f'TokenNode({self.token})'
 
 
+class TokenStopNode(AstNode):
+    def __init__(
+        self,
+        print_str: str = '',
+    ):
+        super().__init__()
+        self.print_str = print_str
+
+    def __str__(self):
+        return self.print_str
+
+    def __repr__(self):
+        return f'TokenStopNode(print_str={self.print_str!r})'
+
+
+class StreamingStopNode(AstNode):
+    def __init__(
+        self,
+        print_str: str = '\n',
+    ):
+        super().__init__()
+        self.print_str = print_str
+
+    def __str__(self):
+        return self.print_str
+
+    def __repr__(self):
+        return f'StreamingStopNode(print_str={self.print_str!r})'
+
+
 class QueueBreakNode(AstNode):
     def __init__(
         self,
@@ -1115,18 +1145,6 @@ class QueueBreakNode(AstNode):
     def __repr__(self):
         return 'QueueBreakNode()'
 
-
-class TokenStopNode(AstNode):
-    def __init__(
-        self,
-    ):
-        super().__init__()
-
-    def __str__(self):
-        return '\n'
-
-    def __repr__(self):
-        return 'TokenStopNode()'
 
 
 class StreamNode(AstNode):

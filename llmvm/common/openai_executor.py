@@ -305,7 +305,7 @@ class OpenAIExecutor(Executor):
         perf.log()
 
         assistant = Assistant(
-            message=TextContent(text_response),
+            message=TextContent(text_response.strip()),
             error=False,
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,

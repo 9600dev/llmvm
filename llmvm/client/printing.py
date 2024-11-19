@@ -18,7 +18,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import BrowserContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
+from llmvm.common.objects import BrowserContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
 
 
 logging = setup_logging()
@@ -41,8 +41,8 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
                 await print_lambda(data.token)
             elif isinstance(data, TextContent):
                 await print_lambda(data.get_str())
-            elif isinstance(data, TokenStopNode):
-                await print_lambda(str(cast(TokenStopNode, data)))
+            elif isinstance(data, TokenStopNode) or isinstance(data, StreamingStopNode):
+                await print_lambda(str(data))
             elif isinstance(data, StreamNode):
                 await print_lambda(cast(StreamNode, data))
             elif isinstance(data, AstNode):
@@ -99,7 +99,7 @@ class StreamPrinter():
             return
         try:
             # Create a temporary file to store the output from kitty icat
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
                 if (
                     Helpers.is_emulator('kitty')
                     and (
@@ -146,6 +146,10 @@ class StreamPrinter():
                         logging.debug('wezterm not found')
                         return
 
+                    # check to see if it's a webp image, because wezterm doesn't support webp
+                    if Helpers.is_webp(image_bytes):
+                        image_bytes = Helpers.convert_image_to_png(image_bytes)
+
                     process = subprocess.Popen(
                         [cmd_path, 'imgcat'],
                         stdin=subprocess.PIPE,
@@ -165,7 +169,7 @@ class StreamPrinter():
             pass
 
     async def write_string(self, string: str):
-        if logging.level <= 20:  # INFO
+        if logging.level <= 20 and string:  # INFO
             self.console.print(f'[{self.token_color}]{string}[/{self.token_color}]', end='')
 
     async def write(self, node: AstNode):
@@ -174,8 +178,8 @@ class StreamPrinter():
                 string = node.token
             if isinstance(node, TextContent):
                 string = node.get_str()
-            elif isinstance(node, TokenStopNode):
-                string = '\n'
+            elif isinstance(node, TokenStopNode) or isinstance(node, StreamingStopNode):
+                string = node.print_str
             elif isinstance(node, StreamNode):
                 if isinstance(node.obj, bytes):
                     await self.display_image(node.obj)
@@ -183,25 +187,41 @@ class StreamPrinter():
             else:
                 string = str(node)
 
-            self.buffer += string
-            self.console.print(f'[{self.token_color}]{string}[/{self.token_color}]', end='')
+            if string:
+                self.buffer += string
+                self.console.print(f'[{self.token_color}]{string}[/{self.token_color}]', end='')
 
 
 class ConsolePrinter:
-    @staticmethod
-    def pprint(prepend: str, content_list: list[Content], escape: bool = False):
+    def __init__(self, file=sys.stdout):
+        self.console = Console(file=file)
+
+    def print(self, any: Any, end: str = ''):
+        self.console.print(any, end)
+
+    def print_exception(self, max_frames: int = 10):
+        self.console.print_exception(max_frames=max_frames)
+
+    def width(self) -> int:
+        return self.console.width
+
+    def height(self) -> int:
+        return self.console.height
+
+    def pprint(self, prepend: str, content_list: list[Content], escape: bool = False):
         def escape_string(input_str):
             return re.sub(r'"', r'\"', input_str) if escape else input_str
 
-        console = Console()
-        console.print(f'{prepend}', end='\n')
+        if prepend:
+            self.console.print(f'{prepend}\n', end='')
+
         helpers_open = False
         helpers_result_open = False
 
         def compress(content: Content, compress: bool = False) -> Content:
             if isinstance(content, TextContent) and compress:
                 if len(content.get_str()) > 10000:
-                    return TextContent(content.get_str()[:300] + ' ... ' + content.get_str()[-300:])
+                    return TextContent(content.get_str()[:300] + '\n\n ... \n\n' + content.get_str()[-300:])
             return content
 
         inline_markdown = Helpers.flatten([ObjectTransformers.transform_inline_markdown_to_image_content_list(content) for content in content_list])
@@ -209,35 +229,34 @@ class ConsolePrinter:
         for content in inline_markdown:
             if isinstance(content, TextContent) and '<helpers_result>' in content.get_str() or '</helpers_result>' in content.get_str():
                 helpers_result_open = '<helpers_result>' in content.get_str()
-                console.print(Markdown(content.get_str()))
+                self.console.print(Markdown(content.get_str()))
 
             elif isinstance(content, TextContent) and '<helpers>' in content.get_str() or '</helpers>' in content.get_str():
                 helpers_open = '<helpers>' in content.get_str()
-                console.print(Markdown(content.get_str()))
+                self.console.print(Markdown(content.get_str()))
 
             elif isinstance(content, ImageContent):
                 asyncio.run(StreamPrinter().display_image(content.sequence))
 
             elif isinstance(content, PdfContent):
-                console.print(Markdown(f'[PdfContent({content.url})]'))
+                self.console.print(Markdown(f'[PdfContent({content.url})]'))
 
             elif isinstance(content, FileContent):
-                console.print(Markdown(f'[FileContent({content.url})]'))
+                self.console.print(Markdown(f'[FileContent({content.url})]'))
 
             elif isinstance(content, MarkdownContent):
-                console.print(Markdown(f'[MarkdownContent({content.url})]'))
+                self.console.print(Markdown(f'[MarkdownContent({content.url})]'))
 
             elif isinstance(content, BrowserContent):
-                console.print(Markdown(f'[BrowserContent({content.url})]'))
+                self.console.print(Markdown(f'[BrowserContent({content.url})]'))
 
             elif isinstance(content, TextContent) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
-                console.print(Markdown(compress(content, helpers_open or helpers_result_open).get_str()))
+                self.console.print(Markdown(compress(content, helpers_open or helpers_result_open).get_str()))
 
             else:
-                console.print(escape_string(f'{compress(content, helpers_open or helpers_result_open).get_str()}'))
+                self.console.print(Markdown(escape_string(f'{compress(content, helpers_open or helpers_result_open).get_str()}')))
 
-    @staticmethod
-    def print_messages(messages: list[Message], escape: bool = False):
+    def print_messages(self, messages: list[Message], escape: bool = False, role_new_line: bool = True):
         # make both ```markdown and markdown'ish responses look like a CodeBlock
         Markdown.__rich_console__ = markdown__rich_console__
 
@@ -256,11 +275,12 @@ class ConsolePrinter:
                 subprocess.run(cmd, text=True, shell=True, env=os.environ)
 
         role_color = Container.get_config_variable('client_role_color', default='bold cyan')
-        for message in messages:
-                ConsolePrinter.pprint(f'[{role_color}]{message.role().capitalize()}[/{role_color}]: ', message.message, escape)
-                fire_helpers(message.get_str())
 
-    @staticmethod
-    def print_thread(thread: SessionThreadModel, escape: bool = False):
-        ConsolePrinter.print_messages([MessageModel.to_message(message) for message in thread.messages], escape)
+        for message in messages:
+                self.pprint(f'[{role_color}]{message.role().capitalize()}[/{role_color}]: ', message.message, escape)
+                fire_helpers(message.get_str())
+                if role_new_line: self.console.print('\n', end='')
+
+    def print_thread(self, thread: SessionThreadModel, escape: bool = False, role_new_line: bool = True):
+        self.print_messages([MessageModel.to_message(message) for message in thread.messages], escape=escape, role_new_line=role_new_line)
 
