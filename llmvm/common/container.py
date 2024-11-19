@@ -1,6 +1,6 @@
 import inspect
 import os
-from typing import Any, Dict, Type, cast
+from typing import Any, Type, cast
 
 import yaml
 
@@ -31,8 +31,8 @@ class Container(metaclass=Singleton):
             return
 
         with open(self.config_file, 'r') as conf_file:
-            self.configuration: Dict = yaml.load(conf_file, Loader=yaml.FullLoader)  # type: ignore
-            self.type_instance_cache: Dict[Type, object] = {}
+            self.configuration: dict = yaml.load(conf_file, Loader=yaml.FullLoader)  # type: ignore
+            self.type_instance_cache: dict[Type, object] = {}
 
     def resolve(self, t: Type, **extra_args):
         args = {}
@@ -60,7 +60,7 @@ class Container(metaclass=Singleton):
     def has(self, key: str) -> bool:
         return key in self.configuration
 
-    def config(self) -> Dict:
+    def config(self) -> dict:
         return self.configuration
 
     def resolve_cache(self, t: Type, **extra_args):

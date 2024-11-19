@@ -307,7 +307,7 @@ class ChromeHelpersInternal():
     async def goto(self, url: str):
         try:
             if (await self.page()).url != url:
-                await (await self.page()).goto(url, wait_until='load')
+                await (await self.page()).goto(url, wait_until='load', timeout=10000)
 
                 domain = urlparse(url).netloc
 

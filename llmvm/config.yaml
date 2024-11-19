@@ -51,3 +51,8 @@ helper_functions:
   - llmvm.server.bcl.BCL.get_central_bank_rates
   - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
   - llmvm.server.tools.browser.Browser
+
+# optional client color Python rich syntax
+client_stream_token_color: 'bright_black'
+client_role_color: 'bold cyan'
+

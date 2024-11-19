@@ -21,7 +21,7 @@ class FunctionBindable():
         self,
         expr,
         func: str,
-        agents: list[Callable],
+        tools: list[Callable],
         messages: list[Message],
         lineno: int,
         expr_instantiation,
@@ -35,7 +35,7 @@ class FunctionBindable():
         self.expr_instantiation = expr_instantiation
         self.messages: list[Message] = messages
         self.func = func.replace('"', '')
-        self.agents = agents
+        self.tools = tools
         self.lineno = lineno
         self.scope_dict = scope_dict
         self.original_code = original_code
@@ -64,7 +64,7 @@ class FunctionBindable():
 
         # get a function definition fuzzy binding
         function_str = Helpers.in_between(func, '', '(')
-        function_callable = [f for f in self.agents if function_str in str(f)]
+        function_callable = [f for f in self.tools if function_str in str(f)]
         if not function_callable:
             raise ValueError('could not find function: {}'.format(function_str))
 
@@ -199,7 +199,7 @@ class FunctionBindable():
                         bindable = match.group(1).replace('python', '').strip()
 
                 # get function definition
-                function_call = Helpers.get_callsite(bindable, self.agents)
+                function_call = Helpers.get_callsite(bindable, self.tools)
 
                 if 'None' in bindable:
                     # move forward a stage and add the latest assistant response
@@ -266,7 +266,7 @@ class FunctionBindable():
             try:
                 locals_result = PythonRuntime(
                     controller=self.controller,
-                    agents=self.agents,
+                    tools=self.tools,
                     vector_search=self.python_runtime.vector_search,
                 ).run(python_code, '')
 

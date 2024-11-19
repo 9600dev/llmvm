@@ -8,23 +8,23 @@ import re
 import jsonpickle
 import async_timeout
 import asyncio
-from typing import Any, Awaitable, List, Callable, Tuple, cast
+from typing import Any, Awaitable, Callable, cast
 
-from rich.console import Console, ConsoleOptions, RenderResult
-from rich.markdown import CodeBlock, Markdown
-from rich.syntax import Syntax
-from rich.text import Text
+from rich.console import Console
+from rich.markdown import Markdown
 
+from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.client.markdown_renderer import markdown__rich_console__
-from llmvm.common.objects import MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
+from llmvm.common.object_transformers import ObjectTransformers
+from llmvm.common.objects import BrowserContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
 
 
 logging = setup_logging()
 
 
-async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) -> List[AstNode]:
+async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) -> list[AstNode]:
     def strip_string(str) -> str:
         if str.startswith('"'):
             str = str[1:]
@@ -88,12 +88,11 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
 
 
 class StreamPrinter():
-    def __init__(self, role: str):
+    def __init__(self, file=sys.stderr):
         self.buffer = ''
-        self.console = Console(file=sys.stderr)
+        self.console = Console(file=file)
         self.markdown_mode = False
-        self.role = role
-        self.started = False
+        self.token_color = Container.get_config_variable('client_stream_token_color', default='bright_black')
 
     async def display_image(self, image_bytes):
         if len(image_bytes) < 10:
@@ -167,16 +166,10 @@ class StreamPrinter():
 
     async def write_string(self, string: str):
         if logging.level <= 20:  # INFO
-            self.console.print(f'[bright_black]{string}[/bright_black]', end='')
+            self.console.print(f'[{self.token_color}]{string}[/{self.token_color}]', end='')
 
     async def write(self, node: AstNode):
         if logging.level <= 20:  # INFO
-            if not self.started and self.role:
-                self.console.print(f'[bold green]{self.role}[/bold green]: ', end='')
-                self.started = True
-
-            string = ''
-
             if isinstance(node, TokenNode):
                 string = node.token
             if isinstance(node, TextContent):
@@ -191,152 +184,83 @@ class StreamPrinter():
                 string = str(node)
 
             self.buffer += string
-            self.console.print(f'[bright_black]{string}[/bright_black]', end='')
+            self.console.print(f'[{self.token_color}]{string}[/{self.token_color}]', end='')
 
 
-def print_messages(messages: List[Message], escape: bool = False):
-    # make both ```markdown and markdown'ish responses look like a CodeBlock
-    Markdown.__rich_console__ = markdown__rich_console__
+class ConsolePrinter:
+    @staticmethod
+    def pprint(prepend: str, content_list: list[Content], escape: bool = False):
+        def escape_string(input_str):
+            return re.sub(r'"', r'\"', input_str) if escape else input_str
 
-    def fire_helpers(s: str):
-        if '```digraph' in s:
-            # fire up graphvis.
-            graphvis_code = Helpers.in_between(s, '```digraph', '```')
-            temp_file = tempfile.NamedTemporaryFile(mode='w+')
-            temp_file.write(graphvis_code)
-            temp_file.flush()
-            # check for linux
-            if sys.platform.startswith('linux'):
-                cmd = 'dot -Tx11 {}'.format(temp_file.name)
-            elif sys.platform.startswith('darwin'):
-                cmd = 'dot -Tpdf {} | open -f -a Preview'.format(temp_file.name)
-            subprocess.run(cmd, text=True, shell=True, env=os.environ)
-
-    def split_markdown_images(text: str) -> list[Content]:
-        result = []
-
-        if '```markdown' not in text:
-            return [TextContent(text)]
-
-        while text:
-            # Pattern to match markdown images: ![alt_text](url)
-            pattern = r'!\[(.*?)\]\((.*?)\)'
-            match = re.search(pattern, text)
-
-            if not match:
-                # No more images found, add remaining text as final result
-                if text:
-                    if '```markdown' not in text:
-                        text = '```markdown\n' + text
-                    if '```' not in text[3:]:
-                        text += '\n```'
-                    result.append(TextContent(text))
-                break
-
-            # Get the full matched string and its components
-            full_match = match.group(0)
-            alt_text = match.group(1)
-            url = match.group(2)
-
-            # Split text into before and after
-            start, end = match.span()
-            before = text[:start]
-            after = text[end:]
-
-            if '```markdown' not in before:
-                before = '```markdown\n' + before
-            if '```' not in before[3:]:
-                before += '\n```'
-
-            result.append(TextContent(before))
-            if os.path.exists(url):
-                with open(url, 'rb') as f:
-                    image_data = f.read()
-                    if Helpers.is_image(image_data):
-                        result.append(ImageContent(image_data, url=url))
-                    else:
-                        result.append(TextContent(f'Image at {url} is not an image.'))
-            elif url.startswith('http'):
-                bytes_result = asyncio.run(Helpers.download_bytes(url))
-                if bytes_result and Helpers.is_image(bytes_result):
-                    result.append(ImageContent(bytes_result, url=url))
-                else:
-                    result.append(TextContent(f'Image at {url} is not an image.'))
-
-            text = after
-        return result
-
-    def escape_string(input_str):
-        if escape:
-            input_str = re.sub(r'"', r'\"', input_str)
-            return input_str
-        else:
-            return input_str
-
-    def pprint(prepend: str, content_list: list[Content]):
         console = Console()
+        console.print(f'{prepend}', end='\n')
+        helpers_open = False
+        helpers_result_open = False
 
-        for content in content_list:
-            if isinstance(content, ImageContent):
-                console.print(f'{prepend}\n', end='')
-                asyncio.run(StreamPrinter('user').display_image(content.sequence))
-            elif isinstance(content, PdfContent):
-                console.print(f'{prepend}', end='')
-                console.print(Markdown(f'[PdfContent({content.url})]'))
-            elif isinstance(content, FileContent):
-                console.print(f'{prepend}', end='')
-                console.print(Markdown(f'[FileContent({content.url})]'))
-            elif isinstance(content, MarkdownContent):
-                console.print(f'{prepend}', end='')
-                console.print(Markdown(f'[MarkdownContent({content.url})]'))
-            elif isinstance(content, Markdown):
-                console.print(f'{prepend}', end='')
-                console.print(content.get_str())
-            elif isinstance(content, TextContent) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
-                console.print(f'{prepend}', end='\n')
+        def compress(content: Content, compress: bool = False) -> Content:
+            if isinstance(content, TextContent) and compress:
+                if len(content.get_str()) > 10000:
+                    return TextContent(content.get_str()[:300] + ' ... ' + content.get_str()[-300:])
+            return content
+
+        inline_markdown = Helpers.flatten([ObjectTransformers.transform_inline_markdown_to_image_content_list(content) for content in content_list])
+
+        for content in inline_markdown:
+            if isinstance(content, TextContent) and '<helpers_result>' in content.get_str() or '</helpers_result>' in content.get_str():
+                helpers_result_open = '<helpers_result>' in content.get_str()
                 console.print(Markdown(content.get_str()))
-            else:
-                console.print(escape_string(f'{prepend}{content.get_str()}'))
-            prepend = ''
 
-    for message in messages:
-        if message.role() == 'assistant':
-            temp_content = message.message[-1]
-            content_list: list[Content] = []
-            if type(temp_content) is TextContent:
-                code_result = Helpers.in_between(temp_content.get_str(), '<helpers_result>', '</helpers_result>')
-                if len(code_result) > 10000:
-                    # using regex, replace the stuff inside of <helpers_result></helpers_result> with a 20 character summary string
-                    code_result_str = '<helpers_result>\n' + code_result[:300] + ' ... ' + code_result[-300:] + '\n</helpers_result>'
-                    temp_content.sequence = re.sub(r'<helpers_result>.*?</helpers_result>', code_result_str, temp_content.get_str(), flags=re.DOTALL)
-                # embed ```python around the code_result
-                if '<helpers>' in temp_content.get_str() and '</helpers>' in temp_content.get_str():
-                    temp_content.sequence = temp_content.get_str().replace('<helpers>', '```python\n<helpers>\n').replace('</helpers>', '\n</helpers>\n```')
-                if '<helpers_result>' in temp_content.get_str() and '</helpers_result>' in temp_content.get_str():
-                    temp_content.sequence = temp_content.get_str().replace('<helpers_result>', '```\n<helpers_result>\n').replace('</helpers_result>', '\n</helpers_result>\n```')
+            elif isinstance(content, TextContent) and '<helpers>' in content.get_str() or '</helpers>' in content.get_str():
+                helpers_open = '<helpers>' in content.get_str()
+                console.print(Markdown(content.get_str()))
 
-                # transform to markdown if it's a markdown block
-                if '```markdown' in temp_content.get_str():
-                    content_list = split_markdown_images(temp_content.get_str())
-                else:
-                    content_list = [temp_content]
-            if not escape:
-                pprint('[bold cyan]Assistant[/bold cyan]: ', content_list)
-            else:
-                pprint('', content_list)
-            fire_helpers(message.get_str())
-        elif message.role() == 'system':
-            if not escape:
-                pprint('[bold red]System[/bold red]: ', message.message)
-            else:
-                pprint('', message.message)
-        elif message.role() == 'user':
-            if not escape:
-                pprint('[bold cyan]User[/bold cyan]: ', message.message)
-            else:
-                pprint('', message.message)
+            elif isinstance(content, ImageContent):
+                asyncio.run(StreamPrinter().display_image(content.sequence))
 
+            elif isinstance(content, PdfContent):
+                console.print(Markdown(f'[PdfContent({content.url})]'))
 
-def print_thread(thread: SessionThreadModel, escape: bool = False):
-    print_messages([MessageModel.to_message(message) for message in thread.messages], escape)
+            elif isinstance(content, FileContent):
+                console.print(Markdown(f'[FileContent({content.url})]'))
+
+            elif isinstance(content, MarkdownContent):
+                console.print(Markdown(f'[MarkdownContent({content.url})]'))
+
+            elif isinstance(content, BrowserContent):
+                console.print(Markdown(f'[BrowserContent({content.url})]'))
+
+            elif isinstance(content, TextContent) and Helpers.is_markdown_simple(content.get_str()) and sys.stdout.isatty():
+                console.print(Markdown(compress(content, helpers_open or helpers_result_open).get_str()))
+
+            else:
+                console.print(escape_string(f'{compress(content, helpers_open or helpers_result_open).get_str()}'))
+
+    @staticmethod
+    def print_messages(messages: list[Message], escape: bool = False):
+        # make both ```markdown and markdown'ish responses look like a CodeBlock
+        Markdown.__rich_console__ = markdown__rich_console__
+
+        def fire_helpers(s: str):
+            if '```digraph' in s:
+                # fire up graphvis.
+                graphvis_code = Helpers.in_between(s, '```digraph', '```')
+                temp_file = tempfile.NamedTemporaryFile(mode='w+')
+                temp_file.write(graphvis_code)
+                temp_file.flush()
+                # check for linux
+                if sys.platform.startswith('linux'):
+                    cmd = 'dot -Tx11 {}'.format(temp_file.name)
+                elif sys.platform.startswith('darwin'):
+                    cmd = 'dot -Tpdf {} | open -f -a Preview'.format(temp_file.name)
+                subprocess.run(cmd, text=True, shell=True, env=os.environ)
+
+        role_color = Container.get_config_variable('client_role_color', default='bold cyan')
+        for message in messages:
+                ConsolePrinter.pprint(f'[{role_color}]{message.role().capitalize()}[/{role_color}]: ', message.message, escape)
+                fire_helpers(message.get_str())
+
+    @staticmethod
+    def print_thread(thread: SessionThreadModel, escape: bool = False):
+        ConsolePrinter.print_messages([MessageModel.to_message(message) for message in thread.messages], escape)
 

@@ -171,9 +171,6 @@ class TokenPerf:
         self._ticks = []
 
     def result(self):
-        def avg(list):
-            return sum(list) / len(list)
-
         if self.enabled:
             ttlt = self._stop - self._start
             ttft = self._ticks[0] - self._start if self._ticks else 0
@@ -554,6 +551,7 @@ class Message(AstNode):
     def __init__(
         self,
         message: list[Content],
+        hidden: bool = False,
     ):
         if not isinstance(message, list):
             raise ValueError('message must be a list of Content objects')
@@ -561,6 +559,7 @@ class Message(AstNode):
         self.message: list[Content] = message
         self.pinned: int = 0  # 0 is not pinned, -1 is pinned last, anything else is pinned
         self.prompt_cached: bool = False
+        self.hidden: bool = hidden
 
     @abstractmethod
     def role(self) -> str:
@@ -576,34 +575,48 @@ class Message(AstNode):
             "message": [cast(Content, content).to_json() for content in self.message],
             "pinned": self.pinned,
             "prompt_cached": self.prompt_cached,
+            "hidden": self.hidden,
         }
 
     @classmethod
     def from_json(cls, data: dict) -> 'Message':
         role = data.get('role')
         messages = [Content.from_json(content_data) for content_data in data.get('message', [])]
+        prompt_cached = data.get('prompt_cached', False)
+        hidden = data.get('hidden', False)
+        pinned = data.get('pinned', 0)
         if role == 'user':
-            return User(messages)
+            user = User(messages, hidden)
+            user.prompt_cached = prompt_cached
+            user.pinned = pinned
+            return user
         elif role == 'system':
-            return System(messages[0].get_str())
+            system = System(messages[0].get_str())
+            system.prompt_cached = prompt_cached
+            system.pinned = pinned
+            return system
         elif role == 'assistant':
-            return Assistant(messages[0])
+            assistant = Assistant(messages[0], hidden)
+            assistant.prompt_cached = prompt_cached
+            assistant.pinned = pinned
+            return assistant
         else:
             raise ValueError(f'Role type not supported {role}, from {data}')
 
 class User(Message):
     def __init__(
         self,
-        message: Content | list[Content]
+        message: Content | list[Content],
+        hidden: bool = False,
     ):
-        if isinstance(message, list):
-            # check to see if all elements are Content
-            if not all(isinstance(m, Content) for m in message):
-                raise ValueError('User message must be a Content object or list of Content objects')
+        if not isinstance(message, list):
+            message = [message]
 
-            super().__init__(message)
-        else:
-            super().__init__([message])
+        # check to see if all elements are Content
+        if not all(isinstance(m, Content) for m in message):
+            raise ValueError('User message must be a Content object or list of Content objects')
+
+        super().__init__(message, hidden)
 
     def role(self) -> str:
         return 'user'
@@ -676,8 +689,9 @@ class Assistant(Message):
         stop_reason: str = '',
         stop_token: str = '',
         perf_trace: object = None,
+        hidden: bool = False,
     ):
-        super().__init__([message])
+        super().__init__([message], hidden)
         self.error = error
         self._system_context = system_context,
         self._llm_call_context: object = llm_call_context

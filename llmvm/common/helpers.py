@@ -375,7 +375,7 @@ class Helpers():
         return re.sub(pattern, execute_command, input_string)
 
     @staticmethod
-    def get_callsite(call_str: str, agents: List[Callable]) -> Optional[FunctionCall]:
+    def get_callsite(call_str: str, tools: list[Callable]) -> Optional[FunctionCall]:
         def __get_callsite_helper(
             call: str,
             functions: List[Callable]
@@ -437,7 +437,7 @@ class Helpers():
 
             return func, function_description
 
-        callsite = __get_callsite_helper(call_str, agents)
+        callsite = __get_callsite_helper(call_str, tools)
         if callsite:
             func, function_description = callsite
             name = function_description['name']

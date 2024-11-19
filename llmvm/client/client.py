@@ -13,7 +13,7 @@ from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.client.parsing import parse_message_thread, parse_message_actions
 from llmvm.client.printing import StreamPrinter, stream_response
-from typing import Awaitable, Callable, Optional, List, Dict, Any, Sequence, Union, cast
+from typing import Awaitable, Callable, Optional, Any, Union, cast
 
 
 logging = setup_logging()
@@ -25,7 +25,7 @@ class Mode(Enum):
     TOOL = 'tool'
 
 
-_printer = StreamPrinter('')
+_printer = StreamPrinter()
 async def default_stream_handler(node: AstNode):
     await _printer.write(node)  # type: ignore
 
@@ -36,9 +36,9 @@ def llm(
     model: Optional[str] = None,
     output_token_len: int = 4096,
     temperature: float = 0.0,
-    stop_tokens: List[str] = [],
+    stop_tokens: list[str] = [],
     stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
-    template_args: Optional[Dict[str, Any]] = None,
+    template_args: Optional[dict[str, Any]] = None,
 ) -> Assistant:
     if (
         not isinstance(messages, list)
@@ -77,12 +77,12 @@ def llmvm(
     model_name: Optional[str] = None,
     temperature: float = 0.0,
     output_token_len: int = 4096,
-    stop_tokens: List[str] = [],
-    cookies: List[Dict[str, Any]] = [],
+    stop_tokens: list[str] = [],
+    cookies: list[dict[str, Any]] = [],
     compression: str = 'auto',
     mode: str = 'auto',
     stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
-    template_args: Optional[Dict[str, Any]] = None,
+    template_args: Optional[dict[str, Any]] = None,
 ) -> SessionThreadModel:
     if (
         not isinstance(messages, list)
@@ -217,9 +217,9 @@ class LLMVMClient():
         model: Optional[str] = None,
         output_token_len: int = 4096,
         temperature: float = 0.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
-        template_args: Optional[Dict[str, Any]] = None,
+        template_args: Optional[dict[str, Any]] = None,
     ) -> Assistant:
         async def null_handler(node: AstNode):
             pass
@@ -235,7 +235,7 @@ class LLMVMClient():
         if not model:
             model = self.model
 
-        thread_messages: List[Message] = self.__parse_messages(messages)
+        thread_messages: list[Message] = self.__parse_messages(messages)
 
         assistant = await executor.aexecute(
             messages=thread_messages,
@@ -272,9 +272,9 @@ class LLMVMClient():
 
     async def get_threads(
         self,
-    ) -> List[SessionThreadModel]:
+    ) -> list[SessionThreadModel]:
         response: httpx.Response = httpx.get(f'{self.api_endpoint}/v1/chat/get_threads')
-        threads = cast(List[SessionThreadModel], TypeAdapter(List[SessionThreadModel]).validate_python(response.json()))
+        threads = cast(list[SessionThreadModel], TypeAdapter(list[SessionThreadModel]).validate_python(response.json()))
 
         return threads
 
@@ -284,7 +284,7 @@ class LLMVMClient():
     ) -> SessionThreadModel:
         return await self.call(thread=session_thread)
 
-    async def status(self) -> Dict[str, str]:
+    async def status(self) -> dict[str, str]:
         async with httpx.AsyncClient(timeout=2.0) as client:
             try:
                 response = await client.get(f'{self.api_endpoint}/health')
@@ -306,17 +306,17 @@ class LLMVMClient():
     async def call(
         self,
         thread: int | SessionThreadModel,
-        messages: Union[List[Message], None] = None,
+        messages: Union[list[Message], None] = None,
         executor_name: Optional[str] = None,
         model_name: Optional[str] = None,
         temperature: float = 0.0,
         output_token_len: int = 4096,
-        stop_tokens: List[str] = [],
-        cookies: List[Dict[str, Any]] = [],
+        stop_tokens: list[str] = [],
+        cookies: list[dict[str, Any]] = [],
         compression: str = '',
         mode: str = '',
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
-        template_args: Optional[Dict[str, Any]] = None,
+        template_args: Optional[dict[str, Any]] = None,
     ) -> SessionThreadModel:
         if (
             (isinstance(messages, list) and len(messages) > 0 and not isinstance(messages[0], Message))
@@ -325,7 +325,7 @@ class LLMVMClient():
             raise ValueError('the messages argument must be a list of Message objects')
 
         # deal with weird message types and inputs
-        thread_messages: List[Message] = []
+        thread_messages: list[Message] = []
 
         if isinstance(thread, SessionThreadModel):
             thread_messages = [MessageModel.to_message(session_message) for session_message in thread.messages]
@@ -372,7 +372,7 @@ class LLMVMClient():
                     f'{self.api_endpoint}/v1/tools/completions',
                     json=thread.model_dump(),
                 ) as response:
-                    objs = await stream_response(response, StreamPrinter('').write)
+                    objs = await stream_response(response, StreamPrinter().write)
 
             await response.aclose()
 

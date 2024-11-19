@@ -12,7 +12,7 @@ import re
 from importlib import resources
 import traceback
 import types
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, cast
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -34,7 +34,7 @@ class ExecutionController(Controller):
     def __init__(
         self,
         executor: Executor,
-        agents: List[Callable],
+        tools: list[Callable],
         vector_search: VectorSearch,
         edit_hook: Optional[Callable[[str], str]] = None,
         continuation_passing_style: bool = False,
@@ -42,7 +42,7 @@ class ExecutionController(Controller):
     ):
         super().__init__()
         self.executor = executor
-        self.agents = agents
+        self.tools = tools
         self.vector_search = vector_search
         self.edit_hook = edit_hook
         self.continuation_passing_style = continuation_passing_style
@@ -53,7 +53,7 @@ class ExecutionController(Controller):
         llm_call: LLMCall,
     ) -> Assistant:
         # execute the call to check to see if the Answer satisfies the original query
-        messages: List[Message] = copy.deepcopy(llm_call.context_messages)
+        messages: list[Message] = copy.deepcopy(llm_call.context_messages)
 
         # don't append the user message if it's empty
         if llm_call.user_message.get_str().strip() != '':
@@ -130,12 +130,12 @@ class ExecutionController(Controller):
                     i += 1
         return messages
 
-    def __parse_function(self, message: Message, agents: List[Callable]) -> Message:
+    def __parse_function(self, message: Message, tools: list[Callable]) -> Message:
         for content in [c for c in message.message if isinstance(c, TextContent) or isinstance(c, FileContent)]:
             content_text = content.get_str()
             if '{{functions}}' in content_text:
                 new_content = content_text.replace(
-                    '{{functions}}', '\n'.join([Helpers.get_function_description_flat(f) for f in agents])
+                    '{{functions}}', '\n'.join([Helpers.get_function_description_flat(f) for f in tools])
                 )
                 if isinstance(content, TextContent):
                     content.sequence = new_content
@@ -344,14 +344,14 @@ class ExecutionController(Controller):
 
     def statement_to_str(
         self,
-        context: List[Statement] | Statement | str | List[Content] | Content,
+        context: list[Statement] | Statement | str | list[Content] | Content,
     ):
         messages = self.statement_to_message(context)
         return '\n\n'.join([message.message.get_str() for message in messages if isinstance(message.message, Content)])
 
     def statement_to_message(
         self,
-        context: List[Statement] | Statement | str | List[Content] | Content,
+        context: list[Statement] | Statement | str | list[Content] | Content,
     ) -> list[Message]:
         from llmvm.server.base_library.function_bindable import \
             FunctionBindable
@@ -549,7 +549,7 @@ class ExecutionController(Controller):
             twenty_percent = math.floor(len(similarity_chunks) * 0.15)
             similarity_chunks = random.sample(similarity_chunks, min(len(similarity_chunks), twenty_percent))
 
-            decision_criteria: List[str] = []
+            decision_criteria: list[str] = []
             for chunk, _ in similarity_chunks[:5]:
                 assistant_similarity = await self.__llm_call_with_prompt(
                     llm_call=LLMCall(
@@ -607,7 +607,7 @@ class ExecutionController(Controller):
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
         template_args: Dict[str, Any] = {},
-    ) -> List[Statement]:
+    ) -> list[Message]:
         # [system_message] [user_message] pairs - deal with them in text content or file content
         messages = self.__parse_message_template(messages, template_args)
 
@@ -634,7 +634,8 @@ class ExecutionController(Controller):
             compression=compression
         )
 
-        return [Answer(result=response.message)]
+        return [response]
+        # return [Answer(result=response.message)]
 
     async def aexecute_continuation(
         self,
@@ -643,11 +644,11 @@ class ExecutionController(Controller):
         model: Optional[str] = None,
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
-        template_args: Dict[str, Any] = {},
-        agents: List[Callable] = [],
-        cookies: List[Dict[str, Any]] = [],
-        locals_dict: Dict[str, Any] = {},
-    ) -> Tuple[List[Statement], Dict[str, Any]]:
+        template_args: dict[str, Any] = {},
+        tools: list[Callable] = [],
+        cookies: list[Dict[str, Any]] = [],
+        locals_dict: dict[str, Any] = {},
+    ) -> Tuple[list[Message], dict[str, Any]]:
         def parse_code_block_result(result: AstNode | list[AstNode] | str | list[Answer]) -> list[AstNode]:
             if isinstance(result, str):
                 return [TextContent(result)]
@@ -669,7 +670,7 @@ class ExecutionController(Controller):
         from llmvm.server.python_runtime import PythonRuntime
         python_runtime = PythonRuntime(
             self,
-            agents=agents,
+            tools=tools,
             vector_search=self.vector_search,
             locals_dict=locals_dict,
         )
@@ -685,16 +686,16 @@ class ExecutionController(Controller):
         messages = [self.__parse_template(m, template_args) for m in messages]
 
         # {{functions}} template
-        messages = [self.__parse_function(m, agents) for m in messages]
+        messages = [self.__parse_function(m, tools) for m in messages]
 
         # bootstrap the continuation execution
         completed = False
-        results: List[Statement] = []
+        results: list[Statement] = []
         old_model = python_runtime.controller.get_executor().get_default_model()
         if model: python_runtime.controller.get_executor().set_default_model(model)
 
         # inject the python_continuation_execution.prompt prompt
-        functions = [Helpers.get_function_description_flat(f) for f in agents]
+        functions = [Helpers.get_function_description_flat(f) for f in tools]
 
         system_message, tools_message = Helpers.prompts(
             prompt_name='python_continuation_execution.prompt',
@@ -707,9 +708,9 @@ class ExecutionController(Controller):
         )
 
         # anthropic prompt caching through the first three messages
-        assistant_reply = Assistant(TextContent('Yes, I am ready.'))
-        system_message.prompt_cached = True
-        tools_message.prompt_cached = True
+        assistant_reply = Assistant(TextContent('Yes, I am ready.'), hidden=True)
+        system_message.hidden = True
+        tools_message.hidden = True
         assistant_reply.prompt_cached = True
 
         # inject the tools_message into the messages, and make sure it's first.
@@ -718,17 +719,20 @@ class ExecutionController(Controller):
         messages_copy.append(system_message)
         messages_copy.append(tools_message)
         messages_copy.append(assistant_reply)
+        # strip prompt caching from all messages so we can only have it on the last message
+        for message in messages:
+            message.prompt_cached = False
         messages_copy.extend(copy.deepcopy(messages[0:-1]))
         messages_copy.append(messages[-1])
         # apply prompt caching to the last message
-        messages[-1].prompt_cached = True
+        messages_copy[-1].prompt_cached = True
 
         # todo: hack
         browser_content_start_token = '<helpers_result>BrowserContent('
 
         # execute the continuation loop
         exception_counter = 0
-        code_blocks_executed: List[str] = []
+        code_blocks_executed: list[str] = []
         while not completed and exception_counter <= self.exception_limit:
             # because BrowserContent can be overly verbose, we'll only allow the last BrowserContent
             # message to be used in the continuation loop
@@ -800,7 +804,7 @@ class ExecutionController(Controller):
 
             # extract any code blocks the Assistant wants to run
             assistant_response_str = response.get_str().replace('Assistant:', '').strip()
-            code_blocks: List[str] = PythonRuntime.get_code_blocks(assistant_response_str)
+            code_blocks: list[str] = PythonRuntime.get_code_blocks(assistant_response_str)
             code_blocks_remove = []
 
             # filter code_blocks we've already seen
@@ -847,6 +851,7 @@ class ExecutionController(Controller):
                 if cookies: locals_dict['cookies'] = cookies
 
                 code_execution_result: Optional[list[AstNode]] = []
+                hidden = False
 
                 try:
                     # todo: made this change for t2
@@ -866,6 +871,7 @@ class ExecutionController(Controller):
                     # we call the assistant again, and the string will often contain the original code block
                     # even though we got an exception, we want to make sure we specify that we've executed it
                     code_blocks_executed.append(code_block)
+                    hidden = True
                     # update the code_execution_result to expose the exception for the next iteration
                     logging.debug('ExecutionController.aexecute_continuation() Exception executing code block: {}'.format(ex))
                     # code_execution_result = Helpers.extract_stacktrace_until(traceback.format_exc(), type(python_runtime))
@@ -923,7 +929,7 @@ class ExecutionController(Controller):
                 else:
                     content_messages.append(TextContent(code_execution_result_str))
                 content_messages.append(TextContent('</helpers_result>'))
-                completed_code_user_message = User(content_messages)
+                completed_code_user_message = User(content_messages, hidden=hidden)
                 # required to complete the continuation
                 messages_copy.append(completed_code_user_message)
                 # required to make messages() work
@@ -941,7 +947,7 @@ class ExecutionController(Controller):
             elif not code_blocks and response.stop_token == '</helpers>':
                 assistant_response_str = response.get_str()
                 assistant_response_str += '\n\n' + "I've repeated the same code block. I should try something different and not repeat the same code again."
-                messages_copy.append(Assistant(TextContent(assistant_response_str)))
+                messages_copy.append(Assistant(TextContent(assistant_response_str), hidden=True))
             else:
                 # if there are no code blocks, we're done
                 if response.get_str().strip() != '':
@@ -952,5 +958,14 @@ class ExecutionController(Controller):
                 # results.extend(python_runtime.answers)
 
         if model: python_runtime.controller.get_executor().set_default_model(old_model)
-        dedupped = Helpers.remove_duplicates(results, lambda a: a.result())
-        return list(reversed(dedupped)), locals_dict
+        dedupped: list[Statement] = list(reversed(Helpers.remove_duplicates(results, lambda a: a.result())))
+
+        if messages_copy[-1].role() != 'assistant':
+            messages_copy.append(Assistant(TextContent('\n'.join([str(statement) for statement in dedupped]))))
+
+        # remove hidden messages from the list
+        messages_copy = [m for m in messages_copy if not m.hidden]
+        # only return the extra messages beyond the messages list that was passed in
+
+        return (messages_copy, locals_dict)
+        # return list(reverseddedupped)), locals_dict

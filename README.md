@@ -6,7 +6,7 @@ It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and 
 
 > **Update October 8th 2024**: Gemini. Simply refuses to emit `<code></code>` tags so we've had to switch to `<helpers></helpers>` and `</helpers_result>`. Had to update the tools prompt to really really force gemini to not go out of bounds.
 
-> **Update October 5th 2024**: Added full Browser API to helpers - LLM can click, type and navigate the browser; refactored the agentic/helper code so you can build class/instance based agents that keep state between requests (see [browser.py](https://github.com/9600dev/llmvm/blob/master/llmvm/server/tools/browser.py) as an example).
+> **Update October 5th 2024**: Added full Browser API to helpers - LLM can click, type and navigate the browser; refactored the agentic/helper/tool code so you can build class/instance based tools that keep state between requests (see [browser.py](https://github.com/9600dev/llmvm/blob/master/llmvm/server/tools/browser.py) as an example).
 
 > **Update September 21st 2024**: Added GPT o1-preview and o1-mini support, but it's not great. o1 seems to struggle to follow current prompt instructions, and really doesn't want to emit the 'code' blocks.
 

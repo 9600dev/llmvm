@@ -1,7 +1,6 @@
 import asyncio
 import csv
 import fnmatch
-import glob
 import io
 import os
 import re
@@ -12,7 +11,7 @@ import textwrap
 import threading
 import time
 from importlib import resources
-from typing import List, Optional, Sequence, cast
+from typing import Optional, Sequence, cast
 
 import click
 import httpx
@@ -23,7 +22,6 @@ from click import MissingParameter
 from click_default_group import DefaultGroup
 from httpx import ConnectError
 from prompt_toolkit import PromptSession
-from prompt_toolkit.keys import Keys
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer as PromptCompleter
 from prompt_toolkit.completion import Completion as PromptCompletion
@@ -32,17 +30,17 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from rich.console import Console
-from rich.markdown import CodeBlock, Markdown
+from rich.markdown import Markdown
 from rich.text import Text
 from threading import Event
 
-from llmvm.client.printing import StreamPrinter, print_messages, print_thread, stream_response
-from llmvm.client.markdown_renderer import markdown__rich_console__, code_block__rich_console__
+from llmvm.client.printing import StreamPrinter, ConsolePrinter, stream_response
+from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.client.client import LLMVMClient
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Assistant, DownloadItemModel,
+from llmvm.common.objects import (DownloadItemModel,
                                   ImageContent, MarkdownContent, Message,
                                   MessageModel, PdfContent, SessionThreadModel, TextContent,
                                   User)
@@ -487,7 +485,7 @@ class Repl():
                     output.seek(0)
                     raw_data = Helpers.load_resize_save(output.read(), 'PNG')
 
-                    asyncio.run(StreamPrinter('user').display_image(raw_data))
+                    asyncio.run(StreamPrinter().display_image(raw_data))
 
                     with tempfile.NamedTemporaryFile(mode='w+b', suffix='.png', delete=False) as temp_file:
                         temp_file.write(raw_data)
@@ -993,7 +991,7 @@ def url(
 
             async with httpx.AsyncClient(timeout=400.0) as client:
                 async with client.stream('POST', f'{endpoint}/download', json=item.model_dump()) as response:
-                    objs = await stream_response(response, StreamPrinter('').write)
+                    objs = await stream_response(response, StreamPrinter().write)
             await response.aclose()
 
             session_thread = SessionThreadModel.model_validate(objs[-1])
@@ -1075,7 +1073,7 @@ def vector_search(
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def vector_ingest(
-    path: List[str],
+    path: list[str],
     endpoint: str,
 ):
     files = path
@@ -1117,7 +1115,7 @@ def threads(
 
     for thread in threads:
         if len(thread.messages) > 0:
-            message_content = str(thread.messages[-1].content).replace('\n', ' ')[0:75]
+            message_content = thread.messages[-1].to_message().get_str().replace('\n', ' ')[0:75]
             rich.print(f'[{thread.id}]: {message_content}')
 
     active_threads = [t for t in threads if len(t.messages) > 0]
@@ -1151,7 +1149,7 @@ def thread(
         int_id = int(id)
 
     thread = asyncio.run(llmvm_client.get_thread(int_id))
-    print_thread(thread=thread)
+    ConsolePrinter.print_thread(thread=thread)
     thread_id = thread.id
     return thread
 
@@ -1183,7 +1181,7 @@ def count(
         default_model_name=model,
         api_key='',
         throw_if_server_down=False,
-        default_stream_handler=StreamPrinter('').write
+        default_stream_handler=StreamPrinter().write
     )
 
     # we just need an approximation of token count here, so we'll skip the function definitions
@@ -1226,11 +1224,11 @@ def messages(
 
     try:
         thread = asyncio.run(llmvm_client.get_thread(thread_id))
-        print_thread(thread=thread, escape=escape)
+        ConsolePrinter.print_thread(thread=thread, escape=escape)
     except Exception:
         if 'last_thread' in globals():
             rich.print('LLMVM server not available. Showing local thread:')
-            print_thread(thread=last_thread, escape=escape)
+            ConsolePrinter.print_thread(thread=last_thread, escape=escape)
         else:
             rich.print('LLMVM server not available.')
 
@@ -1303,8 +1301,8 @@ def new(
 def message(
     message: Optional[str | bytes | Message],
     id: int,
-    path: List[str],
-    context: List[str],
+    path: list[str],
+    context: list[str],
     upload: bool,
     direct: bool,
     endpoint: str,
@@ -1315,7 +1313,7 @@ def message(
     file_writes: bool,
     temperature: float,
     output_token_len: int,
-    stop_tokens: List[str],
+    stop_tokens: list[str],
     escape: bool,
     throw: bool,
     context_messages: Sequence[Message] = [],
@@ -1375,7 +1373,7 @@ def message(
             with io.BytesIO(file_content) as bytes_buffer:
                 if Helpers.is_image(bytes_buffer):
                     image_bytes = Helpers.load_resize_save(bytes_buffer.getvalue(), 'PNG')
-                    # asyncio.run(StreamPrinter('user').display_image(image_bytes))
+
                     tty_message = User(ImageContent(image_bytes, url='cli'))
                     if message:
                         context_messages.insert(0, tty_message)
@@ -1450,7 +1448,7 @@ def message(
         default_model_name=model,
         api_key='',
         throw_if_server_down=throw,
-        default_stream_handler=StreamPrinter('').write
+        default_stream_handler=StreamPrinter().write
     )
 
     thread: SessionThreadModel = SessionThreadModel()
@@ -1466,16 +1464,15 @@ def message(
         mode='direct' if direct else 'tools',
         compression=compression,
         cookies=cookies_list,
-        stream_handler=StreamPrinter('').write,
+        stream_handler=StreamPrinter().write,
     ))
 
     if not thread.messages:
         rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')
         return
 
-    if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
-    print_messages([MessageModel.to_message(thread.messages[-1])], escape)
-    if not escape: asyncio.run(StreamPrinter('').write_string('\n'))
+    ConsolePrinter.print_messages([MessageModel.to_message(thread.messages[-1])], escape)
+
     last_thread = thread
     thread_id = thread.id
 

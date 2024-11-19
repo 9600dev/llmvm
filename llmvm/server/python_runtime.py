@@ -36,7 +36,7 @@ class PythonRuntime:
         self,
         controller: ExecutionController,
         vector_search: VectorSearch,
-        agents: List[Callable] = [],
+        tools: List[Callable] = [],
         answer_error_correcting: bool = False,
         locals_dict = {},
         globals_dict = {}
@@ -45,7 +45,7 @@ class PythonRuntime:
         self.original_code = ''
         self.controller: ExecutionController = controller
         self.vector_search = vector_search
-        self.agents = agents
+        self.tools = tools
         self.locals_dict = locals_dict
         self.globals_dict = globals_dict
         self.answers: List[Answer] = []
@@ -189,14 +189,14 @@ class PythonRuntime:
         self.globals_dict['search'] = self.search
         self.globals_dict['download'] = self.download
         self.globals_dict['pandas_bind'] = self.pandas_bind
-        for agent in self.agents:
-            # an agent is either a static method that is directly callable, or an instance method
+        for tool in self.tools:
+            # a tool is either a static method that is directly callable, or an instance method
             # which needs an instance of the class to be instantiated
-            is_static, cls = Helpers.is_static_method(agent)
+            is_static, cls = Helpers.is_static_method(tool)
             if not is_static and cls and cls.__name__ not in self.globals_dict:
                 self.globals_dict[cls.__name__] = InstantiationWrapper(cls, python_runtime=self)
             else:
-                self.globals_dict[agent.__name__] = agent
+                self.globals_dict[tool.__name__] = tool
 
         self.globals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
@@ -357,7 +357,7 @@ class PythonRuntime:
         bindable = FunctionBindable(
             expr=expr,
             func=func,
-            agents=self.agents,
+            tools=self.tools,
             messages=[],
             lineno=inspect.currentframe().f_back.f_lineno,  # type: ignore
             expr_instantiation=inspect.currentframe().f_back.f_locals,  # type: ignore
@@ -558,7 +558,7 @@ class PythonRuntime:
                         'task': query,
                         'code': python_code,
                         'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
+                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.tools]),
                         'dictionary': dictionary,
                     },
                     user_token=self.controller.get_executor().user_token(),
@@ -741,7 +741,7 @@ class PythonRuntime:
                         'task': query,
                         'code': python_code,
                         'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.agents]),
+                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.tools]),
                         'dictionary': dictionary,
                     },
                     user_token=self.controller.get_executor().user_token(),
@@ -865,7 +865,7 @@ class PythonRuntime:
         write_client_stream(TextContent(f'Python code failed to compile or run due to the following error or exception: {error}\n'))
 
         # SyntaxError, or other more global error. We should rewrite the entire code.
-        # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.agents]
+        # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.tools]
         code_prompt = \
             f'''The following Python code:
 
@@ -908,7 +908,7 @@ class PythonRuntime:
     ):
         logging.debug('rewrite()')
         # SyntaxError, or other more global error. We should rewrite the entire code.
-        function_list = [Helpers.get_function_description_flat(f) for f in self.agents]
+        function_list = [Helpers.get_function_description_flat(f) for f in self.tools]
         code_prompt = \
             f'''The following code (found under "Original Code") either didn't compile, or threw an exception while executing.
             Identify the error in the code below, and re-write the code and only that code.

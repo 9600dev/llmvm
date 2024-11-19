@@ -1,5 +1,7 @@
 import asyncio
 from collections import OrderedDict
+import os
+import re
 from typing import List, cast
 
 from llmvm.common.container import Container
@@ -45,6 +47,67 @@ class ObjectCache:
 cache = ObjectCache()
 
 class ObjectTransformers():
+    @staticmethod
+    def transform_inline_markdown_to_image_content_list(content: Content) -> list[Content]:
+        def split_markdown_images(text: str) -> list[SupportedMessageContent]:
+            result: list[SupportedMessageContent] = []
+
+            if '```markdown' not in text:
+                return [TextContent(text)]
+
+            while text:
+                # Pattern to match markdown images: ![alt_text](url)
+                pattern = r'!\[(.*?)\]\((.*?)\)'
+                match = re.search(pattern, text)
+
+                if not match:
+                    # No more images found, add remaining text as final result
+                    if text:
+                        if '```markdown' not in text:
+                            text = '```markdown\n' + text
+                        if '```' not in text[3:]:
+                            text += '\n```'
+                        result.append(TextContent(text))
+                    break
+
+                # Get the full matched string and its components
+                full_match = match.group(0)
+                alt_text = match.group(1)
+                url = match.group(2)
+
+                # Split text into before and after
+                start, end = match.span()
+                before = text[:start]
+                after = text[end:]
+
+                if '```markdown' not in before:
+                    before = '```markdown\n' + before
+                if '```' not in before[3:]:
+                    before += '\n```'
+
+                result.append(TextContent(before))
+                if os.path.exists(url):
+                    with open(url, 'rb') as f:
+                        image_data = f.read()
+                        if Helpers.is_image(image_data):
+                            result.append(ImageContent(image_data, url=url))
+                        else:
+                            result.append(TextContent(f'Image at {url} is not an image.'))
+                elif url.startswith('http'):
+                    bytes_result = asyncio.run(Helpers.download_bytes(url))
+                    if bytes_result and Helpers.is_image(bytes_result):
+                        result.append(ImageContent(bytes_result, url=url))
+                    else:
+                        result.append(TextContent(f'Image at {url} is not an image.'))
+
+                text = after
+            return result
+
+        if isinstance(content, TextContent):
+            return cast(list[Content], split_markdown_images(content.get_str()))
+
+        return [content]
+
     @staticmethod
     def transform_pdf_to_content(content: PdfContent, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
         if content.original_sequence is not None and isinstance(content.sequence, list):

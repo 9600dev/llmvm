@@ -2,17 +2,15 @@ import asyncio
 import base64
 import json
 import os
-from io import BytesIO
-from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 
 import tiktoken
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from openai.types.chat.completion_create_params import Function
-from PIL import Image
 
 from llmvm.common.helpers import Helpers
-from llmvm.common.logging_helpers import messages_trace, setup_logging
+from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content, Executor, FileContent, ImageContent, MarkdownContent,
                                   Message, PdfContent, System, TextContent, TokenNode, TokenStopNode, User,
@@ -180,14 +178,14 @@ class OpenAIExecutor(Executor):
 
     async def count_tokens(
         self,
-        messages: List[Message],
+        messages: list[Message],
     ) -> int:
         messages_list = self.unpack_and_wrap_messages(messages, self.default_model)
         return await self.count_tokens_dict(messages_list)
 
     async def count_tokens_dict(
         self,
-        messages: list[Dict[str, Any]],
+        messages: list[dict[str, Any]],
     ) -> int:
         num_tokens = 0
         json_accumulator = ''
@@ -205,12 +203,12 @@ class OpenAIExecutor(Executor):
 
     async def aexecute_direct(
         self,
-        messages: List[Dict[str, str]],
-        functions: List[Dict[str, str]] = [],
+        messages: list[dict[str, str]],
+        functions: list[dict[str, str]] = [],
         model: Optional[str] = None,
         max_output_tokens: int = 16384,
         temperature: float = 0.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
@@ -229,8 +227,8 @@ class OpenAIExecutor(Executor):
         if model is not None and 'o1-preview' in model or 'o1-mini' in model:
             messages = [m for m in messages if m['role'] != 'system']
 
-        messages_cast = cast(List[ChatCompletionMessageParam], messages)
-        functions_cast = cast(List[Function], functions)
+        messages_cast = cast(list[ChatCompletionMessageParam], messages)
+        functions_cast = cast(list[Function], functions)
 
         token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
@@ -273,17 +271,17 @@ class OpenAIExecutor(Executor):
 
     async def aexecute(
         self,
-        messages: List[Message],
+        messages: list[Message],
         max_output_tokens: int = 16384,
         temperature: float = 0.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
 
         # wrap and check message list
-        messages_list: list[Dict[str, Any]] = self.unpack_and_wrap_messages(messages, model)
+        messages_list: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages, model)
 
         stream = self.aexecute_direct(
             messages_list,
@@ -318,10 +316,10 @@ class OpenAIExecutor(Executor):
 
     def execute(
         self,
-        messages: List[Message],
+        messages: list[Message],
         max_output_tokens: int = 16384,
         temperature: float = 0.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:

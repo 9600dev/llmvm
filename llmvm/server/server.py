@@ -7,7 +7,7 @@ import shutil
 import sys
 from importlib import resources
 import types
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 import async_timeout
 import jsonpickle
@@ -16,7 +16,7 @@ import rich
 import uvicorn
 from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request,
                      UploadFile)
-from fastapi.param_functions import File, Form
+from fastapi.param_functions import File
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from openai import AsyncOpenAI, OpenAI
 
@@ -27,9 +27,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content,
                                   DownloadItemModel, Message, MessageModel,
-                                  SessionThreadModel, Statement, TokenStopNode, QueueBreakNode, TextContent,
-                                  TokenCompressionMethod, User,
-                                  compression_enum)
+                                  SessionThreadModel, Statement, QueueBreakNode, TextContent, User, compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.persistent_cache import PersistentCache, MemoryCache
 from llmvm.server.python_execution_controller import ExecutionController
@@ -61,9 +59,9 @@ except ValueError:
 
 app = FastAPI()
 
-agents = Helpers.flatten(list(
+tools = Helpers.flatten(list(
     filter(
-        lambda x: x is not None, [Helpers.get_callables(logging, agent) for agent in Container().get('helper_functions')]
+        lambda x: x is not None, [Helpers.get_callables(logging, tool) for tool in Container().get('helper_functions')]
     )
 ))
 
@@ -75,7 +73,7 @@ os.makedirs(Container().get('log_directory'), exist_ok=True)
 os.makedirs(Container().get('vector_store_index_directory'), exist_ok=True)
 
 cache_session = PersistentCache(cache_directory=Container().get('cache_directory'))
-cache_memory: MemoryCache[int, Dict[str, Any]] = MemoryCache()
+cache_memory: MemoryCache[int, dict[str, Any]] = MemoryCache()
 cdn_directory = Container().get('cdn_directory')
 
 
@@ -93,7 +91,7 @@ vector_store = VectorStore(
 )
 vector_search = VectorSearch(vector_store=vector_store)
 
-def __get_unserializable_locals(locals_dict: Dict[str, Any]) -> Dict[str, Any]:
+def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
     unserializable_locals = {}
     for key, value in locals_dict.items():
         if (
@@ -113,7 +111,7 @@ def __get_unserializable_locals(locals_dict: Dict[str, Any]) -> Dict[str, Any]:
                 unserializable_locals[key] = value
     return unserializable_locals
 
-def __serialize_locals_dict(locals_dict: Dict[str, Any]) -> Dict[str, Any]:
+def __serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
     temp_dict = {}
     for key, value in locals_dict.items():
         if isinstance(key, str) and key.startswith('__'):
@@ -177,7 +175,7 @@ def __serialize_item(item):
             # actual functions can't be json serialized so we pass here
             pass
 
-def __deserialize_locals_dict(serialized_dict: Dict[str, Any]) -> Dict[str, Any]:
+def __deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]:
     result = {}
     for key, value in serialized_dict.items():
         if isinstance(value, dict) and value.get('type') == 'function':
@@ -221,7 +219,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         )
         anthropic_controller = ExecutionController(
             executor=anthropic_executor,
-            agents=agents,  # type: ignore
+            tools=tools,  # type: ignore
             vector_search=vector_search,
             edit_hook=None,
             continuation_passing_style=False,
@@ -236,7 +234,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         )
         gemini_controller = ExecutionController(
             executor=gemini_executor,
-            agents=agents,  # type: ignore
+            tools=tools,  # type: ignore
             vector_search=vector_search,
             edit_hook=None,
             continuation_passing_style=False,
@@ -253,7 +251,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
 
         openai_controller = ExecutionController(
             executor=openai_executor,
-            agents=agents,  # type: ignore
+            tools=tools,  # type: ignore
             vector_search=vector_search,
             edit_hook=None,
             continuation_passing_style=False,
@@ -425,7 +423,7 @@ async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     return cast(SessionThreadModel, cache_session.get(thread.id))
 
 @app.get('/v1/chat/get_threads')
-async def get_threads() -> List[SessionThreadModel]:
+async def get_threads() -> list[SessionThreadModel]:
     result = [cast(SessionThreadModel, cache_session.get(id)) for id in cache_session.keys()]
     return result
 
@@ -506,7 +504,7 @@ async def tools_completions(request: SessionThreadModel):
                 Helpers.log_exception(logging, task.exception())
                 queue.put_nowait(QueueBreakNode())
 
-        async def execute_and_signal():
+        async def execute_and_signal() -> list[Message]:
             if thread.current_mode == 'direct':
                 result = await controller.aexecute(
                     messages=messages,
@@ -516,6 +514,7 @@ async def tools_completions(request: SessionThreadModel):
                     stream_handler=callback,
                 )
                 queue.put_nowait(QueueBreakNode())
+                raise NotImplemented('not yet')
                 return result
             else:
                 # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
@@ -530,7 +529,7 @@ async def tools_completions(request: SessionThreadModel):
                     model=model,
                     compression=compression,
                     cookies=cookies,
-                    agents=cast(List[Callable], agents),
+                    tools=cast(list[Callable], tools),
                     locals_dict=locals_dict
                 )
                 queue.put_nowait(QueueBreakNode())
@@ -561,22 +560,10 @@ async def tools_completions(request: SessionThreadModel):
             yield thread.model_dump()
             return
 
-        statements: List[Statement] = task.result()
-
-        # todo parse Answers into Assistants for now
-        results = []
-
-        assistant_result = '\n\n'.join([str(statement) for statement in reversed(statements)])
-        results.append(Assistant(TextContent(assistant_result)))
-
-        if len(results) > 0:
-            for result in results:
-                thread.messages.append(MessageModel.from_message(result))
-            cache_session.set(thread.id, thread)
-            yield thread.model_dump()
-        else:
-            # todo need to do something here to deal with error cases
-            yield thread.model_dump()
+        messages_result: list[Message] = task.result()
+        thread.messages = [MessageModel.from_message(m) for m in messages_result]
+        cache_session.set(thread.id, thread)
+        yield thread.model_dump()
 
     return StreamingResponse(stream_response(stream()), media_type='text/event-stream')  # media_type="application/json")
 
@@ -591,14 +578,17 @@ if __name__ == '__main__':
     default_controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
     default_model_str = f'{default_controller}_model'
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
-    rich.print(f'[cyan]Default executor is: {default_controller}[/cyan]')
-    rich.print(f'[cyan]Default model is: {default_model}[/cyan]')
-    rich.print()
-    rich.print(f'[cyan]Make sure to `playwright install`.[/cyan]')
-    rich.print(f'[cyan]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.[/cyan]')
+    role_color = Container().get_config_variable('client_info_bold_color', default='cyan')
+    tool_color = Container().get_config_variable('client_info_color', default='bold green')
 
-    for agent in agents:
-        rich.print(f'[green]Loaded helper: {agent.__name__}[/green]')  # type: ignore
+    rich.print(f'[{role_color}]Default executor is: {default_controller}[/{role_color}]')
+    rich.print(f'[{role_color}]Default model is: {default_model}[/{role_color}]')
+    rich.print()
+    rich.print(f'[{role_color}]Make sure to `playwright install`.[/{role_color}]')
+    rich.print(f'[{role_color}]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.[/{role_color}]')
+
+    for tool in tools:
+        rich.print(f'[{tool_color}]Loaded helper: {tool.__name__}[/{tool_color}]')  # type: ignore
 
     # you can run this using uvicorn to get better asynchronousy, but don't count on it yet.
     # uvicorn server:app --loop asyncio --workers 4 --log-level debug --host 0.0.0.0 --port 8011

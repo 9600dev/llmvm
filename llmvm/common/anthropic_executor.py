@@ -2,10 +2,9 @@ import asyncio
 import base64
 import json
 import os
-from typing import Any, Awaitable, Callable, Dict, List, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
 
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
-from anthropic.types.message import Message as AnthropicMessage
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
@@ -194,7 +193,7 @@ class AnthropicExecutor(Executor):
 
     async def count_tokens_dict(
         self,
-        messages: list[Dict[str, Any]],
+        messages: list[dict[str, Any]],
     ) -> int:
         num_tokens = 0
         json_accumulator = ''
@@ -209,12 +208,12 @@ class AnthropicExecutor(Executor):
 
     async def aexecute_direct(
         self,
-        messages: List[Dict[str, Any]],
-        functions: List[Dict[str, str]] = [],
+        messages: list[dict[str, Any]],
+        functions: list[dict[str, str]] = [],
         model: Optional[str] = None,
         max_output_tokens: int = 4096,
         temperature: float = 0.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
@@ -241,7 +240,7 @@ class AnthropicExecutor(Executor):
 
         # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
         # going to add an Assistant message in between two User messages, and a User message between two Assistant.
-        messages_list: List[Dict[str, Any]] = []
+        messages_list: list[dict[str, Any]] = []
 
         for i in range(len(messages)):
             if i > 0 and messages[i]['role'] == messages[i - 1]['role']:
@@ -288,14 +287,14 @@ class AnthropicExecutor(Executor):
         messages: list[Message],
         max_output_tokens: int = 4096,
         temperature: float = 1.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
 
         # wrap and check message list
-        messages_list: list[Dict[str, Any]] = self.unpack_and_wrap_messages(messages, model)
+        messages_list: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages, model)
 
         stream = self.aexecute_direct(
             messages_list,
@@ -331,10 +330,10 @@ class AnthropicExecutor(Executor):
 
     def execute(
         self,
-        messages: List[Message],
+        messages: list[Message],
         max_output_tokens: int = 4096,
         temperature: float = 1.0,
-        stop_tokens: List[str] = [],
+        stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:
