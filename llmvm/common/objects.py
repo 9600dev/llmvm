@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
 import time
-from typing import Any, Awaitable, Callable, Optional, Type, TypeVar, TypedDict, Union, cast
+from typing import Any, Awaitable, Callable, Optional, TextIO, Type, TypeVar, TypedDict, Union, cast
 
 import pandas as pd
 from llmvm.common.logging_helpers import setup_logging
@@ -545,7 +545,6 @@ class MarkdownContent(ContainerContent):
 
     def get_str(self) -> str:
         return '\n'.join([c.get_str() for c in self.sequence])
-
 
 class Message(AstNode):
     def __init__(

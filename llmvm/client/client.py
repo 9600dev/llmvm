@@ -55,8 +55,8 @@ def llm(
     return asyncio.run(
         LLMVMClient(
             api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
-            default_executor_name=Container.get_config_variable('LLMVM_EXECUTOR'),
-            default_model_name=Container.get_config_variable('LLMVM_MODEL'),
+            default_executor_name=executor.name() if executor else Container.get_config_variable('LLMVM_EXECUTOR'),
+            default_model_name=model if model else Container.get_config_variable('LLMVM_MODEL'),
             api_key='',
         ).call_direct(
             messages=cast(list[Message], messages),
@@ -119,6 +119,29 @@ def llmvm(
     )
 
 
+def get_executor(
+    executor_name: str,
+    model_name: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> Executor:
+
+    if executor_name == 'anthropic' and not model_name:
+        model_name = 'claude-3-5-sonnet-latest'
+    elif executor_name == 'openai' and not model_name:
+        model_name = 'gpt-4o'
+    elif executor_name == 'gemini' and not model_name:
+        model_name = 'gemini-pro'
+    else:
+        raise ValueError(f'Invalid executor name: {executor_name}')
+
+    return LLMVMClient(
+        api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
+        default_executor_name=executor_name,
+        default_model_name=model_name,
+        api_key=api_key if api_key else ''
+    ).get_executor(executor_name, model_name, api_key)
+
+
 class LLMVMClient():
     def __init__(
         self,
@@ -169,7 +192,7 @@ class LLMVMClient():
             if Container.get_config_variable('ANTHROPIC_API_KEY') or api_key:
                 return AnthropicExecutor(
                     api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'claude-3-5-sonnet-20240620'
+                    default_model=cast(str, model_name) if model_name else 'claude-3-5-sonnet-latest'
                 )
             else:
                 raise ValueError('anthropic executor requested, but unable to find Anthropic API key.')
@@ -178,7 +201,7 @@ class LLMVMClient():
             if Container.get_config_variable('OPENAI_API_KEY') or api_key:
                 return OpenAIExecutor(
                     api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'gpt-4o-2024-08-06'
+                    default_model=cast(str, model_name) if model_name else 'gpt-4o'
                 )
             else:
                 raise ValueError('openai executor requested, but unable to find OpenAI API key.')

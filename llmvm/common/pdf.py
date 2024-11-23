@@ -2,7 +2,7 @@ import asyncio
 import io
 import tempfile
 from io import BytesIO
-from typing import List, cast
+from typing import cast
 from urllib.parse import urlparse
 
 import pdf2image
@@ -42,7 +42,7 @@ class PdfHelpers():
     def parse_pdf_image_to_text(url_or_file: str) -> str:
         result = urlparse(url_or_file)
 
-        text_chunks: List[str] = []
+        text_chunks: list[str] = []
         images = pdf2image.convert_from_path(result.path)  # type: ignore
         for pil_im in images:
             ocr_dict = pytesseract.image_to_data(pil_im, output_type=Output.DICT)
@@ -117,7 +117,7 @@ class Pdf():
         assistant = await self.executor.aexecute([User(TextContent(prompt))])
         return 'yes' in str(assistant.message).lower()
 
-    def parse_pdf(self, byte_stream: bytes, url_or_file: str) -> List[Content]:
+    def parse_pdf(self, byte_stream: bytes, url_or_file: str) -> list[Content]:
         """
         Downloads a pdf file from the url_or_file argument and returns the text.
         You can only use either a url or a path to a pdf file.
@@ -135,7 +135,7 @@ class Pdf():
 
         pdf = pdfplumber.open(stream)
         pages_count = len(pdf.pages)
-        content: List[Content] = []
+        content: list[Content] = []
 
         if pages_count <= 0:
             # try the old way
@@ -161,7 +161,7 @@ class Pdf():
 
         # parse each page
         for i in range(0, pages_count):
-            page_content: List[Content] = []
+            page_content: list[Content] = []
             page = pdf.pages[i]
             text = page.extract_text(x_tolerance=x_tolerance)
             if text:
@@ -199,13 +199,13 @@ class Pdf():
         )
         return content
 
-    def get_pdf(self, url_or_file: str) -> List[Content]:
+    def get_pdf(self, url_or_file: str) -> list[Content]:
         bytes = asyncio.run(Helpers.download_bytes(url_or_file))
         if bytes:
             return self.parse_pdf(bytes, url_or_file)
         return []
 
-    def get_pdf_content(self, content: PdfContent) -> List[Content]:
+    def get_pdf_content(self, content: PdfContent) -> list[Content]:
         if isinstance(content.sequence, bytes):
             return self.parse_pdf(cast(bytes, content.sequence), content.url)
         if content.url:

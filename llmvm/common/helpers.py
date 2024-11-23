@@ -27,7 +27,7 @@ from functools import reduce
 from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
-from typing import Any, Awaitable, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Awaitable, Callable, Dict, Generator, List, Optional, TextIO, Tuple, Union
 from urllib.parse import urljoin, urlparse
 from markdownify import markdownify as md
 import zlib
@@ -321,6 +321,20 @@ class Helpers():
         return ''.join(modified_lines)
 
     @staticmethod
+    def write_markdown(markdown: MarkdownContent, dest: io.TextIOBase):
+        for content in markdown.sequence:
+            if isinstance(content, TextContent):
+                dest.write(content.get_str())
+            elif isinstance(content, ImageContent):
+                if len(content.sequence) > 0:
+                    image_type = Helpers.classify_image(content.get_bytes())
+                    dest.write(f"![image](data:{image_type};base64,{base64.b64encode(content.sequence).decode('utf-8')})")
+                elif content.url:
+                    dest.write(f"![image]({content.url})")
+        dest.flush()
+        return dest
+
+    @staticmethod
     def is_markdown_simple(text):
         if '```markdown' in text:
             return True
@@ -572,23 +586,22 @@ class Helpers():
     @staticmethod
     async def download_bytes(url_or_file: str) -> bytes:
         url_result = urlparse(url_or_file)
-        headers = {  # type: ignore
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'  # NOQA
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        stream = b''
 
-        if url_result.scheme == 'http' or url_result.scheme == 'https':
+        if url_result.scheme in ('http', 'https'):
             async with httpx.AsyncClient() as client:
                 response = await client.get(url_or_file, headers=headers, follow_redirects=True, timeout=10)
-                stream = io.BytesIO(response.content)
+                if response.status_code != 200:
+                    raise ValueError(f'Failed to download image. Status code: {response.status_code}')
+                return response.content
         else:
             try:
                 with open(url_or_file, 'rb') as file:
-                    stream = io.BytesIO(file.read())
+                    return file.read()
             except FileNotFoundError:
-                raise ValueError('The supplied argument url_or_file: {} is not a correct filename or url.'.format(url_or_file))
-
-        return stream.getvalue()
+                raise ValueError(f'The supplied argument url_or_file: {url_or_file} is not a correct filename or url.')
 
     @staticmethod
     async def download(url_or_file: str) -> str:
@@ -644,9 +657,9 @@ class Helpers():
         min_width: int,
         min_height: int
     ) -> list[SupportedMessageContent]:
-        pattern = r'(.*?)!\[(.*?)\]\((.*?)\)|(.+?)$'
         # pattern = r'(.*?)!\[(?:.*?)\]\[(.*?)\]|(.+?)$'
-        embedded_image_pattern = r'\[(.*?)\]:\s*<data:image/(.*?);base64,(.+)>'
+        pattern = r'(.*?)!\[(.*?)\]\((.*?)\)|(.+?)$'
+        embedded_image_pattern = r'!\[([^\]]*?)\]\(data:image/([^;]+);base64,([^)]+)\)'
         content = markdown_content.get_str()
         content_list: List[SupportedMessageContent] = []
         embedded_images: Dict[str, ImageContent] = {}
@@ -657,8 +670,11 @@ class Helpers():
             image_bytes = base64.b64decode(base64_data)
             embedded_images[image_id] = ImageContent(image_bytes, f"{image_id}.{image_type}")
 
-        # Remove the embedded image definitions from the content
-        content = re.sub(embedded_image_pattern, '', content, flags=re.MULTILINE)
+        content = re.sub(
+            r'!\[([^\]]*)\]\(data:image/[^;]+;base64,[^)]+\)',
+            r'![\1](None)',  # \1 refers to the captured alt text
+            content
+        )
 
         last_end = 0
         idx = 0
@@ -674,9 +690,9 @@ class Helpers():
                 idx += 1
             if alt_text:
                 if alt_text in embedded_images:
-                    content_list.append(embedded_images[image_id])
+                    content_list.append(embedded_images[alt_text])
                 else:
-                    logging.debug(f"Downloading image from {markdown_content.url[:25]} {image_id}")
+                    logging.debug(f"Downloading image {image_id} obtained from {markdown_content.url[:25]}")
                     # Handle external images as before
                     task = asyncio.create_task(
                         Helpers.get_image_fuzzy_url(logging, markdown_content.url, image_id, min_width, min_height)

@@ -720,6 +720,7 @@ class ExecutionController(Controller):
         messages_copy.append(messages[-1])
         # apply prompt caching to the last message
         messages_copy[-1].prompt_cached = True
+        messages_copy[-2].prompt_cached = True
 
         # todo: hack
         browser_content_start_token = '<helpers_result>BrowserContent('
@@ -742,7 +743,9 @@ class ExecutionController(Controller):
                     message.prompt_cached = False
                     break
 
+            # this is an anthropic pattern
             messages_copy[-1].prompt_cached = True
+            messages_copy[-2].prompt_cached = True
 
             llm_call = LLMCall(
                 user_message=messages_copy[-1],
