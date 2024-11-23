@@ -1,6 +1,5 @@
 import asyncio
 import csv
-import fnmatch
 import io
 import os
 import re
@@ -33,6 +32,7 @@ from rich.markdown import Markdown
 from rich.text import Text
 from threading import Event
 
+from llmvm.client.custom_completer import CustomCompleter
 from llmvm.client.printing import StreamPrinter, ConsolePrinter, stream_response
 from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.client.client import LLMVMClient
@@ -276,56 +276,6 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
         message_str = Helpers.after_end(message_str, '```', '```')
 
 
-class CustomCompleter(PromptCompleter):
-    def get_path_before_cursor(self, document) -> str:
-            """
-            Custom method to get the full path before cursor, including slashes
-            """
-            # Get text before cursor
-            text_before_cursor = document.text_before_cursor
-
-            # Find the last space or start of line
-            last_space = text_before_cursor.rfind(' ')
-            if last_space == -1:
-                return text_before_cursor
-
-            return text_before_cursor[last_space + 1:]
-
-    def get_completions(self, document, complete_event):
-        # get the filename/path before the cursor
-        word = self.get_path_before_cursor(document)
-
-        current_dir = os.getcwd()
-        # get the files and directories recursively from the current directory
-        filter_out = ['.git', '.venv', '.vscode', '.pytest_cache', '__pycache__']
-        def _get_filtered_files_and_dirs(current_dir, word, filter_out):
-            try:
-                entries = os.listdir(current_dir)
-            except Exception as ex:
-                entries = []
-
-            for entry in entries:
-                if any(fnmatch.fnmatch(entry, pattern) for pattern in filter_out):
-                    continue
-
-                full_path = os.path.join(current_dir, entry)
-
-                if len(word) == 0 or entry.startswith(word):
-                    yield entry
-
-                # if it's a directory also yield its immediate contents with directory prefix
-                if os.path.isdir(full_path) and not os.path.islink(full_path):
-                    for subentry in os.listdir(full_path):
-                        if any(fnmatch.fnmatch(subentry, pattern) for pattern in filter_out):
-                            continue
-
-                        if len(word) == 0 or os.path.join(entry, subentry).startswith(word):
-                            yield os.path.join(entry, subentry)
-
-        for completion in _get_filtered_files_and_dirs(current_dir, word, filter_out):
-            yield PromptCompletion(completion, start_position=-len(word))
-
-
 class Repl():
     def __init__(
         self,
@@ -558,25 +508,18 @@ class Repl():
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text) - 1
 
-        custom_style = Style.from_dict({
-            'suggestion': 'bg:#888888 #444444'
-        })
-
         commands = {
             cmd_name: ctx.command.get_command(ctx, cmd_name).get_short_help_str()  # type: ignore
             for cmd_name in ctx.command.list_commands(ctx)  # type: ignore
         }
 
         command_completer = WordCompleter(list(commands.keys()), ignore_case=True, display_dict=commands)
-        # path_completer = PathCompleter()
-        # combined_completer = merge_completers([command_completer, path_completer, custom_completer])
         custom_completer = CustomCompleter()
         combined_completer = merge_completers([custom_completer, command_completer])
 
         session = PromptSession(
             completer=combined_completer,
             auto_suggest=AutoSuggestFromHistory(),
-            style=custom_style,
             history=history,
             enable_history_search=True,
             vi_mode=True,
