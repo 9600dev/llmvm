@@ -34,6 +34,9 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
 
     async def decode(content) -> bool:
         try:
+            if not content.startswith('{"py/object"'):
+                return False
+
             data = jsonpickle.decode(content)
 
             # tokens
@@ -49,8 +52,11 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
                 response_objects.append(data)
             elif isinstance(data, (dict, list)):
                 response_objects.append(data)
-            else:
+            # todo this shouldn't happen - they all need to be objects
+            elif isinstance(data, str) and data.startswith('"') and data.endswith('"'):
                 await print_lambda(strip_string(data))
+            else:
+                return False
             return True
         except Exception as ex:
             return False
@@ -150,15 +156,18 @@ class StreamPrinter():
                     if Helpers.is_webp(image_bytes):
                         image_bytes = Helpers.convert_image_to_png(image_bytes)
 
-                    process = subprocess.Popen(
-                        [cmd_path, 'imgcat'],
-                        stdin=subprocess.PIPE,
-                        stdout=temp_file
-                    )
-                    process.communicate(input=image_bytes)
-                    process.wait()
-                    # Now cat the temporary file to stderr
-                    subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
+                    self.console.file.flush()
+
+                    if Helpers.is_image(image_bytes):
+                        process = subprocess.Popen(
+                            [cmd_path, 'imgcat'],
+                            stdin=subprocess.PIPE,
+                            stdout=temp_file
+                        )
+                        process.communicate(input=image_bytes)
+                        process.wait()
+                        # Now cat the temporary file to stderr
+                        subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
                 elif (
                     shutil.which('viu')
                 ):
@@ -174,16 +183,17 @@ class StreamPrinter():
 
     async def write(self, node: AstNode):
         if logging.level <= 20:  # INFO
-            if isinstance(node, TokenNode):
-                string = node.token
-            if isinstance(node, TextContent):
-                string = node.get_str()
-            elif isinstance(node, TokenStopNode) or isinstance(node, StreamingStopNode):
-                string = node.print_str
-            elif isinstance(node, StreamNode):
+            if isinstance(node, StreamNode):
                 if isinstance(node.obj, bytes):
                     await self.display_image(node.obj)
                     return
+                raise ValueError(f'StreamNode.obj must be bytes, not {type(node.obj)}')
+            elif isinstance(node, TokenNode):
+                string = node.token
+            elif isinstance(node, TextContent):
+                string = node.get_str()
+            elif isinstance(node, TokenStopNode) or isinstance(node, StreamingStopNode):
+                string = node.print_str
             else:
                 string = str(node)
 

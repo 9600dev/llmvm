@@ -534,6 +534,8 @@ class MarkdownContent(ContainerContent):
         sequence: list[Content],
         url: str = '',
     ):
+        if len(sequence) > 2:
+            raise ValueError('MarkdownContent sequence must be a list of length 2')
         super().__init__(sequence, 'markdown', url)
         self.sequence = sequence
 

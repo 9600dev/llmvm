@@ -148,7 +148,7 @@ class ExecutionController(Controller):
         tokens_per_message = (
             math.floor((llm_call.max_prompt_len - await self.executor.count_tokens([llm_call.user_message])) / len(llm_call.context_messages))  # noqa E501
         )
-        write_client_stream(f'Performing context window compression type: similarity vector search with tokens per message {tokens_per_message}.\n')  # noqa E501
+        write_client_stream(TextContent(f'Performing context window compression type: similarity vector search with tokens per message {tokens_per_message}.\n'))  # noqa E501
 
         # for all messages, do a similarity search
         similarity_messages = []
@@ -199,7 +199,7 @@ class ExecutionController(Controller):
         llm_call: LLMCall,
     ) -> Assistant:
         prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message])
-        write_client_stream(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n')
+        write_client_stream(TextContent(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n'))
 
         # collapse the context messages into single message
         context_message = User(TextContent('\n\n'.join([m.get_str() for m in llm_call.context_messages])))
@@ -274,7 +274,7 @@ class ExecutionController(Controller):
         )
         tokens_per_message = tokens_per_message - header_text_token_len
 
-        write_client_stream(f'Performing context window compression type: summary map/reduce with tokens per message {tokens_per_message}.\n')  # noqa E501
+        write_client_stream(TextContent(f'Performing context window compression type: summary map/reduce with tokens per message {tokens_per_message}.\n'))  # noqa E501
 
         llm_call_copy = llm_call.copy()
 
@@ -311,7 +311,7 @@ class ExecutionController(Controller):
         self,
         llm_call: LLMCall
     ) -> Assistant:
-        write_client_stream('Performing context window compression type: last-in-first-out.\n')
+        write_client_stream(TextContent('Performing context window compression type: last-in-first-out.\n'))
         lifo_messages = copy.deepcopy(llm_call.context_messages)
 
         prompt_context_messages = [llm_call.user_message]
@@ -523,15 +523,15 @@ class ExecutionController(Controller):
             return await self.__similarity(llm_call, query)
         else:
             # let's figure out what method to use
-            write_client_stream(f'The message prompt length: {prompt_len} is bigger than the max prompt length: {max_prompt_len} for executor {llm_call.executor.name()}\n')  # noqa E501
-            write_client_stream(f'Context window compression strategy: {compression.name}.\n')
+            write_client_stream(TextContent(f'The message prompt length: {prompt_len} is bigger than the max prompt length: {max_prompt_len} for executor {llm_call.executor.name()}\n'))  # noqa E501
+            write_client_stream(TextContent(f'Context window compression strategy: {compression.name}.\n'))
             # check to see if we're simply lifo'ing the context messages (last in first out)
             context_message = User(TextContent('\n\n'.join([m.get_str() for m in llm_call.context_messages])))
 
             # see if we can do a similarity search or not.
-            write_client_stream(
+            write_client_stream(TextContent(
                 'Determining context window compression approach of either similarity vector search, or full map/reduce.\n'
-            )
+            ))
             similarity_chunks = await self.vector_search.chunk_and_rank(
                 query=query,
                 token_calculator=self.executor.count_tokens,
@@ -703,9 +703,9 @@ class ExecutionController(Controller):
 
         # anthropic prompt caching through the first three messages
         assistant_reply = Assistant(TextContent('Yes, I am ready.'), hidden=True)
+        assistant_reply.prompt_cached = True
         system_message.hidden = True
         tools_message.hidden = True
-        assistant_reply.prompt_cached = True
 
         # inject the tools_message into the messages, and make sure it's first.
         tools_message.pinned = 0  # pinned as the first message # todo: thread this through the system
@@ -716,11 +716,8 @@ class ExecutionController(Controller):
         # strip prompt caching from all messages so we can only have it on the last message
         for message in messages:
             message.prompt_cached = False
-        messages_copy.extend(copy.deepcopy(messages[0:-1]))
-        messages_copy.append(messages[-1])
-        # apply prompt caching to the last message
-        messages_copy[-1].prompt_cached = True
-        messages_copy[-2].prompt_cached = True
+
+        messages_copy.extend(copy.deepcopy(messages))
 
         # todo: hack
         browser_content_start_token = '<helpers_result>BrowserContent('
@@ -738,9 +735,12 @@ class ExecutionController(Controller):
                 messages_copy[-1] = Assistant(TextContent(last_message_str))
 
             # undo the last prompt cached flag, because we're moving the cache checkpoint to the end
+            prompt_cache_counter = 0
             for message in reversed(messages_copy):
-                if message.prompt_cached:
+                if message.prompt_cached and message != assistant_reply and message != system_message and message != tools_message:
                     message.prompt_cached = False
+                    prompt_cache_counter += 1
+                if prompt_cache_counter >= 2:
                     break
 
             # this is an anthropic pattern
@@ -815,8 +815,8 @@ class ExecutionController(Controller):
             if code_blocks and not response.stop_token == '</complete>':
                 # emit some debugging
                 code_block = '\n'.join(code_blocks)
-                write_client_stream('</helpers>\n')
-                write_client_stream('Executing code block locally.\n')
+                write_client_stream(TextContent('</helpers>\n'))
+                write_client_stream(TextContent('Executing code block locally.\n'))
 
                 no_indent_debug(logging, '')
                 no_indent_debug(logging, '** [bold yellow]Python Abstract Syntax Tree:[/bold yellow] **')
@@ -851,8 +851,9 @@ class ExecutionController(Controller):
                 hidden = False
 
                 try:
-                    # todo: made this change for t2
                     python_runtime.answers = []
+                    # here we're using the original messages list because messages() wouldn't work without
+                    # the original. we append the response to this messages list later in the code.
                     locals_dict = python_runtime.run(
                         python_code=code_block,
                         original_query=messages[-1].get_str(),
@@ -912,9 +913,9 @@ class ExecutionController(Controller):
                 # we have a <helpers_result></helpers_result> block, push it to the cli client
                 if len(code_execution_result_str) > 300:
                     # grab the first and last 150 characters
-                    write_client_stream(f'<helpers_result>{code_execution_result_str[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result_str[-150:]}</helpers_result>\n\n')
+                    write_client_stream(TextContent(f'<helpers_result>{code_execution_result_str[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result_str[-150:]}</helpers_result>\n\n'))
                 else:
-                    write_client_stream(f'<helpers_result>{code_execution_result_str}</helpers_result>\n\n')
+                    write_client_stream(TextContent(f'<helpers_result>{code_execution_result_str}</helpers_result>\n\n'))
 
                 # todo: we're using a string here to embed the answer in the helpers_result
                 # but I think we can probably have all sorts of stuff in here, including images.

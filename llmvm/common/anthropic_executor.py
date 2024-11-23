@@ -69,7 +69,7 @@ class AnthropicExecutor(Executor):
                             "media_type": Helpers.classify_image(content.get_bytes()),
                             "data": base64.b64encode(Helpers.anthropic_resize(content.get_bytes())).decode('utf-8') # type: ignore
                         },
-                        **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models else {}),
+                        **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models and content is message.message[-1] else {}),
                         **({'url': content.url} if server_serialization else {}),
                         **({'content_type': 'image'} if server_serialization else {})
                     })
@@ -79,7 +79,7 @@ class AnthropicExecutor(Executor):
                 content_list.append({
                     'type': 'text',
                     'text': content.get_str(),
-                    **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models else {}),
+                    **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models and content is message.message[-1] else {}),
                     **({'url': content.url} if server_serialization else {}),
                     **({'content_type': 'text'} if server_serialization else {})
                 })
