@@ -170,21 +170,22 @@ class LLMVMClient():
         thread_messages = messages
         thread_messages_copy = []
         for message in thread_messages:
-            if (
-                type(message.message) is Content
-                and any(role_string in message.message.get_str() for role_string in self.role_strings)
-            ):
-                parsed_messages = parse_message_thread(message.message.get_str(), self.action_strings)
-                thread_messages_copy += parsed_messages
-            # if the incoming message has actions [ImageContent(...)], [PdfContent(...)], [FileContent(...)] etc
-            elif (
-                type(message.message) is Content
-                and any(action_string in message.message.get_str() for action_string in self.action_strings)
-            ):
-                parsed_messages = parse_message_actions(User, message.message.get_str(), self.action_strings)
-                thread_messages_copy += parsed_messages
-            else:
-                thread_messages_copy.append(message)
+            for content in message.message:
+                if (
+                    type(content) is TextContent
+                    and any(role_string in content.get_str() for role_string in self.role_strings)
+                ):
+                    parsed_messages = parse_message_thread(content.get_str(), self.action_strings)
+                    thread_messages_copy += parsed_messages
+                # if the incoming message has actions [ImageContent(...)], [PdfContent(...)], [FileContent(...)] etc
+                elif (
+                    type(content) is TextContent
+                    and any(action_string in content.get_str() for action_string in self.action_strings)
+                ):
+                    parsed_messages = parse_message_actions(User, content.get_str(), self.action_strings)
+                    thread_messages_copy += parsed_messages
+                else:
+                    thread_messages_copy.append(message)
         return thread_messages_copy
 
     def get_executor(self, executor_name: str, model_name: Optional[str], api_key: Optional[str]) -> Executor:
