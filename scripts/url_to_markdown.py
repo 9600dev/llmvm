@@ -6,18 +6,21 @@ import random
 import re
 import sys
 from typing import Optional, cast
-import rich
+from urllib.parse import urlparse
+
 import click
+import rich
 
 sys.path.append('..')
 
-from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.server.tools.webhelpers import WebHelpers
-from llmvm.common.objects import Assistant, AstNode, Content, MarkdownContent, Message, TextContent, User, Executor
-from llmvm.common.pdf import Pdf
-from llmvm.client.client import llm, get_executor
+from llmvm.client.client import get_executor, llm
 from llmvm.common.helpers import Helpers
-from urllib.parse import urlparse
+from llmvm.common.object_transformers import ObjectTransformers
+from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
+                                  MarkdownContent, Message, TextContent, User)
+from llmvm.common.pdf import Pdf
+from llmvm.server.tools.chrome import ChromeHelpers
+from llmvm.server.tools.webhelpers import WebHelpers
 
 
 async def stream_handler(node: AstNode):
@@ -63,7 +66,7 @@ def pdf_to_markdown(pdf_url: str, executor: Executor) -> MarkdownContent:
     return MarkdownContent(assistant_content, url=pdf_url)
 
 
-def url_to_markdown(url: str, inline_images: bool = False) -> MarkdownContent:
+def url_to_markdown(url: str, inline_images: bool = False, browser: bool = False) -> MarkdownContent:
     def get_image_urls(text):
         return re.findall(r"!\[.*?\]\((.*?)\)", text)
 
@@ -98,7 +101,16 @@ def url_to_markdown(url: str, inline_images: bool = False) -> MarkdownContent:
     if os.path.exists(url):
         markdown = WebHelpers.convert_html_to_markdown(open(url, 'r').read(), url=url).get_str()
     else:
-        markdown = WebHelpers.convert_html_to_markdown(asyncio.run(Helpers.download(url)), url=url).get_str()
+        html = ''
+        if browser:
+            chrome = ChromeHelpers()
+            asyncio.run(chrome.goto(url=url))
+            asyncio.run(chrome.wait(1500))
+            html = asyncio.run(chrome.get_html())
+        else:
+            html = asyncio.run(Helpers.download(url))
+
+        markdown = WebHelpers.convert_html_to_markdown(html, url=url).get_str()
 
     if inline_images:
         for image_url in get_image_urls(markdown):
@@ -113,12 +125,14 @@ def url_to_markdown(url: str, inline_images: bool = False) -> MarkdownContent:
 @click.option('--model', '-m', default='', required=False)
 @click.option('--output', '-o', default='', required=False)
 @click.option('--inline_images', '-i', is_flag=True, default=False, required=False)
+@click.option('--browser', '-b', is_flag=True, default=False, required=False)
 def main(
     url: str,
     executor_name: str,
     model: str,
     output: str,
     inline_images: bool,
+    browser: bool,
 ):
     if not url:
         rich.print('[red]Please provide a url[/red]')
@@ -132,7 +146,7 @@ def main(
     if '.pdf' in result.geturl():
         markdown_result = pdf_to_markdown(result.geturl(), executor)
     elif 'http' in result.scheme:
-        markdown_result = url_to_markdown(result.geturl(), inline_images=inline_images)
+        markdown_result = url_to_markdown(result.geturl(), inline_images=inline_images, browser=browser)
 
     if markdown_result:
         if output:

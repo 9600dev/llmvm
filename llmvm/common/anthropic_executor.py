@@ -10,10 +10,11 @@ from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content, Executor,
-                                  FileContent, ImageContent, MarkdownContent,
-                                  Message, PdfContent, System, TextContent, TokenNode, TokenStopNode,
-                                  User, awaitable_none, TokenPerf)
+from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content,
+                                  Executor, FileContent, ImageContent,
+                                  MarkdownContent, Message, PdfContent, System,
+                                  TextContent, TokenNode, TokenPerf,
+                                  TokenStopNode, User, awaitable_none)
 from llmvm.common.perf import TokenStreamManager
 
 logging = setup_logging()
@@ -131,7 +132,7 @@ class AnthropicExecutor(Executor):
         if not messages or not all(isinstance(m, Message) for m in messages):
             logging.error('Messages must be a list of Message objects.')
             for m in [m for m in messages if not isinstance(m, Message)]:
-                logging.error(f'Invalid message: {m}')
+                logging.error(f'Invalid message: {m}, the type should be Message but its type is {type(m)}')
             raise ValueError('Messages must be a list of Message objects.')
 
         # deal with the system message

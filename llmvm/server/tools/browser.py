@@ -4,12 +4,15 @@ from typing import Any, Callable, Dict, List, Tuple
 from urllib.parse import urljoin, urlparse
 
 from googlesearch import search as google_search
-from playwright.async_api import ElementHandle, Error, Page, async_playwright, TimeoutError
+from playwright.async_api import (ElementHandle, Error, Page, TimeoutError,
+                                  async_playwright)
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (BrowserContent, Content, ImageContent, LLMCall, MarkdownContent, Message, StreamNode, TextContent,
+from llmvm.common.objects import (BrowserContent, Content, ImageContent,
+                                  LLMCall, MarkdownContent, Message,
+                                  StreamNode, TextContent,
                                   TokenCompressionMethod, User, bcl)
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime import PythonRuntime
@@ -189,7 +192,7 @@ class Browser():
                 append_str += f"{element}\n"
 
         markdown = WebHelpers.convert_html_to_markdown(html, url)
-        markdown.sequence += '\n\n\n' + append_str  # type: ignore
+        markdown.sequence.append(TextContent('\n\n\n' + append_str))
         return markdown
 
     def close(self):

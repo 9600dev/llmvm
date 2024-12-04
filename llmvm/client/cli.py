@@ -10,6 +10,7 @@ import textwrap
 import threading
 import time
 from importlib import resources
+from threading import Event
 from typing import Optional, Sequence, cast
 
 import click
@@ -30,21 +31,23 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from rich.markdown import Markdown
 from rich.text import Text
-from threading import Event
 
-from llmvm.client.custom_completer import CustomCompleter
-from llmvm.client.printing import StreamPrinter, ConsolePrinter, stream_response
-from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.client.client import LLMVMClient
+from llmvm.client.custom_completer import CustomCompleter
+from llmvm.client.markdown_renderer import markdown__rich_console__
+from llmvm.client.parsing import (get_path_as_messages,
+                                  get_string_thread_with_roles,
+                                  parse_command_string, parse_path,
+                                  read_from_pipe)
+from llmvm.client.printing import (ConsolePrinter, StreamPrinter,
+                                   stream_response)
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (DownloadItemModel,
-                                  ImageContent, MarkdownContent, Message,
-                                  MessageModel, PdfContent, SessionThreadModel, TextContent,
+from llmvm.common.objects import (DownloadItemModel, ImageContent,
+                                  MarkdownContent, Message, MessageModel,
+                                  PdfContent, SessionThreadModel, TextContent,
                                   User)
-from llmvm.client.parsing import get_string_thread_with_roles, parse_command_string, read_from_pipe, get_path_as_messages, parse_path
-
 
 invoke_context = None
 logging = setup_logging()
@@ -424,7 +427,7 @@ class Repl():
             global thread_id
             global last_thread
 
-            from PIL import ImageGrab # type: ignore
+            from PIL import ImageGrab  # type: ignore
             try:
                 im = ImageGrab.grabclipboard()
             except Exception as ex:

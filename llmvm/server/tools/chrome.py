@@ -5,8 +5,8 @@ import concurrent.futures
 import datetime as dt
 import os
 import random
-import threading
 import tempfile
+import threading
 from typing import Dict, List, Optional, Tuple, cast
 from urllib.parse import urlparse
 
@@ -495,6 +495,8 @@ class ChromeHelpersInternal():
                     value: attr.value
                 }));
             }''')
+
+            cleaned_value = ''
 
             # if the element is an a tag
             tag_name = await element.evaluate('(el) => el.tagName.toLowerCase()')
