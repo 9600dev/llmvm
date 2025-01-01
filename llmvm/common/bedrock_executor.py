@@ -4,33 +4,33 @@ import json
 import os
 from typing import Any, Awaitable, Callable, Optional, cast
 
-import tiktoken
-from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
-from openai.types.chat.completion_create_params import Function
+import boto3
 
+from llmvm.common.bedrock_helpers import get_image_token_count
+from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
-from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content,
                                   Executor, FileContent, ImageContent,
                                   MarkdownContent, Message, PdfContent, System,
-                                  TextContent, TokenNode, TokenStopNode, User,
-                                  awaitable_none)
-from llmvm.common.perf import O1AsyncIterator, TokenPerf, TokenStreamManager
+                                  TextContent, TokenNode, TokenPerf,
+                                  TokenStopNode, User, awaitable_none)
+from llmvm.common.perf import TokenStreamManager
 
 logging = setup_logging()
 
-
-class OpenAIExecutor(Executor):
+class BedrockExecutor(Executor):
     def __init__(
         self,
-        api_key: str = cast(str, os.environ.get('OPENAI_API_KEY')),
-        default_model: str = 'gpt-4o',
-        api_endpoint: str = 'https://api.openai.com/v1',
-        default_max_input_len: int = 128000,
-        default_max_output_len: int =  16384,
+        api_key: str = '',
+        default_model: str = 'us.amazon.nova-lite-v1:0',
+        api_endpoint: str = '',
+        default_max_input_len: int = 3000000,
+        default_max_output_len: int = 4096,
         max_images: int = 20,
+        region_name: str = 'us-east-1',
+        client_name: str = 'bedrock-runtime',
     ):
         super().__init__(
             default_model=default_model,
@@ -38,10 +38,11 @@ class OpenAIExecutor(Executor):
             default_max_input_len=default_max_input_len,
             default_max_output_len=default_max_output_len,
         )
-        self.aclient = AsyncOpenAI(api_key=api_key, base_url=self.api_endpoint)
+        self.api_key = api_key
+        self.client = boto3.client(client_name, region_name=region_name)
         self.max_images = max_images
 
-    def user_token(self) -> str:
+    def user_token(self):
         return 'User'
 
     def assistant_token(self) -> str:
@@ -51,7 +52,7 @@ class OpenAIExecutor(Executor):
         return ''
 
     def name(self) -> str:
-        return 'openai'
+        return 'bedrock'
 
     def to_dict(self, message: 'Message', model: Optional[str], server_serialization: bool = False) -> dict[str, Any]:
         content_list = []
@@ -59,19 +60,19 @@ class OpenAIExecutor(Executor):
             if isinstance(content, ImageContent) and content.sequence:
                 if 'image/unknown' not in Helpers.classify_image(content.get_bytes()):
                     content_list.append({
-                        'type': 'image_url',
-                        'image_url': {
-                            'url': f"data:image/jpeg;base64,{base64.b64encode(content.sequence).decode('utf-8')}",
-                            'detail': 'high'
-                        },
-                        **({'url': content.url} if server_serialization else {}),
-                        **({'content_type': 'image'} if server_serialization else {})
+                        'image': {
+                            'format': Helpers.classify_image(content.get_bytes()),
+                            'source': {
+                                'bytes': base64.b64encode(content.get_bytes()).decode('utf-8'),
+                            },
+                            **({'url': content.url} if server_serialization else {}),
+                            **({'content_type': 'image'} if server_serialization else {}),
+                        }
                     })
                 else:
                     logging.warning(f"Image content type not supported for {model}")
-            elif isinstance(content, TextContent) and content.sequence:
+            elif isinstance(content, TextContent) and content.sequence:  # is not last message, context messages
                 content_list.append({
-                    'type': 'text',
                     'text': content.get_str(),
                     **({'url': content.url} if server_serialization else {}),
                     **({'content_type': 'text'} if server_serialization else {})
@@ -102,8 +103,8 @@ class OpenAIExecutor(Executor):
             if 'type' in message_content[i] and message_content[i]['type'] == 'text':
                 url = message_content[i]['url'] if 'url' in message_content[i] else ''
                 content_list.append(TextContent(message_content[i]['text'], url=url))
-            elif 'type' in message_content[i] and message_content[i]['type'] == 'image_url':
-                byte_content = base64.b64decode(message_content[i]['image_url']['url'].split(',')[1])
+            elif 'type' in message_content[i] and message_content[i]['type'] == 'image':
+                byte_content = base64.b64decode(message_content[i]['source']['data'])
                 url = message_content[i]['url'] if 'url' in message_content[i] else ''
                 content_list.append(ImageContent(byte_content, url=url))
             else:
@@ -124,7 +125,7 @@ class OpenAIExecutor(Executor):
         if not messages or not all(isinstance(m, Message) for m in messages):
             logging.error('Messages must be a list of Message objects.')
             for m in [m for m in messages if not isinstance(m, Message)]:
-                logging.error(f'Invalid message: {m}')
+                logging.error(f'Invalid message: {m}, the type should be Message but its type is {type(m)}')
             raise ValueError('Messages must be a list of Message objects.')
 
         # deal with the system message
@@ -181,8 +182,8 @@ class OpenAIExecutor(Executor):
         self,
         messages: list[Message],
     ) -> int:
-        messages_list = self.unpack_and_wrap_messages(messages, self.default_model)
-        return await self.count_tokens_dict(messages_list)
+        unpacked_messages: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages=messages)
+        return await self.count_tokens_dict(unpacked_messages)
 
     async def count_tokens_dict(
         self,
@@ -192,29 +193,28 @@ class OpenAIExecutor(Executor):
         json_accumulator = ''
         for message in messages:
             for content in message['content']:
-                if 'image_url' in content['type'] and 'url' in content['image_url']:
-                    b64data = content['image_url']['url']
-                    num_tokens += Helpers.openai_image_tok_count(b64data.split(',')[1])
+                if 'image' in content and 'source' in content['image'] and 'bytes' in content['image']['source']:
+                    b64data = content['image']['source']['bytes']
+                    num_tokens += get_image_token_count(b64data)['estimated_tokens']
                 else:
                     json_accumulator += json.dumps(content, indent=2)
-
-        encoding = tiktoken.get_encoding('cl100k_base')
-        token_count = len(encoding.encode(json_accumulator))
-        return token_count
+        return num_tokens + int(len(json_accumulator.split(' ')) * .75)
 
     async def aexecute_direct(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         functions: list[dict[str, str]] = [],
         model: Optional[str] = None,
-        max_output_tokens: int = 16384,
+        max_output_tokens: int = 4096,
         temperature: float = 0.0,
         stop_tokens: list[str] = [],
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
-        # only works if profiling or LLMVM_PROFILING is set to true
-        message_tokens = await self.count_tokens_dict(messages)
+        if functions:
+            raise NotImplementedError('functions are not implemented for ClaudeExecutor')
+
+        message_tokens = await self.count_tokens_dict(messages=messages)
 
         if message_tokens > self.max_input_tokens(model=model):
             raise Exception('Prompt too long. input tokens: {}, requested output tokens: {}, total: {}, model: {} max context window is: {}'
@@ -224,57 +224,62 @@ class OpenAIExecutor(Executor):
                                     str(model),
                                     self.max_input_tokens(model=model)))
 
-        # o1-mini and o1-preview don't support system messages
-        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
-            messages = [m for m in messages if m['role'] != 'system']
+        # the messages API does not accept System messages, only User and Assistant messages.
+        # get the system message from the dictionary, and remove it from the list
+        system_message: str = ''
+        for message in messages:
+            if message['role'] == 'system':
+                system_message = message['content']
+                messages.remove(message)
 
-        messages_cast = cast(list[ChatCompletionMessageParam], messages)
-        functions_cast = cast(list[Function], functions)
+        # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
+        # going to add an Assistant message in between two User messages, and a User message between two Assistant.
+        messages_list: list[dict[str, Any]] = []
 
-        token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
+        for i in range(len(messages)):
+            if i > 0 and messages[i]['role'] == messages[i - 1]['role']:
+                if messages[i]['role'] == 'user':
+                    messages_list.append({'role': 'assistant', 'content': [{'type': 'text', 'text': 'Thanks. I am ready for your next message.'}]})
+                elif messages[i]['role'] == 'assistant':
+                    messages_list.append({'role': 'user', 'content': [{'type': 'text', 'text': 'Thanks. I am ready for your next message.'}]})
+            messages_list.append(messages[i])
+
+        # todo, this is a busted hack. if a helper function returns nothing, then usually that
+        # message get stripped away
+        if messages_list[0]['role'] != 'system' and messages_list[0]['role'] != 'user':
+            logging.warning('First message was not a system or user message. This is a bug. Adding a default empty message.')
+            messages_list.insert(0, {'role': 'user', 'content': [{'type': 'text', 'text': 'None.'}]})
+
+        # ugh, anthropic api can't have an assistant message with trailing whitespace...
+        if messages_list[-1]['role'] == 'assistant':
+            for j in range(len(messages_list[-1]['content'])):
+                messages_list[-1]['content'][j]['text'] = messages_list[-1]['content'][j]['text'].rstrip()
+
+        messages_trace([{'role': 'system', 'content': [{'type': 'text', 'text': system_message}]}] + messages_list)
+
+        token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore
         token_trace.start()
 
-        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
-            # temp 1.0 only supported for o1 and max_tokens is not supported
-            # streaming not supported, stop tokens not supported. yikes.
-            temperature = 1.0
-            base_params = {
-                "model": model if model else self.default_model,
-                "temperature": temperature,
-                "max_completion_tokens": max_output_tokens,
-                "messages": messages_cast,
-                # "stop": stop_tokens if stop_tokens else None,
-                "functions": functions_cast if functions else None,
-                "stream": False
-            }
-
-        else:
-            base_params = {
-                "model": model if model else self.default_model,
-                "temperature": temperature,
-                "max_tokens": max_output_tokens,
-                "messages": messages_cast,
-                "stop": stop_tokens if stop_tokens else None,
-                "functions": functions_cast if functions else None,
-                "stream": True
-            }
-
-        params = {k: v for k, v in base_params.items() if v is not None}
-        response = await self.aclient.chat.completions.create(**params)
-
-        # if the response is an o1 response, it is not a stream, so we need to
-        # manually stream it
-        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
-            return TokenStreamManager(O1AsyncIterator(response), token_trace)  # type: ignore
-
-        else:
-            return TokenStreamManager(response, token_trace)  # type: ignore
+        try:
+            # AsyncStreamManager[AsyncMessageStream]
+            stream = self.client.messages.stream(
+                max_tokens=max_output_tokens,
+                messages=messages_list,  # type: ignore
+                model=model,
+                system=system_message,
+                temperature=temperature,
+                stop_sequences=stop_tokens,
+            )
+            return TokenStreamManager(stream, token_trace)
+        except Exception as e:
+            logging.error(e)
+            raise
 
     async def aexecute(
         self,
         messages: list[Message],
-        max_output_tokens: int = 16384,
-        temperature: float = 0.0,
+        max_output_tokens: int = 4096,
+        temperature: float = 1.0,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
@@ -296,13 +301,13 @@ class OpenAIExecutor(Executor):
         perf = None
 
         async with await stream as stream_async:  # type: ignore
-            async for text in stream_async:  # type: ignore
+            async for text in stream_async:
                 await stream_handler(TokenNode(text))
                 text_response += text
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
-        await stream_async.get_final_message()
+        await stream_async.get_final_message()  # this forces an update to the perf object
         perf.log()
 
         assistant = Assistant(
@@ -312,14 +317,15 @@ class OpenAIExecutor(Executor):
             stop_token=perf.stop_token,
             perf_trace=perf,
         )
+
         if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')
         return assistant
 
     def execute(
         self,
         messages: list[Message],
-        max_output_tokens: int = 16384,
-        temperature: float = 0.0,
+        max_output_tokens: int = 4096,
+        temperature: float = 1.0,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,

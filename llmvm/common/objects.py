@@ -4,19 +4,19 @@ import datetime as dt
 import importlib
 import json
 import os
+import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
-import time
-from typing import Any, Awaitable, Callable, Optional, TextIO, Type, TypeVar, TypedDict, Union, cast
-
-import pandas as pd
-from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.container import Container
+from typing import (Any, Awaitable, Callable, Optional, TextIO, Type,
+                    TypedDict, TypeVar, Union, cast)
 
 import numpy as np
+import pandas as pd
 from pydantic import BaseModel, Field
 
+from llmvm.common.container import Container
+from llmvm.common.logging_helpers import setup_logging
 
 logging = setup_logging()
 
@@ -753,12 +753,12 @@ class Executor(ABC):
         self,
         default_model: str,
         api_endpoint: str,
-        default_max_token_len: int,
+        default_max_input_len: int,
         default_max_output_len: int,
     ):
-        self.default_model = default_model
+        self._default_model = default_model
         self.api_endpoint = api_endpoint
-        self.default_max_token_len = default_max_token_len
+        self.default_max_input_len = default_max_input_len
         self.default_max_output_len = default_max_output_len
 
     @abstractmethod
@@ -777,44 +777,32 @@ class Executor(ABC):
     ) -> 'Assistant':
         pass
 
-    def set_default_max_tokens(
+    @property
+    def default_model(
         self,
-        default_max_token_len: int,
-    ) -> None:
-        self.default_max_token_len = default_max_token_len
+    ) -> str:
+        return self._default_model
 
-    def set_default_model(
+    @default_model.setter
+    def default_model(
         self,
         default_model: str,
     ) -> None:
-        self.default_model = default_model
-
-    def get_default_model(
-        self,
-    ) -> str:
-        return self.default_model
-
-    def max_tokens(self, model: Optional[str]) -> int:
-        return TokenPriceCalculator().max_tokens(model or self.default_model, default=self.default_max_token_len)
+        self._default_model = default_model
 
     def max_input_tokens(
         self,
-        output_token_len: Optional[int] = None,
         model: Optional[str] = None,
     ) -> int:
-        return TokenPriceCalculator().max_input_tokens(
-            model or self.default_model,
-            default=self.default_max_token_len - self.default_max_output_len
-        )
+        if model: return TokenPriceCalculator().max_input_tokens(model)
+        else: return self.default_max_input_len
 
     def max_output_tokens(
         self,
         model: Optional[str] = None,
     ) -> int:
-        return TokenPriceCalculator().max_output_tokens(
-            model or self.default_model,
-            default=self.default_max_output_len
-        )
+        if model: return TokenPriceCalculator().max_output_tokens(model)
+        else: return self.default_max_output_len
 
     @abstractmethod
     def execute(

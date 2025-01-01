@@ -1,20 +1,22 @@
-from enum import Enum
-import httpx
 import asyncio
-import nest_asyncio
+from enum import Enum
+from typing import Any, Awaitable, Callable, Optional, Union, cast
 
+import httpx
+import nest_asyncio
 from pydantic import TypeAdapter
 
-from llmvm.common.objects import Message, TextContent, User, Content, Assistant, Executor, AstNode, SessionThreadModel, MessageModel
-from llmvm.common.container import Container
-from llmvm.common.openai_executor import OpenAIExecutor
+from llmvm.client.parsing import parse_message_actions, parse_message_thread
+from llmvm.client.printing import StreamPrinter, stream_response
 from llmvm.common.anthropic_executor import AnthropicExecutor
+from llmvm.common.container import Container
+from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.client.parsing import parse_message_thread, parse_message_actions
-from llmvm.client.printing import StreamPrinter, stream_response
-from typing import Awaitable, Callable, Optional, Any, Union, cast
-
+from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
+                                  Message, MessageModel, SessionThreadModel,
+                                  TextContent, User)
+from llmvm.common.openai_executor import OpenAIExecutor
 
 logging = setup_logging()
 nest_asyncio.apply()
@@ -216,6 +218,14 @@ class LLMVMClient():
             else:
                 raise ValueError('GeminiExecutor requires a model name and API key.')
 
+        elif executor_name == 'deepseek':
+            if Container.get_config_variable('DEEPSEEK_API_KEY') or api_key:
+                return DeepSeekExecutor(
+                    api_key=api_key or Container.get_config_variable('DEEPSEEK_API_KEY'),
+                    default_model=cast(str, model_name) if model_name else 'deepseek-coder-v2-instruct'
+                )
+            else:
+                raise ValueError('DeepSeekExecutor requires a model name and API key.')
         else:
             if Container.get_config_variable('ANTHROPIC_API_KEY'):
                 return AnthropicExecutor(
@@ -231,6 +241,11 @@ class LLMVMClient():
                 return GeminiExecutor(
                     api_key=Container.get_config_variable('GEMINI_API_KEY'),
                     default_model='gemini-1.5-pro-latest'
+                )
+            elif Container.get_config_variable('DEEPSEEK_API_KEY'):
+                return DeepSeekExecutor(
+                    api_key=Container.get_config_variable('DEEPSEEK_API_KEY'),
+                    default_model='deepseek-chat'
                 )
             raise ValueError('No API key is set for any executor in ENV. Unable to set default executor.')
 

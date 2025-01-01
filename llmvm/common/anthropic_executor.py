@@ -33,14 +33,14 @@ class AnthropicExecutor(Executor):
         api_key: str = cast(str, os.environ.get('ANTHROPIC_API_KEY')),
         default_model: str = 'claude-3-5-sonnet-20241022',
         api_endpoint: str = 'https://api.anthropic.com',
-        default_max_token_len: int = 200000,
+        default_max_input_len: int = 200000,
         default_max_output_len: int = 4096,
         max_images: int = 20,
     ):
         super().__init__(
             default_model=default_model,
             api_endpoint=api_endpoint,
-            default_max_token_len=default_max_token_len,
+            default_max_input_len=default_max_input_len,
             default_max_output_len=default_max_output_len,
         )
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
@@ -223,7 +223,7 @@ class AnthropicExecutor(Executor):
 
         message_tokens = await self.count_tokens_dict(messages=messages)
 
-        if message_tokens > self.max_input_tokens(max_output_tokens, model=model):
+        if message_tokens > self.max_input_tokens(model=model):
             raise Exception('Prompt too long. input tokens: {}, requested output tokens: {}, total: {}, model: {} max context window is: {}'
                             .format(message_tokens,
                                     max_output_tokens,

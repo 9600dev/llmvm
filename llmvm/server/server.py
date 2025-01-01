@@ -5,8 +5,8 @@ import marshal
 import os
 import shutil
 import sys
-from importlib import resources
 import types
+from importlib import resources
 from typing import Any, Callable, Optional, cast
 
 import async_timeout
@@ -22,14 +22,18 @@ from openai import AsyncOpenAI, OpenAI
 
 from llmvm.common.anthropic_executor import AnthropicExecutor
 from llmvm.common.container import Container
+from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content,
-                                  DownloadItemModel, Message, MessageModel,
-                                  SessionThreadModel, Statement, QueueBreakNode, StreamingStopNode, TextContent, User, compression_enum)
+                                  DownloadItemModel, Executor, Message,
+                                  MessageModel, QueueBreakNode,
+                                  SessionThreadModel, Statement,
+                                  StreamingStopNode, TextContent,
+                                  TokenPriceCalculator, User, compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
-from llmvm.server.persistent_cache import PersistentCache, MemoryCache
+from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime import PythonRuntime
 from llmvm.server.tools.chrome import ChromeHelpers
@@ -65,7 +69,6 @@ tools = Helpers.flatten(list(
     )
 ))
 
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 os.makedirs(Container().get('cache_directory'), exist_ok=True)
 os.makedirs(Container().get('cdn_directory'), exist_ok=True)
@@ -77,8 +80,14 @@ cache_memory: MemoryCache[int, dict[str, Any]] = MemoryCache()
 cdn_directory = Container().get('cdn_directory')
 
 
-if not os.environ.get('OPENAI_API_KEY') and not os.environ.get('ANTHROPIC_API_KEY'):  # pragma: no cover
-    rich.print('[red]Neither OPENAI_API_KEY or ANTHROPIC_API_KEY are set. One of these API keys needs to be set in your terminal environment[/red]')  # NOQA: E501
+if (
+    not os.environ.get('OPENAI_API_KEY')
+    and not os.environ.get('ANTHROPIC_API_KEY')
+    and not os.environ.get('GEMINI_API_KEY')
+    and not os.environ.get('DEEPSEEK_API_KEY')
+):
+    rich.print('[red]Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or DEEPSEEK_API_KEY are set.[/red]')
+    rich.print('One of these API keys needs to be set in your terminal environment[/red]')
     sys.exit(1)
 
 
@@ -90,6 +99,7 @@ vector_store = VectorStore(
     chunk_overlap=10
 )
 vector_search = VectorSearch(vector_store=vector_store)
+
 
 def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
     unserializable_locals = {}
@@ -209,48 +219,45 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
     if not controller:
         raise EnvironmentError('No executor specified in environment or config file')
 
+    default_model_config = Container().get_config_variable(f'{controller}_model', 'LLMVM_MODEL')
+    executor: Executor
+
     if controller == 'anthropic':
-        anthropic_executor = AnthropicExecutor(
+        executor = AnthropicExecutor(
             api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
-            default_model=Container().get_config_variable('anthropic_model', 'LLMVM_MODEL'),
+            default_model=default_model_config,
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
-            default_max_token_len=int(Container().get_config_variable('anthropic_max_tokens')),
-            default_max_output_len=int(Container().get_config_variable('anthropic_max_output_tokens')),
+            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
+            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
         )
-        anthropic_controller = ExecutionController(
-            executor=anthropic_executor,
-            tools=tools,  # type: ignore
-            vector_search=vector_search,
-        )
-        return anthropic_controller
     elif controller == 'gemini':
-        gemini_executor = GeminiExecutor(
+        executor = GeminiExecutor(
             api_key=os.environ.get('GEMINI_API_KEY', ''),
             default_model=Container().get_config_variable('gemini_model', 'LLMVM_MODEL'),
-            default_max_token_len=int(Container().get('gemini_max_tokens')),
-            default_max_output_len=int(Container().get('gemini_max_output_tokens')),
+            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
+            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
         )
-        gemini_controller = ExecutionController(
-            executor=gemini_executor,
-            tools=tools,  # type: ignore
-            vector_search=vector_search,
+    elif controller == 'deepseek':
+        executor = DeepSeekExecutor(
+            api_key=os.environ.get('DEEPSEEK_API_KEY', ''),
+            default_model=Container().get_config_variable('deepseek_model', 'LLMVM_MODEL'),
+            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
+            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
         )
-        return gemini_controller
     else:
-        openai_executor = OpenAIExecutor(
+        executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),
-            default_model=Container().get_config_variable('openai_model', 'LLMVM_MODEL'),
+            default_model=Container().get_config_variable('default_openai_model', 'LLMVM_MODEL'),
             api_endpoint=Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
-            default_max_token_len=int(Container().get('openai_max_tokens')),
-            default_max_output_len=int(Container().get('openai_max_output_tokens')),
+            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
+            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
         )
 
-        openai_controller = ExecutionController(
-            executor=openai_executor,
-            tools=tools,  # type: ignore
-            vector_search=vector_search,
-        )
-        return openai_controller
+    return ExecutionController(
+        executor=executor,
+        tools=tools,
+        vector_search=vector_search,
+    )
 
 
 def __get_thread(id: int) -> SessionThreadModel:
@@ -470,13 +477,13 @@ async def tools_completions(request: SessionThreadModel):
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:
         controller = get_controller(thread.executor)
-        model = thread.model if thread.model else controller.get_executor().get_default_model()
+        model = thread.model if thread.model else controller.get_executor().default_model
     # either the executor or the model is not set, so use the defaults
     # and update the thread
     else:
         logging.debug('Either the executor or the model is not set. Updating thread.')
         controller = get_controller()
-        model = controller.get_executor().get_default_model()
+        model = controller.get_executor().default_model
         thread.executor = controller.get_executor().name()
         thread.model = model
 
