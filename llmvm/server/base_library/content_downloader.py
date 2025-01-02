@@ -164,7 +164,7 @@ class WebAndContentDriver():
                 ),
                 context_messages=cast(list[Message], [User(markdown_content)]),
                 executor=controller.get_executor(),
-                model=controller.get_executor().get_default_model(),
+                model=controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=controller.get_executor().max_input_tokens(),
                 completion_tokens_len=controller.get_executor().max_output_tokens(),

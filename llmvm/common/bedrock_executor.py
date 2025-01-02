@@ -54,6 +54,18 @@ class BedrockExecutor(Executor):
     def name(self) -> str:
         return 'bedrock'
 
+    def max_input_tokens(
+        self,
+        model: Optional[str] = None,
+    ) -> int:
+        return self.default_max_input_len
+
+    def max_output_tokens(
+        self,
+        model: Optional[str] = None,
+    ) -> int:
+        return self.default_max_output_len
+
     def to_dict(self, message: 'Message', model: Optional[str], server_serialization: bool = False) -> dict[str, Any]:
         content_list = []
         for content in message.message:
@@ -211,9 +223,6 @@ class BedrockExecutor(Executor):
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
-        if functions:
-            raise NotImplementedError('functions are not implemented for ClaudeExecutor')
-
         message_tokens = await self.count_tokens_dict(messages=messages)
 
         if message_tokens > self.max_input_tokens(model=model):
@@ -257,19 +266,24 @@ class BedrockExecutor(Executor):
 
         messages_trace([{'role': 'system', 'content': [{'type': 'text', 'text': system_message}]}] + messages_list)
 
-        token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore
+        token_trace = TokenPerf('aexecute_direct', 'bedrock', model)  # type: ignore
         token_trace.start()
 
+        inf_params = {"max_new_tokens": max_output_tokens, "temperature": temperature}
+
+        request_body = {
+            "schemaVersion": "messages-v1",
+            "messages": messages_list,
+            "system": system_message,
+            "inferenceConfig": inf_params,
+        }
+
         try:
-            # AsyncStreamManager[AsyncMessageStream]
-            stream = self.client.messages.stream(
-                max_tokens=max_output_tokens,
-                messages=messages_list,  # type: ignore
-                model=model,
-                system=system_message,
-                temperature=temperature,
-                stop_sequences=stop_tokens,
+            response = self.client.invoke_model_with_response_stream(
+                modelId=model, body=json.dumps(request_body)
             )
+
+            stream = response.get("body")
             return TokenStreamManager(stream, token_trace)
         except Exception as e:
             logging.error(e)

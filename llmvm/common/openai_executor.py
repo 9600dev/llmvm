@@ -191,12 +191,15 @@ class OpenAIExecutor(Executor):
         num_tokens = 0
         json_accumulator = ''
         for message in messages:
-            for content in message['content']:
-                if 'image_url' in content['type'] and 'url' in content['image_url']:
-                    b64data = content['image_url']['url']
-                    num_tokens += Helpers.openai_image_tok_count(b64data.split(',')[1])
-                else:
-                    json_accumulator += json.dumps(content, indent=2)
+            if 'content' in message and isinstance(message['content'], str):
+                json_accumulator += message['content']
+            elif 'content' in message and isinstance(message['content'], list):
+                for content in message['content']:
+                    if 'image_url' in content['type'] and 'url' in content['image_url']:
+                        b64data = content['image_url']['url']
+                        num_tokens += Helpers.openai_image_tok_count(b64data.split(',')[1])
+                    else:
+                        json_accumulator += json.dumps(content, indent=2)
 
         encoding = tiktoken.get_encoding('cl100k_base')
         token_count = len(encoding.encode(json_accumulator))

@@ -273,7 +273,7 @@ class PythonRuntime:
                     ),
                     context_messages=self.statement_to_message(expr),  # type: ignore
                     executor=self.controller.get_executor(),
-                    model=self.controller.get_executor().get_default_model(),
+                    model=self.controller.get_executor().default_model,
                     temperature=0.0,
                     max_prompt_len=self.controller.get_executor().max_input_tokens(),
                     completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -423,7 +423,7 @@ class PythonRuntime:
                 ),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -447,7 +447,7 @@ class PythonRuntime:
         # called with llm_call([var], ...), so we need to flatten
         expr_list = Helpers.flatten(expr_list)
 
-        write_client_stream(TextContent(f'llm_call() calling {self.controller.get_executor().get_default_model()} with instruction: "{llm_instruction}"\n'))
+        write_client_stream(TextContent(f'llm_call() calling {self.controller.get_executor().default_model} with instruction: "{llm_instruction}"\n'))
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -462,7 +462,7 @@ class PythonRuntime:
                 ),
                 context_messages=self.statement_to_message(expr_list),
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -494,7 +494,7 @@ class PythonRuntime:
                 ),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -567,7 +567,7 @@ class PythonRuntime:
                 ),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -594,7 +594,7 @@ class PythonRuntime:
                 ),
                 context_messages=[],  # type: ignore
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=512,
@@ -632,7 +632,7 @@ class PythonRuntime:
                 ),
                 context_messages=context_messages,
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -750,7 +750,7 @@ class PythonRuntime:
                 ),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -884,7 +884,7 @@ class PythonRuntime:
                 user_message=User(TextContent(code_prompt)),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),
@@ -939,7 +939,7 @@ class PythonRuntime:
                 ),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().get_default_model(),
+                model=self.controller.get_executor().default_model,
                 temperature=0.0,
                 max_prompt_len=self.controller.get_executor().max_input_tokens(),
                 completion_tokens_len=self.controller.get_executor().max_output_tokens(),

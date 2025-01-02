@@ -491,7 +491,7 @@ class ExecutionController(Controller):
         Deals with chunking, map/reduce, and other logic if the message/context messages
         are too long for the context window.
         '''
-        model = llm_call.model if llm_call.model else self.executor.get_default_model()
+        model = llm_call.model if llm_call.model else self.executor.default_model
         llm_call.model = model
 
         """
@@ -505,7 +505,7 @@ class ExecutionController(Controller):
         from llmvm.common.pdf import Pdf
 
         prompt_len = await self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message])
-        max_prompt_len = self.executor.max_input_tokens(output_token_len=llm_call.completion_tokens_len, model=model)
+        max_prompt_len = self.executor.max_input_tokens(model=model)
 
         # I have either a message, or a list of messages. They might need to be map/reduced.
         # todo: we usually have a prepended message of context to help the LLM figure out
@@ -586,7 +586,7 @@ class ExecutionController(Controller):
         original_query: str,
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     ) -> Assistant:
-        llm_call.model = llm_call.model if llm_call.model else self.executor.get_default_model()
+        llm_call.model = llm_call.model if llm_call.model else self.executor.default_model
 
         return asyncio.run(self.aexecute_llm_call(
             llm_call=llm_call,
@@ -614,7 +614,7 @@ class ExecutionController(Controller):
             user_message=messages[-1],
             context_messages=messages[0:-1],
             executor=self.executor,
-            model=model if model else self.executor.get_default_model(),
+            model=model if model else self.executor.default_model,
             temperature=temperature,
             max_prompt_len=self.executor.max_input_tokens(),
             completion_tokens_len=self.executor.max_output_tokens(),
@@ -669,7 +669,7 @@ class ExecutionController(Controller):
             locals_dict=locals_dict,
         )
 
-        model = model if model else self.executor.get_default_model()
+        model = model if model else self.executor.default_model
 
         response: Assistant = Assistant(TextContent(''))
 
@@ -685,8 +685,8 @@ class ExecutionController(Controller):
         # bootstrap the continuation execution
         completed = False
         results: list[Statement] = []
-        old_model = python_runtime.controller.get_executor().get_default_model()
-        if model: python_runtime.controller.get_executor().set_default_model(model)
+        old_model = python_runtime.controller.get_executor().default_model
+        if model: python_runtime.controller.get_executor().default_model = model
 
         # inject the python_continuation_execution.prompt prompt
         functions = [Helpers.get_function_description_flat(f) for f in tools]
@@ -774,6 +774,7 @@ class ExecutionController(Controller):
                 and (
                     self.get_executor().name() == 'openai'
                     or self.get_executor().name() == 'gemini'
+                    or self.get_executor().name() == 'deepseek'
                 )
             ):
                 response.stop_token = '</helpers>'
@@ -784,6 +785,7 @@ class ExecutionController(Controller):
                 and (
                     self.get_executor().name() == 'openai'
                     or self.get_executor().name() == 'gemini'
+                    or self.get_executor().name() == 'deepseek'
                 )
             ):
                 response.stop_token = '</complete>'
@@ -960,7 +962,7 @@ class ExecutionController(Controller):
                 completed = True
                 # results.extend(python_runtime.answers)
 
-        if model: python_runtime.controller.get_executor().set_default_model(old_model)
+        if model: python_runtime.controller.get_executor().default_model = old_model
         dedupped: list[Statement] = list(reversed(Helpers.remove_duplicates(results, lambda a: a.result())))
 
         if messages_copy[-1].role() != 'assistant':

@@ -176,7 +176,7 @@ class FunctionBindable():
                         user_message=User(TextContent('Okay, please try binding the callsite.')),  # we can pass an empty message here and the context_messages contain everything  # noqa:E501
                         context_messages=messages[:counter + assistant_counter][::-1],  # reversing the list using list slicing
                         executor=self.controller.get_executor(),
-                        model=self.controller.get_executor().get_default_model(),
+                        model=self.controller.get_executor().default_model,
                         temperature=0.0,
                         max_prompt_len=self.controller.get_executor().max_input_tokens(),
                         completion_tokens_len=self.controller.get_executor().max_output_tokens(),
