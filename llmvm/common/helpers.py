@@ -78,6 +78,30 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
+    def parse_list_string(list_string: str, default: list = []) -> list:
+        try:
+            list_string = list_string.strip()
+
+            # Check if the string starts with '[' and ends with ']'
+            if not (list_string.startswith('[') and list_string.endswith(']')):
+                raise ValueError("Input string must start with '[' and end with ']'")
+
+            result = eval(list_string)
+
+            if not isinstance(result, list):
+                if default: return default
+                raise ValueError("Input string did not evaluate to a list")
+
+            return result
+
+        except SyntaxError as e:
+            if default: return default
+            raise SyntaxError(f"Invalid list syntax: {e}")
+        except Exception as e:
+            if default: return default
+            raise ValueError(f"Error parsing list string: {e}")
+
+    @staticmethod
     def is_async_iterator(obj):
         # Method 1: Check for __aiter__ and __anext__ methods
         has_aiter = hasattr(obj, '__aiter__')

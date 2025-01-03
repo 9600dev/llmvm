@@ -119,11 +119,11 @@ class BedrockExecutor(Executor):
         content_list: list[Content] = []
 
         for i in range(len(message_content)):
-            if 'type' in message_content[i] and message_content[i]['type'] == 'text':
+            if 'text' in message_content[i]:
                 url = message_content[i]['url'] if 'url' in message_content[i] else ''
                 content_list.append(TextContent(message_content[i]['text'], url=url))
-            elif 'type' in message_content[i] and message_content[i]['type'] == 'image':
-                byte_content = base64.b64decode(message_content[i]['source']['data'])
+            elif 'image' in message_content[i]:
+                byte_content = base64.b64decode(message_content[i]['image']['source']['bytes'])
                 url = message_content[i]['url'] if 'url' in message_content[i] else ''
                 content_list.append(ImageContent(byte_content, url=url))
             else:
@@ -255,23 +255,23 @@ class BedrockExecutor(Executor):
         for i in range(len(messages)):
             if i > 0 and messages[i]['role'] == messages[i - 1]['role']:
                 if messages[i]['role'] == 'user':
-                    messages_list.append({'role': 'assistant', 'content': [{'type': 'text', 'text': 'Thanks. I am ready for your next message.'}]})
+                    messages_list.append({'role': 'assistant', 'content': [{'text': 'Thanks. I am ready for your next message.'}]})
                 elif messages[i]['role'] == 'assistant':
-                    messages_list.append({'role': 'user', 'content': [{'type': 'text', 'text': 'Thanks. I am ready for your next message.'}]})
+                    messages_list.append({'role': 'user', 'content': [{'text': 'Thanks. I am ready for your next message.'}]})
             messages_list.append(messages[i])
 
         # todo, this is a busted hack. if a helper function returns nothing, then usually that
         # message get stripped away
         if messages_list[0]['role'] != 'system' and messages_list[0]['role'] != 'user':
             logging.warning('First message was not a system or user message. This is a bug. Adding a default empty message.')
-            messages_list.insert(0, {'role': 'user', 'content': [{'type': 'text', 'text': 'None.'}]})
+            messages_list.insert(0, {'role': 'user', 'content': [{'text': 'None.'}]})
 
         # ugh, anthropic api can't have an assistant message with trailing whitespace...
         if messages_list[-1]['role'] == 'assistant':
             for j in range(len(messages_list[-1]['content'])):
                 messages_list[-1]['content'][j]['text'] = messages_list[-1]['content'][j]['text'].rstrip()
 
-        messages_trace([{'role': 'system', 'content': [{'type': 'text', 'text': system_message}]}] + messages_list)
+        messages_trace([{'role': 'system', 'content': [{'text': system_message}]}] + messages_list)
 
         token_trace = TokenPerf('aexecute_direct', 'bedrock', model)  # type: ignore
         token_trace.start()

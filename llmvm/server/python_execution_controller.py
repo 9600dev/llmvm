@@ -800,7 +800,7 @@ class ExecutionController(Controller):
                 response.message = [TextContent(previous_assistant.get_str() + ' ' + response.get_str())]
 
             # add the stop token to the response
-            if response.stop_token and response.stop_token == '</helpers>':
+            if response.stop_token and response.stop_token == '</helpers>' and not response.get_str().strip().endswith('</helpers>'):
                 response.message = [TextContent(response.get_str() + '\n' + response.stop_token)]
 
             # extract any code blocks the Assistant wants to run
@@ -819,8 +819,9 @@ class ExecutionController(Controller):
             if code_blocks and not response.stop_token == '</complete>':
                 # emit some debugging
                 code_block = '\n'.join(code_blocks)
+                # some executors (like bedrock) will emit the </helpers> token before stopping.
                 write_client_stream(TextContent('</helpers>\n'))
-                write_client_stream(TextContent('Executing code block locally.\n'))
+                write_client_stream(TextContent('Executing <helpers></helpers> code block locally.\n'))
 
                 no_indent_debug(logging, '')
                 no_indent_debug(logging, '** [bold yellow]Python Abstract Syntax Tree:[/bold yellow] **')
@@ -840,7 +841,7 @@ class ExecutionController(Controller):
                 try:
                     _ = ast.parse(Helpers.escape_newlines_in_strings(code_block))
                 except SyntaxError as ex:
-                    logging.debug('aexecute() SyntaxError trying to parse code block: {}'.format(ex))
+                    logging.debug('aexecute() SyntaxError trying to parse <helpers></helpers> code block: {}'.format(ex))
                     code_block = python_runtime.compile_error(
                         python_code=code_block,
                         error=str(ex),

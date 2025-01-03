@@ -233,7 +233,9 @@ class Searcher():
             original_query=self.original_query,
         )
 
-        engine = engine_rank.get_str().split('\n')[0]
+        engine_list = Helpers.parse_list_string(engine_rank.get_str(), [key for key, _ in engines.items()])
+        engine = engine_list[0]
+
         searcher = self.search_google_hook
 
         for key, _ in engines.items():
@@ -241,7 +243,7 @@ class Searcher():
                 self.parser = engines[key]['parser']
                 searcher = engines[key]['searcher']
 
-        write_client_stream(TextContent(f"It seems {engine} is best to perform a search for {self.query}\n"))
+        write_client_stream(TextContent(f"I think the {engine} engine is best to perform a search for the query: {self.query}\n"))
 
         # perform the search
         search_results = []
