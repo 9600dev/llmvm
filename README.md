@@ -2,7 +2,9 @@
 
 LLMVM is a CLI based productivity tool that uses Large Language Models and local Python tools/helpers to reason about and execute your tasks. A CLI client (client.py) either connects directly to an LLM provider or will connect to a local server (server.py) that coordinates tool execution, [Retrieval Agumented Generation](https://blogs.nvidia.com/blog/what-is-retrieval-augmented-generation/), document search and more.
 
-It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/) is currently experimental (it really really doesn't want to generate code in 'code' tags). It's best used with the [kitty](https://github.com/kovidgoyal/kitty) terminal as LLMVM will screenshot and render images as work on vision based tasks progresses.
+It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
+
+> **Update Jan 3rd 2025**: DeepSeek v3 and Nova added, o1-preview and o1-mini have severely regressed. DeepSeek works quite well, Nova maybe slightly behind Gemini 1.5. o1-preview and o1-mini simply refuse to emit tokens with the code helpers [mega prompt](https://github.com/9600dev/llmvm/blob/master/llmvm/server/prompts/python/python_continuation_execution.prompt), and I haven't had time to figure out why.  
 
 > **Update October 8th 2024**: Gemini. Simply refuses to emit `<code></code>` tags so we've had to switch to `<helpers></helpers>` and `</helpers_result>`. Had to update the tools prompt to really really force gemini to not go out of bounds.
 
@@ -26,7 +28,7 @@ $ playwright install
 $ python -m llmvm.server
 
 Default executor is: anthropic
-Default model is: claude-3-5-sonnet-20240620
+Default model is: claude-3-5-sonnet-20241022
 
 Make sure to `playwright install`.
 If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.
@@ -234,11 +236,11 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
 ### Configuring Anthropic vs. OpenAI
 
-* open `~/.config/llmvm/config.yaml` and change executor to 'anthropic' or 'openai':
+* open `~/.config/llmvm/config.yaml` and change executor to 'anthropic' or 'openai', 'deepseek' or 'bedrock':
 
 ```yaml
-executor: 'anthropic'  # or 'openai'
-anthropic_model: 'claude-3-5-sonnet-20240620'
+executor: 'anthropic'  # or 'openai', or 'gemini' or 'deepseek', or 'bedrock'
+anthropic_model: 'claude-3-5-sonnet-20241022'
 ```
 
 or, you can set environment variables that specify the execution backend and the model you'd like to use:
@@ -329,7 +331,7 @@ print(assistant)
 Assistant(Hello! How can I assist you today? Is there anything specific you'd like to talk about or any questions you have?)
 ```
 
-`llm()` connects directly to the specified executor (Anthropic, OpenAI, or Gemini), and `llmvm()` connects to an instance of the LLMVM server for tool handling and so on.
+`llm()` connects directly to the specified executor (Anthropic, OpenAI, Gemini, DeepSeek or Amazon Nova), and `llmvm()` connects to an instance of the LLMVM server for tool handling and so on.
 
 ## Architecture
 
@@ -563,7 +565,7 @@ These days, I mostly run Anthropic's models. Their super fast, cheap, and smart.
 
 ```bash
 OPUS="claude-3-opus-20240229"
-SONNET="claude-3-sonnet-20240229"
+SONNET="claude-3-sonnet-20241022"
 HAIKU="claude-3-haiku-20240307"
 INSTANT="claude-instant-1.2"
 
