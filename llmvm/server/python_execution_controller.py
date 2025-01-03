@@ -775,6 +775,7 @@ class ExecutionController(Controller):
                     self.get_executor().name() == 'openai'
                     or self.get_executor().name() == 'gemini'
                     or self.get_executor().name() == 'deepseek'
+                    or self.get_executor().name() == 'bedrock'
                 )
             ):
                 response.stop_token = '</helpers>'
@@ -786,6 +787,7 @@ class ExecutionController(Controller):
                     self.get_executor().name() == 'openai'
                     or self.get_executor().name() == 'gemini'
                     or self.get_executor().name() == 'deepseek'
+                    or self.get_executor().name() == 'bedrock'
                 )
             ):
                 response.stop_token = '</complete>'

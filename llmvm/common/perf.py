@@ -1,10 +1,12 @@
 import datetime as dt
 import inspect
+import json
 import os
 import time
 from typing import Any, List, Optional, cast
 
 import openai
+from botocore.eventstream import EventStream
 from anthropic import AsyncMessageStream, AsyncMessageStreamManager
 from anthropic import AsyncStream as AnthropicAsyncStream
 from anthropic.types import Completion as AnthropicCompletion
@@ -16,8 +18,23 @@ from openai.types.chat.chat_completion import ChatCompletion as OAICompletion
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import TokenPriceCalculator, TokenPerf
+from llmvm.common.helpers import Helpers
 
 logging = setup_logging()
+
+
+class AsyncIteratorWrapper:
+    def __init__(self, sync_iterator):
+        self.sync_iterator = iter(sync_iterator)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self.sync_iterator)
+        except StopIteration:
+            raise StopAsyncIteration
 
 
 class O1AsyncIterator:
@@ -36,11 +53,14 @@ class O1AsyncIterator:
             raise StopAsyncIteration
 
 
-
 class LoggingAsyncIterator:
     def __init__(self, original_iterator, token_perf: TokenPerf):
-        self.original_iterator = original_iterator.__aiter__()
-        self.perf = token_perf
+        if Helpers.is_sync_iterator(original_iterator) and not Helpers.is_async_iterator(original_iterator):
+            self.original_iterator = AsyncIteratorWrapper(original_iterator)
+            self.perf = token_perf
+        else:
+            self.original_iterator = original_iterator.__aiter__()
+            self.perf = token_perf
 
     async def __anext__(self) -> str:
         try:
@@ -59,6 +79,15 @@ class LoggingAsyncIterator:
                 if result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
                 return cast(str, result.choices[0].message.content or '')  # type: ignore
+            # amazon nova
+            elif isinstance(result, dict) and 'chunk' in result:
+                chunk = result['chunk']
+                chunk_json = json.loads(chunk.get("bytes").decode())
+                content_block_delta = chunk_json.get("contentBlockDelta")
+                if content_block_delta:
+                    return cast(str, content_block_delta.get("delta").get("text"))
+                else:
+                    return ''
             elif isinstance(result, str):
                 return result
             else:
@@ -136,6 +165,10 @@ class TokenStreamManager:
             return self.token_perf_wrapper
         elif isinstance(self.stream, AnthropicAsyncStream):
             self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)
+            return self.token_perf_wrapper
+        elif isinstance(self.stream, EventStream):
+            self.token_perf_wrapper = TokenStreamWrapper(self.stream.__iter__(), self.perf)
+            self.token_perf_wrapper.object = self.stream
             return self.token_perf_wrapper
         elif inspect.isasyncgen(self.stream):
             self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)

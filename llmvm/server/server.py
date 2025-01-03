@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from openai import AsyncOpenAI, OpenAI
 
 from llmvm.common.anthropic_executor import AnthropicExecutor
+from llmvm.common.bedrock_executor import BedrockExecutor
 from llmvm.common.container import Container
 from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
@@ -219,7 +220,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
     if not controller:
         raise EnvironmentError('No executor specified in environment or config file')
 
-    default_model_config = Container().get_config_variable(f'{controller}_model', 'LLMVM_MODEL')
+    default_model_config = Container().get_config_variable(f'default_{controller}_model', 'LLMVM_MODEL')
     executor: Executor
 
     if controller == 'anthropic':
@@ -233,21 +234,29 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
     elif controller == 'gemini':
         executor = GeminiExecutor(
             api_key=os.environ.get('GEMINI_API_KEY', ''),
-            default_model=Container().get_config_variable('gemini_model', 'LLMVM_MODEL'),
+            default_model=default_model_config,
             default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
             default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
         )
     elif controller == 'deepseek':
         executor = DeepSeekExecutor(
             api_key=os.environ.get('DEEPSEEK_API_KEY', ''),
-            default_model=Container().get_config_variable('deepseek_model', 'LLMVM_MODEL'),
+            default_model=default_model_config,
             default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
             default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
+        )
+    elif controller == 'bedrock':
+        executor = BedrockExecutor(
+            api_key='',
+            default_model=default_model_config,
+            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
+            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
+            region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
         )
     else:
         executor = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),
-            default_model=Container().get_config_variable('default_openai_model', 'LLMVM_MODEL'),
+            default_model=default_model_config,
             api_endpoint=Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
             default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
             default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),

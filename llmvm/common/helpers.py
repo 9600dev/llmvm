@@ -27,7 +27,7 @@ from functools import reduce
 from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
-from typing import Any, Awaitable, Callable, Dict, Generator, List, Optional, TextIO, Tuple, Union
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Generator, Iterator, List, Optional, TextIO, Tuple, Union
 from urllib.parse import urljoin, urlparse
 from markdownify import markdownify as md
 import zlib
@@ -77,6 +77,34 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 
 class Helpers():
+    @staticmethod
+    def is_async_iterator(obj):
+        # Method 1: Check for __aiter__ and __anext__ methods
+        has_aiter = hasattr(obj, '__aiter__')
+        has_anext = hasattr(obj, '__anext__')
+
+        # Method 2: Using isinstance with AsyncIterator
+        is_async_iter = isinstance(obj, AsyncIterator)
+
+        # Method 3: Using inspect (most thorough)
+        is_async_gen = inspect.isasyncgen(obj)
+
+        return has_aiter and has_anext or is_async_iter or is_async_gen
+
+    @staticmethod
+    def is_sync_iterator(obj):
+        # Method 1: Check for __iter__ and __next__ methods
+        has_iter = hasattr(obj, '__iter__')
+        has_next = hasattr(obj, '__next__')
+
+        # Method 2: Using isinstance with Iterator
+        is_iter = isinstance(obj, Iterator)
+
+        # Method 3: Using inspect
+        is_generator = inspect.isgenerator(obj)
+
+        return has_iter and has_next or is_iter or is_generator
+
     @staticmethod
     def markdown_to_minimal_text(markdown_content):
         soup = BeautifulSoup(markdown_content, 'html.parser')

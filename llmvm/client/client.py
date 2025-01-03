@@ -9,6 +9,7 @@ from pydantic import TypeAdapter
 from llmvm.client.parsing import parse_message_actions, parse_message_thread
 from llmvm.client.printing import StreamPrinter, stream_response
 from llmvm.common.anthropic_executor import AnthropicExecutor
+from llmvm.common.bedrock_executor import BedrockExecutor
 from llmvm.common.container import Container
 from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
@@ -126,13 +127,12 @@ def get_executor(
     model_name: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> Executor:
-
     if executor_name == 'anthropic' and not model_name:
         model_name = 'claude-3-5-sonnet-latest'
     elif executor_name == 'openai' and not model_name:
         model_name = 'gpt-4o'
     elif executor_name == 'gemini' and not model_name:
-        model_name = 'gemini-pro'
+        model_name = 'gemini-1.5-pro'
     else:
         raise ValueError(f'Invalid executor name: {executor_name}')
 
@@ -213,7 +213,7 @@ class LLMVMClient():
             if Container.get_config_variable('GEMINI_API_KEY') or api_key:
                 return GeminiExecutor(
                     api_key=api_key or Container.get_config_variable('GEMINI_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'gemini-pro'
+                    default_model=cast(str, model_name) if model_name else 'gemini-1.5-pro'
                 )
             else:
                 raise ValueError('GeminiExecutor requires a model name and API key.')
@@ -222,25 +222,33 @@ class LLMVMClient():
             if Container.get_config_variable('DEEPSEEK_API_KEY') or api_key:
                 return DeepSeekExecutor(
                     api_key=api_key or Container.get_config_variable('DEEPSEEK_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'deepseek-coder-v2-instruct'
+                    default_model=cast(str, model_name) if model_name else 'deepseek-chat'
                 )
             else:
                 raise ValueError('DeepSeekExecutor requires a model name and API key.')
+
+        elif executor_name == 'bedrock':
+            return BedrockExecutor(
+                api_key=api_key or Container.get_config_variable('BEDROCK_API_KEY'),
+                default_model=cast(str, model_name) if model_name else 'amazon.nova-pro-v1:0',
+                region_name=Container.get_config_variable('BEDROCK_API_BASE', default='us-east-1'),
+            )
+
         else:
             if Container.get_config_variable('ANTHROPIC_API_KEY'):
                 return AnthropicExecutor(
                     api_key=Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    default_model='claude-3-5-sonnet-20240620'
+                    default_model='claude-3-5-sonnet-latest'
                 )
             elif Container.get_config_variable('OPENAI_API_KEY'):
                 return OpenAIExecutor(
                     api_key=Container.get_config_variable('OPENAI_API_KEY'),
-                    default_model='gpt-4o-2024-08-06'
+                    default_model='gpt-4o'
                 )
             elif Container.get_config_variable('GEMINI_API_KEY'):
                 return GeminiExecutor(
                     api_key=Container.get_config_variable('GEMINI_API_KEY'),
-                    default_model='gemini-1.5-pro-latest'
+                    default_model='gemini-1.5-pro'
                 )
             elif Container.get_config_variable('DEEPSEEK_API_KEY'):
                 return DeepSeekExecutor(

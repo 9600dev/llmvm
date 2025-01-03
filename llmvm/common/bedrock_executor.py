@@ -2,7 +2,7 @@ import asyncio
 import base64
 import json
 import os
-from typing import Any, Awaitable, Callable, Optional, cast
+from typing import Any, Awaitable, Callable, Coroutine, Optional, cast
 
 import boto3
 
@@ -24,7 +24,7 @@ class BedrockExecutor(Executor):
     def __init__(
         self,
         api_key: str = '',
-        default_model: str = 'us.amazon.nova-lite-v1:0',
+        default_model: str = 'amazon.nova-pro-v1:0',
         api_endpoint: str = '',
         default_max_input_len: int = 3000000,
         default_max_output_len: int = 4096,
@@ -73,7 +73,7 @@ class BedrockExecutor(Executor):
                 if 'image/unknown' not in Helpers.classify_image(content.get_bytes()):
                     content_list.append({
                         'image': {
-                            'format': Helpers.classify_image(content.get_bytes()),
+                            'format': Helpers.classify_image(content.get_bytes()).replace('image/', ''),
                             'source': {
                                 'bytes': base64.b64encode(content.get_bytes()).decode('utf-8'),
                             },
@@ -93,6 +93,13 @@ class BedrockExecutor(Executor):
                 logging.warning(f'Content inside message {message.to_json()} was empty.')
             else:
                 raise ValueError(f"Cannot serialize unknown content type: {type(content)} in message {message.to_json()}")
+
+        # system messages can only be a single string
+        if message.role() == 'system':
+            return {
+                'role': message.role(),
+                'content': {'text': content_list[0]['text'] },
+            }
 
         dict_message = {
             'role': message.role(),
@@ -235,7 +242,7 @@ class BedrockExecutor(Executor):
 
         # the messages API does not accept System messages, only User and Assistant messages.
         # get the system message from the dictionary, and remove it from the list
-        system_message: str = ''
+        system_message: dict = {'text': 'You are a helpful assistant.'}
         for message in messages:
             if message['role'] == 'system':
                 system_message = message['content']
@@ -269,12 +276,11 @@ class BedrockExecutor(Executor):
         token_trace = TokenPerf('aexecute_direct', 'bedrock', model)  # type: ignore
         token_trace.start()
 
-        inf_params = {"max_new_tokens": max_output_tokens, "temperature": temperature}
+        inf_params = {"max_new_tokens": max_output_tokens, "temperature": temperature, "stopSequences": stop_tokens}
 
         request_body = {
-            "schemaVersion": "messages-v1",
             "messages": messages_list,
-            "system": system_message,
+            "system": [system_message],
             "inferenceConfig": inf_params,
         }
 
@@ -303,7 +309,7 @@ class BedrockExecutor(Executor):
         # wrap and check message list
         messages_list: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages, model)
 
-        stream = self.aexecute_direct(
+        stream: Coroutine[Any, Any, TokenStreamManager] = self.aexecute_direct(
             messages_list,
             max_output_tokens=max_output_tokens,
             model=model,

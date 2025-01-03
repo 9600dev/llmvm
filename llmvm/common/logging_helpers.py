@@ -163,6 +163,7 @@ def setup_logging(
     logging.getLogger('dateparser').setLevel(logging.CRITICAL)
     logging.getLogger('tesseract').setLevel(logging.CRITICAL)
     logging.getLogger('tzlocal').setLevel(logging.CRITICAL)
+    logging.getLogger('botocore').setLevel(logging.WARNING)
 
     logger: Logger = logging.getLogger()
 
