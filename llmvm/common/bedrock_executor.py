@@ -290,7 +290,7 @@ class BedrockExecutor(Executor):
             )
 
             stream = response.get("body")
-            return TokenStreamManager(stream, token_trace)
+            return TokenStreamManager(stream, token_trace, response_object=response)
         except Exception as e:
             logging.error(e)
             raise
@@ -322,10 +322,19 @@ class BedrockExecutor(Executor):
 
         async with await stream as stream_async:  # type: ignore
             async for text in stream_async:
-                await stream_handler(TokenNode(text))
+                # nova will emit stop tokens before it stops, so we need to check for that
+                if not text in stop_tokens:
+                    await stream_handler(TokenNode(text))
                 text_response += text
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
+
+            # EventStream and the response object doesn't give me access to the stopReason. sigh.
+            stopped = [stop_token for stop_token in stop_tokens if text_response.endswith(stop_token)]
+            if stopped:
+                perf.stop_reason = 'stop'
+                perf.stop_token = next(iter(stopped))
+                text_response = text_response[:-len(perf.stop_token)]
 
         await stream_async.get_final_message()  # this forces an update to the perf object
         perf.log()

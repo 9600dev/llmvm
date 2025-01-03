@@ -237,7 +237,7 @@ class OpenAIExecutor(Executor):
         token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
-        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
+        if model is not None and 'o1' in model:
             # temp 1.0 only supported for o1 and max_tokens is not supported
             # streaming not supported, stop tokens not supported. yikes.
             temperature = 1.0
@@ -246,11 +246,10 @@ class OpenAIExecutor(Executor):
                 "temperature": temperature,
                 "max_completion_tokens": max_output_tokens,
                 "messages": messages_cast,
-                # "stop": stop_tokens if stop_tokens else None,
+                "stop": stop_tokens if stop_tokens else None,
                 "functions": functions_cast if functions else None,
-                "stream": False
+                "stream": True
             }
-
         else:
             base_params = {
                 "model": model if model else self.default_model,
@@ -267,11 +266,11 @@ class OpenAIExecutor(Executor):
 
         # if the response is an o1 response, it is not a stream, so we need to
         # manually stream it
-        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
-            return TokenStreamManager(O1AsyncIterator(response), token_trace)  # type: ignore
+        # if model is not None and 'o1-preview' in model or 'o1-mini' in model:
+        #     return TokenStreamManager(O1AsyncIterator(response), token_trace)  # type: ignore
 
-        else:
-            return TokenStreamManager(response, token_trace)  # type: ignore
+        # else:
+        return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(
         self,

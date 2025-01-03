@@ -137,14 +137,16 @@ class TokenStreamWrapper:
 class TokenStreamManager:
     def __init__(
         self,
-        stream: AsyncMessageStreamManager | AnthropicAsyncStream[AnthropicCompletion] | openai.AsyncStream,  # type: ignore
+        stream: AsyncMessageStreamManager | AnthropicAsyncStream[AnthropicCompletion] | openai.AsyncStream | EventStream,  # type: ignore
         token_perf: 'TokenPerf',
-        stop_tokens: List[str] = []
+        stop_tokens: List[str] = [],
+        response_object: Any = None
     ):
         self.stream = stream
         self.perf = token_perf
         self.token_perf_wrapper = None
         self.stop_tokens = stop_tokens
+        self.response_object = response_object
 
     async def __aenter__(self) -> TokenStreamWrapper:
         self.perf.start()
@@ -168,7 +170,7 @@ class TokenStreamManager:
             return self.token_perf_wrapper
         elif isinstance(self.stream, EventStream):
             self.token_perf_wrapper = TokenStreamWrapper(self.stream.__iter__(), self.perf)
-            self.token_perf_wrapper.object = self.stream
+            self.token_perf_wrapper.object = self.response_object
             return self.token_perf_wrapper
         elif inspect.isasyncgen(self.stream):
             self.token_perf_wrapper = TokenStreamWrapper(self.stream, self.perf)

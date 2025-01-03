@@ -819,9 +819,8 @@ class ExecutionController(Controller):
             if code_blocks and not response.stop_token == '</complete>':
                 # emit some debugging
                 code_block = '\n'.join(code_blocks)
-                # some executors (like bedrock) will emit the </helpers> token before stopping.
                 write_client_stream(TextContent('</helpers>\n'))
-                write_client_stream(TextContent('Executing <helpers></helpers> code block locally.\n'))
+                write_client_stream(TextContent('Executing helpers code block locally.\n'))
 
                 no_indent_debug(logging, '')
                 no_indent_debug(logging, '** [bold yellow]Python Abstract Syntax Tree:[/bold yellow] **')
@@ -946,7 +945,7 @@ class ExecutionController(Controller):
                         result=response.get_str()
                     ))
                 # empty assistant, maybe we got a </helpers_result> that was correct. this should be in the code_execution_result
-                elif code_execution_result:
+                elif code_blocks and code_execution_result:
                     results.extend([answer for answer in cast(list, code_execution_result) if isinstance(answer, Answer)])
 
                 completed = True
