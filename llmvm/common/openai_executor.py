@@ -40,6 +40,7 @@ class OpenAIExecutor(Executor):
         )
         self.aclient = AsyncOpenAI(api_key=api_key, base_url=self.api_endpoint)
         self.max_images = max_images
+        self.api_key = api_key
 
     def user_token(self) -> str:
         return 'User'
@@ -264,12 +265,6 @@ class OpenAIExecutor(Executor):
         params = {k: v for k, v in base_params.items() if v is not None}
         response = await self.aclient.chat.completions.create(**params)
 
-        # if the response is an o1 response, it is not a stream, so we need to
-        # manually stream it
-        # if model is not None and 'o1-preview' in model or 'o1-mini' in model:
-        #     return TokenStreamManager(O1AsyncIterator(response), token_trace)  # type: ignore
-
-        # else:
         return TokenStreamManager(response, token_trace)  # type: ignore
 
     async def aexecute(

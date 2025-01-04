@@ -77,6 +77,12 @@ class Container(metaclass=Singleton):
                 return True
             elif isinstance(value, str) and (value == 'false' or value == 'False'):
                 return False
+            elif isinstance(value, str) and value.lower() == 'none':
+                return None
+            elif isinstance(value, str) and str.isnumeric(value):
+                return int(value)
+            elif isinstance(value, str) and str.isdecimal(value):
+                return float(value)
             else:
                 return value
 
@@ -100,8 +106,8 @@ class Container(metaclass=Singleton):
 
         container = Container(config_file)
         if container.has(name.replace('LLMVM_', '').lower()):
-            return container.get(name.replace('LLMVM_', '').lower())
+            return parse(container.get(name.replace('LLMVM_', '').lower()))
         elif container.has(alternate_name.replace('LLMVM_', '').lower()):
-            return container.get(alternate_name.replace('LLMVM_', '').lower())
+            return parse(container.get(alternate_name.replace('LLMVM_', '').lower()))
         else:
             return default

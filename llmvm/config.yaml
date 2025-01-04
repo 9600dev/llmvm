@@ -23,7 +23,7 @@ default_anthropic_model: 'claude-3-5-sonnet-latest'
 default_gemini_model: 'gemini-2.0-flash-exp'
 default_deepseek_model: 'deepseek-chat'
 default_bedrock_model: 'amazon.nova-pro-v1:0'
-executor: 'openai'  # openai, anthropic, gemini, deepseek, bedrock
+executor: 'anthropic'  # openai, anthropic, gemini, deepseek, bedrock
 override_max_input_tokens: None
 override_max_output_tokens: None
 helper_functions:

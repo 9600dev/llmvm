@@ -1,12 +1,15 @@
-import base64
+import json
 import os
-from typing import Any, Optional, cast
+from typing import Any, Awaitable, Callable, Optional, cast
+from importlib import resources
+import transformers
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import Assistant, BrowserContent, Content, FileContent, ImageContent, MarkdownContent, Message, PdfContent, System, TextContent, User
+from llmvm.common.objects import Assistant, AstNode, BrowserContent, Content, FileContent, ImageContent, MarkdownContent, Message, PdfContent, System, TextContent, User, awaitable_none
 from llmvm.common.openai_executor import OpenAIExecutor
+from llmvm.common.perf import TokenStreamManager
 
 logging = setup_logging()
 
@@ -17,12 +20,16 @@ class DeepSeekExecutor(OpenAIExecutor):
         default_model: str = 'deepseek-chat',
 
         api_endpoint: str = 'https://api.deepseek.com/v1',
-        default_max_input_len: int = 128000,
+        default_max_input_len: int = 64000,
         default_max_output_len: int = 4096,
         max_images: int = 0,
     ):
         if max_images > 0:
             raise ValueError('Deepseek does not support images. max_images must be 0.')
+
+        if default_max_input_len > 64000:
+            logging.debug('Deepseek does not support more than 64k tokens. default_max_input_len must be 64000 or less.')
+            default_max_input_len = 64000
 
         super().__init__(
             api_key=api_key,
@@ -136,4 +143,69 @@ class DeepSeekExecutor(OpenAIExecutor):
 
         return wrapped
 
+    def max_input_tokens(
+        self,
+        model: Optional[str] = None,
+    ) -> int:
+        # deepseek v3 API is limited to 64k tokens right now
+        return self.default_max_input_len
 
+    def max_output_tokens(
+        self,
+        model: Optional[str] = None,
+    ) -> int:
+        return self.default_max_output_len
+
+    async def count_tokens(
+        self,
+        messages: list[Message],
+    ) -> int:
+        messages_list = self.unpack_and_wrap_messages(messages, self.default_model)
+        return await self.count_tokens_dict(messages_list)
+
+    async def count_tokens_dict(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> int:
+        with resources.path("llmvm.common", "deepseek_tokenizer") as tokenizer_path:
+            # Convert path to str just to be sure HF Transformers sees it as a string path
+            os.environ["TOKENIZERS_PARALLELISM"] = "true"
+            tokenizer = transformers.AutoTokenizer.from_pretrained(str(tokenizer_path), allow_remote_code=True)
+
+            num_tokens = 0
+            json_accumulator = ''
+            for message in messages:
+                if 'content' in message and isinstance(message['content'], str):
+                    json_accumulator += message['content']
+                elif 'content' in message and isinstance(message['content'], list):
+                    for content in message['content']:
+                        if 'image_url' in content['type'] and 'url' in content['image_url']:
+                            b64data = content['image_url']['url']
+                            num_tokens += Helpers.openai_image_tok_count(b64data.split(',')[1])
+                        else:
+                            json_accumulator += json.dumps(content, indent=2)
+
+            token_count = len(tokenizer.encode(json_accumulator))
+            return token_count
+
+    async def aexecute_direct(
+        self,
+        messages: list[dict[str, str]],
+        functions: list[dict[str, str]] = [],
+        model: Optional[str] = None,
+        max_output_tokens: int = 4096,
+        temperature: float = 0.0,
+        stop_tokens: list[str] = [],
+    ) -> TokenStreamManager:
+        return await super().aexecute_direct(messages, functions, model, max_output_tokens, temperature, stop_tokens)
+
+    async def aexecute(
+        self,
+        messages: list[Message],
+        max_output_tokens: int = 4096,
+        temperature: float = 0.0,
+        stop_tokens: list[str] = [],
+        model: Optional[str] = None,
+        stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
+    ) -> Assistant:
+        return await super().aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_handler)

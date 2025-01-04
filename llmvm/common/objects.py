@@ -37,11 +37,44 @@ class TokenPriceCalculator():
     ):
         self.price_file = resources.files('llmvm') / price_file
         self.prices = self.__load_prices()
+        self.absolute_defaults = {
+            'anthropic': {
+                'max_input_tokens': 200000,
+                'max_output_tokens': 4096,
+            },
+            'openai': {
+                'max_input_tokens': 128000,
+                'max_output_tokens': 4096,
+            },
+            'gemini': {
+                'max_input_tokens': 2000000,
+                'max_output_tokens': 4096,
+            },
+            'deepseek': {
+                'max_input_tokens': 64000,
+                'max_output_tokens': 4096,
+            },
+            'bedrock': {
+                'max_input_tokens': 300000,
+                'max_output_tokens': 4096,
+            },
+        }
 
     def __load_prices(self):
         with open(self.price_file, 'r') as f:  # type: ignore
             json_prices = json.load(f)
             return json_prices
+
+    def __absolute_default(self, executor: Optional[str], key: str) -> int | None:
+        if not executor:
+            return None
+
+        executor_value = None
+        if executor:
+            executor_defaults = self.absolute_defaults.get(executor)
+            if executor_defaults:
+                executor_value = executor_defaults.get(key)
+                if executor_value: return executor_value
 
     def get(self, model: str, key: str, executor: Optional[str] = None) -> Optional[Any]:
         if model in self.prices and key in self.prices[model]:
@@ -64,30 +97,31 @@ class TokenPriceCalculator():
     ) -> float:
         return self.get(model, 'output_cost_per_token', executor) or 0.0
 
-    def max_tokens(
-        self,
-        model: str,
-        executor: Optional[str] = None,
-        default: int = 0
-    ) -> int:
-        return self.get(model, 'max_tokens', executor) or default
-
     def max_input_tokens(
         self,
         model: str,
+        default: int,
         executor: Optional[str] = None,
-        default: int = 0
     ) -> int:
-        return self.get(model, 'max_input_tokens', executor) or default
+        max_input_tokens = self.get(model, 'max_input_tokens', executor) or default or self.__absolute_default(executor, 'max_input_tokens')
+
+        if not max_input_tokens:
+            raise ValueError(f'max_input_tokens not found for model {model} and executor {executor} and no default provided.')
+
+        return cast(int, max_input_tokens)
 
     def max_output_tokens(
         self,
         model: str,
+        default: int,
         executor: Optional[str] = None,
-        default: int = 0
     ) -> int:
-        return self.get(model, 'max_output_tokens', executor) or default
+        max_output_tokens = self.get(model, 'max_output_tokens', executor) or default or self.__absolute_default(executor, 'max_output_tokens')
 
+        if not max_output_tokens:
+            raise ValueError(f'max_output_tokens not found for model {model} and executor {executor} and no default provided.')
+
+        return cast(int, max_output_tokens)
 
 def bcl(module_or_path):
     def decorator(cls):
@@ -794,14 +828,14 @@ class Executor(ABC):
         self,
         model: Optional[str] = None,
     ) -> int:
-        if model: return TokenPriceCalculator().max_input_tokens(model)
+        if model: return TokenPriceCalculator().max_input_tokens(model=model, default=self.default_max_input_len, executor=self.name())
         else: return self.default_max_input_len
 
     def max_output_tokens(
         self,
         model: Optional[str] = None,
     ) -> int:
-        if model: return TokenPriceCalculator().max_output_tokens(model)
+        if model: return TokenPriceCalculator().max_output_tokens(model=model, default=self.default_max_output_len, executor=self.name())
         else: return self.default_max_output_len
 
     @abstractmethod

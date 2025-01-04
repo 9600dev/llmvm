@@ -212,7 +212,6 @@ def __deserialize_item(item):
     return item
 
 
-
 def get_controller(controller: Optional[str] = None) -> ExecutionController:
     if not controller:
         controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
@@ -221,6 +220,9 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         raise EnvironmentError('No executor specified in environment or config file')
 
     default_model_config = Container().get_config_variable(f'default_{controller}_model', 'LLMVM_MODEL')
+    override_max_input_len = Container().get_config_variable(f'override_max_input_tokens', 'LLMVM_OVERRIDE_MAX_INPUT_TOKENS', default=None)
+    override_max_output_len = Container().get_config_variable(f'override_max_output_tokens', 'LLMVM_OVERRIDE_MAX_OUTPUT_TOKENS', default=None)
+
     executor: Executor
 
     if controller == 'anthropic':
@@ -228,29 +230,29 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
-            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
-            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
+            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
+            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=4096),
         )
     elif controller == 'gemini':
         executor = GeminiExecutor(
             api_key=os.environ.get('GEMINI_API_KEY', ''),
             default_model=default_model_config,
-            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
-            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
+            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
+            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=4096),
         )
     elif controller == 'deepseek':
         executor = DeepSeekExecutor(
             api_key=os.environ.get('DEEPSEEK_API_KEY', ''),
             default_model=default_model_config,
-            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
-            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
+            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
+            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
         )
     elif controller == 'bedrock':
         executor = BedrockExecutor(
             api_key='',
             default_model=default_model_config,
-            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
-            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
+            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='bedrock', default=300000),
+            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='bedrock', default=4096),
             region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
         )
     else:
@@ -258,8 +260,8 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
             api_key=os.environ.get('OPENAI_API_KEY', ''),
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
-            default_max_input_len=TokenPriceCalculator().max_input_tokens(default_model_config),
-            default_max_output_len=TokenPriceCalculator().max_output_tokens(default_model_config),
+            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
+            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
         )
 
     return ExecutionController(

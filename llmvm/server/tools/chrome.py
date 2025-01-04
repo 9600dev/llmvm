@@ -307,7 +307,8 @@ class ChromeHelpersInternal():
     async def goto(self, url: str):
         try:
             if (await self.page()).url != url:
-                await (await self.page()).goto(url, wait_until='load', timeout=10000)
+                page = await self.page()
+                await page.goto(url)
 
                 domain = urlparse(url).netloc
 
@@ -315,6 +316,12 @@ class ChromeHelpersInternal():
                     logging.debug(f'ChromeHelpersInternal.goto() waiting for {domain} for {self.wait_fors[domain]} ms')
                     wait_for_lambda = self.wait_fors[domain]
                     await wait_for_lambda(await self.page())
+
+                try:
+                    async with page.expect_event("domcontentloaded", timeout=8000):
+                        pass
+                except:
+                    logging.debug("ChromeHelpersInternal.goto() page is still loading after timeout; stopping rendering.")
 
                 # wait some fraction of a second for some rendering
                 await self.wait(200)
@@ -324,8 +331,8 @@ class ChromeHelpersInternal():
         except Error as ex:
             # try new page
             logging.debug(f'ChromeHelpersInternal.goto() exception: {ex}')
-            self._page = await self.__new_page()
-            await (await self.page()).goto(url)
+            # self._page = await self.__new_page()
+            # await (await self.page()).goto(url)
 
     async def wait(self, milliseconds: int) -> None:
         await (await self.page()).evaluate("() => { setTimeout(function() { return; }, 0); }")
