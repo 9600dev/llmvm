@@ -25,6 +25,7 @@ from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.tools.market import MarketHelpers
+from llmvm.server.tools.work_downloader import WorkDownloader
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
 
@@ -202,6 +203,7 @@ class PythonRuntime:
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
         self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
+        self.globals_dict['WorkDownloader'] = CallWrapper(self, WorkDownloader)
         self.globals_dict['answer'] = self.answer
         self.globals_dict['sys'] = sys
         self.globals_dict['os'] = os

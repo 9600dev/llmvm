@@ -704,29 +704,51 @@ class Helpers():
 
     @staticmethod
     async def markdown_content_to_supported_content(
-        logging,
-        markdown_content: MarkdownContent,
-        min_width: int,
-        min_height: int
+        logging, markdown_content: MarkdownContent, min_width: int, min_height: int
     ) -> list[SupportedMessageContent]:
-        # pattern = r'(.*?)!\[(?:.*?)\]\[(.*?)\]|(.+?)$'
+        # Patterns for inline images and text
         pattern = r'(.*?)!\[(.*?)\]\((.*?)\)|(.+?)$'
+
+        # Pattern for embedded inline images
         embedded_image_pattern = r'!\[([^\]]*?)\]\(data:image/([^;]+);base64,([^)]+)\)'
+
+        # New patterns for reference-style images
+        reference_pattern = r'!\[\]\[([^\]]+)\]'
+        definition_pattern = r'\[([^\]]+)\]:\s*<(data:image/([^;]+);base64,([^>]+))>'
+
         content = markdown_content.get_str()
         content_list: List[SupportedMessageContent] = []
         embedded_images: Dict[str, ImageContent] = {}
 
-        # First, extract embedded images
+        # First, extract embedded inline images
         for match in re.finditer(embedded_image_pattern, content, re.MULTILINE):
             image_id, image_type, base64_data = match.groups()
             image_bytes = base64.b64decode(base64_data)
             embedded_images[image_id] = ImageContent(image_bytes, f"{image_id}.{image_type}")
 
+        # Extract reference-style embedded images and remove the definitions
+        for match in re.finditer(definition_pattern, content, re.MULTILINE):
+            ref_id, full_uri, image_type, base64_data = match.groups()
+            image_bytes = base64.b64decode(base64_data)
+            embedded_images[ref_id] = ImageContent(image_bytes, f"{ref_id}.{image_type}")
+
+        # Remove the image definitions from the content
+        content = re.sub(definition_pattern, '', content)
+
+        # Replace inline embedded images with placeholders
         content = re.sub(
             r'!\[([^\]]*)\]\(data:image/[^;]+;base64,[^)]+\)',
             r'![\1](None)',  # \1 refers to the captured alt text
             content
         )
+
+        # Replace reference-style embedded images with placeholders
+        for ref_id in embedded_images.keys():
+            content = re.sub(
+                r'!\[\]\[' + re.escape(ref_id) + r'\]',
+                f'![{ref_id}](None)',
+                content
+            )
 
         last_end = 0
         idx = 0
@@ -734,32 +756,38 @@ class Helpers():
 
         for match in re.finditer(pattern, content, re.DOTALL):
             before, alt_text, image_id, after = match.groups()
+
             if before and before != content[last_end:match.start()] and last_end != match.start():
                 content_list.append(TextContent(content[last_end:match.start()]))
                 idx += 1
+
             if before:
                 content_list.append(TextContent(before))
                 idx += 1
+
             if alt_text:
                 if alt_text in embedded_images:
                     content_list.append(embedded_images[alt_text])
                 else:
                     logging.debug(f"Downloading image {image_id} obtained from {markdown_content.url[:25]}")
-                    # Handle external images as before
                     task = asyncio.create_task(
                         Helpers.get_image_fuzzy_url(logging, markdown_content.url, image_id, min_width, min_height)
                     )
                     tasks.append((idx, task, image_id))
                     content_list.append(TextContent(''))
                 idx += 1
+
             if after:
                 content_list.append(TextContent(after))
                 idx += 1
+
             last_end = match.end()
 
         if last_end < len(content):
-            content_list.append(TextContent(content[last_end:]))
-            idx += 1
+            remaining_content = content[last_end:].strip()
+            if remaining_content:  # Only add if there's non-whitespace content remaining
+                content_list.append(TextContent(remaining_content))
+                idx += 1
 
         for idx, task, image_url in tasks:
             image_bytes = await task
@@ -770,6 +798,7 @@ class Helpers():
         collapsed_content_list = [c for c in content_list if c.sequence]
         combined_content_list = []
         current_text = ""
+
         for c in collapsed_content_list:
             if isinstance(c, ImageContent):
                 if current_text:
@@ -780,7 +809,9 @@ class Helpers():
                 current_text += c.get_str()
 
         if current_text:
-            combined_content_list.append(TextContent(current_text))
+            current_text = current_text.strip()  # Remove leading/trailing whitespace
+            if current_text:  # Only add if there's non-whitespace content
+                combined_content_list.append(TextContent(current_text))
 
         return combined_content_list
 

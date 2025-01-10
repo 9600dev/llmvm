@@ -369,6 +369,7 @@ class ExecutionController(Controller):
             and (
                 isinstance(context[0], Content)
                 or isinstance(context[0], Message)
+                or isinstance(context[0], Statement)
             )
         ):
             return Helpers.flatten([self.statement_to_message(c) for c in context])
@@ -386,6 +387,11 @@ class ExecutionController(Controller):
             return [User(TextContent(result_prompt['user_message']))]
 
         elif isinstance(context, FunctionCall):
+            # check to see if the return result is something we already know
+            # that can be cohersed into a message
+            if isinstance(context.result(), Content):
+                return self.statement_to_message(cast(Content, context.result()))
+
             result_prompt = Helpers.load_and_populate_prompt(
                 prompt_name=statement_result_prompts[context.token()],
                 template={
@@ -400,6 +406,11 @@ class ExecutionController(Controller):
             return [User(TextContent(result_prompt['user_message']))]
 
         elif isinstance(context, FunctionCallMeta):
+            # check to see if the return result is something we already know
+            # that can be cohersed into a message
+            if isinstance(context.result(), Content):
+                return self.statement_to_message(cast(Content, context.result()))
+
             result_prompt = Helpers.load_and_populate_prompt(
                 prompt_name=statement_result_prompts['function_meta'],
                 template={
