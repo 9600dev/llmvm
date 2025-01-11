@@ -191,3 +191,50 @@ class WorkDownloader():
             time.sleep(0.5)
 
         raise RuntimeError(f"PDF file was not created at {pdf_path}")
+
+    @staticmethod
+    def get_chrome_tabs() -> str:
+        """
+        Retrieves all open tabs from Google Chrome and returns them as a string in 'url,title' format.
+
+        Returns:
+            str: A string containing all tab information, with each tab on a new line in 'url,title' format.
+
+        Example:
+        tabs = WorkDownloader.get_chrome_tabs()
+        answer(tabs)
+        # Output:
+        # https://www.google.com,Google
+        # https://github.com,GitHub - Some Github Repository
+        # ...
+        """
+
+        applescript = '''
+        tell application "Google Chrome"
+            set tabList to {}
+            set windowList to every window
+            repeat with theWindow in windowList
+                set tabList to tabList & (every tab of theWindow whose URL is not "")
+            end repeat
+
+            set output to ""
+            repeat with theTab in tabList
+                set theURL to URL of theTab
+                set theTitle to title of theTab
+                set output to output & theURL & "," & theTitle & linefeed
+            end repeat
+
+            return output
+        end tell
+        '''
+
+        # Run AppleScript
+        result = subprocess.run(['osascript', '-e', applescript], capture_output=True, text=True)
+
+        if result.returncode != 0:
+            logging.error(f"Error executing AppleScript: {result.stderr}")
+            raise RuntimeError(f"Failed to get Chrome tabs: {result.stderr}")
+
+        # Remove the last newline if it exists
+        output = result.stdout.rstrip()
+        return output
