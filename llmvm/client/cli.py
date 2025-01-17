@@ -210,14 +210,23 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                 filename = os.path.expanduser(filename)
             filename = os.path.abspath(filename)
             if os.path.exists(filename) and prompt:
-                rich.print(f'File {filename} already exists')
+                rich.print(f'Found the filename: {filename} the diff wants to patch.')
 
             if prompt:
-                rich.print(f'Apply diff to: {filename}? (y/n) ', end='')
-                answer = input()
-                if answer == 'n':
-                    message_str = Helpers.after_end(message_str, '```diff', '```')
-                    continue
+                if os.path.exists(filename):
+                    rich.print(f'Apply diff to: {filename}? (y/n) ', end='')
+                    answer = input()
+                    if answer == 'n':
+                        message_str = Helpers.after_end(message_str, '```diff', '```')
+                        continue
+                else:
+                    rich.print(f'File {filename} does not exist. Filename to apply to? (enter to break) ', end='')
+                    answer = input()
+                    if not answer:
+                        message_str = Helpers.after_end(message_str, '```diff', '```')
+                        continue
+                    else:
+                        filename = answer
 
             if diff_info['command'] == 'patch':
                 with tempfile.NamedTemporaryFile(mode='w', delete=True) as temp_file:
@@ -230,11 +239,13 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                 with open(filename, 'r') as f:
                     applied_diff = Helpers.apply_context_free_diff(f.read(), diff_info['diff_content'])
                 with open(filename, 'w') as f:
+                    rich.print(f'Applying diff to {filename} via command {command}')
                     f.write(applied_diff)
             elif diff_info['command'] == 'apply_unified_diff':
                 with open(filename, 'r') as f:
                     applied_diff = Helpers.apply_unified_diff(f.read(), diff_info['diff_content'])
                 with open(filename, 'w') as f:
+                    rich.print(f'Applying diff to {filename} via command {command}')
                     f.write(applied_diff)
 
             message_str = Helpers.after_end(message_str, '```diff', '```')
@@ -345,6 +356,9 @@ class Repl():
         rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
         rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
         rich.print('[white](:w filename to save the current thread to a file)[/white]')
+        rich.print('[white](cb Show all code blocks)[/white]')
+        rich.print('[white](ycb0 Copy code block 0, 1, 2... ycb for all)[/white]')
+        rich.print('[white](vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/white]')
         rich.print('[white]($(command) to execute a shell command and capture in query)[/white]')
         rich.print('[white]($$(command) to execute a shell command and display to screen)[/white]')
         rich.print('')
@@ -407,9 +421,10 @@ class Repl():
         def _(event):
             if 'last_thread' in globals():
                 last_thread_t: SessionThreadModel = last_thread
-                last_message = str(last_thread_t.messages[-1].content)
+                last_message = last_thread_t.messages[-1].to_message().get_str()
 
-                code_blocks = Helpers.extract_code_blocks(last_message)
+                code_blocks = get_code_blocks()
+
                 if code_blocks:
                     code = '\n\n'.join(code_blocks)
                     pyperclip.copy(code)
@@ -563,6 +578,15 @@ class Repl():
                     tokens = ['--direct'] + tokens
             return tokens
 
+        def get_code_blocks() -> list[str]:
+            if 'last_thread' in globals():
+                last_thread_t: SessionThreadModel = last_thread
+                last_message = last_thread_t.messages[-1].to_message().get_str()
+                code_blocks = Helpers.extract_code_blocks(last_message)
+                return code_blocks
+            else:
+                return []
+
         command_executing = False
 
         while True:
@@ -605,6 +629,38 @@ class Repl():
                     last_thread_t: SessionThreadModel = last_thread
                     pyperclip.copy(str(last_thread_t.messages[-1].content))
                     rich.print('Last message copied to clipboard.')
+                    continue
+
+                if query == 'cb':
+                    code_blocks = get_code_blocks()
+                    for i in range(len(code_blocks)):
+                        rich.print(f"[i] block {i}:")
+                        markdown_snippet = f'```python\n{code_blocks[i][0:300]}\n```'
+                        Markdown.__rich_console__ = markdown__rich_console__
+                        console.print(Markdown(markdown_snippet))
+                    continue
+
+                if query == 'ycb' or (
+                    query.startswith('ycb')
+                    and query[3].isdigit()
+                ):
+                    # find the code block to copy
+                    if query == 'ycb':
+                        pyperclip.copy('\n\n'.join(get_code_blocks()))
+                    else:
+                        pyperclip.copy(get_code_blocks()[int(query[3])])
+                    continue
+
+                if query == 'vcb' or (
+                    query.startswith('vcb')
+                    and query[3].isdigit()
+                ):
+                    # find the code block to copy
+                    if query == 'vcb':
+                        result = '\n\n'.join(get_code_blocks())
+                        self.open_default_editor(result)
+                    else:
+                        self.open_default_editor(get_code_blocks()[int(query[3])])
                     continue
 
                 # save a thread
