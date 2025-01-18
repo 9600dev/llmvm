@@ -137,7 +137,7 @@ matplotlib = "^3.9.0"
 dateparser = "^1.2.0"
 gspread = "^6.1.3"
 gspread-dataframe = "^4.0.0"
-mcp = "^1.2.0"
+mcp = {extras = ["cli"], version = "^1.2.0"}
 
 [build-system]
 requires = ["poetry-core"]
