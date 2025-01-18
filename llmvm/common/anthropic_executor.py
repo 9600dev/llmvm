@@ -320,7 +320,7 @@ class AnthropicExecutor(Executor):
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
-        anthropic_message = await stream_async.get_final_message()  # this forces an update to the perf object
+        _ = await stream_async.get_final_message()  # this forces an update to the perf object
         perf.log()
 
         assistant = Assistant(
@@ -329,8 +329,7 @@ class AnthropicExecutor(Executor):
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,
             perf_trace=perf,
-            total_tokens=(anthropic_message.usage.input_tokens + anthropic_message.usage.output_tokens)
-                if anthropic_message else 0,
+            total_tokens=perf.total_tokens
         )
 
         if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')

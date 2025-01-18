@@ -172,7 +172,7 @@ class ExecutionController(Controller):
             similarity_messages.append(User(TextContent(similarity_message)))
 
         total_similarity_tokens = sum(
-            [await self.executor.count_tokens(m.message.get_str()) for m in similarity_messages]
+            [await self.executor.count_tokens([m.message]) for m in similarity_messages]
         )
         if total_similarity_tokens > llm_call.max_prompt_len:
             logging.error(f'__similarity() total_similarity_tokens: {total_similarity_tokens} is greater than max_prompt_len: {llm_call.max_prompt_len}, will perform map/reduce.')  # noqa E501
@@ -315,18 +315,16 @@ class ExecutionController(Controller):
         lifo_messages = copy.deepcopy(llm_call.context_messages)
 
         prompt_context_messages = [llm_call.user_message]
-        current_tokens = await self.executor.count_tokens(
-            llm_call.user_message.get_str()
-        ) + llm_call.completion_tokens_len
+        current_tokens = await self.executor.count_tokens([llm_call.user_message]) + llm_call.completion_tokens_len
 
         # reverse over the messages, last to first
         for i in range(len(lifo_messages) - 1, -1, -1):
             if (
-                current_tokens + await self.executor.count_tokens(lifo_messages[i].get_str())
+                current_tokens + await self.executor.count_tokens([lifo_messages[i]])
                 < llm_call.max_prompt_len
             ):
                 prompt_context_messages.append(lifo_messages[i])
-                current_tokens += await self.executor.count_tokens(lifo_messages[i].get_str())
+                current_tokens += await self.executor.count_tokens([lifo_messages[i]])
             else:
                 break
 

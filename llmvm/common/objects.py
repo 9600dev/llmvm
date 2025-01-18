@@ -913,7 +913,7 @@ class Executor(ABC):
     @abstractmethod
     async def count_tokens(
         self,
-        messages: list['Message'] | str,
+        messages: list['Message'],
     ) -> int:
         pass
 

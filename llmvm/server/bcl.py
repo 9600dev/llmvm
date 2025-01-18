@@ -265,7 +265,7 @@ class BCL():
             python_files = []
             for root, _, files in os.walk(os.path.expanduser(path)):
                 for file in files:
-                    if file.endswith('.py'):
+                    if file.endswith('.py') and '.venv' not in root:
                         python_files.append(os.path.join(root, file))
             return python_files
 
@@ -273,7 +273,7 @@ class BCL():
             expanded_path = os.path.expanduser(source_file_paths)
             if os.path.isdir(expanded_path):
                 return find_python_files(expanded_path)
-            elif os.path.isfile(expanded_path) and expanded_path.endswith('.py'):
+            elif os.path.isfile(expanded_path) and expanded_path.endswith('.py') and '.venv' not in expanded_path:
                 return [expanded_path]
             else:
                 raise ValueError(f"Invalid source file path: {source_file_paths}. Must be a directory or a .py file.")
@@ -284,7 +284,7 @@ class BCL():
                 expanded_path = os.path.expanduser(path)
                 if os.path.isdir(expanded_path):
                     all_python_files.extend(find_python_files(expanded_path))
-                elif os.path.isfile(expanded_path) and expanded_path.endswith('.py'):
+                elif os.path.isfile(expanded_path) and expanded_path.endswith('.py') and '.venv' not in expanded_path:
                     all_python_files.append(expanded_path)
                 else:
                     raise ValueError(f"Invalid source file path: {expanded_path}. Must be a directory or a .py file.")

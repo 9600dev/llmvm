@@ -96,7 +96,7 @@ class VectorSearch():
         self,
         query: str,
         content: str,
-        token_calculator: Callable[[str], Awaitable[int]],
+        token_calculator: Callable[[list[Message]], Awaitable[int]],
         chunk_token_count: int = 256,
         chunk_overlap: int = 0,
         max_tokens: int = 8196,
