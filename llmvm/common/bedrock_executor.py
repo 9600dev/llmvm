@@ -14,7 +14,7 @@ from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content,
                                   Executor, FileContent, ImageContent,
                                   MarkdownContent, Message, PdfContent, System,
-                                  TextContent, TokenNode, TokenPerf,
+                                  TextContent, TokenCountCache, TokenNode, TokenPerf,
                                   TokenStopNode, User, awaitable_none)
 from llmvm.common.perf import TokenStreamManager
 
@@ -38,6 +38,7 @@ class BedrockExecutor(Executor):
             default_max_input_len=default_max_input_len,
             default_max_output_len=default_max_output_len,
         )
+        self.token_count_cache: TokenCountCache = TokenCountCache()
         self.api_key = api_key
         self.client = boto3.client(client_name, region_name=region_name)
         self.max_images = max_images
@@ -208,6 +209,9 @@ class BedrockExecutor(Executor):
         self,
         messages: list[dict[str, Any]],
     ) -> int:
+        if self.token_count_cache.get(messages):
+            return cast(int, self.token_count_cache.get(messages))
+
         num_tokens = 0
         json_accumulator = ''
         for message in messages:
@@ -217,7 +221,10 @@ class BedrockExecutor(Executor):
                     num_tokens += get_image_token_count(b64data)['estimated_tokens']
                 else:
                     json_accumulator += json.dumps(content, indent=2)
-        return num_tokens + int(len(json_accumulator.split(' ')) * .75)
+
+        result = num_tokens + int(len(json_accumulator.split(' ')) * .90)
+        self.token_count_cache.put(messages, result)
+        return result
 
     async def aexecute_direct(
         self,
@@ -345,6 +352,7 @@ class BedrockExecutor(Executor):
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,
             perf_trace=perf,
+            total_tokens=perf.total_tokens or await self.count_tokens(messages),
         )
 
         if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')

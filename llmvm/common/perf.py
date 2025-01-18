@@ -72,13 +72,23 @@ class LoggingAsyncIterator:
             if isinstance(result, AnthropicCompletion):
                 return cast(str, result.completion or '')
             elif isinstance(result, OAICompletionChunk):
-                if result.choices[0].finish_reason:
+                if result.choices and len(result.choices) > 0 and result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
-                return cast(str, result.choices[0].delta.content or '')  # type: ignore
+                if result.usage:
+                    self.perf.total_tokens = result.usage.total_tokens  # type: ignore
+                if result.choices and len(result.choices) > 0:
+                    return cast(str, result.choices[0].delta.content or '')  # type: ignore
+                else:
+                    return ''
             elif isinstance(result, OAICompletion):  # o1 mini and o1 preview don't do streaming
-                if result.choices[0].finish_reason:
+                if result.choices and len(result.choices) > 0 and result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
-                return cast(str, result.choices[0].message.content or '')  # type: ignore
+                if 'usage' in result and 'total_tokens' in result['usage']:  # type: ignore
+                    self.perf.total_tokens = result.usage.total_tokens  # type: ignore
+                if result.choices and len(result.choices) > 0:
+                    return cast(str, result.choices[0].message.content or '')  # type: ignore
+                else:
+                    return ''
             # amazon nova
             elif isinstance(result, dict) and 'chunk' in result:
                 chunk = result['chunk']
@@ -128,6 +138,7 @@ class TokenStreamWrapper:
             self.perf.object = final_message  # type: ignore
             self.perf.stop_reason = str(final_message.stop_reason) if final_message.stop_reason else ''
             self.perf.stop_token = final_message.stop_sequence if final_message.stop_sequence else ''
+            self.perf.total_tokens = final_message.usage.input_tokens + final_message.usage.output_tokens
             await self.object.close()
             return final_message
         else:

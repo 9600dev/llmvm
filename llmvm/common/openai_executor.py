@@ -240,16 +240,17 @@ class OpenAIExecutor(Executor):
 
         if model is not None and 'o1' in model:
             # temp 1.0 only supported for o1 and max_tokens is not supported
-            # streaming not supported, stop tokens not supported. yikes.
+            # this barely works
             temperature = 1.0
             base_params = {
                 "model": model if model else self.default_model,
                 "temperature": temperature,
-                "max_completion_tokens": max_output_tokens,
+                "max_completion_tokens": 4096,
                 "messages": messages_cast,
                 "stop": stop_tokens if stop_tokens else None,
                 "functions": functions_cast if functions else None,
-                "stream": True
+                "stream_options": {"include_usage": True},
+                "stream": True,
             }
         else:
             base_params = {
@@ -259,6 +260,7 @@ class OpenAIExecutor(Executor):
                 "messages": messages_cast,
                 "stop": stop_tokens if stop_tokens else None,
                 "functions": functions_cast if functions else None,
+                "stream_options": {"include_usage": True},
                 "stream": True
             }
 
@@ -299,7 +301,7 @@ class OpenAIExecutor(Executor):
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
-        await stream_async.get_final_message()
+        _ = await stream_async.get_final_message()
         perf.log()
 
         assistant = Assistant(
@@ -308,6 +310,7 @@ class OpenAIExecutor(Executor):
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,
             perf_trace=perf,
+            total_tokens=perf.total_tokens,
         )
         if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')
         return assistant

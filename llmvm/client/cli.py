@@ -420,9 +420,6 @@ class Repl():
         @kb.add('c-y', 'c')
         def _(event):
             if 'last_thread' in globals():
-                last_thread_t: SessionThreadModel = last_thread
-                last_message = last_thread_t.messages[-1].to_message().get_str()
-
                 code_blocks = get_code_blocks()
 
                 if code_blocks:
@@ -587,15 +584,29 @@ class Repl():
             else:
                 return []
 
+        def get_total_tokens(session_thread: SessionThreadModel) -> int:
+            if session_thread and session_thread.messages and session_thread.messages[-1].role == 'assistant':
+                return session_thread.messages[-1].total_tokens
+            else:
+                return 0
+
         command_executing = False
 
         while True:
             try:
+                global last_thread
+
                 ctx = click.Context(cli)
                 pipe_task = asyncio.create_task(process_pipe_messages(self))
 
+                token_count = get_total_tokens(last_thread) if 'last_thread' in globals() else 0
+
+                repl_stats = f'[id: {thread_id}] query>> '
+                if token_count > 0:
+                    repl_stats = f'[id: {thread_id} n_toks: {token_count}] query>> '
+
                 query = await session.prompt_async(
-                    f'[{thread_id}] query>> ',
+                    repl_stats,
                     complete_while_typing=True,
                 )
 
@@ -1157,56 +1168,6 @@ def thread(
     console.print_thread(thread=thread)
     thread_id = thread.id
     return thread
-
-
-@cli.command('count', help='Count tokens in messsage thread.')
-@click.option('--id', '-i', type=int, default=0, required=True, help='Thread ID')
-@click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''))
-@click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
-              help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
-@click.option('--endpoint', '-e', type=str, required=False,
-              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
-              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
-def count(
-    id: int,
-    model: str,
-    executor: str,
-    endpoint: str,
-):
-    global thread_id
-    global last_thread
-
-    if executor:
-        if (executor.startswith('"') and executor.endswith('"')) or (executor.startswith("'") and executor.endswith("'")):
-            executor = executor[1:-1]
-
-    llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
-        default_executor_name=executor,
-        default_model_name=model,
-        api_key='',
-        throw_if_server_down=False,
-        default_stream_handler=StreamPrinter().write
-    )
-
-    # we just need an approximation of token count here, so we'll skip the function definitions
-    system_message, tools_message = Helpers.prompts(
-        prompt_name='python_continuation_execution.prompt',
-        template={},
-        user_token='User',
-        assistant_token='Assistant',
-        append_token='',
-    )
-
-    if id <= 0:
-        count = asyncio.run(llmvm_client.count_tokens([system_message, tools_message]))
-        rich.print(count)
-        return count
-    else:
-        thread = asyncio.run(llmvm_client.get_thread(id))
-        count = asyncio.run(llmvm_client.count_tokens([system_message, tools_message] + [MessageModel.to_message(m) for m in thread.messages]))
-        rich.print(count)
-        return count
 
 
 @cli.command('messages', help='List all messages in a message thread.')

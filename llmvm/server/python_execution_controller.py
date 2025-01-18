@@ -965,7 +965,16 @@ class ExecutionController(Controller):
             elif not code_blocks and response.stop_token == '</helpers>':
                 assistant_response_str = response.get_str()
                 assistant_response_str += '\n\n' + "I've repeated the same code block. I should try something different and not repeat the same code again."
-                messages_copy.append(Assistant(TextContent(assistant_response_str), hidden=True))
+                messages_copy.append(
+                    Assistant(
+                        TextContent(assistant_response_str),
+                        total_tokens=response.total_tokens,
+                        stop_reason=response.stop_reason,
+                        stop_token=response.stop_token,
+                        perf_trace=response.perf_trace,
+                        hidden=True
+                    )
+                )
             else:
                 # if there are no code blocks, we're done
                 if response.get_str().strip() != '':
@@ -979,11 +988,18 @@ class ExecutionController(Controller):
         dedupped: list[Statement] = list(reversed(Helpers.remove_duplicates(results, lambda a: a.result())))
 
         if messages_copy[-1].role() != 'assistant':
-            messages_copy.append(Assistant(TextContent('\n'.join([str(statement) for statement in dedupped]))))
+            messages_copy.append(
+                Assistant(
+                    TextContent('\n'.join([str(statement) for statement in dedupped])),
+                    total_tokens=response.total_tokens,
+                    stop_reason=response.stop_reason,
+                    stop_token=response.stop_token,
+                    perf_trace=response.perf_trace,
+                )
+            )
 
         # remove hidden messages from the list
         messages_copy = [m for m in messages_copy if not m.hidden]
         # only return the extra messages beyond the messages list that was passed in
 
         return (messages_copy, locals_dict)
-        # return list(reverseddedupped)), locals_dict

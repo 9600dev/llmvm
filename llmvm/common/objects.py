@@ -8,7 +8,7 @@ import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from importlib import resources
-from typing import (Any, Awaitable, Callable, Optional, TextIO, Type,
+from typing import (Any, Awaitable, Callable, Optional, OrderedDict, TextIO, Type,
                     TypedDict, TypeVar, Union, cast)
 
 import numpy as np
@@ -160,6 +160,50 @@ def none(a: 'AstNode') -> None:
     pass
 
 
+class TokenCountCache:
+    _instance = None
+
+    def __new__(cls, max_size: int = 500):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance.max_size = max_size
+            cls._instance.cache = OrderedDict()
+        return cls._instance
+
+    def __init__(self, max_size: int = 500):
+        # The initialization will only happen once
+        # subsequent calls will not modify max_size
+        if not hasattr(self, 'cache'):
+            self.max_size = max_size
+            self.cache = OrderedDict()
+
+    def _generate_key(self, messages: list[dict[str, Any]]) -> str:
+        return str(hash(str(messages)))
+
+    def get(self, messages: list[dict[str, Any]]) -> Optional[int]:
+        key = self._generate_key(messages)
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        return None
+
+    def put(self, messages: list[dict[str, Any]], token_count: int) -> None:
+        key = self._generate_key(messages)
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            self.cache[key] = token_count
+            return
+        self.cache[key] = token_count
+        if len(self.cache) > self.max_size:
+            self.cache.popitem(last=False)
+
+    def clear(self) -> None:
+        self.cache.clear()
+
+    def __len__(self) -> int:
+        return len(self.cache)
+
+
 class TokenPerf:
     def __init__(
         self,
@@ -173,7 +217,8 @@ class TokenPerf:
             'LLMVM_PROFILING_FILE',
             default='~/.local/share/llmvm/trace.log'
         ),
-        request_id: str = ''
+        request_id: str = '',
+        total_tokens: int = 0,
     ):
         self._name: str = name
         self._executor: str = executor_name
@@ -189,6 +234,7 @@ class TokenPerf:
         self.request_id = request_id
         self.stop_reason = ''
         self.stop_token = ''
+        self.total_tokens = total_tokens
         self.object = None
 
     def start(self):
@@ -233,6 +279,7 @@ class TokenPerf:
                 'request_id': self.request_id,
                 'stop_reason': self.stop_reason,
                 'stop_token': self.stop_token,
+                'total_tokens': self.total_tokens,
                 'ticks': self.ticks()
             }
         else:
@@ -251,7 +298,7 @@ class TokenPerf:
     def __str__(self):
         if self.enabled:
             res = self.result()
-            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["ttlt"]},{res["ttft"]},{res["completion_time"]},{res["prompt_len"]},{res["completion_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{res["request_id"]},{res["stop_reason"]},{res["stop_token"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
+            result = f'{dt.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")},{res["name"]},{res["executor"]},{res["model"]},{res["ttlt"]},{res["ttft"]},{res["completion_time"]},{res["prompt_len"]},{res["completion_len"]},{res["p_tok_sec"]},{res["s_tok_sec"]},{res["request_id"]},{res["stop_reason"]},{res["stop_token"]},{res["total_tokens"]},{",".join([f"{t:.8f}" for t in res["ticks"]])}'
             return result
         else:
             return ''
@@ -272,7 +319,7 @@ class TokenPerf:
             self.debug()
             if not os.path.exists(os.path.expanduser(self.log_file)):
                 with open(os.path.expanduser(self.log_file), 'w') as f:
-                    f.write('name,executor,model,ttlt,ttft,prompt_tokens,completion_time,prompt_len,completion_len,p_tok_sec,s_tok_sec,p_cost,s_cost,request_id,stop_reason,stop_token,ticks\n')
+                    f.write('name,executor,model,ttlt,ttft,prompt_tokens,completion_time,prompt_len,completion_len,p_tok_sec,s_tok_sec,p_cost,s_cost,request_id,stop_reason,stop_token,total_tokens,ticks\n')
             with open(os.path.expanduser(self.log_file), 'a') as f:
                 result = str(self)
                 f.write(result + '\n')
@@ -293,6 +340,7 @@ class TokenPerf:
                 'request_id': '',
                 'stop_reason': '',
                 'stop_token': '',
+                'total_tokens': 0,
                 'ticks': []
             }
 
@@ -725,6 +773,7 @@ class Assistant(Message):
         stop_token: str = '',
         perf_trace: object = None,
         hidden: bool = False,
+        total_tokens: int = 0,
     ):
         super().__init__([message], hidden)
         self.error = error
@@ -733,6 +782,7 @@ class Assistant(Message):
         self.stop_reason: str = stop_reason
         self.stop_token: str = stop_token
         self.perf_trace: object = perf_trace
+        self.total_tokens: int = total_tokens
 
     def role(self) -> str:
         return 'assistant'
@@ -767,6 +817,7 @@ class Assistant(Message):
         json_result['system_context'] = self._system_context
         json_result['stop_reason'] = self.stop_reason
         json_result['stop_token'] = self.stop_token
+        json_result['total_tokens'] = self.total_tokens
         return json_result
 
     @classmethod
@@ -776,6 +827,7 @@ class Assistant(Message):
         assistant._system_context = data.get('system_context')
         assistant.stop_reason = cast(str, data.get('stop_reason'))
         assistant.stop_token = cast(str, data.get('stop_token'))
+        assistant.total_tokens = cast(int, data.get('total_tokens'))
         return assistant
 
 
@@ -868,7 +920,7 @@ class Executor(ABC):
     @abstractmethod
     async def count_tokens_dict(
         self,
-        messages: list['Message'] | str,
+        messages: list[dict[str, Any]],
     ) -> int:
         pass
 
@@ -1538,6 +1590,7 @@ class MessageModel(BaseModel):
     content: list[ContentModel]
     pinned: int = 0
     prompt_cached: bool = False
+    total_tokens: int = 0  # only used on Assistant messages
 
     def to_message(self) -> Message:
         content_objects = [c.to_content() for c in self.content]
@@ -1547,9 +1600,9 @@ class MessageModel(BaseModel):
         elif self.role == 'system':
             msg = System(content_objects[0].get_str())
         elif self.role == 'assistant':
-            msg = Assistant(content_objects[0])
+            msg = Assistant(content_objects[0], total_tokens=self.total_tokens)
         else:
-            raise ValueError(f"Unsupported role: {self.role}")
+            raise ValueError(f"MessageModel.to_message() Unsupported role: {self.role}")
 
         msg.pinned = self.pinned
         msg.prompt_cached = self.prompt_cached
@@ -1563,7 +1616,8 @@ class MessageModel(BaseModel):
             role=message.role(),
             content=content_models,
             pinned=message.pinned,
-            prompt_cached=message.prompt_cached
+            prompt_cached=message.prompt_cached,
+            total_tokens=message.total_tokens if isinstance(message, Assistant) else 0,
         )
 
 

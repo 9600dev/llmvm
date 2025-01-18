@@ -13,7 +13,7 @@ from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content,
                                   Executor, FileContent, ImageContent,
                                   MarkdownContent, Message, PdfContent, System,
-                                  TextContent, TokenNode, TokenPerf,
+                                  TextContent, TokenCountCache, TokenNode, TokenPerf,
                                   TokenStopNode, User, awaitable_none)
 from llmvm.common.perf import TokenStreamManager
 
@@ -45,6 +45,7 @@ class AnthropicExecutor(Executor):
         )
         self.client = AsyncAnthropic(api_key=api_key, base_url=api_endpoint)
         self.max_images = max_images
+        self.token_count_cache: TokenCountCache = TokenCountCache()
 
     def user_token(self):
         return 'User'
@@ -196,16 +197,20 @@ class AnthropicExecutor(Executor):
         self,
         messages: list[dict[str, Any]],
     ) -> int:
-        num_tokens = 0
-        json_accumulator = ''
-        for message in messages:
-            for content in message['content']:
-                if 'image' in content['type'] and 'source' in content and 'data' in content['source']:
-                    b64data = content['source']['data']
-                    num_tokens += Helpers.anthropic_image_tok_count(b64data)
-                else:
-                    json_accumulator += json.dumps(content, indent=2)
-        return num_tokens + await self.client.count_tokens(json_accumulator)
+        # expensive call, so we're going to cache the results
+        if self.token_count_cache.get(messages):
+            return cast(int, self.token_count_cache.get(messages))
+
+        system_message = [m for m in messages if m['role'] == 'system']
+        rest_messages = [m for m in messages if m['role'] != 'system']
+
+        num_tokens = await self.client.beta.messages.count_tokens(
+            messages=rest_messages,  # type: ignore
+            model=self.default_model,
+            system=str(system_message[0]['content'] if system_message and system_message[0]['content'] else ''),
+        )
+        self.token_count_cache.put(messages, num_tokens.input_tokens)
+        return num_tokens.input_tokens
 
     async def aexecute_direct(
         self,
@@ -315,7 +320,7 @@ class AnthropicExecutor(Executor):
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
-        await stream_async.get_final_message()  # this forces an update to the perf object
+        anthropic_message = await stream_async.get_final_message()  # this forces an update to the perf object
         perf.log()
 
         assistant = Assistant(
@@ -324,6 +329,8 @@ class AnthropicExecutor(Executor):
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,
             perf_trace=perf,
+            total_tokens=(anthropic_message.usage.input_tokens + anthropic_message.usage.output_tokens)
+                if anthropic_message else 0,
         )
 
         if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')
