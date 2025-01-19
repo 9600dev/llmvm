@@ -34,7 +34,7 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
 
     async def decode(content) -> bool:
         try:
-            if not content.startswith('{'):
+            if not content.startswith('{') or not content.endswith('}'):
                 return False
 
             data = jsonpickle.decode(content)
