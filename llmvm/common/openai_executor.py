@@ -143,15 +143,19 @@ class OpenAIExecutor(Executor):
             raise ValueError('First message must be from User')
 
         for message in expanded_messages:
-            for i in range(len(message.message)):
+            for i in range(len(message.message) - 1, -1, -1):
                 if isinstance(message.message[i], PdfContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], MarkdownContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], BrowserContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], FileContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
 
         # check to see if there are more than self.max_images images in the message list
         images = [c for c in Helpers.flatten([m.message for m in expanded_messages]) if isinstance(c, ImageContent)]
@@ -212,7 +216,7 @@ class OpenAIExecutor(Executor):
         functions: list[dict[str, str]] = [],
         model: Optional[str] = None,
         max_output_tokens: int = 16384,
-        temperature: float = 0.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
     ) -> TokenStreamManager:
         model = model if model else self.default_model
@@ -229,7 +233,7 @@ class OpenAIExecutor(Executor):
                                     self.max_input_tokens(model=model)))
 
         # o1-mini and o1-preview don't support system messages
-        if model is not None and 'o1-preview' in model or 'o1-mini' in model:
+        if model is not None and 'o1-preview' in model or 'o1-mini' in model or 'deepseek-reasoner' in model:
             messages = [m for m in messages if m['role'] != 'system']
 
         messages_cast = cast(list[ChatCompletionMessageParam], messages)
@@ -273,7 +277,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: list[Message],
         max_output_tokens: int = 16384,
-        temperature: float = 0.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
@@ -319,7 +323,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: list[Message],
         max_output_tokens: int = 16384,
-        temperature: float = 0.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,

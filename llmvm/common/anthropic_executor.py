@@ -151,15 +151,19 @@ class AnthropicExecutor(Executor):
             raise ValueError('First message must be from User')
 
         for message in expanded_messages:
-            for i in range(len(message.message)):
+            for i in range(len(message.message) - 1, -1, -1):
                 if isinstance(message.message[i], PdfContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], MarkdownContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], BrowserContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], FileContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
 
         # check to see if there are more than self.max_images images in the message list
         images = [c for c in Helpers.flatten([m.message for m in expanded_messages]) if isinstance(c, ImageContent)]
@@ -183,6 +187,16 @@ class AnthropicExecutor(Executor):
         # now build the json dictionary and return
         for i in range(len(expanded_messages)):
             wrapped.append(self.to_dict(expanded_messages[i], model, server_serialization=False))
+
+        # anthropic doesn't like content that is just non-whitespace
+        for i in range(len(wrapped) - 1, -1, -1):
+            if isinstance(wrapped[i]['content'], list):
+                for j in range(len(wrapped[i]['content']) -1, -1, -1):
+                    if wrapped[i]['content'][j]['type'] == 'text' and wrapped[i]['content'][j]['text'].strip() == '':  # type: ignore
+                        wrapped[i]['content'].pop(j)  # type: ignore
+            else:
+                if wrapped[i]['content']['type'] == 'text' and wrapped[i]['content']['text'].strip() == '':  # type: ignore
+                    wrapped.pop(i)
 
         return wrapped
 
@@ -218,7 +232,7 @@ class AnthropicExecutor(Executor):
         functions: list[dict[str, str]] = [],
         model: Optional[str] = None,
         max_output_tokens: int = 4096,
-        temperature: float = 0.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
     ) -> TokenStreamManager:
         model = model if model else self.default_model
@@ -244,7 +258,7 @@ class AnthropicExecutor(Executor):
                 system_message = message['content']
                 messages.remove(message)
 
-        # the messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
+        # the Anthropic messages API also doesn't allow for multiple User or Assistant messages in a row, so we're
         # going to add an Assistant message in between two User messages, and a User message between two Assistant.
         messages_list: list[dict[str, Any]] = []
 
@@ -272,6 +286,11 @@ class AnthropicExecutor(Executor):
         token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore
         token_trace.start()
 
+        # anthropic debug prepend stuff, ignore for now
+        prepend = Container.get_config_variable('LLMVM_PREPEND', default='')
+        if prepend:
+            messages_list[0]['content'][0]['text'] = prepend + messages_list[0]['content'][0]['text']
+
         try:
             # AsyncStreamManager[AsyncMessageStream]
             stream = self.client.messages.stream(
@@ -292,7 +311,7 @@ class AnthropicExecutor(Executor):
         self,
         messages: list[Message],
         max_output_tokens: int = 4096,
-        temperature: float = 1.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
@@ -339,7 +358,7 @@ class AnthropicExecutor(Executor):
         self,
         messages: list[Message],
         max_output_tokens: int = 4096,
-        temperature: float = 1.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Optional[Callable[[AstNode], None]] = None,

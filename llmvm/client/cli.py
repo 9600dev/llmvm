@@ -227,6 +227,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                         continue
                     else:
                         filename = answer
+            command = diff_info['command']
 
             if diff_info['command'] == 'patch':
                 with tempfile.NamedTemporaryFile(mode='w', delete=True) as temp_file:
@@ -1260,7 +1261,7 @@ def new(
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
               default='lifo', help='context window compression method if the message is too large. Default is "lifo" last in first out.')
 @click.option('--file-writes', type=bool, required=False, default=False, is_flag=True, help='automatically apply file writes and diffs')
-@click.option('--temperature', type=float, required=False, default=0.0, help='temperature for the call.')
+@click.option('--temperature', type=float, required=False, default=0.2, help='temperature for the call.')
 @click.option('--output_token_len', type=int, required=False, default=4096, help='maximum output tokens for the call.')
 @click.option('--stop_tokens', type=str, required=False, multiple=True, help='stop tokens for the call.')
 @click.option('--escape', type=bool, is_flag=True, required=False, help='escape the message content.')

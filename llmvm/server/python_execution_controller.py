@@ -652,21 +652,46 @@ class ExecutionController(Controller):
         cookies: list[Dict[str, Any]] = [],
         locals_dict: dict[str, Any] = {},
     ) -> Tuple[list[Message], dict[str, Any]]:
-        def parse_code_block_result(result: AstNode | list[AstNode] | str | list[Answer]) -> list[AstNode]:
+        # def parse_code_block_result(result: AstNode | list[AstNode] | str | list[Answer]) -> list[AstNode]:
+        #     if isinstance(result, str):
+        #         return [TextContent(result)]
+        #     elif isinstance(result, Content):
+        #         return [result]
+        #     elif isinstance(result, list) and len(result) == 1:
+        #         return [result[0]]
+        #     elif isinstance(result, list) and all([isinstance(a, Answer) for a in result]):
+        #         logging.debug('parse_code_block_result() called with list of Answers')
+        #         return [TextContent(str(a.result())) for a in result]  # type: ignore
+        #     elif isinstance(result, list) and len(result) > 1:
+        #         logging.debug('parse_code_block_result() called with list of AstNodes')
+        #         return cast(list[AstNode], result)
+        #     elif isinstance(result, Assistant):
+        #         return cast(list[AstNode], result.message)
+        #     else:
+        #         raise ValueError(f'Unknown content type: {type(result)}')
+
+        def parse_code_block_result(result) -> list[AstNode]:
             if isinstance(result, str):
                 return [TextContent(result)]
+            elif isinstance(result, (int, float, bool, dict, complex)):
+                return [TextContent(str(result))]
             elif isinstance(result, Content):
                 return [result]
-            elif isinstance(result, list) and len(result) == 1:
-                return [result[0]]
-            elif isinstance(result, list) and all([isinstance(a, Answer) for a in result]):
-                logging.debug('parse_code_block_result() called with list of Answers')
-                return [TextContent(str(a.result())) for a in result]  # type: ignore
-            elif isinstance(result, list) and len(result) > 1:
-                logging.debug('parse_code_block_result() called with list of AstNodes')
-                return cast(list[AstNode], result)
+            elif isinstance(result, Answer):
+                return parse_code_block_result(result.result())  # type: ignore
+            elif isinstance(result, FunctionCallMeta):
+                return parse_code_block_result(result.result())  # type: ignore
+            elif isinstance(result, list):
+                results = [parse_code_block_result(r) for r in result]
+                return Helpers.flatten(results)
             elif isinstance(result, Assistant):
-                return cast(list[AstNode], result.message)
+                return [TextContent(str(result.message))]
+            elif isinstance(result, Statement):
+                messages = self.statement_to_message(result)
+                content: list[Content] = Helpers.flatten([m.message for m in messages])
+                return cast(list[AstNode], content)
+            elif isinstance(result, AstNode):
+                return [result]
             else:
                 raise ValueError(f'Unknown content type: {type(result)}')
 
@@ -935,10 +960,12 @@ class ExecutionController(Controller):
                 messages_copy.append(response)
                 content_messages = []
                 content_messages.append(TextContent(f'<helpers_result>'))
-                if isinstance(code_execution_result, Content):
-                    content_messages.append(code_execution_result)
-                else:
-                    content_messages.append(TextContent(code_execution_result_str))
+                for c in code_execution_result:
+                    if isinstance(c, Content):
+                        content_messages.append(c)
+                    else:
+                        logging.debug('code_execution_result item is not a Content: {}'.format(c))
+                        content_messages.append(TextContent(str(c)))
                 content_messages.append(TextContent('</helpers_result>'))
                 completed_code_user_message = User(content_messages, hidden=hidden)
                 # required to complete the continuation

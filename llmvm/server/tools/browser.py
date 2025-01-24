@@ -29,7 +29,11 @@ class Browser():
         cookies: List[Dict[str, str]] = [],
     ):
         """
-        Controls a Chrome browser instance to interact with web pages.
+        Controls a Playwright based Chrome browser instance to interact with web pages.
+        You typically only need one instance of this class per user session:
+
+        browser = Browser()
+        ...
         """
         self.controller = controller
         self.runtime = runtime
@@ -115,6 +119,9 @@ class Browser():
 
     def __handle_navigate_expression(self, selector: str) -> BrowserContent:
         def __internal_click(selector: str) -> BrowserContent:
+            if 'current_page' not in self.__dict__:
+                raise ValueError('The browser instance is either closed, or has not been opened yet. Call goto() first.')
+
             logging.debug(f"Browser.__handle_navigate_expression() clicking {selector}")
             element_handle = asyncio.run(self.__resolve_selector(selector))
             asyncio.run(self.browser.click(element_handle))
@@ -236,6 +243,8 @@ class Browser():
 
         Expression: {expression}
         """
+        if 'current_page' not in self.__dict__:
+            raise ValueError('The browser instance is either closed, or has not been opened yet. Call goto() first.')
 
         result = asyncio.run(self.controller.aexecute_llm_call(
             llm_call=LLMCall(
@@ -379,6 +388,9 @@ class Browser():
         :type hit_enter: bool
         :return: The current state of the browser
         """
+        if 'current_page' not in self.__dict__:
+            raise ValueError('The browser instance is either closed, or has not been opened yet. Call goto() first.')
+
         logging.debug(f"Inserting {text} into {selector}")
         try:
             element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
@@ -430,6 +442,9 @@ class Browser():
         :type y: int
         :return: The current state of the browser
         """
+        if 'current_page' not in self.__dict__:
+            raise ValueError('The browser instance is either closed, or has not been opened yet. Call goto() first.')
+
         asyncio.run(self.browser.mouse_move_x_y_and_click(x, y))
         asyncio.run(self.browser.wait(500))
         return self.__get_state()

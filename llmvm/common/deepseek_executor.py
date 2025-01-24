@@ -64,12 +64,13 @@ class DeepSeekExecutor(OpenAIExecutor):
             else:
                 raise ValueError(f"Cannot serialize unknown content type: {type(content)} in message {message.to_json()}")
 
+        # deepseek reasoner doesn't support multiple user or assistant messages in a row
+        # so we should collapse multiple content blocks into a single block
         return [
             {
                 'role': message.role(),
-                'content': content
+                'content': '\n\n'.join(content_list)
             }
-            for content in content_list
         ]
 
     def from_dict(self, message: dict[str, Any]) -> 'Message':
@@ -110,17 +111,22 @@ class DeepSeekExecutor(OpenAIExecutor):
             raise ValueError('First message must be from User')
 
         for message in expanded_messages:
-            for i in range(len(message.message)):
+            for i in range(len(message.message) - 1, -1, -1):
                 if isinstance(message.message[i], PdfContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], MarkdownContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], BrowserContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], FileContent):
-                    message.message = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
 
         # check to see if there are more than self.max_images images in the message list
+        # deepseek right now doesn't support images, so it'll be zero.
         images = [c for c in Helpers.flatten([m.message for m in expanded_messages]) if isinstance(c, ImageContent)]
         image_count = len(images)
 
@@ -136,6 +142,17 @@ class DeepSeekExecutor(OpenAIExecutor):
                         if expanded_messages[i].message[j] == image:
                             expanded_messages[i].message.pop(j)
                             break
+
+        # deepseek reasoner doesn't support multiple user or assistant messages in a row
+        expanded_messages_temp = []
+        for i in range(len(expanded_messages)):
+            if i > 0 and isinstance(expanded_messages[i], User) and isinstance(expanded_messages[i - 1], User):
+                expanded_messages_temp.append(Assistant(TextContent('Okay, I am ready for your next message.')))
+            elif i > 0 and isinstance(expanded_messages[i], Assistant) and isinstance(expanded_messages[i - 1], Assistant):
+                raise ValueError('Two assistant messages in a row should not happen.')
+
+            expanded_messages_temp.append(expanded_messages[i])
+        expanded_messages = expanded_messages_temp
 
         # now build the json dictionary and return
         for i in range(len(expanded_messages)):
@@ -194,7 +211,7 @@ class DeepSeekExecutor(OpenAIExecutor):
         functions: list[dict[str, str]] = [],
         model: Optional[str] = None,
         max_output_tokens: int = 4096,
-        temperature: float = 0.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
     ) -> TokenStreamManager:
         return await super().aexecute_direct(messages, functions, model, max_output_tokens, temperature, stop_tokens)
@@ -203,7 +220,7 @@ class DeepSeekExecutor(OpenAIExecutor):
         self,
         messages: list[Message],
         max_output_tokens: int = 4096,
-        temperature: float = 0.0,
+        temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,

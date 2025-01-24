@@ -25,7 +25,6 @@ from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.tools.market import MarketHelpers
-from llmvm.server.tools.work_downloader import WorkDownloader
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
 
@@ -203,7 +202,6 @@ class PythonRuntime:
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
         self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
-        self.globals_dict['WorkDownloader'] = CallWrapper(self, WorkDownloader)
         self.globals_dict['answer'] = self.answer
         self.globals_dict['sys'] = sys
         self.globals_dict['os'] = os
@@ -302,14 +300,7 @@ class PythonRuntime:
                 expr.startswith('gsheet://') or expr.startswith('https://docs.google.com/spreadsheets/')
             )
         ):
-            import gspread
-            from gspread_dataframe import get_as_dataframe
-            gp = gspread.oauth()  # type: ignore
-            spreadsheet = gp.open_by_url(expr)
-            ws = spreadsheet.get_worksheet(0)
-            df = get_as_dataframe(ws, drop_empty_rows=True, drop_empty_columns=True)
-            return PandasMeta(expr_str=expr, pandas_df=df)
-
+            return Helpers.get_google_sheet(expr)
         elif (
             isinstance(expr, str)
             and ('.csv' in expr or expr.startswith('http'))

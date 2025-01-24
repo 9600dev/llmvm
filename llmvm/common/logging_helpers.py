@@ -115,27 +115,30 @@ def role_debug(logger, callee, role, message) -> None:
         header = True
         counter = 1
         max_lines = 20
-        for message in message_lines:
-            if header:
-                console.print('[orange]{}[/orange][green]{}[/green][grey]{}[/grey]'.format(
-                    callee[0:callee_column - 1].ljust(callee_column)[:callee_column],
-                    role.ljust(role_column)[:role_column],
-                    message.ljust(text_column)[:text_column]
-                ))
-                header = False
-            elif counter < max_lines or counter >= len(message_lines) - 5:
-                console.print('{}{}{}'.format(
-                    ''.ljust(callee_column),
-                    ''.ljust(role_column),
-                    message.ljust(text_column)[:text_column]
-                ))
-            elif counter == max_lines:
-                console.print('{}{}{}'.format(
-                    ''.ljust(callee_column),
-                    ''.ljust(role_column),
-                    '...'
-                ))
-            counter += 1
+        try:
+            for message in message_lines:
+                if header:
+                    console.print('[orange]{}[/orange][green]{}[/green][grey]{}[/grey]'.format(
+                        callee[0:callee_column - 1].ljust(callee_column)[:callee_column],
+                        role.ljust(role_column)[:role_column],
+                        message.ljust(text_column)[:text_column]
+                    ))
+                    header = False
+                elif counter < max_lines or counter >= len(message_lines) - 5:
+                    console.print('{}{}{}'.format(
+                        ''.ljust(callee_column),
+                        ''.ljust(role_column),
+                        message.ljust(text_column)[:text_column]
+                    ))
+                elif counter == max_lines:
+                    console.print('{}{}{}'.format(
+                        ''.ljust(callee_column),
+                        ''.ljust(role_column),
+                        '...'
+                    ))
+                counter += 1
+        except Exception as _:
+            pass
 
 
 def setup_logging(

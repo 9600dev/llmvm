@@ -596,6 +596,7 @@ Rules:
 * You should liberally use Markdown links to reference and cite the data source you are using in your responses, particularly if the data source has a url associated with it, e.g. [Read More](https://www.bbc.com/news/some-news-link.html)
 * If you see image content in the user's query that you think might be useful in explaining a concept in your respose, you should liberally use these images in ```markdown blocks via ![alt_text](url) and I will render them for the user.
 * Never use ```tool_code blocks or delimiters to execute code, only use <helpers></helpers> blocks.
+* Users cannot see what is inside <helper_results></helper_results> blocks, so if you need to use data from inside the <helper_results> block, extract it out and pass it back to the user as part of your Assistant reply.
 * If you feel like the users problem, query, question is answered based on your understanding of the entire conversation, emit the token "</complete>".
 * Always look at previous messages for context.
 

@@ -37,9 +37,6 @@ helper_functions:
   - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
   - llmvm.server.tools.market.MarketHelpers.get_stock_price_history
   - llmvm.server.tools.market.MarketHelpers.get_stock_analysis
-  - llmvm.server.tools.work_downloader.WorkDownloader.work_google_doc_to_markdown
-  - llmvm.server.tools.work_downloader.WorkDownloader.work_url_download
-  - llmvm.server.tools.work_downloader.WorkDownloader.get_chrome_tabs
   - llmvm.server.bcl.BCL.sample_normal
   - llmvm.server.bcl.BCL.sample_binomial
   - llmvm.server.bcl.BCL.sample_lognormal
@@ -55,6 +52,7 @@ helper_functions:
   - llmvm.server.bcl.BCL.get_central_bank_rates
   - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
   - llmvm.server.tools.browser.Browser
+  - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser
 
 # optional client color Python rich syntax
 client_stream_token_color: 'bright_black'

@@ -41,7 +41,7 @@ from docstring_parser import parse
 from PIL import Image
 
 from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent,
-                                  Message, StreamNode, SupportedMessageContent, System, TextContent, User)
+                                  Message, PandasMeta, StreamNode, SupportedMessageContent, System, TextContent, User)
 
 
 def write_client_stream(obj):
@@ -77,6 +77,16 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 
 class Helpers():
+    @staticmethod
+    def get_google_sheet(url: str) -> PandasMeta:
+            import gspread
+            from gspread_dataframe import get_as_dataframe
+            gp = gspread.oauth()  # type: ignore
+            spreadsheet = gp.open_by_url(url)
+            ws = spreadsheet.get_worksheet(0)
+            df = get_as_dataframe(ws, drop_empty_rows=True, drop_empty_columns=True)
+            return PandasMeta(expr_str=url, pandas_df=df)
+
     @staticmethod
     def parse_list_string(list_string: str, default: list = []) -> list:
         try:
