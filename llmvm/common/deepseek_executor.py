@@ -49,6 +49,9 @@ class DeepSeekExecutor(OpenAIExecutor):
     def append_token(self) -> str:
         return ''
 
+    def scratchpad_token(self) -> str:
+        return 'scratchpad'
+
     def name(self) -> str:
         return 'deepseek'
 

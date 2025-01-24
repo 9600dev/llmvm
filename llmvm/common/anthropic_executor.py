@@ -56,6 +56,9 @@ class AnthropicExecutor(Executor):
     def append_token(self) -> str:
         return ''
 
+    def scratchpad_token(self) -> str:
+        return 'thinking'
+
     def name(self) -> str:
         return 'anthropic'
 

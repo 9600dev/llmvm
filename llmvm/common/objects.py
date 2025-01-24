@@ -943,6 +943,12 @@ class Executor(ABC):
         pass
 
     @abstractmethod
+    def scratchpad_token(
+        self
+    ) -> str:
+        pass
+
+    @abstractmethod
     def unpack_and_wrap_messages(self, messages: list[Message], model: Optional[str] = None) -> list[dict[str, str]]:
         pass
 

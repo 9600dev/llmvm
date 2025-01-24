@@ -1815,6 +1815,7 @@ class Helpers():
         template: Dict[str, str],
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
+        scratchpad_token: str = 'scratchpad',
         append_token: str = '',
     ) -> Tuple[System, User]:
         if '[system_message]' not in prompt_text:
@@ -1844,6 +1845,8 @@ class Helpers():
         if not template.get('assistant_token'):
             template['assistant_token'] = assistant_token
             template['assistant_colon_token'] = assistant_token + ':'
+        if not template.get('scratchpad_token'):
+            template['scratchpad_token'] = scratchpad_token
 
         for key, value in template.items():
             prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
@@ -1881,19 +1884,21 @@ class Helpers():
         template: Dict[str, str],
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
+        scratchpad_token: str = 'scratchpad',
         append_token: str = '',
         module: str = 'llmvm.server.prompts.python'
     ) -> Dict[str, Any]:
         prompt: Dict[str, Any] = Helpers.load_resources_prompt(prompt_name, module)
 
         try:
-
             if not template.get('user_token'):
                 template['user_token'] = user_token
                 template['user_colon_token'] = user_token + ':'
             if not template.get('assistant_token'):
                 template['assistant_token'] = assistant_token
                 template['assistant_colon_token'] = assistant_token + ':'
+            if not template.get('scratchpad_token'):
+                template['scratchpad_token'] = scratchpad_token
 
             for key, value in template.items():
                 prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
@@ -1936,27 +1941,16 @@ class Helpers():
             return result
 
     @staticmethod
-    def populate_prompts(
-        prompt_str: str,
-        template: Dict[str, str],
-        user_token: str = 'User',
-        assistant_token: str = 'Assistant',
-        append_token: str = '',
-        module: str = 'llmvm.server.prompts.python'
-    ) -> Tuple[System, User]:
-        prompt = Helpers.load_and_populate_prompt(prompt_str, template, user_token, assistant_token, append_token, module)
-        return (prompt['system_message'], prompt['user_message'])
-
-    @staticmethod
     def prompt_message(
         prompt_name: str,
         template: Dict[str, str],
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
+        scratchpad_token: str = 'scratchpad',
         append_token: str = '',
         module: str = 'llmvm.server.prompts.python'
     ) -> Message:
-        prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
+        prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, scratchpad_token, append_token, module)
         return User(TextContent(prompt['user_message']))
 
     @staticmethod
@@ -1965,8 +1959,9 @@ class Helpers():
         template: Dict[str, str],
         user_token: str = 'User',
         assistant_token: str = 'Assistant',
+        scratchpad_token: str = 'scratchpad',
         append_token: str = '',
         module: str = 'llmvm.server.prompts.python'
     ) -> Tuple[System, User]:
-        prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, append_token, module)
+        prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, scratchpad_token, append_token, module)
         return (System(prompt['system_message']), User(TextContent(prompt['user_message'])))
