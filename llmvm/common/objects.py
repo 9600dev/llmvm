@@ -1080,7 +1080,7 @@ def coerce_to(a: Any, type_var: Type[T]) -> Any:
         if isinstance(a, (int, float, np.number, bool)):
             return bool(a)
 
-    raise TypeError(f"Cannot coerce type {type(a)} to {type_var}")
+    raise TypeError(f"Cannot coerce type {type(a)} with value {str(a)[0:50]} to {type_var}")
 
 class TokenCompressionMethod(Enum):
     AUTO = 0

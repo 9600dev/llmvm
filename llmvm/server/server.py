@@ -595,9 +595,11 @@ if __name__ == '__main__':
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
     role_color = Container().get_config_variable('client_info_bold_color', default='cyan')
     tool_color = Container().get_config_variable('client_info_color', default='bold green')
+    port=int(Container().get_config_variable('server_port', 'LLMVM_SERVER_PORT'))
 
     rich.print(f'[{role_color}]Default executor is: {default_controller}[/{role_color}]')
     rich.print(f'[{role_color}]Default model is: {default_model}[/{role_color}]')
+    rich.print(f'[{role_color}]Default port is: {port} $LLMVM_SERVER_PORT or config to change.[/{role_color}]')
     rich.print()
     rich.print(f'[{role_color}]Make sure to `playwright install`.[/{role_color}]')
     rich.print(f'[{role_color}]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.[/{role_color}]')

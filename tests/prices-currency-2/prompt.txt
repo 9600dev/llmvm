@@ -1,0 +1,1 @@
+John has $100.00 USD. Annie asks to borrow $50 AUD from John. John agrees, but requires that Annie pay back the loan in one year, at a simple interest rate of 6%. How much does John have after a year when Annie pays him back?

@@ -1,0 +1,1 @@
+I want you to create a LLM prompt that describes the exact inverse of the image I've just sent you. Really describe the inverse image well, so that it can be created by an image generator.

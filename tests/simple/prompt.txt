@@ -1,0 +1,1 @@
+Generate a Python list from 0 to 10 using Python list syntax. Just emit the list in Python list format, nothing else. 

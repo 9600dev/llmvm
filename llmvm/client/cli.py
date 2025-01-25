@@ -751,6 +751,11 @@ def cli(ctx):
             for cmd_name in ctx.command.list_commands(ctx)  # type: ignore
         }
 
+        # there's a weird assumption I've made here around parsing, which I'm going to hackily fix
+        for i in range(len(sys.argv)):
+            if sys.argv[i] == '-t' or sys.argv[i] == '--context' and not sys.argv[i+1].startswith('"'):
+                sys.argv[i+1] = f'"{sys.argv[i+1]}"'
+
         query = ' '.join(sys.argv[1:])
         args = query.split(' ')
 
