@@ -292,7 +292,7 @@ class ConsolePrinter:
             else:
                 self.pprint(f'[{role_color}]{message.role().capitalize()}[/{role_color}]: ', message.message, escape)
             fire_helpers(message.get_str())
-            if role_new_line: self.console.print('\n', end='')
+            if not escape and role_new_line: self.console.print('\n', end='')
 
     def print_thread(self, thread: SessionThreadModel, escape: bool = False, role_new_line: bool = True):
         self.print_messages([MessageModel.to_message(message) for message in thread.messages], escape=escape, role_new_line=role_new_line)
