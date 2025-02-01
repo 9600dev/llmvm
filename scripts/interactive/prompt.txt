@@ -1,1 +1,13 @@
-the previous message contains the output of a text based program that is currently running. you are interacting directly with this text based program. I want you to emit the next command in order to make progress on the task you think you need to make progress on. if you need to hit the "enter" key, just emit <ENTER> as part of your response and I'll take both your text output and hit the enter key on your behalf. Just emit the next command, nothing else. try and avoid repeated commands over and over again.  
+The previous message contains the current output of a terminal program that you are directly interacting with. Your job is to emit just the next specific command(s) for the terminal program to make forward progress. The goal will be described for you in the next message to help make forward progress. 
+
+I will take the command you emit, and send it directly to the terminal program. 
+
+If you need to send the "enter" key, you can do that by emitting <ENTER>, so:
+
+go north<ENTER>
+
+or 
+
+ls<ENTER>
+
+Do not add commentary, formatting, markdown blocks, apologies, or ask questions. Just emit the next command you want to send to the program, that's it. Remember, the previous message contains the current state of the program and all your previous commands, and the next message contains the goal. It's not wise to repeat commands. 

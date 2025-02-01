@@ -44,6 +44,14 @@ class ExecutionController(Controller):
         self.vector_search = vector_search
         self.exception_limit = exception_limit
 
+    def __execution_prompt(self, executor: Executor, model: str) -> str:
+        if executor.name() == 'openai' and ('o1' in model or 'o3' in model):
+            return 'python_continuation_execution_reasoning.prompt'
+        elif executor.name() == 'anthropic' and 'research' in model:
+            return 'python_continuation_execution_reasoning.prompt'
+        else:
+            return 'python_continuation_execution.prompt'
+
     async def __llm_call(
         self,
         llm_call: LLMCall,
@@ -715,7 +723,7 @@ class ExecutionController(Controller):
         functions = [Helpers.get_function_description_flat(f) for f in tools]
 
         system_message, tools_message = Helpers.prompts(
-            prompt_name='python_continuation_execution.prompt',
+            prompt_name=self.__execution_prompt(self.get_executor(), model),
             template={
                 'functions': '\n'.join(functions),
             },

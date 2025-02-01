@@ -236,7 +236,13 @@ class OpenAIExecutor(Executor):
                                     self.max_input_tokens(model=model)))
 
         # o1-mini and o1-preview don't support system messages
-        if model is not None and 'o1-preview' in model or 'o1-mini' in model or 'deepseek-reasoner' in model:
+        if (
+            model is not None
+            and 'o1-preview' in model
+            or 'o1-mini' in model
+            or 'deepseek-reasoner' in model
+            or 'o3-mini' in model
+        ):
             messages = [m for m in messages if m['role'] != 'system']
 
         messages_cast = cast(list[ChatCompletionMessageParam], messages)
@@ -245,7 +251,7 @@ class OpenAIExecutor(Executor):
         token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()
 
-        if model is not None and 'o1' in model:
+        if model is not None and ('o1' in model or 'o3' in model):
             # temp 1.0 only supported for o1 and max_tokens is not supported
             # this barely works
             temperature = 1.0
