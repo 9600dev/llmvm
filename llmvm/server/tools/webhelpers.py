@@ -4,6 +4,8 @@ import re
 from typing import cast
 import unicodedata
 from urllib.parse import urlparse
+import xml.etree.ElementTree as ET
+import re
 
 from bs4 import BeautifulSoup
 from markdownify import MarkdownConverter
@@ -68,6 +70,33 @@ class VerboseConverter(MarkdownConverter):
 
 class WebHelpers():
     @staticmethod
+    def convert_xml_to_text(xml_string: str) -> str:
+        xml_string = re.sub(r'\sxmlns[^"]+"[^"]+"', '', xml_string)
+
+        root = ET.fromstring(xml_string)
+
+        def get_text(element):
+            text_parts = []
+
+            if element.text and element.text.strip():
+                text_parts.append(element.text.strip())
+
+            for child in element:
+                text_parts.extend(get_text(child))
+
+                if child.tail and child.tail.strip():
+                    text_parts.append(child.tail.strip())
+
+            return text_parts
+
+        all_text = get_text(root)
+
+        cleaned_text = '\n'.join(all_text)
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text)
+
+        return cleaned_text
+
+    @staticmethod
     def convert_html_to_markdown(html: str, url: str = '') -> MarkdownContent:
         def clean_markdown(markdown_text: str) -> str:
             lines = []
@@ -103,6 +132,11 @@ class WebHelpers():
             return '\n'.join([line for line in lines if line])
 
         logging.debug(f'WebHelpers.convert_html_to_markdown_soup: {html[:25]}')
+
+        if 'parlinfo.aph.gov.au' in url and '.xml' in url:
+            logging.info('WebHelpers.convert_html_to_markdown: parlinfo.aph.gov.au')
+            return MarkdownContent(sequence=[TextContent(WebHelpers.convert_xml_to_text(html))], url=url)
+
         soup = BeautifulSoup(html, features='lxml')
 
         for data in soup(['style', 'script']):
@@ -164,6 +198,8 @@ class WebHelpers():
         # todo this is redundant with ContentDownloader
         from llmvm.server.base_library.content_downloader import \
             WebAndContentDriver
+
+
         logging.debug('WebHelpers.get_url: {}'.format(url))
         downloader = WebAndContentDriver()
         download_params: DownloadParams = {'url': url, 'goal': '', 'search_term': ''}

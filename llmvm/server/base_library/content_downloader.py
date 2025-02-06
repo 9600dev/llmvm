@@ -41,6 +41,8 @@ class WebAndContentDriver():
         if download['url'].startswith('"') and download['url'].endswith('"'):
             download['url'] = download['url'][1:-1]
 
+        download['url'] = download['url'].replace(';fileType=text%2Fxml', '')
+
         # deal with files
         result = urlparse(download['url'])
         if result.scheme == '' or result.scheme == 'file':
@@ -68,6 +70,19 @@ class WebAndContentDriver():
             csv_filename = loop.run_until_complete(task)
             _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
             return FileContent(sequence=b'', url=csv_filename)
+
+        # deal with xml files
+        elif (result.scheme == 'http' or result.scheme == 'https') and '.xml' in result.path:
+            chrome_helper = ChromeHelpers(cookies=self.cookies)
+            loop = asyncio.get_event_loop()
+            task = loop.create_task(chrome_helper.download(download['url']))
+            xml_filename = loop.run_until_complete(task)
+            _ = loop.run_until_complete(loop.create_task(chrome_helper.close()))
+
+            with open(xml_filename, 'r') as f:
+                xml_file_content = f.read()
+                xml_str = WebHelpers.convert_xml_to_text(xml_file_content)
+                return TextContent(xml_str)
 
         # deal with websites
         elif result.scheme == 'http' or result.scheme == 'https':

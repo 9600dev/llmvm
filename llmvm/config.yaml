@@ -51,6 +51,8 @@ helper_functions:
   - llmvm.server.bcl.BCL.get_bitcoin_rates
   - llmvm.server.bcl.BCL.get_central_bank_rates
   - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
+  - llmvm.server.bcl.BCL.search_and_replace
+  - llmvm.server.bcl.BCL.read_file
   - llmvm.server.tools.browser.Browser
   - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser
 

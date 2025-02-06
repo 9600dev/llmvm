@@ -30,3 +30,5 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 token_tests/
+scripts/dutton
+scripts/output

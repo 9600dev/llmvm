@@ -21,7 +21,7 @@ Functions:
 
 {{functions}}
 
-There are also 9 special functions that I've added to our Python implementation that will help us:
+There are also 8 special functions that I've added to our Python implementation that will help us:
 
 T = TypeVar('T')
 
@@ -31,9 +31,8 @@ T = TypeVar('T')
 4. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. You can also pass Google Sheets urls (https://docs.google.com/spreadsheets/...) as the expression and it will return a Pandas DataFrame.
 5. search(expression, total_links_to_return: int = 3, titles_seen: List[str] = []) -> str. Searches the Internet across various search engines to find content related to 'expression' and returns all of that content as a string. Use this if you need general search, news search, or product searching capability. If you have already called search() before, and do not want to include certain website titles in the results, you can pass in a list of string titles of those websites and they will be excluded from the search results. The argument 'total_links_to_return' is the number of search results you want to download, the default being three. Typically this is enough, but if you feel like you're not getting the content you require, or you have a particularly complicated task to solve, you can increase this total.
 6. download(expression) -> str. Downloads any web page, html, PDF file, news article or word document, converts it to text, and returns that text content as a string.
-7. messages() -> List[Message]. Returns the current large language model User Assistant conversation as a list of Messages to use for code within <helpers></helpers> blocks. messages()[0] is the first message sent in the conversation. messages()[-1] is the last message. Messages can either be User messages or Assistant messages. You can only get either the first message via [0], the last message via [-1], or all messages via messages(). It's preferable to use python variables to get at data and documents if code has been written and executed in <helper> blocks already.
-8. coerce(expression, type_var: Type[T]) -> T. Takes any value in expression and coerces it to specified Python type in type_var.
-9. answer(expression) -> Answer. Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the User. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Python code.
+7. coerce(expression, type_var: Type[T]) -> T. Takes any value in expression and coerces it to specified Python type in type_var.
+8. answer(expression) -> Answer. Allows you to capture the answer to the natural language query, question or problem so that I can emit that back to the User. You can also use "answer("the text answer")" to just directly generate a response to the users query, problem or question if you know it already and don't need to execute Python code.
 
 You also have access to the full library of numpy (np) and scipy (scipy), but no other libraries. Assume they've already been imported.
 

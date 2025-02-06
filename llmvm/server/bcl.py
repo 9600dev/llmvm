@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import FunctionCallMeta, ImageContent
+from llmvm.common.objects import FunctionCallMeta, ImageContent, TextContent
 from llmvm.server.base_library.source import Source
 
 logging = setup_logging()
@@ -203,7 +203,7 @@ class BCL():
         image_content = BCL.generate_graph_image(x_y_data_dict={"x": [1, 2, 3], "y": [4.0, 5.0, 6.0]}, title="My Graph Title", x_label="X Label", y_label="Y Label")
 
         :param x_y_data_dict: The data to plot
-        :type data: Dict[str, Any]
+        :type x_y_data_dict: Dict[str, Any]
         :param title: The title of the graph
         :type title: str
         :param x_label: The label for the x-axis
@@ -258,6 +258,42 @@ class BCL():
 
         write_client_stream(image_bytes)
         return ImageContent(image_bytes)
+
+    @staticmethod
+    def read_file(full_path_filename: str) -> TextContent:
+        """
+        Generates a graph image from the given x_y_data_dict Dictionary, which has two keys: 'x' and 'y' and a list of int/floats
+        and prints it to the client's screen. It returns None.
+
+        Example:
+        file_content = BCL.read_file("path/to/file.txt")
+
+        :param full_path_filename: The full path to the file
+        :type full_path_filename: str
+        :return: File contents as a TextContent object
+        :rtype: TextContent
+        """
+        with open(full_path_filename, 'r') as f:
+            return TextContent(f.read(), url=full_path_filename)
+
+    @staticmethod
+    def search_and_replace(text: str, search: str, replace: str) -> str:
+        """
+        Performs a simple string replacement on the given text.
+
+        :param text: The input text
+        :type text: str
+        :param search: The search pattern
+        :type search: str
+        :param replace: The replacement string
+        :type replace: str
+        :return: The modified text
+        :rtype: str
+        """
+        if isinstance(text, TextContent):
+            text = text.get_str()
+
+        return text.replace(search, replace)
 
     @staticmethod
     def __source_paths(source_file_paths: Union[List[str], str]) -> List[str]:
