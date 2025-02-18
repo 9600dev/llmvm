@@ -4,7 +4,7 @@ server_host: '0.0.0.0'
 server_port: 8011
 profiling: false
 profiling_file: '~/.local/share/llmvm/profiling_trace.log'
-executor_trace: '~/.local/share/llmvm/executor_trace.log'
+executor_trace: '~/.local/share/llmvm/executor.trace'
 chromium_headless: true
 chromium_cookies: '~/.local/share/llmvm/cookies.txt'
 cache_directory: '~/.local/share/llmvm/cache'
@@ -48,7 +48,8 @@ helper_functions:
   - llmvm.server.bcl.BCL.get_weather
   - llmvm.server.bcl.BCL.address_lat_lon
   - llmvm.server.bcl.BCL.get_currency_rates
-  - llmvm.server.bcl.BCL.get_bitcoin_rates
+  - llmvm.server.bcl.BCL.get_gold_silver_price_in_usd
+  - llmvm.server.bcl.BCL.get_bitcoin_prices_in_usd
   - llmvm.server.bcl.BCL.get_central_bank_rates
   - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
   - llmvm.server.bcl.BCL.search_and_replace

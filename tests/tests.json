@@ -1,0 +1,98 @@
+[
+  {
+    "name": "ansi",
+    "prompt": "ansi/prompt.txt",
+    "files": [],
+    "args": ["-p", "ansi/prompt.txt"]
+  },
+  {
+    "name": "avocado",
+    "prompt": "avocado/prompt.txt",
+    "files": ["avocado.csv"],
+    "args": ["-t", "~/dev/llmvm/tests/avocado/avocado.csv", "-p", "avocado/prompt.txt"]
+  },
+  {
+    "name": "beach",
+    "prompt": "beach/prompt.txt",
+    "files": ["beach.png"],
+    "args": ["-p", "beach/beach.png", "-p", "beach/prompt.txt"]
+  },
+  {
+    "name": "code-1",
+    "prompt": "code-1/prompt.txt",
+    "files": ["cli.py"],
+    "args": ["-p", "code-1/cli.py", "-p", "code-1/prompt.txt"]
+  },
+  {
+    "name": "image-rotation",
+    "prompt": "image-rotation/prompt.txt",
+    "files": ["image.png"],
+    "args": ["-p", "image-rotation/image.png", "-p", "image-rotation/prompt.txt"]
+  },
+  {
+    "name": "leadership",
+    "prompt": "leadership/prompt.txt",
+    "files": [],
+    "args": ["-p", "leadership/prompt.txt"]
+  },
+  {
+    "name": "paper-compare",
+    "prompt": "paper-compare/prompt.txt",
+    "files": ["compute-optimal.pdf", "scaling-laws.pdf"],
+    "args": ["-p", "paper-compare/compute-optimal.pdf", "-p", "paper-compare/scaling-laws.pdf", "-p", "paper-compare/prompt.txt"]
+  },
+  {
+    "name": "prices-currency",
+    "prompt": "prices-currency/prompt.txt",
+    "files": [],
+    "args": ["-p", "prices-currency/prompt.txt"]
+  },
+  {
+    "name": "prices-currency-2",
+    "prompt": "prices-currency-2/prompt.txt",
+    "files": [],
+    "args": ["-p", "prices-currency-2/prompt.txt"]
+  },
+  {
+    "name": "prices-gold",
+    "prompt": "prices-gold/prompt.txt",
+    "files": [],
+    "args": ["-p", "prices-gold/prompt.txt"]
+  },
+  {
+    "name": "prose-1",
+    "prompt": "prose-1/prompt.txt",
+    "files": [],
+    "args": ["-p", "prose-1/prompt.txt"]
+  },
+  {
+    "name": "requirements",
+    "prompt": "requirements/prompt.txt",
+    "files": ["requirements.txt"],
+    "args": ["-p", "requirements/requirements.txt", "-p", "requirements/prompt.txt"]
+  },
+  {
+    "name": "simple",
+    "prompt": "simple/prompt.txt",
+    "files": [],
+    "args": ["-p", "simple/prompt.txt"]
+  },
+  {
+    "name": "squareroot",
+    "prompt": "squareroot/prompt.txt",
+    "files": [],
+    "args": ["-p", "squareroot/prompt.txt"]
+  },
+  {
+    "name": "stock-bets",
+    "prompt": "stock-bets/prompt.txt",
+    "files": [],
+    "args": ["-p", "stock-bets/prompt.txt"]
+  },
+  {
+    "name": "weather",
+    "prompt": "weather/prompt.txt",
+    "files": [],
+    "args": ["-p", "weather/prompt.txt"]
+  }
+]

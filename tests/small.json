@@ -1,0 +1,14 @@
+[
+  {
+    "name": "ansi",
+    "prompt": "ansi/prompt.txt",
+    "files": [],
+    "args": ["-p", "ansi/prompt.txt"]
+  },
+  {
+    "name": "beach",
+    "prompt": "beach/prompt.txt",
+    "files": ["beach.png"],
+    "args": ["-p", "beach/beach.png", "-p", "beach/prompt.txt"]
+  }
+]

@@ -1,6 +1,5 @@
 import ast
 import asyncio
-import tokenize
 import base64
 from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
@@ -9,18 +8,15 @@ import importlib
 import inspect
 import io
 import itertools
+import json
 import math
 import os
 import re
-import signal
 import subprocess
-import sys
-import threading
 import traceback
 from bs4 import BeautifulSoup
 import dateparser
 import typing
-import tzlocal
 from collections import Counter
 from enum import Enum, IntEnum
 from functools import reduce
@@ -78,6 +74,25 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
+    def is_callee(func_name: str):
+        import inspect
+        for frame_info in inspect.stack():
+            if frame_info.function == func_name:
+                return True
+        return False
+
+    @staticmethod
+    def deserialize_messages(json_filename: str) -> list[Message]:
+        with open(os.path.expanduser(json_filename), 'r') as f:
+            # find the place where there's an append
+            full_str = f.read()
+            pattern = r'''(?m)^ {2}\}\r?\n^\]\s*\r?\n^\s*\r?\n^\[\s*\r?\n^ {2}\{'''
+            replacement = '  },\n  {'
+            clean_content = re.sub(pattern, replacement, full_str)
+            messages = json.loads(clean_content)
+        return [Message.from_json(m) for m in messages]
+
+    @staticmethod
     def get_google_sheet(url: str) -> PandasMeta:
             import gspread
             from gspread_dataframe import get_as_dataframe
@@ -86,6 +101,15 @@ class Helpers():
             ws = spreadsheet.get_worksheet(0)
             df = get_as_dataframe(ws, drop_empty_rows=True, drop_empty_columns=True)
             return PandasMeta(expr_str=url, pandas_df=df)
+
+    @staticmethod
+    def parse_lists_from_string(list_str: str) -> list:
+        list_str = list_str.strip()
+        pattern = r'\[[^\[\]]*\]'
+        list_strings = re.findall(pattern, list_str)
+
+        lists = [eval(lst_str) for lst_str in list_strings]
+        return lists
 
     @staticmethod
     def parse_list_string(list_string: str, default: list = []) -> list:
@@ -1072,12 +1096,16 @@ class Helpers():
             return False
 
     @staticmethod
-    def is_markdown(byte_stream):
+    def is_markdown(byte_stream: Union[bytes, str, io.BytesIO]) -> bool:
+        content = ''
         if isinstance(byte_stream, io.BytesIO):
             byte_stream = byte_stream.getvalue()
 
         # Convert the byte stream to a string
-        content = byte_stream.decode('utf-8', errors='ignore')
+        if isinstance(byte_stream, bytes):
+            content = byte_stream.decode('utf-8', errors='ignore')
+        else:
+            content = byte_stream
 
         # Define regex patterns for common Markdown elements
         patterns = {

@@ -1375,15 +1375,11 @@ def message(
                     else:
                         message = tty_message
                 else:
-                    bytes_buffer_content = bytes_buffer.read().decode('utf-8', errors='ignore')
-                    if bytes_buffer_content:
-                        tty_message = User(TextContent(bytes_buffer.read().decode('utf-8', errors='ignore')))
-                        if message:
-                            context_messages.insert(0, tty_message)
-                        else:
-                            message = tty_message
+                    tty_message = User(TextContent(bytes_buffer.read().decode('utf-8', errors='ignore')))
+                    if message:
+                        context_messages.insert(0, tty_message)
                     else:
-                        logging.debug('we are in a tty, but there is no content to read.')
+                        message = tty_message
 
     # if we don't have a message here, something went wrong.
     if not message:
@@ -1463,8 +1459,7 @@ def message(
     thread_id = thread.id
 
     # apply file writes with or without prompting
-    if file_writes or Helpers.is_callee('repl'):
-        apply_file_writes_and_diffs(thread.messages[-1].to_message().get_str(), not file_writes)
+    apply_file_writes_and_diffs(thread.messages[-1].to_message().get_str(), not file_writes)
 
     return thread
 

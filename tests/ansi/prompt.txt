@@ -1,0 +1,1 @@
+I want you to output ascii characters for a logo. The company name for the logo is "56k". Draw me an awesome ascii art logo.

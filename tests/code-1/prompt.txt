@@ -1,0 +1,1 @@
+I want you to comb through the previous message which contains source code and find all of the Python click commands. Describe what they do, and include if they're hidden or not. Don't add commentary, just generate the list of commands and a summary of what they do. 

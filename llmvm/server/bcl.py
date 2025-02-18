@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
 from typing import List, cast
@@ -26,6 +27,13 @@ class BCL():
         """
         Returns a datetime object from a string using datetime.strftime().
         Examples: BCL.datetime("2020-01-01"), BCL.datetime("now"), BCL.datetime("-1 days"), BCL.datetime("now", "Australia/Brisbane")
+
+        :param expr: The string to parse as a datetime.
+        :type expr: str
+        :param timezone: The timezone to use for the datetime. If not provided, the current timezone is used.
+        :type timezone: Optional[str]
+        :return: The parsed datetime object.
+        :rtype: datetime.datetime
         """
         return Helpers.parse_relative_datetime(str(expr), timezone)
 
@@ -34,6 +42,11 @@ class BCL():
         """
         Returns the latitude and longitude of an address as a Tuple of floats.
         Examples: lat, lon = BCL.address_lat_lon(address="1600 Pennsylvania Avenue NW, Washington, DC")
+
+        :param address: The address to get the latitude and longitude for.
+        :type address: str
+        :return: The latitude and longitude of the address as a tuple of floats.
+        :rtype: Tuple[float, float]
         """
         logging.debug(f"BCL.address_lat_lon() address: {address}")
         address = address.replace(" ", "+")
@@ -50,10 +63,13 @@ class BCL():
     def get_central_bank_rates() -> str:
         """
         Returns the most popular central bank interest rates as a natural language string. Dates are in American format.
-        Examples: rates = BCL.get_central_bank_rates()
+        Example: rates = BCL.get_central_bank_rates()
         answer(rates)
-        American Central Bank: 5.00 % as of 09-19-2024
-        ...
+            American Central Bank: 5.00 % as of 09-19-2024
+            ...
+
+        :return: central bank interest rates as a string
+        :rtype: str
         """
         html_content = httpx.get("https://www.global-rates.com/en/interest-rates/central-banks/").content
         soup = BeautifulSoup(html_content, 'html.parser')
@@ -96,23 +112,48 @@ class BCL():
     def get_currency_rates(currency_code: str) -> str:
         """
         Returns the most popular currency rates for a given currency code as a natural language string. Try and use at least 3 decimal places.
-        Examples: rates = BCL.get_currency_rates(currency_code="AUD")
+        Example: rates = BCL.get_currency_rates(currency_code="AUD")
         answer(rates)
-        {"rates": {"CAD": 1.4375, "EUR": 0.8675, "GBP": 0.7675, "JPY": 120.0, "NZD": 1.4925, "USD": 1.1625, "CHF": 0.95, "CNY": 6.75, "HKD": 7.75}}
+
+        :param currency_code: The currency code to get the rates for.
+        :type currency_code: str
+        :return: currency rates as a string
+        :rtype: str
         """
         result = httpx.get(f"https://open.er-api.com/v6/latest/{currency_code}").json()
         str_result = f"Currency rates for {currency_code}:\n"
-        str_result += str(result['rates'])
+        if 'rates' in result:
+            str_result += str(result['rates'])
+        else:
+            str_result += str(result)
         return str_result
 
     @staticmethod
-    def get_bitcoin_rates() -> str:
+    def get_gold_silver_price_in_usd() -> str:
+        """
+        Returns the current gold and silver spot prices in USD as a natural language string.
+        Example: prices = BCL.get_gold_silver_price_in_usd()
+        answer(prices)
+
+        :return: gold and silver prices as a string
+        :rtype: str
+        """
+        result = asyncio.run(Helpers.download("https://data-asg.goldprice.org/dbXRates/USD"))
+        str_result = f"Gold price in USD:\n"
+        str_result += str(result)
+        return str_result
+
+    @staticmethod
+    def get_bitcoin_prices_in_usd() -> str:
         """
         Returns the most popular bitcoin rates as a natural language string. Try and use at least 3 decimal places.
-        Examples: rates = BCL.get_bitcoin_rates()
+        Example: rates = BCL.get_bitcoin_rates()
         answer(rates)
+
+        :return: bitcoin prices as a string
+        :rtype: str
         """
-        result = httpx.get("https://api.coindesk.com/v1/bpi/currentprice.json").json()
+        result = httpx.get("https://api.binance.com/api/v1/ticker/price?symbol=BTCUSDT").json()
         str_result = f"Bitcoin rates:\n"
         str_result += str(result)
         return str_result

@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import logging
 import os
 import sys
@@ -13,7 +14,7 @@ from rich.traceback import install
 from llmvm.common.container import Container
 
 
-def trace(content):
+def __trace(content):
     if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
         with open(os.path.expanduser(Container.get_config_variable('LLMVM_EXECUTOR_TRACE')), 'a+') as f:
             f.write(content)
@@ -23,14 +24,21 @@ def messages_trace(messages: List[Dict[str, Any]]):
     if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
         for m in messages:
             if 'content' in m:
-                trace(f"<{m['role'].capitalize()}:>{m['content']}</{m['role'].capitalize()}>\n\n")
+                __trace(f"<{m['role'].capitalize()}:>{m['content']}</{m['role'].capitalize()}>\n\n")
             elif 'parts' in m and isinstance(m['parts'], list) and isinstance(m['parts'][0], dict) and 'inline_data' in m['parts'][0]:
                 # ImageContent todo fix properly
-                trace(f"<{m['role'].capitalize()}:>[ImageContent()]</{m['role'].capitalize()}>\n\n")
+                __trace(f"<{m['role'].capitalize()}:>[ImageContent()]</{m['role'].capitalize()}>\n\n")
             elif 'parts' in m:
                 content = ' '.join(m['parts'])
-                trace(f"<{m['role'].capitalize()}:>{content}</{m['role'].capitalize()}>\n\n")
+                __trace(f"<{m['role'].capitalize()}:>{content}</{m['role'].capitalize()}>\n\n")
 
+def serialize_messages(messages):
+    if Container.get_config_variable('LLMVM_SERIALIZE', default=''):
+        result = json.dumps([m.to_json() for m in messages], indent=2)
+        file_path = os.path.expanduser(Container.get_config_variable('LLMVM_SERIALIZE'))
+        with open(file_path, 'a+') as f:
+            f.write(result + '\n\n')
+            f.flush()
 
 class TimedLogger(logging.Logger):
     def __init__(self, name='timing', level=logging.NOTSET):
@@ -178,7 +186,7 @@ def setup_logging(
     if module_name in global_loggers:
         return global_loggers[module_name]
 
-    install(show_locals=True)
+    install(show_locals=False, max_frames=20, suppress=["importlib, site-packages"])
     handler = RichHandler(console=Console(file=sys.stderr))
     handler.setLevel(default_level)
 
