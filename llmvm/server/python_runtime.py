@@ -408,7 +408,7 @@ class PythonRuntime:
                 user_message=Helpers.prompt_message(
                     prompt_name='coerce.prompt',
                     template={
-                        'string': str(expr),
+                        'string': Helpers.str_get_str(expr),
                         'type': str(type_name),
                     },
                     user_token=self.controller.get_executor().user_token(),
@@ -473,7 +473,7 @@ class PythonRuntime:
 
     def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> List[Any]:
         logging.debug(f'llm_list_bind({str(expr)[:20]}, {repr(llm_instruction)}, {count}, {list_type})')
-        context = expr.get_str() if isinstance(expr, Message) else str(expr)
+        context = Helpers.str_get_str(expr)
 
         assistant: Assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -545,7 +545,7 @@ class PythonRuntime:
         logging.debug('__rewrite_answer_error_correction()')
         dictionary = ''
         for key, value in locals_dictionary.items():
-            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
+            dictionary += '{} = "{}"\n'.format(key, Helpers.str_get_str(value)[:128].replace('\n', ' '))
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -583,7 +583,7 @@ class PythonRuntime:
                 user_message=Helpers.prompt_message(
                     prompt_name='answer_primitive.prompt',
                     template={
-                        'function_output': str(expr),
+                        'function_output': Helpers.str_get_str(expr),
                         'original_query': self.original_query,
                     },
                     user_token=self.controller.get_executor().user_token(),

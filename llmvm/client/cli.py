@@ -614,7 +614,7 @@ class Repl():
                     repl_stats,
                     complete_while_typing=True,
                     style=Style.from_dict({
-                        'prompt': Container.get_config_variable('client_prompt_color', default='')
+                        'prompt': Container.get_config_variable('client_repl_color', default='')
                     })
                 )
 
@@ -1278,7 +1278,7 @@ def new(
 @click.option('--stop_tokens', type=str, required=False, multiple=True, help='stop tokens for the call.')
 @click.option('--escape', type=bool, is_flag=True, required=False, help='escape the message content.')
 @click.option('--throw', type=bool, is_flag=True, required=False, default=False, help='throw an exception if the LLMVM server is down. Default is false.')
-@click.option('--thinking', '-z', type=int, required=False, default=0, help='enable thinking mode with a max token length.')
+@click.option('--thinking', '-z', type=int, required=False, default=0, help='enable thinking mode, specifying a max thinking token length.')
 @click.option('--context_messages', required=False, multiple=True, hidden=True)
 def message(
     message: Optional[str | bytes | Message],
@@ -1328,6 +1328,9 @@ def message(
     if path:
         context_messages = get_path_as_messages(path, upload, [])
         logging.debug(f'path: {path}')
+
+    if thinking == 0 and Container().get_config_variable('LLMVM_THINKING', default=0):
+        thinking = int(Container().get_config_variable('LLMVM_THINKING', default=0))
 
     if context:
         for c in reversed(context):
@@ -1453,6 +1456,7 @@ def message(
         mode='direct' if direct else 'tools',
         compression=compression,
         cookies=cookies_list,
+        thinking=thinking,
         stream_handler=StreamPrinter().write,
     ))
 

@@ -59,5 +59,6 @@ helper_functions:
 
 # optional client color Python rich syntax
 client_stream_token_color: 'bright_black'
+client_stream_thinking_token_color: 'cyan'
 client_role_color: 'bold cyan'
 client_repl_color: 'ansibrightcyan'

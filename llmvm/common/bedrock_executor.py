@@ -316,9 +316,13 @@ class BedrockExecutor(Executor):
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
+
+        if thinking > 0:
+            raise NotImplementedError('Thinking is not implemented for BedrockExecutor')
 
         # wrap and check message list
         messages_list: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages, model)
@@ -335,11 +339,11 @@ class BedrockExecutor(Executor):
         perf = None
 
         async with await stream as stream_async:  # type: ignore
-            async for text in stream_async:
+            async for token in stream_async:
                 # nova will emit stop tokens before it stops, so we need to check for that
-                if not text in stop_tokens:
-                    await stream_handler(TokenNode(text))
-                text_response += text
+                if not token.token in stop_tokens:
+                    await stream_handler(TokenNode(token.token))
+                text_response += token.token
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
@@ -372,10 +376,11 @@ class BedrockExecutor(Executor):
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:
         async def stream_pipe(node: AstNode):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, thinking, stream_pipe))

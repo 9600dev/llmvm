@@ -1111,6 +1111,7 @@ class LLMCall():
         completion_tokens_len: int,
         prompt_name: str,
         stop_tokens: list[str] = [],
+        thinking: int = 0,
         stream_handler: Callable[['AstNode'], Awaitable[None]] = awaitable_none
     ):
         self.user_message = user_message
@@ -1122,6 +1123,7 @@ class LLMCall():
         self.completion_tokens_len = completion_tokens_len
         self.prompt_name = prompt_name
         self.stop_tokens = stop_tokens
+        self.thinking = thinking
         self.stream_handler = stream_handler
 
     def copy(self):
@@ -1135,6 +1137,7 @@ class LLMCall():
             completion_tokens_len=self.completion_tokens_len,
             prompt_name=self.prompt_name,
             stop_tokens=self.stop_tokens,
+            thinking=self.thinking,
             stream_handler=self.stream_handler,
         )
 
@@ -1183,6 +1186,17 @@ class TokenNode(AstNode):
 
     def __repr__(self):
         return f'TokenNode({self.token})'
+
+
+class TokenThinkingNode(TokenNode):
+    def __init__(
+        self,
+        token: str,
+    ):
+        super().__init__(token)
+
+    def __repr__(self):
+        return f'TokenThinkingNode({self.token})'
 
 
 class TokenStopNode(AstNode):
@@ -1637,6 +1651,7 @@ class SessionThreadModel(BaseModel):
     stop_tokens: list[str] = []
     output_token_len: int = 0
     current_mode: str = 'tools'
+    thinking: int = 0
     cookies: list[dict[str, Any]] = []
     messages: list[MessageModel] = []
     locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True)

@@ -289,6 +289,7 @@ class OpenAIExecutor(Executor):
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model
@@ -308,9 +309,9 @@ class OpenAIExecutor(Executor):
         perf = None
 
         async with await stream as stream_async:  # type: ignore
-            async for text in stream_async:  # type: ignore
-                await stream_handler(TokenNode(text))
-                text_response += text
+            async for token in stream_async:  # type: ignore
+                await stream_handler(TokenNode(token.token))
+                text_response += token.token
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
@@ -335,10 +336,11 @@ class OpenAIExecutor(Executor):
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:
         async def stream_pipe(node: AstNode):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, thinking, stream_pipe))

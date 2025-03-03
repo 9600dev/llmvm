@@ -12,7 +12,7 @@ import re
 from importlib import resources
 import traceback
 import types
-from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, cast
+from typing import Any, Awaitable, Callable, Optional, Tuple, cast
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -68,9 +68,10 @@ class ExecutionController(Controller):
                 messages,
                 max_output_tokens=llm_call.completion_tokens_len,
                 temperature=llm_call.temperature,
-                stream_handler=llm_call.stream_handler,
                 model=llm_call.model,
                 stop_tokens=llm_call.stop_tokens,
+                thinking=llm_call.thinking,
+                stream_handler=llm_call.stream_handler,
             )
             role_debug(logging, llm_call.prompt_name, 'User', llm_call.user_message.get_str())
             role_debug(logging, llm_call.prompt_name, 'Assistant', assistant.get_str())
@@ -83,7 +84,7 @@ class ExecutionController(Controller):
     async def __llm_call_with_prompt(
         self,
         llm_call: LLMCall,
-        template: Dict[str, Any],
+        template: dict[str, Any],
     ) -> Assistant:
         prompt = Helpers.load_and_populate_prompt(
             prompt_name=llm_call.prompt_name,
@@ -99,7 +100,7 @@ class ExecutionController(Controller):
             llm_call
         )
 
-    def __parse_template(self, message: Message, template_args: Dict[str, Any]) -> Message:
+    def __parse_template(self, message: Message, template_args: dict[str, Any]) -> Message:
         # {{templates}}
         # check to see if any of the content nodes have {{templates}} in them, and if so, replace
         # with template_args.
@@ -112,7 +113,7 @@ class ExecutionController(Controller):
                         content.sequence = message_text.replace(key_replace, value)
         return message
 
-    def __parse_message_template(self, messages: list[Message], template_args: Dict[str, Any]) -> list[Message]:
+    def __parse_message_template(self, messages: list[Message], template_args: dict[str, Any]) -> list[Message]:
         # check the [system_message] [user_message] pair, and parse those into messages
         # if they exist
         for i in range(len(messages)):
@@ -626,7 +627,8 @@ class ExecutionController(Controller):
         model: Optional[str] = None,
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
-        template_args: Dict[str, Any] = {},
+        thinking: int = 0,
+        template_args: dict[str, Any] = {},
     ) -> list[Message]:
         # [system_message] [user_message] pairs - deal with them in text content or file content
         messages = self.__parse_message_template(messages, template_args)
@@ -644,6 +646,7 @@ class ExecutionController(Controller):
             completion_tokens_len=self.executor.max_output_tokens(),
             prompt_name='',
             stop_tokens=[],
+            thinking=thinking,
             stream_handler=stream_handler
         )
 
@@ -664,8 +667,9 @@ class ExecutionController(Controller):
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
         template_args: dict[str, Any] = {},
         tools: list[Callable] = [],
-        cookies: list[Dict[str, Any]] = [],
+        cookies: list[dict[str, Any]] = [],
         locals_dict: dict[str, Any] = {},
+        thinking: int = 0,
     ) -> Tuple[list[Message], dict[str, Any]]:
         def parse_code_block_result(result) -> list[AstNode]:
             if isinstance(result, str):
@@ -789,6 +793,7 @@ class ExecutionController(Controller):
                 completion_tokens_len=self.executor.max_output_tokens(),
                 prompt_name='',
                 stop_tokens=['</helpers>', '</complete>'],
+                thinking=thinking,
                 stream_handler=stream_handler
             )
 

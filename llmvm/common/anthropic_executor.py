@@ -15,7 +15,7 @@ from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content,
                                   Executor, FileContent, ImageContent,
                                   MarkdownContent, Message, PdfContent, System,
                                   TextContent, TokenCountCache, TokenNode, TokenPerf,
-                                  TokenStopNode, User, awaitable_none)
+                                  TokenStopNode, TokenThinkingNode, User, awaitable_none)
 from llmvm.common.perf import TokenStreamManager
 
 logging = setup_logging()
@@ -242,6 +242,9 @@ class AnthropicExecutor(Executor):
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
+        if thinking > 0 and temperature != 1.0:
+            temperature = 1.0
+
         if functions:
             raise NotImplementedError('functions are not implemented for ClaudeExecutor')
 
@@ -334,15 +337,19 @@ class AnthropicExecutor(Executor):
             model=model,
             temperature=temperature,
             stop_tokens=stop_tokens,
+            thinking=thinking,
         )
 
         text_response: str = ''
         perf = None
 
         async with await stream as stream_async:  # type: ignore
-            async for text in stream_async:
-                await stream_handler(TokenNode(text))
-                text_response += text
+            async for token in stream_async:
+                if token.thinking:
+                    await stream_handler(TokenThinkingNode(token.token))
+                else:
+                    await stream_handler(TokenNode(token.token))
+                text_response += token.token
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
@@ -368,10 +375,11 @@ class AnthropicExecutor(Executor):
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Optional[Callable[[AstNode], None]] = None,
     ) -> Assistant:
         async def stream_pipe(node: AstNode):
             if stream_handler:
                 stream_handler(node)
 
-        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_pipe))
+        return asyncio.run(self.aexecute(messages, max_output_tokens, temperature, stop_tokens, model, thinking, stream_pipe))

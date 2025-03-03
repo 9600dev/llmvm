@@ -523,6 +523,7 @@ async def tools_completions(request: SessionThreadModel):
                     temperature=thread.temperature,
                     model=model,
                     compression=compression,
+                    thinking=thread.thinking,
                     stream_handler=callback,
                 )
                 queue.put_nowait(QueueBreakNode())

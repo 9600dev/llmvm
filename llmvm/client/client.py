@@ -33,6 +33,7 @@ async def default_stream_handler(node: AstNode):
     await _printer.write(node)  # type: ignore
 
 
+
 def llm(
     messages: list[Message] | list[str] | str,
     executor: Optional[Executor] = None,
@@ -172,6 +173,21 @@ class LLMVMClient():
         self.default_executor = executor_instance
         self.model = executor_instance.default_model
 
+    def __parse_template(self, message: Message, template_args: Optional[dict[str, Any]]) -> Message:
+        if not template_args:
+            return message
+        # {{templates}}
+        # check to see if any of the content nodes have {{templates}} in them, and if so, replace
+        # with template_args.
+        for content in message.message:
+            if isinstance(content, TextContent):
+                message_text = content.get_str()
+                for key, value in template_args.items():
+                    key_replace = '{{' + key + '}}'
+                    if key_replace in message_text:
+                        content.sequence = message_text.replace(key_replace, value)
+        return message
+
     def __parse_messages(self, messages: list[Message]) -> list[Message]:
         thread_messages = messages
         thread_messages_copy = []
@@ -288,6 +304,7 @@ class LLMVMClient():
             model = self.model
 
         thread_messages: list[Message] = self.__parse_messages(messages)
+        thread_messages: list[Message] = [self.__parse_template(m, template_args) for m in thread_messages]
 
         assistant = await executor.aexecute(
             messages=thread_messages,
@@ -295,6 +312,7 @@ class LLMVMClient():
             temperature=temperature,
             stop_tokens=stop_tokens,
             model=model,
+            thinking=thinking,
             stream_handler=stream_handler,
         )
         return assistant
@@ -385,7 +403,8 @@ class LLMVMClient():
         elif isinstance(messages, list):
             thread_messages = messages
 
-        thread_messages = self.__parse_messages(thread_messages)
+        thread_messages: list[Message] = self.__parse_messages(thread_messages)
+        thread_messages: list[Message] = [self.__parse_template(m, template_args) for m in thread_messages]
 
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
@@ -415,6 +434,7 @@ class LLMVMClient():
                 thread.compression = compression
             if mode:
                 thread.current_mode = mode
+            thread.thinking = thinking
 
             # attach the messages to the thread
             thread.messages = [MessageModel.from_message(message) for message in thread_messages]
@@ -456,6 +476,7 @@ class LLMVMClient():
             output_token_len=output_token_len,
             stop_tokens=stop_tokens,
             stream_handler=stream_handler,
+            thinking=thinking,
             template_args=template_args,
         )
         return SessionThreadModel(

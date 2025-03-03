@@ -74,6 +74,13 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
+    def str_get_str(obj):
+        if hasattr(obj, 'get_str'):
+            return obj.get_str()
+        else:
+            return str(obj)
+
+    @staticmethod
     def is_callee(func_name: str):
         import inspect
         for frame_info in inspect.stack():

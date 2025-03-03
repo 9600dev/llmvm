@@ -226,6 +226,7 @@ class DeepSeekExecutor(OpenAIExecutor):
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
-        return await super().aexecute(messages, max_output_tokens, temperature, stop_tokens, model, stream_handler)
+        return await super().aexecute(messages, max_output_tokens, temperature, stop_tokens, model, thinking, stream_handler)

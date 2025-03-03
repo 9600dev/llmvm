@@ -18,7 +18,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import BrowserContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel
+from llmvm.common.objects import BrowserContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel, TokenThinkingNode
 
 
 logging = setup_logging()
@@ -99,6 +99,7 @@ class StreamPrinter():
         self.console = Console(file=file)
         self.markdown_mode = False
         self.token_color = Container.get_config_variable('client_stream_token_color', default='bright_black')
+        self.thinking_token_color = Container.get_config_variable('client_stream_thinking_token_color', default='cyan')
 
     async def display_image(self, image_bytes):
         if len(image_bytes) < 10:
@@ -177,21 +178,22 @@ class StreamPrinter():
         except Exception as e:
             pass
 
-    async def write_string(self, string: str):
-        if logging.level <= 20 and string:  # INFO
-            self.console.print(f'[{self.token_color}]{string}[/{self.token_color}]', end='')
-
     async def write(self, node: AstNode):
         if logging.level <= 20:  # INFO
+            token_color = self.token_color
+
             if isinstance(node, StreamNode):
                 if isinstance(node.obj, bytes):
                     await self.display_image(node.obj)
                     return
                 raise ValueError(f'StreamNode.obj must be bytes, not {type(node.obj)}')
-            elif isinstance(node, TokenNode):
-                string = node.token
             elif isinstance(node, TextContent):
                 string = node.get_str()
+            elif isinstance(node, TokenThinkingNode):
+                string = node.token
+                token_color = self.thinking_token_color
+            elif isinstance(node, TokenNode):
+                string = node.token
             elif isinstance(node, TokenStopNode) or isinstance(node, StreamingStopNode):
                 string = node.print_str
             else:
@@ -199,7 +201,7 @@ class StreamPrinter():
 
             if string:
                 self.buffer += string
-                self.console.print(f'[{self.token_color}]{string}[/{self.token_color}]', end='')
+                self.console.print(string, end='', style=f"{token_color}", highlight=False)
 
 
 class ConsolePrinter:

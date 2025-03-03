@@ -3,14 +3,14 @@ import inspect
 import json
 import os
 import time
-from typing import Any, List, Optional, cast
+from typing import Any, List, Optional, Union, cast
 
 import openai
 from botocore.eventstream import EventStream
-from anthropic import AsyncMessageStream, AsyncMessageStreamManager
+from anthropic import AsyncMessageStream, AsyncMessageStreamManager, ContentBlockStopEvent
 from anthropic import AsyncStream as AnthropicAsyncStream
-from anthropic.types import Completion as AnthropicCompletion
-from anthropic.types import Message as AnthropicMessage
+from anthropic.types import Completion as AnthropicCompletion, Message as AnthropicMessage, RawMessageStartEvent, RawMessageStopEvent, RawMessageStreamEvent, RawMessageDeltaEvent, RawContentBlockDeltaEvent, RawContentBlockStartEvent, RawContentBlockStopEvent, ContentBlockStartEvent
+from anthropic.lib.streaming._types import ThinkingEvent, TextEvent, CitationEvent, SignatureEvent, InputJsonEvent
 from openai.types.chat.chat_completion_chunk import \
     ChatCompletionChunk as OAICompletionChunk
 from openai.types.chat.chat_completion import ChatCompletion as OAICompletion
@@ -53,6 +53,20 @@ class O1AsyncIterator:
             raise StopAsyncIteration
 
 
+AnthropicStreamType = Union[ThinkingEvent, TextEvent, CitationEvent, SignatureEvent, InputJsonEvent]
+
+class StreamingToken():
+    def __init__(
+        self,
+        token: str,
+        underlying: object,
+        thinking: bool = False,
+    ):
+        self.token = token
+        self.underlying = underlying
+        self.thinking = thinking
+
+
 class LoggingAsyncIterator:
     def __init__(self, original_iterator, token_perf: TokenPerf):
         if Helpers.is_sync_iterator(original_iterator) and not Helpers.is_async_iterator(original_iterator):
@@ -61,8 +75,9 @@ class LoggingAsyncIterator:
         else:
             self.original_iterator = original_iterator.__aiter__()
             self.perf = token_perf
+        self.original_iterator_object = original_iterator
 
-    async def __anext__(self) -> str:
+    async def __anext__(self) -> StreamingToken:
         try:
             result = await self.original_iterator.__anext__()
 
@@ -70,36 +85,71 @@ class LoggingAsyncIterator:
                 self.perf.tick()
 
             if isinstance(result, AnthropicCompletion):
-                return cast(str, result.completion or '')
+                return StreamingToken(result.completion or '', underlying=result,thinking=False)
             elif isinstance(result, OAICompletionChunk):
                 if result.choices and len(result.choices) > 0 and result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
                 if result.usage:
                     self.perf.total_tokens = result.usage.total_tokens  # type: ignore
+
                 if result.choices and len(result.choices) > 0:
-                    return cast(str, result.choices[0].delta.content or '')  # type: ignore
+                    return StreamingToken(result.choices[0].delta.content or '', underlying=result, thinking=False)  # type: ignore
                 else:
-                    return ''
+                    return StreamingToken('', underlying=result.choices, thinking=False)
+            # openai
             elif isinstance(result, OAICompletion):  # o1 mini and o1 preview don't do streaming
                 if result.choices and len(result.choices) > 0 and result.choices[0].finish_reason:
                     self.perf.stop_reason = result.choices[0].finish_reason
                 if 'usage' in result and 'total_tokens' in result['usage']:  # type: ignore
                     self.perf.total_tokens = result.usage.total_tokens  # type: ignore
+
                 if result.choices and len(result.choices) > 0:
-                    return cast(str, result.choices[0].message.content or '')  # type: ignore
+                    return StreamingToken(result.choices[0].message.content or '', underlying=result, thinking=False)
                 else:
-                    return ''
+                    return StreamingToken('', underlying=result.choices, thinking=False)
             # amazon nova
             elif isinstance(result, dict) and 'chunk' in result:
                 chunk = result['chunk']
                 chunk_json = json.loads(chunk.get("bytes").decode())
                 content_block_delta = chunk_json.get("contentBlockDelta")
+
                 if content_block_delta:
-                    return cast(str, content_block_delta.get("delta").get("text"))
+                    return StreamingToken(content_block_delta.get("delta").get("text"), underlying=result, thinking=False)
                 else:
-                    return ''
+                    return StreamingToken('', underlying=result, thinking=False)
+            # anthropic
+            elif (
+                isinstance(result, ContentBlockStartEvent)
+                and result.content_block.type == 'thinking'
+            ):
+                return StreamingToken('<thinking>\n', underlying=result, thinking=True)
+            elif (
+                isinstance(result, ContentBlockStopEvent)
+                and result.content_block.type == 'thinking'
+            ):
+                return StreamingToken('\n</thinking>\n', underlying=result, thinking=True)
+            elif (
+                isinstance(result, RawMessageStartEvent)
+                or isinstance(result, RawMessageStopEvent)
+                or isinstance(result, RawMessageDeltaEvent)
+                or isinstance(result, RawContentBlockStartEvent)
+                or isinstance(result, RawContentBlockStopEvent)
+                or isinstance(result, RawContentBlockDeltaEvent)
+            ):
+                return StreamingToken('', underlying=result, thinking=False)
+            elif isinstance(result, AnthropicStreamType):
+                if result.type == 'thinking':
+                    return StreamingToken(result.thinking, underlying=result, thinking=True)
+                elif result.type == 'text':
+                    return StreamingToken(result.text, underlying=result, thinking=False)
+                elif result.type == 'signature':
+                    return StreamingToken('', underlying=result, thinking=False)
+                elif result.type == 'input_json':
+                    return StreamingToken('', underlying=result, thinking=False)
+                else:
+                    return StreamingToken('', underlying=result, thinking=False)
             elif isinstance(result, str):
-                return result
+                return StreamingToken(result, underlying=result, thinking=False)
             else:
                 raise ValueError(f'Unknown completion type: {type(result)}, stream type: {type(self.original_iterator)}')
         except StopAsyncIteration:
@@ -169,7 +219,7 @@ class TokenStreamManager:
             if Container().get_config_variable('LLMVM_SHARE', default=''):
                 with open(os.path.expanduser(Container().get_config_variable('LLMVM_SHARE') + f'/{self.perf.request_id}.json'), 'w') as f:
                     f.write(result.response._request._content.decode('utf-8'))  # type: ignore
-            self.token_perf_wrapper = TokenStreamWrapper(result.text_stream, self.perf)  # type: ignore
+            self.token_perf_wrapper = TokenStreamWrapper(result, self.perf)  # type: ignore
             self.token_perf_wrapper.object = result
 
             return self.token_perf_wrapper
