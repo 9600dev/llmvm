@@ -5,6 +5,7 @@ import os
 from typing import Any, Awaitable, Callable, Optional, cast
 
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
+from anthropic.types import ThinkingConfigParam
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
@@ -237,6 +238,7 @@ class AnthropicExecutor(Executor):
         max_output_tokens: int = 4096,
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
+        thinking: int = 0,
     ) -> TokenStreamManager:
         model = model if model else self.default_model
 
@@ -289,10 +291,10 @@ class AnthropicExecutor(Executor):
         token_trace = TokenPerf('aexecute_direct', 'anthropic', model)  # type: ignore
         token_trace.start()
 
-        # anthropic debug prepend stuff, ignore for now
-        prepend = Container.get_config_variable('LLMVM_PREPEND', default='')
-        if prepend:
-            messages_list[0]['content'][0]['text'] = prepend + messages_list[0]['content'][0]['text']
+        thinking_block: ThinkingConfigParam = {
+            'type': 'enabled',
+            'budget_tokens': thinking,
+        } if thinking else {'type': 'disabled'}
 
         try:
             # AsyncStreamManager[AsyncMessageStream]
@@ -303,7 +305,8 @@ class AnthropicExecutor(Executor):
                 system=system_message,
                 temperature=temperature,
                 stop_sequences=stop_tokens,
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
+                thinking=thinking_block,
+                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
             )
             return TokenStreamManager(stream, token_trace)
         except Exception as e:
@@ -317,6 +320,7 @@ class AnthropicExecutor(Executor):
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
     ) -> Assistant:
         model = model if model else self.default_model

@@ -613,6 +613,9 @@ class Repl():
                 query = await session.prompt_async(
                     repl_stats,
                     complete_while_typing=True,
+                    style=Style.from_dict({
+                        'prompt': Container.get_config_variable('client_prompt_color', default='')
+                    })
                 )
 
                 pipe_task.cancel()
@@ -1275,6 +1278,7 @@ def new(
 @click.option('--stop_tokens', type=str, required=False, multiple=True, help='stop tokens for the call.')
 @click.option('--escape', type=bool, is_flag=True, required=False, help='escape the message content.')
 @click.option('--throw', type=bool, is_flag=True, required=False, default=False, help='throw an exception if the LLMVM server is down. Default is false.')
+@click.option('--thinking', '-z', type=int, required=False, default=0, help='enable thinking mode with a max token length.')
 @click.option('--context_messages', required=False, multiple=True, hidden=True)
 def message(
     message: Optional[str | bytes | Message],
@@ -1294,6 +1298,7 @@ def message(
     stop_tokens: list[str],
     escape: bool,
     throw: bool,
+    thinking: int,
     context_messages: Sequence[Message] = [],
 ):
     global thread_id

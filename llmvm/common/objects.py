@@ -859,6 +859,7 @@ class Executor(ABC):
         temperature: float = 0.0,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
+        thinking: int = 0,
         stream_handler: Optional[Callable[['AstNode'], Awaitable[None]]] = None,
     ) -> 'Assistant':
         pass

@@ -40,6 +40,7 @@ def llm(
     output_token_len: int = 4096,
     temperature: float = 0.0,
     stop_tokens: list[str] = [],
+    thinking: int = 0,
     stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
     template_args: Optional[dict[str, Any]] = None,
 ) -> Assistant:
@@ -68,6 +69,7 @@ def llm(
             output_token_len=output_token_len,
             temperature=temperature,
             stop_tokens=stop_tokens,
+            thinking=thinking,
             stream_handler=stream_handler,
             template_args=template_args,
         )
@@ -84,6 +86,7 @@ def llmvm(
     cookies: list[dict[str, Any]] = [],
     compression: str = 'auto',
     mode: str = 'auto',
+    thinking: int = 0,
     stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
     template_args: Optional[dict[str, Any]] = None,
 ) -> SessionThreadModel:
@@ -116,6 +119,7 @@ def llmvm(
             cookies = cookies,
             compression=compression,
             mode=mode,
+            thinking=thinking,
             stream_handler=stream_handler,
             template_args=template_args,
         )
@@ -265,6 +269,7 @@ class LLMVMClient():
         output_token_len: int = 4096,
         temperature: float = 0.0,
         stop_tokens: list[str] = [],
+        thinking: int = 0,
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
         template_args: Optional[dict[str, Any]] = None,
     ) -> Assistant:
@@ -362,6 +367,7 @@ class LLMVMClient():
         cookies: list[dict[str, Any]] = [],
         compression: str = '',
         mode: str = '',
+        thinking: int = 0,
         stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
         template_args: Optional[dict[str, Any]] = None,
     ) -> SessionThreadModel:
