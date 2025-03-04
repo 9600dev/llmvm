@@ -80,7 +80,7 @@ class AnthropicExecutor(Executor):
                         **({'content_type': 'image'} if server_serialization else {})
                     })
                 else:
-                    logging.warning(f"Image content type not supported for {model}")
+                    logging.warning(f"Image content type not supported for model {model}")
             elif isinstance(content, TextContent) and content.sequence:  # is not last message, context messages
                 content_list.append({
                     'type': 'text',

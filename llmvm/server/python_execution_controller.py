@@ -686,7 +686,7 @@ class ExecutionController(Controller):
                 results = [parse_code_block_result(r) for r in result]
                 return Helpers.flatten(results)
             elif isinstance(result, Assistant):
-                return [TextContent(str(result.message))]
+                return cast(list[AstNode], result.message)
             elif isinstance(result, Statement):
                 messages = self.statement_to_message(result)
                 content: list[Content] = Helpers.flatten([m.message for m in messages])

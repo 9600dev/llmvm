@@ -765,7 +765,7 @@ class System(Message):
 class Assistant(Message):
     def __init__(
         self,
-        message: Content,
+        message: Content | list[Content],
         error: bool = False,
         system_context: object = None,
         llm_call_context: object = None,
@@ -775,7 +775,10 @@ class Assistant(Message):
         hidden: bool = False,
         total_tokens: int = 0,
     ):
-        super().__init__([message], hidden)
+        if isinstance(message, list):
+            super().__init__(message, hidden)
+        else:
+            super().__init__([message], hidden)
         self.error = error
         self._system_context = system_context,
         self._llm_call_context: object = llm_call_context
@@ -791,13 +794,16 @@ class Assistant(Message):
         return self.get_str()
 
     def get_str(self):
-        return str(self.message[0].get_str())
+        return ' '.join([str(m.get_str()) for m in self.message])
 
     def __add__(self, other):
-        other_message = str(other)
+        def str_str(x):
+            if hasattr(x, 'get_str'):
+                return x.get_str()
+            return str(x)
 
         assistant = Assistant(
-            message=TextContent(str(self.message) + other_message),
+            message=TextContent(str_str(self.message) + str_str(other)),
             system_context=self._system_context,
             llm_call_context=self._llm_call_context,
             stop_reason=self.stop_reason,
