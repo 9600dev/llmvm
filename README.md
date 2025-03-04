@@ -2,9 +2,12 @@
 
 LLMVM is a CLI based productivity tool that uses Large Language Models and local Python tools/helpers to reason about and execute your tasks. A CLI client (client.py) either connects directly to an LLM provider or will connect to a local server (server.py) that coordinates tool execution, [Retrieval Agumented Generation](https://blogs.nvidia.com/blog/what-is-retrieval-augmented-generation/), document search and more.
 
-It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
+It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 3.5/4/4 Turbo/4o/o1/o3 models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
 
-> **Update Jan 3rd 2025**: DeepSeek v3 and Nova added, o1-preview and o1-mini have severely regressed. DeepSeek works quite well, Nova maybe slightly behind Gemini 1.5. o1-preview and o1-mini simply refuse to emit tokens with the code helpers [mega prompt](https://github.com/9600dev/llmvm/blob/master/llmvm/server/prompts/python/python_continuation_execution.prompt), and I haven't had time to figure out why.  
+
+> **Update March 4th 2025**: Added Anthropic "thinking tokens" support. Use -z num_of_thinking_tokens to set the number of thinking tokens. Lots of bug fixes; browser works far better now. o1/o3 works better - it does not like CoT examples, so the megaprompt has been split into reasoning and non-reasoning megaprompts.
+
+> **Update Jan 3rd 2025**: DeepSeek v3 and Nova added, o1-preview and o1-mini have severely regressed. DeepSeek works quite well, Nova maybe slightly behind Gemini 1.5. o1-preview and o1-mini simply refuse to emit tokens with the code helpers [mega prompt](https://github.com/9600dev/llmvm/blob/master/llmvm/server/prompts/python/python_continuation_execution.prompt), and I haven't had time to figure out why.
 
 > **Update October 8th 2024**: Gemini. Simply refuses to emit `<code></code>` tags so we've had to switch to `<helpers></helpers>` and `</helpers_result>`. Had to update the tools prompt to really really force gemini to not go out of bounds.
 
@@ -28,18 +31,20 @@ $ playwright install
 $ python -m llmvm.server
 
 Default executor is: anthropic
-Default model is: claude-3-5-sonnet-20241022
+Default model is: claude-3-7-sonnet-20250219
 
 Make sure to `playwright install`.
 If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.
 Loaded helper: datetime
 Loaded helper: search_linkedin_profile
 Loaded helper: get_linkedin_profile
+Loaded helper: get_hackernews_latest
 Loaded helper: get_report
 Loaded helper: get_stock_price
 Loaded helper: get_current_market_capitalization
 Loaded helper: get_stock_volatility
 Loaded helper: get_stock_price_history
+Loaded helper: get_stock_analysis
 Loaded helper: sample_normal
 Loaded helper: sample_binomial
 Loaded helper: sample_lognormal
@@ -51,16 +56,25 @@ Loaded helper: find_all_references
 Loaded helper: get_weather
 Loaded helper: address_lat_lon
 Loaded helper: get_currency_rates
-Loaded helper: get_bitcoin_rates
+Loaded helper: get_gold_silver_price_in_usd
+Loaded helper: get_bitcoin_prices_in_usd
 Loaded helper: get_central_bank_rates
 Loaded helper: get_tvshow_ratings_and_details
-Loaded helper: click
+Loaded helper: search_and_replace
+Loaded helper: read_file
+Loaded helper: click_selector
 Loaded helper: close
-Loaded helper: find_and_click_on
-Loaded helper: get_selector
+Loaded helper: find_and_click_on_expression
+Loaded helper: find_selector_or_mouse_x_y
 Loaded helper: goto
-Loaded helper: type_into
-
+Loaded helper: mouse_move_x_y_and_click
+Loaded helper: type_into_selector_or_mouse_x_y
+Loaded helper: get_chrome_tabs_url_and_title
+Loaded helper: get_pdf
+Loaded helper: get_screenshot
+Loaded helper: google_doc_to_markdown
+Loaded helper: google_sheet_to_pandas
+Loaded helper: goto
 INFO:     Started server process [71093]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
@@ -80,7 +94,7 @@ query>>
 For the best experience, turning on all logging and very thorough (but expensive) content analysis, run the client and server with these settings:
 
 ```bash
-LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-3-5-sonnet-20240620" LLMVM_PROFILING="true" python -m llmvm.client  # and llmvm.server
+LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-3-7-sonnet-20250219" LLMVM_PROFILING="true" python -m llmvm.client  # and llmvm.server
 ```
 
 Quick intro video here:
@@ -240,7 +254,7 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
 ```yaml
 executor: 'anthropic'  # or 'openai', or 'gemini' or 'deepseek', or 'bedrock'
-anthropic_model: 'claude-3-5-sonnet-20241022'
+anthropic_model: 'claude-3-7-sonnet-20250219'
 ```
 
 or, you can set environment variables that specify the execution backend and the model you'd like to use:
@@ -565,7 +579,7 @@ These days, I mostly run Anthropic's models. Their super fast, cheap, and smart.
 
 ```bash
 OPUS="claude-3-opus-20240229"
-SONNET="claude-3-sonnet-20241022"
+SONNET="claude-3-7-sonnet-20250219"
 HAIKU="claude-3-haiku-20240307"
 INSTANT="claude-instant-1.2"
 
