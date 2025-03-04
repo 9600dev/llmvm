@@ -685,16 +685,16 @@ class Helpers():
 
         if url_result.scheme in ('http', 'https'):
             async with httpx.AsyncClient() as client:
-                response = await client.get(url_or_file, headers=headers, follow_redirects=True, timeout=10)
+                response = await client.get(url_or_file, headers=headers, follow_redirects=True, timeout=5)
                 if response.status_code != 200:
-                    raise ValueError(f'Failed to download image. Status code: {response.status_code}')
+                    raise ValueError(f'Helpers.download_bytes() Failed to download: {url_or_file}. Status code is: {response.status_code}')
                 return response.content
         else:
             try:
                 with open(url_or_file, 'rb') as file:
                     return file.read()
             except FileNotFoundError:
-                raise ValueError(f'The supplied argument url_or_file: {url_or_file} is not a correct filename or url.')
+                raise ValueError(f'Helpers.download_bytes() The supplied argument url_or_file: {url_or_file} is not a correct filename or url.')
 
     @staticmethod
     async def download(url_or_file: str) -> str:
@@ -703,33 +703,51 @@ class Helpers():
             return stream.decode('utf-8')
         return ''
 
+
     @staticmethod
     async def get_image_fuzzy_url(logging, url: str, image_url: str, min_width: int, min_height: int) -> bytes:
-        parsed_url = urlparse(url)
-        path = parsed_url.path
-        without_file = parsed_url.scheme + "://" + parsed_url.netloc + os.path.dirname(path)
+        # Return early if there's no image URL
+        if not image_url:
+            return b''
+
+        # If the URL starts with "www", prepend https:// to it
+        if image_url.startswith('www'):
+            image_url = 'https://' + image_url
 
         try:
-            if image_url.startswith('http'):
+            # Handle protocol-relative URLs (e.g., //example.com/img.jpg)
+            if image_url.startswith('//'):
+                parsed_base = urlparse(url)
+                scheme = parsed_base.scheme if parsed_base.scheme else 'https'
+                full_url = f"{scheme}:{image_url}"
+                result = await Helpers.download_bytes(full_url)
+
+            # Handle full http(s) URLs
+            elif image_url.startswith('http://') or image_url.startswith('https://'):
                 result = await Helpers.download_bytes(image_url)
-                width, height = Helpers.image_size(result)
-                if width >= min_width and height >= min_height:
-                    return result
 
-            elif image_url.startswith('/'):
-                result = await Helpers.download_bytes(parsed_url.scheme + "://" + parsed_url.netloc + image_url)
-                width, height = Helpers.image_size(result)
-                if width >= min_width and height >= min_height:
-                    return result
+            # Handle local file URLs and paths
+            elif image_url.startswith('file://'):
+                local_path = image_url[len('file://'):]
+                with open(local_path, 'rb') as f:
+                    result = f.read()
+            # Also if the file exists on disk using the given image_url directly
+            elif os.path.exists(image_url):
+                with open(image_url, 'rb') as f:
+                    result = f.read()
 
+            # Otherwise, assume it's a relative URL and build the full URL accordingly.
             else:
-                result = await Helpers.download_bytes(without_file + image_url)
-                width, height = Helpers.image_size(result)
-                if width >= min_width and height >= min_height:
-                    return result
+                full_url = urljoin(url, image_url)
+                result = await Helpers.download_bytes(full_url)
+
+            # Validate the image dimensions.
+            width, height = Helpers.image_size(result)
+            if width >= min_width and height >= min_height:
+                return result
+
         except Exception as e:
-            logging.debug(f"Error downloading image {url} {image_url}: {e}")
-            return b''
+            logging.debug(f"Helpers.get_image_fuzzy_url({image_url}) exception caught: {e}")
 
         return b''
 

@@ -304,7 +304,55 @@ class ChromeHelpersInternal():
             await self.browser.close()
         self.is_closed = True
 
-    async def goto(self, url: str):
+    async def goto(self, url: str) -> str:
+        import hashlib
+
+        try:
+            if (await self.page()).url != url:
+                page = await self.page()
+                await page.goto(url, wait_until="commit")
+
+                domain = urlparse(url).netloc
+
+                if domain in self.wait_fors:
+                    logging.debug(f'ChromeHelpersInternal.goto() waiting for {domain} for {self.wait_fors[domain]} ms')
+                    wait_for_lambda = self.wait_fors[domain]
+                    await wait_for_lambda(await self.page())
+
+                stable_iterations_required = 2  # number of consecutive identical checks
+                check_interval = 100  # milliseconds between checks
+                max_checks = 20       # maximum checks to prevent infinite loops
+
+                stable_count = 0
+                previous_hash = None
+
+                for _ in range(max_checks):
+
+                    await (await self.page()).mouse.move(random.randint(1, 800), random.randint(1, 600))
+
+                    content = await page.content()
+                    # Calculate a hash of the content to compare quickly
+                    current_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
+                    if current_hash == previous_hash:
+                        stable_count += 1
+                    else:
+                        stable_count = 0
+                    # If we've seen the same content consecutively, assume it's stable
+                    if stable_count >= stable_iterations_required:
+                        return content
+
+                    previous_hash = current_hash
+                    await self.wait(check_interval)
+
+                logging.debug('ChromeHelpersInternal.goto() reached maximum checks without finding stable content')
+                return await (await self.page()).content()
+            else:
+                return await (await self.page()).content()
+        except Error as ex:
+            logging.debug(f'ChromeHelpersInternal.goto() exception: {ex}')
+            return str("goto() failed with an exception: " + str(ex))
+
+    async def goto2(self, url: str):
         try:
             if (await self.page()).url != url:
                 page = await self.page()
@@ -318,10 +366,10 @@ class ChromeHelpersInternal():
                     await wait_for_lambda(await self.page())
 
                 try:
-                    async with page.expect_event("domcontentloaded", timeout=8000):
+                    async with page.expect_event("networkidle", timeout=8000):
                         pass
-                except:
-                    logging.debug("ChromeHelpersInternal.goto() page is still loading after timeout; stopping rendering.")
+                except Exception as ex:
+                    logging.debug(f"ChromeHelpersInternal.goto() page is still loading after timeout; stopping rendering. {ex}")
 
                 # wait some fraction of a second for some rendering
                 await self.wait(200)

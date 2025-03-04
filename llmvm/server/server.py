@@ -498,7 +498,7 @@ async def tools_completions(request: SessionThreadModel):
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}&temperature={thread.temperature}')  # NOQA: E501
+    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&thinking={thread.thinking}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}&temperature={thread.temperature}')  # NOQA: E501
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')

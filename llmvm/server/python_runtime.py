@@ -652,7 +652,7 @@ class PythonRuntime:
         return answer
 
     def answer(self, expr, check_answer: bool = True) -> Answer:
-        logging.debug(f'PythonRuntime.answer({str(expr)[:20]})')
+        logging.debug(f'PythonRuntime.answer({Helpers.str_get_str(expr)[:20]})')
 
         # if we have a list of answers, maybe just return them.
         if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
@@ -673,7 +673,7 @@ class PythonRuntime:
             self.answers.append(answer)
             return answer
 
-        snippet = str(expr).replace('\n', ' ')[:150]
+        snippet = Helpers.str_get_str(expr).replace('\n', ' ')[:150]
 
         # let's check the answer
         if not self.answer_error_correcting:
@@ -731,7 +731,7 @@ class PythonRuntime:
         logging.debug('rewrite_python_error_correction()')
         dictionary = ''
         for key, value in locals_dictionary.items():
-            dictionary += '{} = "{}"\n'.format(key, str(value)[:128].replace('\n', ' '))
+            dictionary += '{} = "{}"\n'.format(key, Helpers.str_get_str(value)[:128].replace('\n', ' '))
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(

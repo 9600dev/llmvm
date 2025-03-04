@@ -949,7 +949,7 @@ class ExecutionController(Controller):
 
                 # todo: this should be AstNode or TextNode or ...
                 # but for now we're just making it a str()
-                code_execution_result_str = '\n'.join([str(c) for c in code_execution_result])
+                code_execution_result_str = '\n'.join([Helpers.str_get_str(c) for c in code_execution_result])
 
                 # we have a <helpers_result></helpers_result> block, push it to the cli client
                 if len(code_execution_result_str) > 300:
@@ -968,7 +968,7 @@ class ExecutionController(Controller):
                         content_messages.append(c)
                     else:
                         logging.debug('code_execution_result item is not a Content: {}'.format(c))
-                        content_messages.append(TextContent(str(c)))
+                        content_messages.append(TextContent(Helpers.str_get_str(c)))
                 content_messages.append(TextContent('</helpers_result>'))
                 completed_code_user_message = User(content_messages, hidden=hidden)
                 # required to complete the continuation
@@ -1018,7 +1018,7 @@ class ExecutionController(Controller):
         if messages_copy[-1].role() != 'assistant':
             messages_copy.append(
                 Assistant(
-                    TextContent('\n'.join([str(statement) for statement in dedupped])),
+                    TextContent('\n'.join([Helpers.str_get_str(statement) for statement in dedupped])),
                     total_tokens=response.total_tokens,
                     stop_reason=response.stop_reason,
                     stop_token=response.stop_token,
