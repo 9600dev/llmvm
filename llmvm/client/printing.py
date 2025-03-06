@@ -24,16 +24,18 @@ from llmvm.common.objects import BrowserContent, MarkdownContent, Message, Conte
 logging = setup_logging()
 
 
-async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) -> list[AstNode]:
-    def strip_string(str) -> str:
-        if str.startswith('"'):
-            str = str[1:]
-        if str.endswith('"'):
-            str = str[:-1]
-        return str
+async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) -> list:
+    # this was changed mar 6, to support idle timoue so there's streaming issues, this will be the root cause
+    def strip_string(s: str) -> str:
+        if s.startswith('"'):
+            s = s[1:]
+        if s.endswith('"'):
+            s = s[:-1]
+        return s
 
-    async def decode(content) -> bool:
+    async def decode(content: str) -> bool:
         try:
+            # Only attempt to decode if content looks like a JSON object.
             if not content.startswith('{') or not content.endswith('}'):
                 return False
 
@@ -44,7 +46,7 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
                 await print_lambda(data.token)
             elif isinstance(data, TextContent):
                 await print_lambda(data.get_str())
-            elif isinstance(data, TokenStopNode) or isinstance(data, StreamingStopNode):
+            elif isinstance(data, (TokenStopNode, StreamingStopNode)):
                 await print_lambda(str(data))
             elif isinstance(data, StreamNode):
                 await print_lambda(cast(StreamNode, data))
@@ -52,44 +54,48 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
                 response_objects.append(data)
             elif isinstance(data, (dict, list)):
                 response_objects.append(data)
-            # todo this shouldn't happen - they all need to be objects
+            # todo: this shouldn't happen - they all need to be objects
             elif isinstance(data, str) and data.startswith('"') and data.endswith('"'):
                 await print_lambda(strip_string(data))
             else:
                 return False
             return True
-        except Exception as ex:
+        except Exception:
             return False
 
     response_objects = []
-    async with async_timeout.timeout(400):
+    buffer = ''
+    response_iterator = response.aiter_raw()
+
+    while True:
         try:
-            buffer = ''
-            async for raw_bytes in response.aiter_raw():
-                content = raw_bytes.decode('utf-8')
-                content = content.replace('data: ', '').strip()
-
-                if content == '[DONE]':
-                    pass
-                elif content == '':
-                    pass
-                else:
-                    result = await decode(content)
-                    if not result:
-                        buffer += content
-                        result = await decode(buffer)
-                        if result:
-                            buffer = ''
-                    else:
-                        buffer = ''
-
+            raw_bytes = await asyncio.wait_for(response_iterator.__anext__(), timeout=60)
         except asyncio.TimeoutError as ex:
             logging.exception(ex)
-            # await response.aclose()
             raise ex
+        except StopAsyncIteration:
+            # End of stream
+            break
         except KeyboardInterrupt as ex:
             await response.aclose()
             raise ex
+
+        content = raw_bytes.decode('utf-8')
+        content = content.replace('data: ', '').strip()
+
+        if content in ('[DONE]', ''):
+            continue
+        else:
+            result = await decode(content)
+            if not result:
+                # If the chunk couldn't be decoded alone, accumulate and try decoding again.
+                buffer += content
+                result = await decode(buffer)
+                if result:
+                    buffer = ''
+            else:
+                buffer = ''
+
     return response_objects
 
 

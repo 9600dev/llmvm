@@ -1366,6 +1366,15 @@ class FunctionCallMeta(Call):
     def __str__(self):
         return str(self._result)
 
+    def __repr__(self):
+        return self._result.__repr__()
+
+    def get_str(self):
+        if hasattr(self._result, 'get_str'):
+            return self._result.get_str()  # type: ignore
+        else:
+            return str(self._result)
+
     def __add__(self, other):
         a, b = coerce_types(self._result, other)
         return a + b  # type: ignore

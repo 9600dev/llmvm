@@ -709,9 +709,9 @@ class PythonRuntime:
 
         # let's check the answer
         if not self.answer_error_correcting:
-            write_client_stream(TextContent(f'I am double checking an answer: answer("{snippet} ...")\n'))
+            write_client_stream(TextContent(f'I am double checking a result: result("{snippet} ...")\n'))
         else:
-            write_client_stream(TextContent(f'I have a new answer, double checking it: answer("{snippet} ...")\n'))
+            write_client_stream(TextContent(f'I have a new result, double checking it: result("{snippet} ...")\n'))
 
         # if the original query is referring to an image, it's because we were in tool mode
         # so this is a todo: hack to fix answers() so that it works for images

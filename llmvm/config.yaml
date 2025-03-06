@@ -42,9 +42,9 @@ helper_functions:
   - llmvm.server.bcl.BCL.sample_lognormal
   - llmvm.server.bcl.BCL.sample_list
   - llmvm.server.bcl.BCL.generate_graph_image
-  - llmvm.server.bcl.BCL.get_code_structure_summary
+  - llmvm.server.bcl.BCL.get_source_code_structure_summary
   - llmvm.server.bcl.BCL.get_source_code
-  - llmvm.server.bcl.BCL.find_all_references
+  - llmvm.server.bcl.BCL.find_all_references_to_method
   - llmvm.server.bcl.BCL.get_weather
   - llmvm.server.bcl.BCL.address_lat_lon
   - llmvm.server.bcl.BCL.get_currency_rates

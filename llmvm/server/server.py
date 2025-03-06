@@ -310,15 +310,19 @@ def __get_thread(id: int) -> SessionThreadModel:
 
 
 async def stream_response(response):
+    # this was changed mar 6, to support idle timoue so there's streaming issues, this will be the root cause
     content = ''
-    async with async_timeout.timeout(220):
+    response_iterator = response.__aiter__()
+    while True:
         try:
-            async for chunk in response:
-                content += str(chunk)
-                yield f"data: {jsonpickle.encode(chunk)}\n\n"
-            yield "data: [DONE]"
+            chunk = await asyncio.wait_for(response_iterator.__anext__(), timeout=60)
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="Stream timed out")
+        except StopAsyncIteration:
+            yield "data: [DONE]"
+            break
+        content += str(chunk)
+        yield f"data: {jsonpickle.encode(chunk)}\n\n"
 
 
 @app.post('/v1/chat/completions')

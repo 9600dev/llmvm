@@ -119,28 +119,32 @@ class ExecutionController(Controller):
         return message
 
     def __parse_message_template(self, messages: list[Message], template_args: dict[str, Any]) -> list[Message]:
-        # check the [system_message] [user_message] pair, and parse those into messages
-        # if they exist
-        for i in range(len(messages)):
-            for j in range(len(messages[i].message)):
-                if (
-                    (type(messages[i].message[j]) is TextContent or type(messages[i].message[j]) is FileContent)
-                    and '[system_message]' in messages[i].message[j].get_str()
-                    and '[user_message]' in messages[i].message[j].get_str()
-                ):
+        new_messages = []
+        for message in messages:
+            # Assume each message has a 'message' attribute that is a list of contents.
+            replaced = False
+            for content in message.message:
+                if (isinstance(content, (TextContent, FileContent)) and
+                    '[system_message]' in content.get_str() and
+                    '[user_message]' in content.get_str()):
+
+                    # Obtain the two prompts from the helper.
                     system, user = Helpers.get_prompts(
-                        messages[i].message[j].get_str(),
+                        content.get_str(),
                         template_args,
                         self.get_executor().user_token(),
                         self.get_executor().assistant_token(),
                         self.get_executor().scratchpad_token(),
                         self.get_executor().append_token(),
                     )
-                    # inject system and user into messages
-                    messages[i] = system
-                    messages.insert(i + 1, user)
-                    i += 1
-        return messages
+                    # Append the parsed system and user messages.
+                    new_messages.append(system)
+                    new_messages.append(user)
+                    replaced = True
+                    break  # Found our marker in this message, so stop checking further.
+            if not replaced:
+                new_messages.append(message)
+        return new_messages
 
     def __parse_function(self, message: Message, tools: list[Callable]) -> Message:
         for content in [c for c in message.message if isinstance(c, TextContent) or isinstance(c, FileContent)]:
@@ -932,7 +936,7 @@ class ExecutionController(Controller):
                         EXCEPTION_PROMPT = """We have reached our exception limit.
                         Running any of the previous code again won't work.
                         You have one more shot, try something very different. Feel free to just emit a natural language message instead of code.\n"""
-                        code_execution_result = parse_code_block_result(f'{code_execution_result}\n\n{EXCEPTION_PROMPT}')
+                        code_execution_result = parse_code_block_result(f'{Helpers.str_get_str(code_execution_result)}\n\n{EXCEPTION_PROMPT}')
                         logging.debug('aexecute() Exception limit reached)')
 
                 # code_execution_result will be empty if the code block executed without exceptions
@@ -943,7 +947,8 @@ class ExecutionController(Controller):
                     code_execution_result = parse_code_block_result(python_runtime.answers)
                 elif not python_runtime.answers and code_execution_result:
                     # exception!
-                    code_execution_result = parse_code_block_result(f'{code_execution_result}')
+                    # code_execution_result = parse_code_block_result(code_execution_result)
+                    pass
                 elif not python_runtime.answers and not code_execution_result:
                     # sometimes dove doesn't generate an answer() block, so we'll have to get the last assignment of the code and use that.
                     last_assignment = python_runtime.get_last_assignment(code_block, locals_dict)

@@ -1322,6 +1322,12 @@ class FunctionCallMeta(Call):
     def __float__(self):
         return float(self._result)  # type: ignore
 
+    def __class__(self):
+        if self._result is not None:
+            return self._result.__class__
+        else:
+            return type(self)
+
     def __getattr__(self, name):
         if self._result is not None:
             return getattr(self._result, name)

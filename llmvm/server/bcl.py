@@ -499,7 +499,7 @@ class BCL():
             raise ValueError(f"Invalid source file paths: {source_file_paths}. Must be a list of file paths or a directory path.")
 
     @staticmethod
-    def get_code_structure_summary(source_file_paths: Union[List[str], str]) -> str:
+    def get_source_code_structure_summary(source_file_paths: Union[List[str], str]) -> str:
         """
         Gets all class names, method names, and docstrings for each of the source code files listed in source_files.
         This method does not return any source code, only class names, method names and their docstrings.
@@ -541,7 +541,7 @@ class BCL():
             raise ValueError(f"File {source_file_path} not found")
 
     @staticmethod
-    def find_all_references(
+    def find_all_references_to_method(
             source_file_paths: List[str],
             method_name: str
         ) -> str:
