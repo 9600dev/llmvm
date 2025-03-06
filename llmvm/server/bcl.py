@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import subprocess
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
 from typing import List, cast
@@ -301,6 +302,131 @@ class BCL():
         return ImageContent(image_bytes)
 
     @staticmethod
+    def find(
+        pattern: str,
+        paths: Union[str, List[str]] = ".",
+        file_patterns: Optional[Union[str, List[str]]] = None,
+        ignore_case: bool = False,
+        word_regexp: bool = False,
+        max_depth: Optional[int] = None,
+        max_results: Optional[int] = 10,
+    ) -> list[dict[str, Any]]:
+        """
+        Execute ripgrep search and return results as a dictionary that can be converted to JSON.
+
+        :param pattern: The search pattern (regular expression)
+        :type pattern: str
+        :param paths: Directory path(s) to search in
+        :type paths: str or list
+        :param file_patterns: File pattern(s) to include (e.g., "*.py"). Use a glob if possible.
+        :type file_patterns: str or list, optional
+        :param ignore_case: Whether to perform case-insensitive search
+        :type ignore_case: bool
+        :param word_regexp: Whether to match the pattern as a whole word
+        :type word_regexp: bool
+        :param max_depth: Maximum depth to recursively search
+        :type max_depth: int, optional
+        :param max_results: Maximum number of results to return
+        :type max_results: int, optional
+
+        :returns: dict[str, Any] which can be converted to json via json.dumps():
+        [
+            {
+                "file": "/path/to/project/src/main.py",
+                "line_number": 42,
+                "content": "def process_data(input_file, output_format='json'):",
+                "submatches": [
+                    {
+                        "match": "process_data",
+                        "start": 4,
+                        "end": 16
+                    }
+                ]
+            },
+            ...
+        ]
+        """
+        # Initialize ripgrep command
+        cmd = ["rg"]
+
+        # Add basic arguments
+        if ignore_case:
+            cmd.append("-i")
+        if word_regexp:
+            cmd.append("-w")
+
+        # Add optional depth limit
+        if max_depth is not None:
+            cmd.extend(["--max-depth", str(max_depth)])
+
+        # Add max results limit
+        if max_results is not None:
+            cmd.extend(["--max-count", str(max_results)])
+
+        # Always include line numbers
+        cmd.append("--line-number")
+
+        # Handle file patterns correctly
+        if file_patterns:
+            if isinstance(file_patterns, str):
+                if file_patterns.startswith('.'): file_patterns = "*" + file_patterns
+                cmd.extend(["--glob", file_patterns])
+            else:
+                for glob_pattern in file_patterns:
+                    if glob_pattern.startswith('.'): glob_pattern = "*" + glob_pattern
+                    cmd.extend(["--glob", glob_pattern])
+
+        cmd.append("--json")
+
+        # Fix for empty pattern - use "." to match any character if pattern is empty
+        search_pattern = pattern if pattern else "."
+        cmd.append(search_pattern)
+
+        # Add the search paths
+        if isinstance(paths, str):
+            cmd.append(os.path.expanduser(paths))
+        else:
+            for path in paths:
+                cmd.append(os.path.expanduser(path))
+
+        try:
+            # Execute ripgrep command
+            logging.debug('BCL.find() cmd: {}'.format(cmd))
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+            if result.returncode != 0 and result.returncode != 1:  # 1 means no matches, which is valid
+                if "not found" in result.stderr:
+                    raise RuntimeError("ripgrep (rg) is not installed or not in PATH")
+                else:
+                    raise RuntimeError(f"ripgrep error: {result.stderr} called via cmd: {cmd}")
+
+            # Process output based on requested format
+            output = []
+            for line in result.stdout.strip().split('\n'):
+                if line:  # Skip empty lines
+                    try:
+                        match_data = json.loads(line)
+                        output.append({
+                            'file': match_data.get('data', {}).get('path', {}).get('text', ''),
+                            'line_number': match_data.get('data', {}).get('line_number', 0),
+                            'content': match_data.get('data', {}).get('lines', {}).get('text', ''),
+                            'submatches': [
+                                {
+                                    'match': m.get('match', {}).get('text', ''),
+                                    'start': m.get('start', 0),
+                                    'end': m.get('end', 0)
+                                }
+                                for m in match_data.get('data', {}).get('submatches', [])
+                            ]
+                        })
+                    except json.JSONDecodeError:
+                        continue
+            return output
+        except FileNotFoundError:
+            raise RuntimeError("ripgrep (rg) is not installed or not in PATH")
+
+
+    @staticmethod
     def read_file(full_path_filename: str) -> TextContent:
         """
         Generates a graph image from the given x_y_data_dict Dictionary, which has two keys: 'x' and 'y' and a list of int/floats
@@ -363,6 +489,8 @@ class BCL():
                     all_python_files.extend(find_python_files(expanded_path))
                 elif os.path.isfile(expanded_path) and expanded_path.endswith('.py') and '.venv' not in expanded_path:
                     all_python_files.append(expanded_path)
+                elif expanded_path.endswith('.py') and not os.path.isfile(expanded_path):
+                    raise ValueError(f"Invalid source file path: {expanded_path}. File does not exist.")
                 else:
                     raise ValueError(f"Invalid source file path: {expanded_path}. Must be a directory or a .py file.")
             return all_python_files

@@ -4,6 +4,7 @@ import traceback
 import numpy as np
 import datetime as dt
 import inspect
+import json
 import pandas as pd
 import os
 import re
@@ -250,8 +251,8 @@ class PythonRuntime:
             block = block.strip()
             if block:
                 # Remove language identifier if present
-                if block.startswith('python'):
-                    block = block[6:].lstrip()
+                if block.startswith('python\n'):
+                    block = block[7:].lstrip()
                 try:
                     # ast.parse(block)
                     # syntax errors weren't allowing the model to try again and fix the error

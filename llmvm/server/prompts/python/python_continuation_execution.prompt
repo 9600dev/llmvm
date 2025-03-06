@@ -49,7 +49,7 @@ T = TypeVar('T')
 
 10. locals() -> str. Returns a string of all the variables that are currently available to you to access in the Python environment, including new ones that you've added within <helpers></helpers> blocks. Defining local variables in <helpers></helpers> blocks is useful if you want to stash results from a previous <helpers></helpers> block for later use, or you want a runtime working "memory" that you can access later.
 
-The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, types, numpy (as np), pandas (as pd) and scipy as (scipy). There are no other libraries available.
+The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas (as pd) and scipy as (scipy). There are no other libraries available.
 
 There is a Content class which is an abstract class that might be returned by tools. This class looks like:
 
