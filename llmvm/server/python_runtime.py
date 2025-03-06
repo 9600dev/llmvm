@@ -36,7 +36,7 @@ class PythonRuntime:
         self,
         controller: ExecutionController,
         vector_search: VectorSearch,
-        tools: List[Callable] = [],
+        tools: list[Callable] = [],
         answer_error_correcting: bool = False,
         locals_dict = {},
         globals_dict = {}
@@ -45,7 +45,7 @@ class PythonRuntime:
         self.original_code = ''
         self.controller: ExecutionController = controller
         self.vector_search = vector_search
-        self.tools = tools
+        self.tools: list[Callable] = tools
         self.locals_dict = locals_dict
         self.globals_dict = globals_dict
         self.answers: List[Answer] = []
@@ -189,6 +189,8 @@ class PythonRuntime:
         self.globals_dict['search'] = self.search
         self.globals_dict['download'] = self.download
         self.globals_dict['pandas_bind'] = self.pandas_bind
+        self.globals_dict['functions'] = self.functions
+        self.globals_dict['locals'] = self.locals
         for tool in self.tools:
             # a tool is either a static method that is directly callable, or an instance method
             # which needs an instance of the class to be instantiated
@@ -202,7 +204,7 @@ class PythonRuntime:
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
         self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
-        self.globals_dict['answer'] = self.answer
+        self.globals_dict['result'] = self.result
         self.globals_dict['sys'] = sys
         self.globals_dict['os'] = os
         self.globals_dict['datetime'] = dt
@@ -212,6 +214,7 @@ class PythonRuntime:
         self.globals_dict['pd'] = pd
         self.globals_dict['float'] = float
         self.globals_dict['int'] = int
+        self.globals_dict['print'] = self.print
 
 
     @staticmethod
@@ -342,6 +345,7 @@ class PythonRuntime:
 
         # return [m for m in self.messages_list[:-1] if m.role() != 'system']
         return [m for m in self.messages_list if m.role() != 'system']
+
 
     def llm_bind(self, expr, func: str):
         # todo circular import if put at the top
@@ -651,8 +655,35 @@ class PythonRuntime:
         self.answers.append(answer)
         return answer
 
-    def answer(self, expr, check_answer: bool = True) -> Answer:
-        logging.debug(f'PythonRuntime.answer({Helpers.str_get_str(expr)[:20]})')
+    def print(self, *args, sep=' ', end='\n', file=None, flush=False):
+        logging.debug(f'PythonRuntime.print({args})')
+
+        args_as_strings = [str(arg) for arg in args]
+        result = sep.join(args_as_strings) + end
+
+        answer = Answer(
+            result=result
+        )
+        self.answers.append(answer)
+        write_client_stream(TextContent(result))
+
+        return answer
+
+    def functions(self) -> str:
+        tools = '\n'.join([Helpers.get_function_description_flat(f) for f in self.tools])
+        return tools
+
+    def locals(self) -> str:
+        return '\n'.join([f'{key} = {Helpers.str_get_str(value)[:128]}' for key, value in self.locals_dict.items()])
+
+    def result(self, expr, check_answer: bool = True) -> Content:
+        def __result(expr):
+            if isinstance(expr, Content):
+                return expr
+            else:
+                return TextContent(Helpers.str_get_str(expr))
+
+        logging.debug(f'PythonRuntime.result({Helpers.str_get_str(expr)[:20]})')
 
         # if we have a list of answers, maybe just return them.
         if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
@@ -671,7 +702,7 @@ class PythonRuntime:
                 result=expr
             )
             self.answers.append(answer)
-            return answer
+            return __result(expr)
 
         snippet = Helpers.str_get_str(expr).replace('\n', ' ')[:150]
 
@@ -688,12 +719,11 @@ class PythonRuntime:
                 result=expr
             )
             self.answers.append(answer)
-            return answer
 
         # todo: hack for continuations
         answer = Answer(result=expr)
         self.answers.append(answer)
-        return answer
+        return __result(answer)
 
     def get_last_assignment(
         self,
@@ -795,6 +825,16 @@ class PythonRuntime:
             counter += 1
         return None
 
+    def __get_function_names(self, code_str):
+        parsed = ast.parse(code_str)
+
+        function_names = []
+        for node in ast.walk(parsed):
+            if isinstance(node, ast.FunctionDef):
+                function_names.append(node.name)
+
+        return function_names
+
     def __compile_and_execute(
         self,
         python_code: str,
@@ -831,30 +871,11 @@ class PythonRuntime:
             raise Exception(build_exception_str(traceback.format_exc()))
 
         self.locals_dict = context
-        return self.locals_dict
+        # add any helpers the llm defined to the tools list
+        function_names = self.__get_function_names(python_code)
+        callables = {name: self.locals_dict[name] for name in function_names if name in self.locals_dict and callable(self.locals_dict[name])}
+        self.tools = self.tools + list(callables.values())
 
-    def __interpret(
-        self,
-        python_code: str,
-    ) -> Dict[Any, Any]:
-        parsed_ast = ast.parse(Helpers.escape_newlines_in_strings(python_code))
-
-        # todo: this doesn't have the globals/local dictionary merging stuff like above
-        for node in parsed_ast.body:
-            if isinstance(node, ast.Expr):
-                logging.debug(f'[eval] {astunparse.unparse(node)}')
-                result = eval(
-                    compile(ast.Expression(node.value), '<string>', 'eval'),
-                    {**self.globals_dict, **self.locals_dict}
-                )
-                logging.debug(f'[=>] {result}')
-            else:
-                logging.debug(f'[exec] {astunparse.unparse(node)}')
-                exec(
-                    compile(ast.Module(body=[node], type_ignores=[]), '<string>', 'exec'),
-                    self.globals_dict,
-                    self.locals_dict
-                )
         return self.locals_dict
 
     def compile_error(
@@ -971,17 +992,3 @@ class PythonRuntime:
         self.locals_dict = locals_dict
 
         return self.__compile_and_execute(python_code)
-
-    def run_continuation_passing(
-        self,
-        python_code: str,
-        original_query: str,
-        messages: List[Message] = [],
-        locals_dict: Dict = {}
-    ) -> Dict[Any, Any]:
-        self.original_code = python_code
-        self.original_query = original_query
-        self.messages_list = messages
-        self.locals_dict = locals_dict
-
-        return self.__interpret(python_code)

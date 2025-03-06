@@ -125,13 +125,17 @@ def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
 def __serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
     temp_dict = {}
     for key, value in locals_dict.items():
+        if key == 'hello_world':
+            print('asdfasdfasdf')
         if isinstance(key, str) and key.startswith('__'):
             continue
-        elif type(value).__module__ == 'builtins':
+        elif isinstance(value, types.FunctionType) and value.__module__ == 'builtins':
             continue
         elif key == 'AutoGlobalDict':
             continue
         elif isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
+            is_static, cls = Helpers.is_static_method(value)
+
             # Serialize the function's code object
             code_bytes = marshal.dumps(value.__code__)
             temp_dict[key] = {
@@ -139,7 +143,14 @@ def __serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
                 'name': value.__name__,
                 'code': base64.b64encode(code_bytes).decode('ascii'),
                 'defaults': value.__defaults__,
-                'closure': value.__closure__
+                'closure': value.__closure__,
+                'doc': value.__doc__,
+                'annotations': value.__annotations__,
+                'is_method': not is_static or cls is not None,
+                'class_name': cls.__name__ if cls else None,
+                'is_static_method': is_static and cls is not None,
+                'qualname': value.__qualname__,
+                'module': value.__module__
             }
         elif isinstance(value, dict):
             temp_dict[key] = __serialize_locals_dict(value)
@@ -195,6 +206,25 @@ def __deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]
             code = marshal.loads(code_bytes)
             # Recreate the function
             func = types.FunctionType(code, result, value['name'], value['defaults'], value['closure'])
+
+            # add the docstrings etc.
+            if 'doc' in value:
+                    func.__doc__ = value['doc']
+
+            if 'annotations' in value:
+                    func.__annotations__ = value['annotations']
+
+            if 'qualname' in value:
+                func.__qualname__ = value['qualname']
+
+            if 'module' in value:
+                func.__module__ = value['module']
+
+            if value.get('is_method') and value.get('class_name') and value['class_name'] in result:
+                cls = result[value['class_name']]
+                if value.get('is_static_method'):
+                    func = staticmethod(func)
+
             result[key] = func
         elif isinstance(value, dict):
             result[key] = __deserialize_locals_dict(value)
@@ -532,6 +562,11 @@ async def tools_completions(request: SessionThreadModel):
                 # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
                 locals_dict = __deserialize_locals_dict(thread.locals_dict)
                 locals_dict.update(cache_memory.get(thread.id) or {})
+
+                # add the runtime defined tools to the list of tools
+                for key, value in locals_dict.items():
+                    if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
+                        tools.append(value)
 
                 # todo: this is a hack
                 result, locals_dict = await controller.aexecute_continuation(

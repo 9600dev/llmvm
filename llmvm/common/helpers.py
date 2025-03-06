@@ -1709,6 +1709,55 @@ class Helpers():
 
     @staticmethod
     def __get_class_of_func(func):
+        try:
+            # First attempt: check if it's a bound method
+            if inspect.ismethod(func):
+                for cls in inspect.getmro(func.__self__.__class__):
+                    if cls.__dict__.get(func.__name__) is func:
+                        return cls
+                func = func.__func__  # fallback to **qualname** parsing
+
+            # Second attempt: use qualname for regular functions
+            if inspect.isfunction(func):
+                # Check if __qualname__ exists and has proper format
+                if hasattr(func, '__qualname__') and '.' in func.__qualname__:
+                    try:
+                        # Get the module
+                        module = inspect.getmodule(func)
+                        if module:
+                            # Extract class name from qualname
+                            class_name = func.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0]
+                            cls = getattr(module, class_name, None)
+                            if isinstance(cls, type):
+                                return cls
+                    except (AttributeError, ValueError):
+                        pass
+
+            # Third attempt: check for __objclass__ attribute (descriptors)
+            cls = getattr(func, '__objclass__', None)
+            if isinstance(cls, type):
+                return cls
+
+            # Fourth attempt: check globals dictionary directly
+            if hasattr(func, '__globals__') and func.__globals__:
+                # Try to find a class in globals that contains this function
+                for name, obj in func.__globals__.items():
+                    if isinstance(obj, type):
+                        # Check if function exists in the class's dict
+                        if func.__name__ in obj.__dict__ and (
+                                obj.__dict__[func.__name__] is func or
+                                (hasattr(obj.__dict__[func.__name__], '__func__') and
+                                obj.__dict__[func.__name__].__func__ is func)):
+                            return obj
+        except Exception:
+            # Catch any other exceptions during introspection
+            pass
+
+        # We couldn't determine the class
+        return None
+
+    @staticmethod
+    def __get_class_of_func2(func):
         if inspect.ismethod(func):
             for cls in inspect.getmro(func.__self__.__class__):
                 if cls.__dict__.get(func.__name__) is func:
@@ -1725,13 +1774,21 @@ class Helpers():
 
     @staticmethod
     def is_static_method(func) -> Tuple[bool, Optional[type]]:
-        for cls in inspect.getmro(func.__globals__.get(func.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0], type(None))):
-            if func.__name__ in cls.__dict__:
-                # It's a method, check if it's static
-                if isinstance(cls.__dict__[func.__name__], staticmethod):
-                    return True, None
-                return False, cls
-            # It's a standalone function
+        try:
+            class_name = func.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0]
+            cls = func.__globals__.get(class_name)
+
+            if cls is None or not isinstance(cls, type):
+                return True, None  # Treat as standalone function
+
+            for base_cls in inspect.getmro(cls):
+                if func.__name__ in base_cls.__dict__:
+                    # It's a method, check if it's static
+                    if isinstance(base_cls.__dict__[func.__name__], staticmethod):
+                        return True, None
+                    return False, base_cls
+        except (AttributeError, TypeError):
+            pass
         return True, None
 
     @staticmethod

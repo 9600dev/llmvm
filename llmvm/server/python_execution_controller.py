@@ -14,6 +14,8 @@ import traceback
 import types
 from typing import Any, Awaitable, Callable, Optional, Tuple, cast
 
+import pandas as pd
+
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import (no_indent_debug, response_writer,
@@ -46,10 +48,13 @@ class ExecutionController(Controller):
 
     def __execution_prompt(self, executor: Executor, model: str) -> str:
         if executor.name() == 'openai' and ('o1' in model or 'o3' in model):
+            logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution_reasoning.prompt')
             return 'python_continuation_execution_reasoning.prompt'
         elif executor.name() == 'anthropic' and 'research' in model:
+            logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution.prompt')
             return 'python_continuation_execution_reasoning.prompt'
         else:
+            logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution.prompt')
             return 'python_continuation_execution.prompt'
 
     async def __llm_call(
@@ -693,6 +698,11 @@ class ExecutionController(Controller):
                 return cast(list[AstNode], content)
             elif isinstance(result, AstNode):
                 return [result]
+            elif isinstance(result, pd.DataFrame):
+                if len(result.to_csv()) < 1024:
+                    return [TextContent(result.to_csv())]
+                else:
+                    return [TextContent(result.head(10).to_csv()[0:1024])]
             else:
                 raise ValueError(f'Unknown content type: {type(result)}')
 
