@@ -1,6 +1,5 @@
 import ast
 import builtins
-import traceback
 import numpy as np
 import datetime as dt
 import inspect
@@ -28,10 +27,83 @@ from llmvm.server.tools.market import MarketHelpers
 from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
 
+
 logging = setup_logging()
 
 
-class PythonRuntime:
+class RuntimeError(Exception):
+    def __init__(self, message: str, inner_exception: Optional[Exception] = None):
+        self.message = message
+        self.inner_exception = inner_exception
+        super().__init__(message)
+
+
+class InstantiationWrapper:
+    def __init__(self, wrapped_class, python_runtime: 'Runtime'):
+        self.wrapped_class = wrapped_class
+        self.python_runtime = python_runtime
+
+    def __call__(self, *args, **kwargs):
+        init_method = self.wrapped_class.__init__
+        params_call = {}
+
+        for name, param in inspect.signature(init_method).parameters.items():
+            if name == 'self':
+                continue
+
+            if param.annotation and param.annotation is Runtime:
+                params_call[name] = self.python_runtime
+            elif param.annotation and param.annotation is ExecutionController:
+                params_call[name] = self.python_runtime.controller
+            elif param.annotation and param.annotation is VectorSearch:
+                params_call[name] = self.python_runtime.vector_search
+            elif name == 'cookies':
+                cookies = self.python_runtime.locals_dict['cookies'] if 'cookies' in self.python_runtime.locals_dict else []
+                params_call[name] = cookies
+
+        merged_kwargs = {**params_call, **kwargs}
+        instance = self.wrapped_class(*args, **merged_kwargs)
+        return instance
+
+
+class CallWrapper:
+    def __init__(self, outer_self, wrapped_class):
+        self.wrapped_class = wrapped_class
+        self.outer_self = outer_self
+
+    def __getattr__(self, name):
+        # instantiate if it's not been instantiated yet
+        if isinstance(self.wrapped_class, type):
+            try:
+                self.wrapped_class = self.wrapped_class()
+            except Exception:
+                logging.debug(f'Could not instantiate {self.wrapped_class}')
+
+        if hasattr(self.wrapped_class, name):
+            attr = getattr(self.wrapped_class, name)
+            if callable(attr):
+                def wrapper(*args, **kwargs):
+                    caller_frame = inspect.currentframe().f_back  # type: ignore
+                    caller_frame_lineno = caller_frame.f_lineno  # type: ignore
+
+                    # extract the line from the original python code
+                    code_line = self.outer_self.original_code.split('\n')[caller_frame_lineno - 1]
+
+                    # todo: we should probably do the marshaling here too
+                    result = attr(*args, **kwargs)
+
+                    meta = FunctionCallMeta(
+                        callsite=code_line,
+                        func=attr,
+                        result=result,
+                        lineno=caller_frame_lineno,
+                    )
+                    return meta
+                return wrapper
+        raise AttributeError(f"'{self.wrapped_class.__class__.__name__}' object has no attribute '{name}'")
+
+
+class Runtime:
     def __init__(
         self,
         controller: ExecutionController,
@@ -42,86 +114,23 @@ class PythonRuntime:
         globals_dict = {},
         thread_id = 0
     ):
-        self.original_query = ''
-        self.original_code = ''
-        self.controller: ExecutionController = controller
-        self.vector_search = vector_search
-        self.tools: list[Callable] = tools
         self.locals_dict = locals_dict
         self.globals_dict = globals_dict
+        self.thread_id = thread_id
+        self.controller: ExecutionController = controller
+        self.vector_search: VectorSearch = vector_search
+        self.tools: list[Callable] = tools
         self.answers: List[Answer] = []
         self.messages_list: List[Message] = []
         self.answer_error_correcting = answer_error_correcting
-        self.thread_id = thread_id
+        self.original_query = ''
+        self.original_code = ''
         self.setup()
 
-    def statement_to_message(self, statement: Any) -> List[Message]:
+    def __statement_to_message(self, statement: Any) -> List[Message]:
         return self.controller.statement_to_message(statement)
 
     def setup(self):
-        class InstantiationWrapper:
-            def __init__(self, wrapped_class, python_runtime: PythonRuntime):
-                self.wrapped_class = wrapped_class
-                self.python_runtime = python_runtime
-
-            def __call__(self, *args, **kwargs):
-                init_method = self.wrapped_class.__init__
-                params_call = {}
-
-                for name, param in inspect.signature(init_method).parameters.items():
-                    if name == 'self':
-                        continue
-
-                    if param.annotation and param.annotation is PythonRuntime:
-                        params_call[name] = self.python_runtime
-                    elif param.annotation and param.annotation is ExecutionController:
-                        params_call[name] = self.python_runtime.controller
-                    elif param.annotation and param.annotation is VectorSearch:
-                        params_call[name] = self.python_runtime.vector_search
-                    elif name == 'cookies':
-                        cookies = self.python_runtime.locals_dict['cookies'] if 'cookies' in self.python_runtime.locals_dict else []
-                        params_call[name] = cookies
-
-                merged_kwargs = {**params_call, **kwargs}
-                instance = self.wrapped_class(*args, **merged_kwargs)
-                return instance
-
-        class CallWrapper:
-            def __init__(self, outer_self, wrapped_class):
-                self.wrapped_class = wrapped_class
-                self.outer_self = outer_self
-
-            def __getattr__(self, name):
-                # instantiate if it's not been instantiated yet
-                if isinstance(self.wrapped_class, type):
-                    try:
-                        self.wrapped_class = self.wrapped_class()
-                    except Exception:
-                        logging.debug(f'Could not instantiate {self.wrapped_class}')
-
-                if hasattr(self.wrapped_class, name):
-                    attr = getattr(self.wrapped_class, name)
-                    if callable(attr):
-                        def wrapper(*args, **kwargs):
-                            caller_frame = inspect.currentframe().f_back  # type: ignore
-                            caller_frame_lineno = caller_frame.f_lineno  # type: ignore
-
-                            # extract the line from the original python code
-                            code_line = self.outer_self.original_code.split('\n')[caller_frame_lineno - 1]
-
-                            # todo: we should probably do the marshaling here too
-                            result = attr(*args, **kwargs)
-
-                            meta = FunctionCallMeta(
-                                callsite=code_line,
-                                func=attr,
-                                result=result,
-                                lineno=caller_frame_lineno,
-                            )
-                            return meta
-                        return wrapper
-                raise AttributeError(f"'{self.wrapped_class.__class__.__name__}' object has no attribute '{name}'")
-
         class float():
             def __new__(cls, value, *args, **kwargs):
                 return builtins.float.__new__(builtins.float, coerce_to(value, builtins.float), *args, **kwargs)
@@ -182,7 +191,6 @@ class PythonRuntime:
         self.locals_dict = {}
         self.globals_dict = {}
 
-        # todo: fix this hack
         self.globals_dict['llm_bind'] = self.llm_bind
         self.globals_dict['llm_call'] = self.llm_call
         self.globals_dict['llm_list_bind'] = self.llm_list_bind
@@ -199,20 +207,13 @@ class PythonRuntime:
         self.globals_dict['pandas_bind'] = self.pandas_bind
         self.globals_dict['helpers'] = self.helpers
         self.globals_dict['locals'] = self.locals
-        for tool in self.tools:
-            # a tool is either a static method that is directly callable, or an instance method
-            # which needs an instance of the class to be instantiated
-            is_static, cls = Helpers.is_static_method(tool)
-            if not is_static and cls and cls.__name__ not in self.globals_dict:
-                self.globals_dict[cls.__name__] = InstantiationWrapper(cls, python_runtime=self)
-            else:
-                self.globals_dict[tool.__name__] = tool
+        self.globals_dict['result'] = self.result
+        self.globals_dict['print'] = self.print
 
         self.globals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
         self.globals_dict['BCL'] = CallWrapper(self, BCL)
         self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
         self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
-        self.globals_dict['result'] = self.result
         self.globals_dict['sys'] = sys
         self.globals_dict['os'] = os
         self.globals_dict['datetime'] = dt
@@ -222,103 +223,25 @@ class PythonRuntime:
         self.globals_dict['pd'] = pd
         self.globals_dict['float'] = float
         self.globals_dict['int'] = int
-        self.globals_dict['print'] = self.print
 
+        for tool in self.tools:
+            self.install_helper(tool)
 
-    @staticmethod
-    def only_code_block(code: str) -> bool:
-        code = code.strip()
-        return (
-            (code.startswith('```python') or code.startswith('<helpers>'))
-            and (code.endswith('```') or code.endswith('</helpers>'))
-        )
+        return self.globals_dict
 
-    @staticmethod
-    def get_code_blocks(code: str) -> List[str]:
-        def extract_code_blocks(text):
-            # Pattern to match <helpers> blocks
-            code_pattern = re.compile(r'<helpers>(.*?)</helpers>', re.DOTALL)
-            code_blocks = code_pattern.findall(text)
+    def install_helper(self, helper: Callable):
+        is_static, cls = Helpers.is_static_method(helper)
+        if not is_static and cls and cls.__name__ not in self.globals_dict:
+            self.globals_dict[cls.__name__] = InstantiationWrapper(cls, python_runtime=self)
+        else:
+            self.globals_dict[helper.__name__] = helper
 
-            blocks = []
-            for block in code_blocks:
-                # Check for nested Markdown block
-                markdown_pattern = re.compile(r'```(?:python)?\s*(.*?)\s*```', re.DOTALL)
-                nested_markdown = markdown_pattern.search(block)
-                if nested_markdown:
-                    blocks.append(nested_markdown.group(1))
-                else:
-                    blocks.append(block)
-            return blocks
-
-        code = code.strip()
-        ordered_blocks = []
-
-        for block in extract_code_blocks(code):
-            block = block.strip()
-            if block:
-                # Remove language identifier if present
-                if block.startswith('python\n'):
-                    block = block[7:].lstrip()
-                try:
-                    # ast.parse(block)
-                    # syntax errors weren't allowing the model to try again and fix the error
-                    ordered_blocks.append(block)
-                except SyntaxError:
-                    pass
-
-        return ordered_blocks
-
-    def get_last_assignment(
-        self,
-        code: str,
-        locals_dict: Dict[str, Any],
-    ) -> Optional[Tuple[str, str]]:
-        ast_parsed_code_block = ast.parse(Helpers.escape_newlines_in_strings(code))
-        last_stmt = ast_parsed_code_block.body[-1]
-
-        # Check if it's an assignment
-        if isinstance(last_stmt, ast.Assign):
-            # Get the target (left side of the assignment)
-            target = last_stmt.targets[0]
-
-            # Check if the target is a simple variable name
-            if isinstance(target, ast.Name):
-                var_name = target.id
-
-                # Get the value from local_dict if it exists
-                if var_name in locals_dict:
-                    return (var_name, locals_dict[var_name])
-                else:
-                    return None
-
-        # If it's not an assignment or doesn't have a simple variable name target
-        return None
-
-    def __last(self, role: str) -> list[Content]:
-        logging.debug('last()')
-        if len(self.messages_list) == 0:
-            return []
-
-        result = Helpers.last(lambda x: x.role() == role, self.messages_list)
-        if result is None:
-            return []
-        return result.content
-
-    def __get_function_names(self, code_str):
-        parsed = ast.parse(code_str)
-
-        function_names = []
-        for node in ast.walk(parsed):
-            if isinstance(node, ast.FunctionDef):
-                function_names.append(node.name)
-
-        return function_names
+        if helper not in self.tools:
+            self.tools.append(helper)
 
     ########################
     ## llmvm special helpers
     ########################
-
     def pandas_bind(self, expr) -> PandasMeta:
         logging.debug(f'PythonRuntime.pandas_bind({expr})')
 
@@ -333,7 +256,7 @@ class PythonRuntime:
                         scratchpad_token=self.controller.get_executor().scratchpad_token(),
                         append_token=self.controller.get_executor().append_token(),
                     ),
-                    context_messages=self.statement_to_message(expr),  # type: ignore
+                    context_messages=self.__statement_to_message(expr),  # type: ignore
                     executor=self.controller.get_executor(),
                     model=self.controller.get_executor().default_model,
                     temperature=0.0,
@@ -375,9 +298,9 @@ class PythonRuntime:
                     return PandasMeta(expr_str=expr, pandas_df=df)
                 else:
                     logging.error(f'PythonRuntime.pandas_bind({expr}) expr is an invalid URL')
-                    raise Exception(f'PythonRuntime.pandas_bind({expr}) expr is an invalid URL')
+                    raise RuntimeError(f'pandas_bind({expr}) expr is an invalid URL')
             except FileNotFoundError as _:
-                raise Exception(f'PythonRuntime.pandas_bind({expr}) file or url {expr} not found')
+                raise RuntimeError(f'pandas_bind({expr}) file or url {expr} not found')
             except Exception as _:
                 return pandas_bind_with_llm(expr)
 
@@ -397,15 +320,29 @@ class PythonRuntime:
             return pandas_bind_with_llm(expr)
 
     def last_assistant(self) -> list[Content]:
-        return self.__last('assistant')
+        logging.debug('last_assistant()')
+        if len(self.messages_list) == 0:
+            return []
+
+        result = Helpers.last(lambda x: x.role() == 'assistant', self.messages_list)
+        if result is None:
+            return []
+        return result.content
 
     def last_user(self) -> list[Content]:
-        return self.__last('user')
+        logging.debug('last_user()')
+        if len(self.messages_list) == 0:
+            return []
+
+        result = Helpers.last(lambda x: x.role() == 'user', self.messages_list)
+        if result is None:
+            return []
+        return result.content
 
     def write_file(self, filename: str, content: list[Content] | str) -> bool:
         if os.path.basename(filename) != filename:
             logging.error(f'PythonRuntime.write_file() filename must be a basename, not a full path. filename: {filename}')
-            raise ValueError(f'write_file() filename must be a basename, not a full path. filename: {filename}')
+            raise RuntimeError(f'write_file() filename must be a basename, not a full path. filename: {filename}')
 
         memory_dir = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory')
         if not os.path.exists(os.path.expanduser(memory_dir)):
@@ -515,7 +452,6 @@ class PythonRuntime:
             original_code=self.original_code,
             original_query=self.original_query,
             controller=self.controller,
-            python_runtime=self,
         )
         bindable.bind(expr, func)
         return bindable
@@ -554,7 +490,7 @@ class PythonRuntime:
         results = searcher.search(titles_seen=titles_seen)
         return results
 
-    def coerce(self, expr, type_name: Union[str, Type]) -> Any:
+    def coerce(self, expr, type_name: Union[str, Type]) -> str:
         if isinstance(type_name, type):
             type_name = type_name.__name__
 
@@ -585,8 +521,7 @@ class PythonRuntime:
         )
         logging.debug('Coercing {} to {} resulted in {}'.format(expr, type_name, assistant.get_str()))
         write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {assistant.get_str()}\n'))
-
-        return self.__eval_with_error_wrapper(assistant.get_str())
+        return assistant.get_str()
 
     def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
         logging.debug(f'llm_call({str(expr_list)[:20]}, {repr(llm_instruction)})')
@@ -612,7 +547,7 @@ class PythonRuntime:
                     scratchpad_token=self.controller.get_executor().scratchpad_token(),
                     append_token=self.controller.get_executor().append_token(),
                 ),
-                context_messages=self.statement_to_message(expr_list),
+                context_messages=self.__statement_to_message(expr_list),
                 executor=self.controller.get_executor(),
                 model=self.controller.get_executor().default_model,
                 temperature=0.0,
@@ -670,21 +605,8 @@ class PythonRuntime:
             result = cast(list, eval(list_result))
             return result[:count]
         except Exception as ex:
-            logging.debug('PythonRuntime.llm_list_bind error: {}'.format(ex))
-            logging.debug('PythonRuntime.llm_list_bind list_result: {}, llm_instruction'.format(list_result, llm_instruction))
-
-            new_python_code = self.rewrite_python_error_correction(
-                query=llm_instruction,
-                python_code=assistant.get_str(),
-                error=str(ex),
-                locals_dictionary=self.locals_dict,
-            )
-            logging.debug('PythonRuntime.llm_list_bind rewrote Python code: {}'.format(new_python_code))
-            result = cast(list, eval(new_python_code))
-            if not isinstance(result, list):
-                logging.error('PythonRuntime.llm_list_bind result is not a list')
-                return []
-            return result[:count]
+            logging.debug(f'PythonRuntime.llm_list_bind ex: {ex} list_result: {list_result}, llm_instruction {llm_instruction}')
+            raise RuntimeError(f'PythonRuntime.llm_list_bind error: {ex} list_result: {list_result}, llm_instruction {llm_instruction}', ex)
 
     def print(self, *args, sep=' ', end='\n', file=None, flush=False):
         logging.debug(f'PythonRuntime.print({args})')
@@ -756,232 +678,82 @@ class PythonRuntime:
         self.answers.append(answer)
         return __result(answer)
 
-    def rewrite_python_error_correction(
-        self,
-        query: str,
-        python_code: str,
-        error: str,
-        locals_dictionary: Dict[Any, Any],
-    ) -> str:
-        logging.debug('rewrite_python_error_correction()')
-        dictionary = ''
-        for key, value in locals_dictionary.items():
-            dictionary += '{} = "{}"\n'.format(key, Helpers.str_get_str(value)[:128].replace('\n', ' '))
 
-        assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='python_error_correction.prompt',
-                    template={
-                        'task': query,
-                        'code': python_code,
-                        'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.tools]),
-                        'dictionary': dictionary,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    scratchpad_token=self.controller.get_executor().scratchpad_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=[],
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='python_error_correction.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query
-        )
+global _runtime
+_runtime = None
 
-        # double shot try
-        try:
-            _ = ast.parse(Helpers.escape_newlines_in_strings(assistant.get_str()))
-            return assistant.get_str()
-        except SyntaxError as ex:
-            logging.debug('SyntaxError: {}'.format(ex))
-            try:
-                _ = self.rewrite_python_error_correction(
-                    query=query,
-                    python_code=assistant.get_str(),
-                    error=str(ex),
-                    locals_dictionary=locals_dictionary,
-                )
-                return assistant.get_str()
-            except Exception as ex:
-                logging.debug('Second exception rewriting Python code: {}'.format(ex))
-                return ''
+def install(runtime: Runtime):
+    global _runtime
+    _runtime = runtime
 
-    def __eval_with_error_wrapper(
-        self,
-        python_code: str,
-        retry_count: int = 2,
-    ):
-        counter = 0
-        while counter < retry_count:
-            try:
-                return eval(python_code, self.globals_dict, self.locals_dict)
-            except Exception as ex:
-                logging.debug(f'Error evaluating Python code, exception raised: {ex}')
-                logging.debug(f'Python code: {python_code}')
-                python_code = self.rewrite(python_code, str(ex))
-            counter += 1
-        return None
+def llm_bind(expr, func: str):
+    global _runtime
+    return cast(Runtime, _runtime).llm_bind(expr, func)
 
-    def __compile_and_execute(
-        self,
-        python_code: str,
-    ) -> Dict[Any, Any]:
-        def build_exception_str(tb_string):
-            def extract_relevant_traceback(tb_string):
-                match = re.search(r'File "<ast>",.*', tb_string, re.DOTALL)
-                if match:
-                    str_result = match.group(0)
-                    return str_result
-                return tb_string
+def llm_call(expr_list: List, instruction: str) -> Assistant:
+    global _runtime
+    return cast(Runtime, _runtime).llm_call(expr_list, instruction)
 
-            lines = Helpers.split_on_newline(python_code)  # python_code.split('\n')
-            python_code_with_line_numbers = '\n'.join([f'{(line_counter+1):02} {line}' for line_counter, line in enumerate(lines)])
-            return f'An exception occurred while parsing or executing the following Python code in the <ast> module:\n\n{python_code_with_line_numbers}\n\nThe exception was: {extract_relevant_traceback(tb_string)}\n'
+def llm_list_bind(expr, llm_instruction: str, count: int = sys.maxsize) -> list:
+    global _runtime
+    return cast(Runtime, _runtime).llm_list_bind(expr, llm_instruction, count)
 
-        logging.debug('PythonRuntime.__compile_and_execute()')
-        python_code = Helpers.escape_newlines_in_strings(python_code)
+def coerce(expr, type_name: Union[str, Type]) -> Any:
+    global _runtime
+    return cast(Runtime, _runtime).coerce(expr, type_name)
 
-        try:
-            parsed_ast = ast.parse(python_code)
-        except Exception as ex:
-            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while parsing:\n{python_code}\n, exception: {ex}')
-            raise Exception(build_exception_str(traceback.format_exc()))
+def read_memory(key: str) -> list[Content]:
+    global _runtime
+    return cast(Runtime, _runtime).read_memory(key)
 
-        context = AutoGlobalDict(self.globals_dict, self.locals_dict)
+def write_memory(key: str, summary: str, value: list[Content]) -> None:
+    global _runtime
+    cast(Runtime, _runtime).write_memory(key, summary, value)
 
-        compilation_result = compile(parsed_ast, filename="<ast>", mode="exec")
+def read_memory_keys() -> list[dict[str, str]]:
+    global _runtime
+    return cast(Runtime, _runtime).read_memory_keys()
 
-        try:
-            exec(compilation_result, context, context)
-        except Exception as ex:
-            logging.error(f'PythonRuntime.__compile_and_execute() threw an exception while executing:\n{python_code}\n')
-            raise Exception(build_exception_str(traceback.format_exc()))
+def write_file(filename: str, content: list[Content]) -> bool:
+    global _runtime
+    return cast(Runtime, _runtime).write_file(filename, content)
 
-        self.locals_dict = context
-        # add any helpers the llm defined to the tools list
-        function_names = self.__get_function_names(python_code)
-        callables = {name: self.locals_dict[name] for name in function_names if name in self.locals_dict and callable(self.locals_dict[name])}
-        self.tools = self.tools + list(callables.values())
+def read_file(full_path_filename: str) -> TextContent:
+    global _runtime
+    return cast(Runtime, _runtime).read_file(full_path_filename)
 
-        return self.locals_dict
+def last_assistant() -> list[Content]:
+    global _runtime
+    return cast(Runtime, _runtime).last_assistant()
 
-    def compile_error(
-        self,
-        python_code: str,
-        error: str,
-    ) -> str:
-        logging.debug(f'PythonRuntime.compile_error(): error {error}')
-        write_client_stream(TextContent(f'Python code failed to compile or run due to the following error or exception: {error}\n'))
+def last_user() -> list[Content]:
+    global _runtime
+    return cast(Runtime, _runtime).last_user()
 
-        # SyntaxError, or other more global error. We should rewrite the entire code.
-        # function_list = [Helpers.get_function_description_flat_extra(f) for f in self.tools]
-        code_prompt = \
-            f'''The following Python code:
+def search(expr: str, total_links_to_return: int = 3, titles_seen: List[str] = []) -> list[Content]:
+    global _runtime
+    return cast(Runtime, _runtime).search(expr, total_links_to_return, titles_seen)
 
-            {python_code}
+def download(expr: str) -> Content:
+    global _runtime
+    return cast(Runtime, _runtime).download(expr)
 
-            Failed to compile or run due to the following error:
+def pandas_bind(expr) -> PandasMeta:
+    global _runtime
+    return cast(Runtime, _runtime).pandas_bind(expr)
 
-            {error}
+def helpers() -> str:
+    global _runtime
+    return cast(Runtime, _runtime).helpers()
 
-            Analyze the error, and rewrite the entire code above to fix the error.
-            Do not explain yourself, do not apologize. Just emit the re-written code and only the code.
-            '''
+def locals() -> str:
+    global _runtime
+    return cast(Runtime, _runtime).locals()
 
-        assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=User(TextContent(code_prompt)),
-                context_messages=[],
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
+def result(expr, check_answer: bool = True) -> Content:
+    global _runtime
+    return cast(Runtime, _runtime).result(expr, check_answer)
 
-        lines = assistant.get_str().split('\n')
-        write_client_stream(TextContent(f'Re-writing Python code\n'))
-        logging.debug('PythonRuntime.compile_error() Re-written Python code:')
-        for line in lines:
-            logging.debug(f'  {str(line)}')
-        return str(assistant.message)
-
-    def rewrite(
-        self,
-        python_code: str,
-        error: str,
-    ):
-        logging.debug('rewrite()')
-        # SyntaxError, or other more global error. We should rewrite the entire code.
-        function_list = [Helpers.get_function_description_flat(f) for f in self.tools]
-        code_prompt = \
-            f'''The following code (found under "Original Code") either didn't compile, or threw an exception while executing.
-            Identify the error in the code below, and re-write the code and only that code.
-            The error is found under "Error" and the code is found under "Original Code".
-
-            If there is natural language guidance in previous messages, follow it to help re-write the original code.
-
-            Original User Query: {self.original_query}
-
-            Error: {error}
-
-            Original Code:
-
-            {python_code}
-            '''
-
-        assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='python_tool_execution.prompt',
-                    template={
-                        'functions': '\n'.join(function_list),
-                        'user_input': code_prompt,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    scratchpad_token=self.controller.get_executor().scratchpad_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=[],
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='python_tool_execution.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
-        lines = assistant.get_str().split('\n')
-        logging.debug('rewrite() Re-written Python code:')
-        for line in lines:
-            logging.debug(f'  {str(line)}')
-        return assistant.get_str()
-
-    def run(
-        self,
-        python_code: str,
-        original_query: str,
-        messages: List[Message] = [],
-        locals_dict: Dict = {}
-    ) -> Dict[Any, Any]:
-        self.original_code = python_code
-        self.original_query = original_query
-        self.messages_list = messages
-        self.locals_dict = locals_dict
-
-        return self.__compile_and_execute(python_code)
+def print(*args, sep=' ', end='\n', file=None, flush=False):
+    global _runtime
+    return cast(Runtime, _runtime).print(*args, sep, end, file, flush)

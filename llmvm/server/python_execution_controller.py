@@ -49,7 +49,7 @@ class ExecutionController(Controller):
             logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution.prompt')
             return 'python_continuation_execution.prompt'
 
-    async def __llm_call(
+    async def __execute_llm_call(
         self,
         llm_call: LLMCall,
     ) -> Assistant:
@@ -78,10 +78,10 @@ class ExecutionController(Controller):
         response_writer(llm_call.prompt_name, assistant)
         return assistant
 
-    async def __llm_call_with_prompt(
+    async def aexecute_llm_call_simple(
         self,
         llm_call: LLMCall,
-        template: dict[str, Any],
+        template: dict[str, Any] = {},
     ) -> Assistant:
         prompt = Helpers.load_and_populate_prompt(
             prompt_name=llm_call.prompt_name,
@@ -93,8 +93,20 @@ class ExecutionController(Controller):
         )
         llm_call.user_message = User(TextContent(prompt['user_message']))
 
-        return await self.__llm_call(
+        return await self.__execute_llm_call(
             llm_call
+        )
+
+    def execute_llm_call_simple(
+        self,
+        llm_call: LLMCall,
+        template: dict[str, Any] = {},
+    ) -> Assistant:
+        return asyncio.run(
+            self.aexecute_llm_call_simple(
+                llm_call=llm_call,
+                template=template,
+            )
         )
 
     def __parse_template(self, message: Message, template_args: dict[str, Any]) -> Message:
@@ -189,7 +201,7 @@ class ExecutionController(Controller):
         if total_similarity_tokens > llm_call.max_prompt_len:
             logging.error(f'__similarity() total_similarity_tokens: {total_similarity_tokens} is greater than max_prompt_len: {llm_call.max_prompt_len}, will perform map/reduce.')  # noqa E501
 
-        assistant_result = await self.__llm_call(
+        assistant_result = await self.__execute_llm_call(
             llm_call=LLMCall(
                 user_message=llm_call.user_message,
                 context_messages=similarity_messages,
@@ -230,7 +242,7 @@ class ExecutionController(Controller):
         )
 
         for chunk in chunks:
-            chunk_assistant = await self.__llm_call_with_prompt(
+            chunk_assistant = await self.aexecute_llm_call_simple(
                 llm_call=LLMCall(
                     user_message=User(TextContent('')),
                     context_messages=[],
@@ -253,7 +265,7 @@ class ExecutionController(Controller):
         # perform the reduce
         map_results = '\n\n====\n\n' + '\n\n====\n\n'.join(chunk_results)
 
-        assistant_result = await self.__llm_call_with_prompt(
+        assistant_result = await self.aexecute_llm_call_simple(
             llm_call=LLMCall(
                 user_message=User(TextContent('')),
                 context_messages=[],
@@ -314,7 +326,7 @@ class ExecutionController(Controller):
         # we should have all the same messages, but summarized.
         llm_call_copy.context_messages = summary_messages
 
-        assistant_result = await self.__llm_call(
+        assistant_result = await self.__execute_llm_call(
             llm_call_copy,
         )
         return assistant_result
@@ -343,7 +355,7 @@ class ExecutionController(Controller):
         new_call = llm_call.copy()
         new_call.context_messages = prompt_context_messages[::-1]
 
-        assistant_result = await self.__llm_call(
+        assistant_result = await self.__execute_llm_call(
             llm_call=new_call
         )
         return assistant_result
@@ -538,7 +550,7 @@ class ExecutionController(Controller):
         # what to do with the message at a later stage. This is getting removed right now.
         if prompt_len <= max_prompt_len:
             # straight call
-            return await self.__llm_call(llm_call=llm_call)
+            return await self.__execute_llm_call(llm_call=llm_call)
         elif prompt_len > max_prompt_len and compression == TokenCompressionMethod.LIFO:
             return await self.__lifo(llm_call)
         elif prompt_len > max_prompt_len and compression == TokenCompressionMethod.SUMMARY:
@@ -573,7 +585,7 @@ class ExecutionController(Controller):
 
             decision_criteria: list[str] = []
             for chunk, _ in similarity_chunks[:5]:
-                assistant_similarity = await self.__llm_call_with_prompt(
+                assistant_similarity = await self.aexecute_llm_call_simple(
                     llm_call=LLMCall(
                         user_message=User(TextContent('')),
                         context_messages=[],
@@ -702,8 +714,8 @@ class ExecutionController(Controller):
             else:
                 raise ValueError(f'Unknown content type: {type(result)}')
 
-        from llmvm.server.python_runtime import PythonRuntime
-        python_runtime = PythonRuntime(
+        from llmvm.server.python_runtime_host import PythonRuntimeHost
+        python_runtime = PythonRuntimeHost(
             self,
             tools=tools,
             vector_search=self.vector_search,
@@ -849,7 +861,7 @@ class ExecutionController(Controller):
 
             # extract any code blocks the Assistant wants to run
             assistant_response_str = response.get_str().replace('Assistant:', '').strip()
-            code_blocks: list[str] = PythonRuntime.get_code_blocks(assistant_response_str)
+            code_blocks: list[str] = PythonRuntimeHost.get_code_blocks(assistant_response_str)
             code_blocks_remove = []
 
             # filter code_blocks we've already seen
@@ -885,7 +897,8 @@ class ExecutionController(Controller):
                     _ = ast.parse(Helpers.escape_newlines_in_strings(code_block))
                 except SyntaxError as ex:
                     logging.debug('aexecute() SyntaxError trying to parse <helpers></helpers> code block: {}'.format(ex))
-                    code_block = python_runtime.compile_error(
+                    code_block = PythonRuntimeHost.fix_python_parse_compile_error(
+                        controller=self,
                         python_code=code_block,
                         error=str(ex),
                     )
@@ -944,7 +957,7 @@ class ExecutionController(Controller):
                     pass
                 elif not python_runtime.answers and not code_execution_result:
                     # sometimes dove doesn't generate an answer() block, so we'll have to get the last assignment of the code and use that.
-                    last_assignment = python_runtime.get_last_assignment(code_block, locals_dict)
+                    last_assignment = PythonRuntimeHost.get_last_assignment(code_block, locals_dict)
                     if last_assignment:
                         # todo: this forces a string, but we can deal with more than that these days
                         code_execution_result = parse_code_block_result(last_assignment[1])

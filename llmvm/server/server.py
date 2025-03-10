@@ -36,7 +36,8 @@ from llmvm.common.objects import (Assistant, AstNode, Content,
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
-from llmvm.server.python_runtime import PythonRuntime
+from llmvm.server.python_runtime_host import PythonRuntimeHost
+from llmvm.server.runtime import Runtime
 from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.vector_search import VectorSearch
 from llmvm.server.vector_store import VectorStore
@@ -114,13 +115,15 @@ def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
             isinstance(value, object)
             and not isinstance(value, type)
             and type(value).__module__ != 'builtins'
-            and type(value).__module__ != PythonRuntime.__module__
+            and type(value).__module__ != PythonRuntimeHost.__module__
+            and type(value).__module__ != Runtime.__module__
         ):
             try:
                 json.dumps(value)
             except:
                 unserializable_locals[key] = value
     return unserializable_locals
+
 
 def __serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
     temp_dict = {}

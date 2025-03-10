@@ -7,11 +7,11 @@ import astunparse
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Assistant, Content, FunctionCall, LLMCall,
+from llmvm.common.objects import (Assistant, FunctionCall, LLMCall,
                                   Message, System, TextContent, User)
-from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
-from llmvm.server.python_runtime import PythonRuntime
+from llmvm.server.runtime import Runtime
+from llmvm.server.python_runtime_host import PythonRuntimeHost
 
 logging = setup_logging()
 
@@ -29,7 +29,6 @@ class FunctionBindable():
         original_code: str,
         original_query: str,
         controller: ExecutionController,
-        python_runtime: PythonRuntime,
     ):
         self.expr = expr
         self.expr_instantiation = expr_instantiation
@@ -42,7 +41,6 @@ class FunctionBindable():
         self.original_query = original_query
         self.controller = controller
         self.bound_function: Optional[Callable] = None
-        self.python_runtime = python_runtime
         self._result = None
 
     def __call__(self, *args, **kwargs):
@@ -264,12 +262,7 @@ class FunctionBindable():
             locals_result = {}
 
             try:
-                locals_result = PythonRuntime(
-                    controller=self.controller,
-                    tools=self.tools,
-                    vector_search=self.python_runtime.vector_search,
-                ).run(python_code, '')
-
+                exec(python_code, locals_result, locals_result)
                 self._result = locals_result[identifier]
                 yield self
 
@@ -281,11 +274,13 @@ class FunctionBindable():
             except Exception as ex:
                 logging.error('Error executing function call: {}'.format(ex))
                 counter += 1
-                python_code = self.python_runtime.rewrite_python_error_correction(
-                    query=self.original_query,
+                python_code = PythonRuntimeHost.fix_python_error(
+                    controller=self.controller,
                     python_code=python_code,
+                    helpers=self.tools,
                     error=str(ex),
-                    locals_dictionary=self.scope_dict,
+                    task_query=self.original_query,
+                    locals_dict=self.scope_dict,
                 )
 
         # we should probably return uncertain_or_error here.
