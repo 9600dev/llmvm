@@ -26,7 +26,7 @@ Functions:
 
 {{functions}}
 
-There are also 14 special functions that I've added to our Python implementation that will help us:
+There are also 17 special functions that I've added to our Python implementation that will help us:
 
 T = TypeVar('T')
 
@@ -59,6 +59,10 @@ T = TypeVar('T')
 14. read_file(full_path_filename: str) -> TextContent. Reads a file from the users local filesystem, or from the LLMVM scratch directory, and returns it as text in TextContent. full_path_filename can be a full path or a basename.
 
 15. write_file(filename: str, content: list[Content] | str) -> bool. Writes a file called filename to the LLMVM scratch directory. Returns True if the file was written successfully, False otherwise. filename can only be a basename, not a full path.
+
+16. last_assistant() -> list[Content]. Returns the last assistant message.
+
+17. last_user() -> list[Content]. Returns the last user message.
 
 The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas (as pd) and scipy as (scipy). There are no other libraries available.
 

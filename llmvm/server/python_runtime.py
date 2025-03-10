@@ -193,6 +193,8 @@ class PythonRuntime:
         self.globals_dict['read_memory_keys'] = self.read_memory_keys
         self.globals_dict['write_file'] = self.write_file
         self.globals_dict['read_file'] = self.read_file
+        self.globals_dict['last_assistant'] = self.last_assistant
+        self.globals_dict['last_user'] = self.last_user
         self.globals_dict['search'] = self.search
         self.globals_dict['download'] = self.download
         self.globals_dict['pandas_bind'] = self.pandas_bind
@@ -352,6 +354,22 @@ class PythonRuntime:
 
         # return [m for m in self.messages_list[:-1] if m.role() != 'system']
         return [m for m in self.messages_list if m.role() != 'system']
+
+    def __last(self, role: str) -> list[Content]:
+        logging.debug('last()')
+        if len(self.messages_list) == 0:
+            return []
+
+        result = Helpers.last(lambda x: x.role() == role, self.messages_list)
+        if result is None:
+            return []
+        return result.content
+
+    def last_assistant(self) -> list[Content]:
+        return self.__last('assistant')
+
+    def last_user(self) -> list[Content]:
+        return self.__last('user')
 
     def write_file(self, filename: str, content: list[Content] | str) -> bool:
         if os.path.basename(filename) != filename:
