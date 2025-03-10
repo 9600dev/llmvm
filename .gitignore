@@ -31,6 +31,7 @@ node_modules/
 /playwright/.cache/
 token_tests/
 scripts/dutton
+scripts/albernese
 scripts/output
 tests/comparisons
 tests/output

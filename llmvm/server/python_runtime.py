@@ -13,12 +13,11 @@ import scipy
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast, Any, Type
 from urllib.parse import urlparse
 
-import astunparse
-
+from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handler
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Answer, Assistant, Content, DownloadParams, FileContent,
+from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, DownloadParams, FileContent,
                                   FunctionCallMeta, LLMCall,
                                   Message, PandasMeta, TextContent,
                                   User, coerce_to, awaitable_none)
@@ -40,7 +39,8 @@ class PythonRuntime:
         tools: list[Callable] = [],
         answer_error_correcting: bool = False,
         locals_dict = {},
-        globals_dict = {}
+        globals_dict = {},
+        thread_id = 0
     ):
         self.original_query = ''
         self.original_code = ''
@@ -52,6 +52,7 @@ class PythonRuntime:
         self.answers: List[Answer] = []
         self.messages_list: List[Message] = []
         self.answer_error_correcting = answer_error_correcting
+        self.thread_id = thread_id
         self.setup()
 
     def statement_to_message(self, statement: Any) -> List[Message]:
@@ -187,6 +188,11 @@ class PythonRuntime:
         self.globals_dict['llm_list_bind'] = self.llm_list_bind
         self.globals_dict['coerce'] = self.coerce
         self.globals_dict['messages'] = self.messages
+        self.globals_dict['read_memory'] = self.read_memory
+        self.globals_dict['write_memory'] = self.write_memory
+        self.globals_dict['read_memory_keys'] = self.read_memory_keys
+        self.globals_dict['write_file'] = self.write_file
+        self.globals_dict['read_file'] = self.read_file
         self.globals_dict['search'] = self.search
         self.globals_dict['download'] = self.download
         self.globals_dict['pandas_bind'] = self.pandas_bind
@@ -347,6 +353,102 @@ class PythonRuntime:
         # return [m for m in self.messages_list[:-1] if m.role() != 'system']
         return [m for m in self.messages_list if m.role() != 'system']
 
+    def write_file(self, filename: str, content: list[Content] | str) -> bool:
+        if os.path.basename(filename) != filename:
+            logging.error(f'PythonRuntime.write_file() filename must be a basename, not a full path. filename: {filename}')
+            raise ValueError(f'write_file() filename must be a basename, not a full path. filename: {filename}')
+
+        memory_dir = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory')
+        if not os.path.exists(os.path.expanduser(memory_dir)):
+            os.makedirs(memory_dir)
+
+        if not os.path.exists(os.path.expanduser(memory_dir) + f'/{self.thread_id}'):
+            os.makedirs(os.path.expanduser(memory_dir) + f'/{self.thread_id}')
+
+        with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{filename}', 'w') as f:
+            if isinstance(content, list):
+                for c in content:
+                    f.write(f'{c.get_str()}\n')
+            elif isinstance(content, str):
+                f.write(content)
+        return True
+
+    def read_file(self, full_path_filename: str) -> TextContent:
+        memory_dir = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory')
+
+        if not os.path.exists(full_path_filename) and os.path.exists(f'{memory_dir}/{self.thread_id}/{full_path_filename}'):
+            with open(f'{memory_dir}/{self.thread_id}/{full_path_filename}', 'r') as f:
+                return TextContent(f.read(), url=f'{memory_dir}/{self.thread_id}/{full_path_filename}')
+
+        with open(full_path_filename, 'r') as f:
+            return TextContent(f.read(), url=full_path_filename)
+
+    def write_memory(self, key: str, summary: str, value: list[Content] | str) -> bool:
+        try:
+            memory_dir = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory')
+            if not os.path.exists(os.path.expanduser(memory_dir)):
+                os.makedirs(memory_dir)
+
+            if not os.path.exists(os.path.expanduser(memory_dir) + f'/{self.thread_id}'):
+                os.makedirs(os.path.expanduser(memory_dir) + f'/{self.thread_id}')
+
+            if not isinstance(value, list):
+                value = [value]  # type: ignore
+
+            values = []
+            for content in value:
+                if isinstance(content, Assistant):
+                    for c in content.message:
+                        values.append(c)
+                elif isinstance(content, str):
+                    values.append(TextContent(content))
+                else:
+                    values.append(content)
+
+            with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{key}.meta', 'w') as f:
+                f.write(summary)
+
+            with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{key}.json', 'w') as f:
+                f.write(json.dumps(values, cls=ContentEncoder, indent=2))
+
+            with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{key}.txt', 'w') as f:
+                for content in values:
+                    if isinstance(content, Content):
+                        f.write(content.get_str())
+                    else:
+                        f.write(f'{content}\n')
+        except Exception as e:
+            logging.error(f'PythonRuntime.write_memory() exception: {e}')
+            return False
+        return True
+
+    def read_memory(self, key: str) -> list[Content]:
+        memory_dir = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory')
+        if not os.path.exists(os.path.expanduser(memory_dir)):
+            os.makedirs(memory_dir)
+
+        if not os.path.exists(os.path.expanduser(memory_dir) + f'/{self.thread_id}'):
+            os.makedirs(os.path.expanduser(memory_dir) + f'/{self.thread_id}')
+
+        if not os.path.exists(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{key}.json'):
+            return []
+
+        with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{key}.json', 'r') as f:
+            result = json.loads(f.read())
+            object_list = [Content.from_json(content) for content in result]
+            return object_list
+
+    def read_memory_keys(self) -> list[dict[str, str]]:
+        memory_dir = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory')
+        if not os.path.exists(os.path.expanduser(memory_dir)):
+            os.makedirs(memory_dir)
+
+        if not os.path.exists(os.path.expanduser(memory_dir) + f'/{self.thread_id}'):
+            os.makedirs(os.path.expanduser(memory_dir) + f'/{self.thread_id}')
+
+        meta = [f for f in os.listdir(os.path.expanduser(memory_dir) + f'/{self.thread_id}') if f.endswith('.meta')]
+        key_summaries = [{'key': f.replace('.meta', ''), 'summary': open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{f}', 'r').read()} for f in meta]
+        return key_summaries
 
     def llm_bind(self, expr, func: str):
         # todo circular import if put at the top

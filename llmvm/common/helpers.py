@@ -1,7 +1,6 @@
 import ast
 import asyncio
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import datetime as dt
 import glob
 import importlib
@@ -38,6 +37,7 @@ from PIL import Image
 
 from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent,
                                   Message, PandasMeta, StreamNode, SupportedMessageContent, System, TextContent, User)
+from llmvm.common.container import Container
 
 
 def write_client_stream(obj):
@@ -73,6 +73,22 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 
 class Helpers():
+    @staticmethod
+    def get_value_from_parent_frame(variable_name, frame_depth=6):
+        current_frame = inspect.currentframe()
+
+        target_frame = current_frame
+        for _ in range(frame_depth):
+            if target_frame.f_back is None:
+                return None
+
+            if target_frame.f_locals.get(variable_name):
+                return target_frame.f_locals.get(variable_name)
+
+            target_frame = target_frame.f_back
+
+        return None
+
     @staticmethod
     def str_get_str(obj):
         if hasattr(obj, 'get_str'):
@@ -2013,6 +2029,12 @@ class Helpers():
             for key, value in template.items():
                 prompt['system_message'] = prompt['system_message'].replace('{{' + key + '}}', value)
                 prompt['user_message'] = prompt['user_message'].replace('{{' + key + '}}', value)
+
+            # todo hack!
+            result = Helpers.get_value_from_parent_frame('thread')
+            thread_id = 0
+            if result:
+                thread_id = result.id
 
             # deal with exec() statements to inject things like datetime
             import datetime

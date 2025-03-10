@@ -61,7 +61,6 @@ Loaded helper: get_bitcoin_prices_in_usd
 Loaded helper: get_central_bank_rates
 Loaded helper: get_tvshow_ratings_and_details
 Loaded helper: search_and_replace
-Loaded helper: read_file
 Loaded helper: click_selector
 Loaded helper: close
 Loaded helper: find_and_click_on_expression

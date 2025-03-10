@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import subprocess
+import types
 from bs4 import BeautifulSoup
 from dataclasses import dataclass
 from typing import List, cast
@@ -14,6 +15,7 @@ import numpy as np
 from typing import Dict, List, Optional, Any, Tuple, Union
 
 
+from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import FunctionCallMeta, ImageContent, TextContent
@@ -424,24 +426,6 @@ class BCL():
             return output
         except FileNotFoundError:
             raise RuntimeError("ripgrep (rg) is not installed or not in PATH")
-
-
-    @staticmethod
-    def read_file(full_path_filename: str) -> TextContent:
-        """
-        Generates a graph image from the given x_y_data_dict Dictionary, which has two keys: 'x' and 'y' and a list of int/floats
-        and prints it to the client's screen. It returns None.
-
-        Example:
-        file_content = BCL.read_file("path/to/file.txt")
-
-        :param full_path_filename: The full path to the file
-        :type full_path_filename: str
-        :return: File contents as a TextContent object
-        :rtype: TextContent
-        """
-        with open(full_path_filename, 'r') as f:
-            return TextContent(f.read(), url=full_path_filename)
 
     @staticmethod
     def search_and_replace(text: str, search: str, replace: str) -> str:

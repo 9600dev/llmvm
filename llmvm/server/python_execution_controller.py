@@ -1,22 +1,12 @@
 import ast
 import asyncio
-import base64
 import copy
-import dis
-import inspect
-import json
-import marshal
 import math
 import random
-import re
-from importlib import resources
-import traceback
-import types
 from typing import Any, Awaitable, Callable, Optional, Tuple, cast
 
 import pandas as pd
 
-from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import (no_indent_debug, response_writer,
                                           role_debug, setup_logging)
@@ -38,13 +28,15 @@ class ExecutionController(Controller):
         executor: Executor,
         tools: list[Callable],
         vector_search: VectorSearch,
-        exception_limit: int = 3
+        exception_limit: int = 3,
+        thread_id: int = 0
     ):
         super().__init__()
         self.executor = executor
         self.tools = tools
         self.vector_search = vector_search
         self.exception_limit = exception_limit
+        self.thread_id = thread_id
 
     def __execution_prompt(self, executor: Executor, model: str) -> str:
         if executor.name() == 'openai' and ('o1' in model or 'o3' in model):
@@ -716,6 +708,7 @@ class ExecutionController(Controller):
             tools=tools,
             vector_search=self.vector_search,
             locals_dict=locals_dict,
+            thread_id=self.thread_id
         )
 
         model = model if model else self.executor.default_model

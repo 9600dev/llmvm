@@ -160,6 +160,13 @@ def none(a: 'AstNode') -> None:
     pass
 
 
+class ContentEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if hasattr(obj, 'to_json') and callable(getattr(obj, 'to_json')):
+            return obj.to_json()
+        return super().default(obj)
+
+
 class TokenCountCache:
     _instance = None
 

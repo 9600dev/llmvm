@@ -148,6 +148,9 @@ select = [
   "F",
 ]
 
+[tool.uv.workspace]
+members = ["mcp/testing1", "mcp/currency"]
+
 [project]
 name = "llmvm-cli"
 version = "0.9.7"

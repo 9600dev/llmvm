@@ -10,6 +10,7 @@ chromium_cookies: '~/.local/share/llmvm/cookies.txt'
 cache_directory: '~/.local/share/llmvm/cache'
 cdn_directory: '~/.local/share/llmvm/cdn'
 log_directory: '~/.local/share/llmvm/logs'
+memory_directory: '~/.local/share/llmvm/memory'
 vector_store_index_directory: '~/.local/share/llmvm/faiss'
 vector_store_embedding_model: 'all-MiniLM-L6-v2' # 'BAAI/bge-base-en'
 vector_store_chunk_size: 500
@@ -53,7 +54,6 @@ helper_functions:
   - llmvm.server.bcl.BCL.get_central_bank_rates
   - llmvm.server.bcl.BCL.get_tvshow_ratings_and_details
   - llmvm.server.bcl.BCL.search_and_replace
-  - llmvm.server.bcl.BCL.read_file
   - llmvm.server.bcl.BCL.find
   - llmvm.server.tools.browser.Browser
   - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser

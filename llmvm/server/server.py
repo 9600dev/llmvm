@@ -242,7 +242,7 @@ def __deserialize_item(item):
     return item
 
 
-def get_controller(controller: Optional[str] = None) -> ExecutionController:
+def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> ExecutionController:
     if not controller:
         controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
 
@@ -298,6 +298,7 @@ def get_controller(controller: Optional[str] = None) -> ExecutionController:
         executor=executor,
         tools=tools,
         vector_search=vector_search,
+        thread_id=thread_id
     )
 
 
@@ -521,13 +522,13 @@ async def tools_completions(request: SessionThreadModel):
 
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:
-        controller = get_controller(thread.executor)
+        controller = get_controller(thread_id=thread.id, controller=thread.executor)
         model = thread.model if thread.model else controller.get_executor().default_model
     # either the executor or the model is not set, so use the defaults
     # and update the thread
     else:
         logging.debug('Either the executor or the model is not set. Updating thread.')
-        controller = get_controller()
+        controller = get_controller(thread_id=thread.id)
         model = controller.get_executor().default_model
         thread.executor = controller.get_executor().name()
         thread.model = model

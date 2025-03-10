@@ -361,6 +361,7 @@ class Repl():
         rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
         rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
         rich.print('[white](:w filename to save the current thread to a file)[/white]')
+        rich.print('[white](:.) to open the LLMVM memory/scratch directory in finder.')
         rich.print('[white](cb Show all code blocks)[/white]')
         rich.print('[white](ycb0 Copy code block 0, 1, 2... ycb for all)[/white]')
         rich.print('[white](vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/white]')
@@ -641,6 +642,14 @@ class Repl():
                     # quit the assistant
                     tear_down(ctx)
                     break
+
+                if query == ':.':
+                    thread_id = last_thread.id
+                    directory = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default=f'~/.local/share/llmvm/memory/')
+                    # macos only?
+                    command = f'open {directory}/{thread_id}'
+                    subprocess.run(command, shell=True)
+                    continue
 
                 # there are a few special commands that aren't 'clickified'
                 if query == 'yy':
