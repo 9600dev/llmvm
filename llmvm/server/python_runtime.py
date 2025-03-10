@@ -187,7 +187,6 @@ class PythonRuntime:
         self.globals_dict['llm_call'] = self.llm_call
         self.globals_dict['llm_list_bind'] = self.llm_list_bind
         self.globals_dict['coerce'] = self.coerce
-        self.globals_dict['messages'] = self.messages
         self.globals_dict['read_memory'] = self.read_memory
         self.globals_dict['write_memory'] = self.write_memory
         self.globals_dict['read_memory_keys'] = self.read_memory_keys
@@ -198,7 +197,7 @@ class PythonRuntime:
         self.globals_dict['search'] = self.search
         self.globals_dict['download'] = self.download
         self.globals_dict['pandas_bind'] = self.pandas_bind
-        self.globals_dict['functions'] = self.functions
+        self.globals_dict['helpers'] = self.helpers
         self.globals_dict['locals'] = self.locals
         for tool in self.tools:
             # a tool is either a static method that is directly callable, or an instance method
@@ -269,6 +268,56 @@ class PythonRuntime:
                     pass
 
         return ordered_blocks
+
+    def get_last_assignment(
+        self,
+        code: str,
+        locals_dict: Dict[str, Any],
+    ) -> Optional[Tuple[str, str]]:
+        ast_parsed_code_block = ast.parse(Helpers.escape_newlines_in_strings(code))
+        last_stmt = ast_parsed_code_block.body[-1]
+
+        # Check if it's an assignment
+        if isinstance(last_stmt, ast.Assign):
+            # Get the target (left side of the assignment)
+            target = last_stmt.targets[0]
+
+            # Check if the target is a simple variable name
+            if isinstance(target, ast.Name):
+                var_name = target.id
+
+                # Get the value from local_dict if it exists
+                if var_name in locals_dict:
+                    return (var_name, locals_dict[var_name])
+                else:
+                    return None
+
+        # If it's not an assignment or doesn't have a simple variable name target
+        return None
+
+    def __last(self, role: str) -> list[Content]:
+        logging.debug('last()')
+        if len(self.messages_list) == 0:
+            return []
+
+        result = Helpers.last(lambda x: x.role() == role, self.messages_list)
+        if result is None:
+            return []
+        return result.content
+
+    def __get_function_names(self, code_str):
+        parsed = ast.parse(code_str)
+
+        function_names = []
+        for node in ast.walk(parsed):
+            if isinstance(node, ast.FunctionDef):
+                function_names.append(node.name)
+
+        return function_names
+
+    ########################
+    ## llmvm special helpers
+    ########################
 
     def pandas_bind(self, expr) -> PandasMeta:
         logging.debug(f'PythonRuntime.pandas_bind({expr})')
@@ -346,24 +395,6 @@ class PythonRuntime:
 
         else:
             return pandas_bind_with_llm(expr)
-
-    def messages(self) -> List[Message]:
-        logging.debug('messages()')
-        if len(self.messages_list) == 0:
-            return []
-
-        # return [m for m in self.messages_list[:-1] if m.role() != 'system']
-        return [m for m in self.messages_list if m.role() != 'system']
-
-    def __last(self, role: str) -> list[Content]:
-        logging.debug('last()')
-        if len(self.messages_list) == 0:
-            return []
-
-        result = Helpers.last(lambda x: x.role() == role, self.messages_list)
-        if result is None:
-            return []
-        return result.content
 
     def last_assistant(self) -> list[Content]:
         return self.__last('assistant')
@@ -655,127 +686,6 @@ class PythonRuntime:
                 return []
             return result[:count]
 
-    def __rewrite_answer_error_correction(
-        self,
-        query: str,
-        python_code: str,
-        error: str,
-        locals_dictionary: Dict[Any, Any],
-    ) -> str:
-        '''
-        This handles the case where an answer() is not correct and we need to
-        identify the single place in the code where this may have occurred, and
-        see if we can manually patch it.
-        '''
-        logging.debug('__rewrite_answer_error_correction()')
-        dictionary = ''
-        for key, value in locals_dictionary.items():
-            dictionary += '{} = "{}"\n'.format(key, Helpers.str_get_str(value)[:128].replace('\n', ' '))
-
-        assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='answer_error_correction.prompt',
-                    template={
-                        'task': query,
-                        'code': python_code,
-                        'error': error,
-                        'functions': '\n'.join([Helpers.get_function_description_flat(f) for f in self.tools]),
-                        'dictionary': dictionary,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    scratchpad_token=self.controller.get_executor().scratchpad_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=[],
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='answer_error_correction.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
-
-        return assistant.get_str()
-
-    def __generate_primitive_answer(self, expr) -> Answer:
-        answer_assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='answer_primitive.prompt',
-                    template={
-                        'function_output': Helpers.str_get_str(expr),
-                        'original_query': self.original_query,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    scratchpad_token=self.controller.get_executor().scratchpad_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=[],  # type: ignore
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=512,
-                prompt_name='answer_primitive.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
-
-        answer = Answer(
-            result=answer_assistant.get_str(),
-        )
-        self.answers.append(answer)
-        return answer
-
-    def __single_shot_answer(self, expr) -> Answer:
-        # if we're here, we're in the error correction mode
-        context_messages: List[Message] = Helpers.flatten([
-            self.statement_to_message(
-                statement=value,
-            ) for key, value in self.locals_dict.items() if key.startswith('var')
-        ])
-        context_messages.extend(self.statement_to_message(expr))  # type: ignore
-
-        answer_assistant = self.controller.execute_llm_call(
-            llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
-                    prompt_name='answer.prompt',
-                    template={
-                        'original_query': self.original_query,
-                    },
-                    user_token=self.controller.get_executor().user_token(),
-                    assistant_token=self.controller.get_executor().assistant_token(),
-                    scratchpad_token=self.controller.get_executor().scratchpad_token(),
-                    append_token=self.controller.get_executor().append_token(),
-                ),
-                context_messages=context_messages,
-                executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
-                prompt_name='answer.prompt',
-            ),
-            query=self.original_query,
-            original_query=self.original_query,
-        )
-        # check for comments
-        if "[##]" in answer_assistant.get_str():
-            answer_assistant.message = [TextContent(answer_assistant.get_str().split("[##]")[0].strip())]
-
-        answer = Answer(
-            result=answer_assistant.get_str()
-        )
-        self.answers.append(answer)
-        return answer
-
     def print(self, *args, sep=' ', end='\n', file=None, flush=False):
         logging.debug(f'PythonRuntime.print({args})')
 
@@ -790,7 +700,7 @@ class PythonRuntime:
 
         return answer
 
-    def functions(self) -> str:
+    def helpers(self) -> str:
         tools = '\n'.join([Helpers.get_function_description_flat(f) for f in self.tools])
         return tools
 
@@ -845,32 +755,6 @@ class PythonRuntime:
         answer = Answer(result=expr)
         self.answers.append(answer)
         return __result(answer)
-
-    def get_last_assignment(
-        self,
-        code: str,
-        locals_dict: Dict[str, Any],
-    ) -> Optional[Tuple[str, str]]:
-        ast_parsed_code_block = ast.parse(Helpers.escape_newlines_in_strings(code))
-        last_stmt = ast_parsed_code_block.body[-1]
-
-        # Check if it's an assignment
-        if isinstance(last_stmt, ast.Assign):
-            # Get the target (left side of the assignment)
-            target = last_stmt.targets[0]
-
-            # Check if the target is a simple variable name
-            if isinstance(target, ast.Name):
-                var_name = target.id
-
-                # Get the value from local_dict if it exists
-                if var_name in locals_dict:
-                    return (var_name, locals_dict[var_name])
-                else:
-                    return None
-
-        # If it's not an assignment or doesn't have a simple variable name target
-        return None
 
     def rewrite_python_error_correction(
         self,
@@ -945,16 +829,6 @@ class PythonRuntime:
                 python_code = self.rewrite(python_code, str(ex))
             counter += 1
         return None
-
-    def __get_function_names(self, code_str):
-        parsed = ast.parse(code_str)
-
-        function_names = []
-        for node in ast.walk(parsed):
-            if isinstance(node, ast.FunctionDef):
-                function_names.append(node.name)
-
-        return function_names
 
     def __compile_and_execute(
         self,
@@ -1108,8 +982,6 @@ class PythonRuntime:
         self.original_code = python_code
         self.original_query = original_query
         self.messages_list = messages
-        # todo: why are we running setup again here?
-        # self.setup()
         self.locals_dict = locals_dict
 
         return self.__compile_and_execute(python_code)

@@ -418,7 +418,7 @@ var1 = download("https://ten13.vc/team")
 
 The \<helpers> block creates a Python runtime context and the LLMVM server will extract this code and execute it. Once the code is executed, the \<helpers>\</helpers> block is replaced with \<helpers_result>\</helpers_result> but the Python runtime context is kept alive for any further execution of \<helpers> blocks later.
 
-The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/python_runtime.py#L392C12-L392C12) function is part of a set of user definable base class libraries that the LLM knows about: download() llm_call() llm_list_bind(), llm_bind(), answer() and so on. download() fires up an instance of Chromium via [Playwright](https://playwright.dev/) to download web or PDF content and convert them to Markdown.
+The [download()](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/python_runtime.py#L392C12-L392C12) function is part of a set of user definable base class libraries that the LLM knows about: download() llm_call() llm_list_bind(), llm_bind(), result() and so on. download() fires up an instance of Chromium via [Playwright](https://playwright.dev/) to download web or PDF content and convert them to Markdown.
 
 ```python
 var2 = llm_call([var1], "extract list of names")  # Step 2: Extract the list of names
@@ -469,10 +469,10 @@ var3 = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_
   * -> WebHelpers.search_linkedin_profile("Steve", "Baxter", "Transition Level Investments")
 
 ```python
-answer(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the user
+result(answers)  # Step 7: Show the summaries of the LinkedIn profiles to the user
 ```
 
-[answer()](https://github.com/9600dev/llmvm/blob/f0caa7268822ec517af4a8b9c3afff6b086008e8/python_runtime.py#L477) is a collection of possible answers that either partially solve, or fully solve for the original query. Once code is finished executing, each answer found in answers() is handed to the LLM for guidance on how effective it is at solving/answering the query. The result is then shown to the user, and in this case, it's a career summary of each of the individuals from [TEN13](https://ten13.vc) extracted from LinkedIn.
+[result()](https://github.com/9600dev/llmvm/blob/f0caa7268822ec517af4a8b9c3afff6b086008e8/python_runtime.py#L477) is a collection of possible results that either partially solve, or fully solve for the original query. Once code is finished executing, each answer found in result()'s is handed to the LLM for guidance on how effective it is at solving/answering the query. The result is then shown to the user, and in this case, it's a career summary of each of the individuals from [TEN13](https://ten13.vc) extracted from LinkedIn.
 
 ### Continuation Passing Style Execution
 
@@ -555,7 +555,7 @@ the client that will shut down the server.
 
 <helpers>
   source_code_files = BCL.get_code_structure_summary(["~/dev/llmvm"])
-  answer(source_code_files)
+  result(source_code_files)
 </helpers>
 <helpers_result>
 ...

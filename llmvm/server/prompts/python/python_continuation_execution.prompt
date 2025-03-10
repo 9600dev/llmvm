@@ -46,7 +46,7 @@ T = TypeVar('T')
 
 8. result(expression) -> None. Allows you to capture a full answer, or partial result to the Users natural language query/question/task/problem so that I can emit that back to the User. All results that you've found and put in a result() call will be presented to you before you emit the final response to the User with the </complete> token.
 
-9. functions() -> str. Returns a string of all the helper tools/functions that are available to you to call in the Python environment, including new ones that you've built and added yourself within the <helpers></helpers> blocks.
+9. helpers() -> str. Returns a string of all the helper tools/python functions that are available to you to call in the Python environment, including new ones that you've built and added yourself within the <helpers></helpers> blocks.
 
 10. locals() -> str. Returns a string of all the variables that are currently available to you to access in the Python environment, including new ones that you've added within <helpers></helpers> blocks. Defining local variables in <helpers></helpers> blocks is useful if you want to stash results from a previous <helpers></helpers> block for later use, or you want a runtime working "memory" that you can access later.
 

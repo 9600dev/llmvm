@@ -950,8 +950,8 @@ class ExecutionController(Controller):
                         code_execution_result = parse_code_block_result(last_assignment[1])
 
                 if not code_execution_result:
-                    # no answer() block, or last assignment was None
-                    code_execution_result = parse_code_block_result(f'No answer() block found in code block, or last assignment was None.')
+                    # no result() block, or last assignment was None
+                    code_execution_result = parse_code_block_result(f'No result() block found in code block, or last Python statement was "None".')
 
                 assert(isinstance(code_execution_result, list) and len(code_execution_result) > 0)
 

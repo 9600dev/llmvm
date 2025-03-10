@@ -3,6 +3,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from langchain.text_splitter import TextSplitter
 
+from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import Message
 from llmvm.common.pdf import PdfHelpers
@@ -50,9 +51,19 @@ class EntityMetadata():
 class VectorSearch():
     def __init__(
         self,
-        vector_store: VectorStore,
+        vector_store: Optional[VectorStore] = None,
     ):
-        self.vector_store = vector_store
+        if vector_store is None:
+            vector_store = VectorStore(
+                store_directory=Container().get('vector_store_index_directory'),
+                index_name='index',
+                embedding_model=Container().get('vector_store_embedding_model'),
+                chunk_size=int(Container().get('vector_store_chunk_size')),
+                chunk_overlap=10
+            )
+            self.vector_store = vector_store
+        else:
+            self.vector_store = vector_store
 
     def search(
         self,
