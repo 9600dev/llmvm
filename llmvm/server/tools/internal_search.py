@@ -10,7 +10,7 @@ from typing import Optional, cast
 from anthropic import Anthropic
 
 
-MODEL_DEFAULT='research-wombat-latest'
+MODEL_DEFAULT='claude-3-7-sonnet-20250219'
 
 
 class InternalSearcher():

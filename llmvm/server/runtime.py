@@ -1,7 +1,7 @@
 import ast
 import builtins
 import numpy as np
-import datetime as dt
+from datetime import datetime
 import inspect
 import json
 import pandas as pd
@@ -9,7 +9,7 @@ import os
 import re
 import sys
 import scipy
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast, Any, Type
+from typing import Any, Callable, Optional, Tuple, Union, cast, Any, Type
 from urllib.parse import urlparse
 
 from llmvm.common.container import Container
@@ -20,11 +20,8 @@ from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, Do
                                   FunctionCallMeta, LLMCall,
                                   Message, PandasMeta, TextContent,
                                   User, coerce_to, awaitable_none)
-from llmvm.server.python_execution_controller import ExecutionController
-from llmvm.server.tools.edgar import EdgarHelpers
 from llmvm.server.auto_global_dict import AutoGlobalDict
-from llmvm.server.tools.market import MarketHelpers
-from llmvm.server.tools.webhelpers import WebHelpers
+from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.vector_search import VectorSearch
 
 
@@ -39,9 +36,9 @@ class RuntimeError(Exception):
 
 
 class InstantiationWrapper:
-    def __init__(self, wrapped_class, python_runtime: 'Runtime'):
+    def __init__(self, wrapped_class, runtime: 'Runtime'):
         self.wrapped_class = wrapped_class
-        self.python_runtime = python_runtime
+        self.runtime = runtime
 
     def __call__(self, *args, **kwargs):
         init_method = self.wrapped_class.__init__
@@ -52,13 +49,13 @@ class InstantiationWrapper:
                 continue
 
             if param.annotation and param.annotation is Runtime:
-                params_call[name] = self.python_runtime
+                params_call[name] = self.runtime
             elif param.annotation and param.annotation is ExecutionController:
-                params_call[name] = self.python_runtime.controller
+                params_call[name] = self.runtime.controller
             elif param.annotation and param.annotation is VectorSearch:
-                params_call[name] = self.python_runtime.vector_search
+                params_call[name] = self.runtime.vector_search
             elif name == 'cookies':
-                cookies = self.python_runtime.locals_dict['cookies'] if 'cookies' in self.python_runtime.locals_dict else []
+                cookies = self.runtime.runtime_state['cookies'] if 'cookies' in self.runtime.runtime_state else []
                 params_call[name] = cookies
 
         merged_kwargs = {**params_call, **kwargs}
@@ -87,7 +84,7 @@ class CallWrapper:
                     caller_frame_lineno = caller_frame.f_lineno  # type: ignore
 
                     # extract the line from the original python code
-                    code_line = self.outer_self.original_code.split('\n')[caller_frame_lineno - 1]
+                    code_line = 'todo'
 
                     # todo: we should probably do the marshaling here too
                     result = attr(*args, **kwargs)
@@ -104,33 +101,38 @@ class CallWrapper:
 
 
 class Runtime:
+    """
+    The runtime class is responsible for:
+     * Installing runtime functions and helper tools into a globals_dict for runtime code execution.
+     * Providing the messages_list and thread_id for runtime use.
+     * Capturing an answers into a list for all 'result()' calls within the runtime.
+    """
     def __init__(
         self,
         controller: ExecutionController,
         vector_search: VectorSearch,
-        tools: list[Callable] = [],
+        helpers: list[Callable],
+        messages_list: list[Message],
+        runtime_state: AutoGlobalDict,
         answer_error_correcting: bool = False,
-        locals_dict = {},
-        globals_dict = {},
         thread_id = 0
     ):
-        self.locals_dict = locals_dict
-        self.globals_dict = globals_dict
-        self.thread_id = thread_id
+        self.runtime_state: AutoGlobalDict = runtime_state
         self.controller: ExecutionController = controller
         self.vector_search: VectorSearch = vector_search
-        self.tools: list[Callable] = tools
-        self.answers: List[Answer] = []
-        self.messages_list: List[Message] = []
+        # for read/write filesystem
+        self.thread_id = thread_id
+        self._helpers: list[Callable] = helpers
+        self.answers: list[Answer] = []
+        self.messages_list: list[Message] = messages_list
         self.answer_error_correcting = answer_error_correcting
         self.original_query = ''
         self.original_code = ''
-        self.setup()
 
-    def __statement_to_message(self, statement: Any) -> List[Message]:
-        return self.controller.statement_to_message(statement)
-
-    def setup(self):
+    def setup(self) -> 'Runtime':
+        """
+        Sets up the runtime by installing the global runtime functions and helper tools into globals_dict.
+        """
         class float():
             def __new__(cls, value, *args, **kwargs):
                 return builtins.float.__new__(builtins.float, coerce_to(value, builtins.float), *args, **kwargs)
@@ -188,59 +190,56 @@ class Runtime:
         from llmvm.server.bcl import BCL
 
         self.answers = []
-        self.locals_dict = {}
-        self.globals_dict = {}
 
-        self.globals_dict['llm_bind'] = self.llm_bind
-        self.globals_dict['llm_call'] = self.llm_call
-        self.globals_dict['llm_list_bind'] = self.llm_list_bind
-        self.globals_dict['coerce'] = self.coerce
-        self.globals_dict['read_memory'] = self.read_memory
-        self.globals_dict['write_memory'] = self.write_memory
-        self.globals_dict['read_memory_keys'] = self.read_memory_keys
-        self.globals_dict['write_file'] = self.write_file
-        self.globals_dict['read_file'] = self.read_file
-        self.globals_dict['last_assistant'] = self.last_assistant
-        self.globals_dict['last_user'] = self.last_user
-        self.globals_dict['search'] = self.search
-        self.globals_dict['download'] = self.download
-        self.globals_dict['pandas_bind'] = self.pandas_bind
-        self.globals_dict['helpers'] = self.helpers
-        self.globals_dict['locals'] = self.locals
-        self.globals_dict['result'] = self.result
-        self.globals_dict['print'] = self.print
+        # libraries
+        self.runtime_state['sys'] = sys
+        self.runtime_state['os'] = os
+        self.runtime_state['datetime'] = datetime
+        self.runtime_state['numpy'] = np
+        self.runtime_state['scipy'] = scipy
+        self.runtime_state['np'] = np
+        self.runtime_state['pd'] = pd
+        self.runtime_state['float'] = float
+        self.runtime_state['int'] = int
 
-        self.globals_dict['WebHelpers'] = CallWrapper(self, WebHelpers)
-        self.globals_dict['BCL'] = CallWrapper(self, BCL)
-        self.globals_dict['EdgarHelpers'] = CallWrapper(self, EdgarHelpers)
-        self.globals_dict['MarketHelpers'] = CallWrapper(self, MarketHelpers)
-        self.globals_dict['sys'] = sys
-        self.globals_dict['os'] = os
-        self.globals_dict['datetime'] = dt
-        self.globals_dict['numpy'] = np
-        self.globals_dict['scipy'] = scipy
-        self.globals_dict['np'] = np
-        self.globals_dict['pd'] = pd
-        self.globals_dict['float'] = float
-        self.globals_dict['int'] = int
+        # llmvm runtime
+        self.runtime_state['llm_bind'] = self.llm_bind
+        self.runtime_state['llm_call'] = self.llm_call
+        self.runtime_state['llm_list_bind'] = self.llm_list_bind
+        self.runtime_state['coerce'] = self.coerce
+        self.runtime_state['read_memory'] = self.read_memory
+        self.runtime_state['write_memory'] = self.write_memory
+        self.runtime_state['read_memory_keys'] = self.read_memory_keys
+        self.runtime_state['write_file'] = self.write_file
+        self.runtime_state['read_file'] = self.read_file
+        self.runtime_state['last_assistant'] = self.last_assistant
+        self.runtime_state['last_user'] = self.last_user
+        self.runtime_state['search'] = self.search
+        self.runtime_state['download'] = self.download
+        self.runtime_state['pandas_bind'] = self.pandas_bind
+        self.runtime_state['helpers'] = self.helpers
+        self.runtime_state['locals'] = self.locals
+        self.runtime_state['result'] = self.result
+        self.runtime_state['print'] = self.print
 
-        for tool in self.tools:
-            self.install_helper(tool)
+        for helper in self._helpers:
+            self.install_helper(helper)
 
-        return self.globals_dict
+        return self
 
     def install_helper(self, helper: Callable):
         is_static, cls = Helpers.is_static_method(helper)
-        if not is_static and cls and cls.__name__ not in self.globals_dict:
-            self.globals_dict[cls.__name__] = InstantiationWrapper(cls, python_runtime=self)
-        else:
-            self.globals_dict[helper.__name__] = helper
+        if not is_static and cls and cls.__name__ not in self.runtime_state:
+            self.runtime_state[cls.__name__] = InstantiationWrapper(cls, runtime=self)
+        elif is_static:
+            cls = Helpers.get_class_from_static_callable(helper)
+            self.runtime_state[cls.__name__] = CallWrapper(self, cls)
 
-        if helper not in self.tools:
-            self.tools.append(helper)
+        if helper not in self._helpers:
+            self._helpers.append(helper)
 
     ########################
-    ## llmvm special helpers
+    ## llmvm runtime
     ########################
     def pandas_bind(self, expr) -> PandasMeta:
         logging.debug(f'PythonRuntime.pandas_bind({expr})')
@@ -256,7 +255,7 @@ class Runtime:
                         scratchpad_token=self.controller.get_executor().scratchpad_token(),
                         append_token=self.controller.get_executor().append_token(),
                     ),
-                    context_messages=self.__statement_to_message(expr),  # type: ignore
+                    context_messages=self.controller.statement_to_message(expr),
                     executor=self.controller.get_executor(),
                     model=self.controller.get_executor().default_model,
                     temperature=0.0,
@@ -324,20 +323,20 @@ class Runtime:
         if len(self.messages_list) == 0:
             return []
 
-        result = Helpers.last(lambda x: x.role() == 'assistant', self.messages_list)
+        result: Optional[Assistant] = Helpers.last(lambda x: x.role() == 'assistant', self.messages_list)
         if result is None:
             return []
-        return result.content
+        return cast(Assistant, result).message
 
     def last_user(self) -> list[Content]:
         logging.debug('last_user()')
         if len(self.messages_list) == 0:
             return []
 
-        result = Helpers.last(lambda x: x.role() == 'user', self.messages_list)
+        result: Optional[User] = Helpers.last(lambda x: x.role() == 'user', self.messages_list)
         if result is None:
             return []
-        return result.content
+        return cast(User, result).message
 
     def write_file(self, filename: str, content: list[Content] | str) -> bool:
         if os.path.basename(filename) != filename:
@@ -444,11 +443,11 @@ class Runtime:
         bindable = FunctionBindable(
             expr=expr,
             func=func,
-            tools=self.tools,
+            helpers=self._helpers,
             messages=[],
             lineno=inspect.currentframe().f_back.f_lineno,  # type: ignore
             expr_instantiation=inspect.currentframe().f_back.f_locals,  # type: ignore
-            scope_dict=self.locals_dict,
+            scope_dict=self.runtime_state,
             original_code=self.original_code,
             original_query=self.original_query,
             controller=self.controller,
@@ -461,7 +460,7 @@ class Runtime:
 
         from llmvm.server.base_library.content_downloader import \
             WebAndContentDriver
-        cookies = self.locals_dict['cookies'] if 'cookies' in self.locals_dict else []
+        cookies = self.runtime_state['cookies'] if 'cookies' in self.runtime_state else []
 
         downloader = WebAndContentDriver(cookies=cookies)
         download_params: DownloadParams = {
@@ -471,7 +470,7 @@ class Runtime:
         }
         return downloader.download(download=download_params)
 
-    def search(self, expr: str, total_links_to_return: int = 3, titles_seen: List[str] = [], preferred_search_engine: str = '') -> List[Content]:
+    def search(self, expr: str, total_links_to_return: int = 3, titles_seen: list[str] = [], preferred_search_engine: str = '') -> list[Content]:
         logging.debug(f'PythonRuntime.search({str(expr)})')
         from llmvm.server.base_library.searcher import Searcher
 
@@ -523,7 +522,7 @@ class Runtime:
         write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {assistant.get_str()}\n'))
         return assistant.get_str()
 
-    def llm_call(self, expr_list: List[Any] | Any, llm_instruction: str) -> Assistant:
+    def llm_call(self, expr_list: list[Any] | Any, llm_instruction: str) -> Assistant:
         logging.debug(f'llm_call({str(expr_list)[:20]}, {repr(llm_instruction)})')
 
         if not isinstance(expr_list, list):
@@ -547,7 +546,7 @@ class Runtime:
                     scratchpad_token=self.controller.get_executor().scratchpad_token(),
                     append_token=self.controller.get_executor().append_token(),
                 ),
-                context_messages=self.__statement_to_message(expr_list),
+                context_messages=self.controller.statement_to_message(expr_list),
                 executor=self.controller.get_executor(),
                 model=self.controller.get_executor().default_model,
                 temperature=0.0,
@@ -562,7 +561,7 @@ class Runtime:
         write_client_stream(TextContent(f'llm_call() finished...\n\n'))
         return assistant
 
-    def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> List[Any]:
+    def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> list[Any]:
         logging.debug(f'llm_list_bind({str(expr)[:20]}, {repr(llm_instruction)}, {count}, {list_type})')
         context = Helpers.str_get_str(expr)
 
@@ -623,11 +622,11 @@ class Runtime:
         return answer
 
     def helpers(self) -> str:
-        tools = '\n'.join([Helpers.get_function_description_flat(f) for f in self.tools])
-        return tools
+        helpers = '\n'.join([Helpers.get_function_description_flat(f) for f in self._helpers])
+        return helpers
 
     def locals(self) -> str:
-        return '\n'.join([f'{key} = {Helpers.str_get_str(value)[:128]}' for key, value in self.locals_dict.items()])
+        return '\n'.join([f'{key} = {Helpers.str_get_str(value)[:128]}' for key, value in self.runtime_state.items()])
 
     def result(self, expr, check_answer: bool = True) -> Content:
         def __result(expr):
@@ -690,7 +689,7 @@ def llm_bind(expr, func: str):
     global _runtime
     return cast(Runtime, _runtime).llm_bind(expr, func)
 
-def llm_call(expr_list: List, instruction: str) -> Assistant:
+def llm_call(expr_list: list, instruction: str) -> Assistant:
     global _runtime
     return cast(Runtime, _runtime).llm_call(expr_list, instruction)
 
@@ -730,7 +729,7 @@ def last_user() -> list[Content]:
     global _runtime
     return cast(Runtime, _runtime).last_user()
 
-def search(expr: str, total_links_to_return: int = 3, titles_seen: List[str] = []) -> list[Content]:
+def search(expr: str, total_links_to_return: int = 3, titles_seen: list[str] = []) -> list[Content]:
     global _runtime
     return cast(Runtime, _runtime).search(expr, total_links_to_return, titles_seen)
 

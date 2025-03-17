@@ -74,6 +74,36 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
+    def matplotlib_figure_to_image_content(fig, dpi=130):
+        import matplotlib.pyplot as plt
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format='png', dpi=dpi, bbox_inches='tight')
+        plt.close(fig)
+        image_bytes = buffer.getvalue()
+        buffer.close()
+        return ImageContent(image_bytes)
+
+    @staticmethod
+    def get_class_from_static_callable(callable_obj):
+        if not callable(callable_obj):
+            raise ValueError("Provided object must be callable")
+
+        qualname_parts = callable_obj.__qualname__.split('.')
+        if len(qualname_parts) < 2:
+            raise ValueError("Callable is not a class method or static method")
+
+        class_name = qualname_parts[-2]
+        module = inspect.getmodule(callable_obj)
+        if module is None:
+            raise ValueError("Unable to retrieve module from callable")
+
+        cls = getattr(module, class_name, None)
+        if not isinstance(cls, type):
+            raise ValueError(f"Unable to find class {class_name} in module {module.__name__}")
+
+        return cls
+
+    @staticmethod
     def get_value_from_parent_frame(variable_name, frame_depth=6):
         current_frame = inspect.currentframe()
 
@@ -760,6 +790,9 @@ class Helpers():
             # Validate the image dimensions.
             width, height = Helpers.image_size(result)
             if width >= min_width and height >= min_height:
+                if Helpers.is_webp(result):
+                    result = Helpers.convert_image_to_png(result)
+
                 return result
 
         except Exception as e:

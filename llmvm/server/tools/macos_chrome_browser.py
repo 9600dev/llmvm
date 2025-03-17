@@ -14,7 +14,6 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import ImageContent, MarkdownContent, PandasMeta, TextContent, PdfContent
 from llmvm.server.python_execution_controller import ExecutionController
-from llmvm.server.python_runtime import PythonRuntime
 from llmvm.server.tools.webhelpers import WebHelpers
 
 logging = setup_logging()
@@ -23,14 +22,12 @@ class MacOSChromeBrowser():
     def __init__(
         self,
         controller: ExecutionController,
-        runtime: PythonRuntime,
     ):
         """
         This static class provides methods for downloading web pages, PDFs, and Markdown files using the
         users MacOS Chrome browser instance. It uses AppleScript to automate Chrome's functionality.
         """
         self.controller = controller
-        self.runtime = runtime
 
     def google_sheet_to_pandas(self, google_sheet_url) -> PandasMeta:
         """
@@ -43,7 +40,7 @@ class MacOSChromeBrowser():
         <helpers>
         macos_browser = MacOSChromeBrowser()
         df = macos_browser.google_sheet_to_pandas("https://docs.google.com/spreadsheets/d/22a234de6f7g8h9i0d2j/edit")
-        answer(df)
+        result(df)
         </helpers>
         """
         if re.match(r'^https://docs\.google\.com/spreadsheets', google_sheet_url):
@@ -65,7 +62,7 @@ class MacOSChromeBrowser():
         <helpers>
         macos_browser = MacOSChromeBrowser()
         markdown_content = macos_browser.google_doc_to_markdown("https://docs.google.com/document/d/22a234de6f7g8h9i0d2j/edit")
-        answer(markdown_content)
+        result(markdown_content)
         """
         if re.match(r'^https://docs\.google\.com/spreadsheets/', google_doc_url):
             raise ValueError("Google Sheets should be downloaded and accessed using google_sheet_to_pandas() helper function")
@@ -158,7 +155,7 @@ class MacOSChromeBrowser():
         <helpers>
         macos_browser = MacOSChromeBrowser()
         pdf_content = macos_browser.get_pdf("https://outline.com/doc/some_cool_document")
-        answer(pdf_content)
+        result(pdf_content)
         </helpers>
         """
         self.goto(url)
@@ -231,7 +228,7 @@ class MacOSChromeBrowser():
         <helpers>
         macos_browser = MacOSChromeBrowser()
         markdown_content = macos_browser.goto("https://google.com")
-        answer(markdown_content)
+        result(markdown_content)
         </helpers>
         """
         applescript = f'''
@@ -296,7 +293,7 @@ class MacOSChromeBrowser():
         <helpers>
         macos_browser = MacOSChromeBrowser()
         screenshot_imagecontent = macos_browser.get_screenshot('https://www.bbc.com')
-        answer(screenshot_imagecontent)
+        result(screenshot_imagecontent)
         </helpers>
         """
         # Create a temporary file for the screenshot
@@ -364,7 +361,7 @@ class MacOSChromeBrowser():
         Example:
         mac_browser = MacOSChromeBrowser()
         tabs = mac_browser.get_chrome_tabs_url_and_title()
-        answer(tabs)
+        result(tabs)
         # Output:
         # https://www.google.com,Google
         # https://github.com,GitHub - Some Github Repository

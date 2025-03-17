@@ -28,7 +28,6 @@ executor: 'anthropic'  # openai, anthropic, gemini, deepseek, bedrock
 override_max_input_tokens: None
 override_max_output_tokens: None
 helper_functions:
-  - llmvm.server.bcl.BCL.datetime
   - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
   - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
   - llmvm.server.tools.webhelpers.WebHelpers.get_hackernews_latest
@@ -38,11 +37,13 @@ helper_functions:
   - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
   - llmvm.server.tools.market.MarketHelpers.get_stock_price_history
   - llmvm.server.tools.market.MarketHelpers.get_stock_analysis
+  - llmvm.server.bcl.BCL.datetime
   - llmvm.server.bcl.BCL.sample_normal
   - llmvm.server.bcl.BCL.sample_binomial
   - llmvm.server.bcl.BCL.sample_lognormal
   - llmvm.server.bcl.BCL.sample_list
   - llmvm.server.bcl.BCL.generate_graph_image
+  - llmvm.server.bcl.BCL.matplotlib_to_image
   - llmvm.server.bcl.BCL.get_source_code_structure_summary
   - llmvm.server.bcl.BCL.get_source_code
   - llmvm.server.bcl.BCL.find_all_references_to_method

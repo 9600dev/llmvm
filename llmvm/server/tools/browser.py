@@ -1,10 +1,10 @@
 import asyncio
 import re
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from googlesearch import search as google_search
-from playwright.async_api import (ElementHandle, Error, Page, TimeoutError,
+from playwright.async_api import (ElementHandle, Error, Page, Locator, TimeoutError,
                                   async_playwright)
 
 from llmvm.common.container import Container
@@ -15,7 +15,6 @@ from llmvm.common.objects import (BrowserContent, Content, ImageContent,
                                   StreamNode, TextContent,
                                   TokenCompressionMethod, User, bcl)
 from llmvm.server.python_execution_controller import ExecutionController
-from llmvm.server.python_runtime import PythonRuntime
 from llmvm.server.tools.chrome import ChromeHelpers, ClickableElementHandle
 from llmvm.server.tools.webhelpers import WebHelpers
 
@@ -25,7 +24,6 @@ class Browser():
     def __init__(
         self,
         controller: ExecutionController,
-        runtime: PythonRuntime,
         cookies: List[Dict[str, str]] = [],
     ):
         """
@@ -36,7 +34,6 @@ class Browser():
         ...
         """
         self.controller = controller
-        self.runtime = runtime
         self.cookies = cookies
 
         self.browser = ChromeHelpers(cookies=cookies)
@@ -95,26 +92,50 @@ class Browser():
     async def __resolve_selector(self, selector: str) -> None | ElementHandle:
         logging.debug(f"Browser.__resolve_selector() resolving {selector}")
 
+        # Handle coordinate-based selector
         if selector.startswith('(') and selector.endswith(')') and ',' in selector:
             selector = selector[1:-1]
             x, y = selector.split(',')
             return await self.browser.get_element_at_position(int(x), int(y))
 
-        try:
-            async with asyncio.timeout(2):
-                if selector.startswith('<'):
-                    return await self.__find_html_element_handle(selector)
-
+        async def __locator(selector: str) -> Optional[ElementHandle]:
+            count = 0
+            async with asyncio.timeout(3):
                 locator = self.current_page.locator(selector)
-                if locator:
-                    return await locator.element_handle()
-                else:
-                    return None
+                count = await locator.count()
+
+            if count > 0:
+                return await locator.first.element_handle(timeout=4000)
+            else: return None
+
+        original_selector = selector
+
+        try:
+            if selector.startswith('<'):
+                return await self.__find_html_element_handle(selector)
+
+            result = await __locator(selector)
+            if result: return result
+
+            if not selector.startswith('#') and not selector.startswith('.') and not selector.startswith(':'):
+                result = await __locator(f'#{selector}')
+                if result: return result
+                result = await __locator(f'.{selector}')
+                if result: return result
+            elif selector.startswith('#'):
+                result = await __locator(f'.selector[1:]')
+                if result: return result
+            elif selector.startswith('.'):
+                result = await __locator(f'#{selector[1:]}')
+                if result: return result
+
+            logging.debug(f"Browser.__resolve_selector() failed to find selector {original_selector}")
+            return None
         except asyncio.TimeoutError:
-            logging.debug(f"Browser.__resolve_selector() TimeoutError resolving {selector}")
+            logging.debug(f"Browser.__resolve_selector() TimeoutError resolving {original_selector}")
             raise Exception(f"Timeout resolving selector {selector}")
         except Exception as ex:
-            logging.debug(f"Browser.__resolve_selector() Exception resolving {selector}: {ex}")
+            logging.debug(f"Browser.__resolve_selector() Exception resolving {original_selector}: {ex}")
             raise Exception(f"Exception resolving selector {selector}: {ex}")
 
     def __handle_navigate_expression(self, selector: str) -> BrowserContent:
@@ -218,7 +239,7 @@ class Browser():
         Assistant:
         <helpers>
         race_results_id = browser.find_selector_or_mouse_x_y("Race Results")
-        answer(race_results_id)
+        result(race_results_id)
         </helpers>
 
         The selector_id is #race-results-button-id
@@ -276,14 +297,14 @@ class Browser():
         <helpers>
         browser = Browser()
         page_content = browser.goto("https://formula1.com")
-        answer(page_content)
+        result(page_content)
         </helpers>
 
         I can see a "Race Results" button in the page. Let's click the "Race Results" button:
 
         <helpers>
         race_results_content = browser.find_and_click_on_expression("Race Results button")
-        answer(race_results_content)
+        result(race_results_content)
         </helpers>
 
         :param expression: The natural language description of the element to click
@@ -298,7 +319,7 @@ class Browser():
         Opens a Chrome browser instance at the url specified and returns the webpage and webpage markdown for you to interact with.
         At the start of the Markdown, a list of clickable elements and their selector ids are provided.
         This allows you to see what is on the current web page and either click or fill in text boxes.
-        Returns the current state of the browser which you can use in an answer() call.
+        Returns the current state of the browser which you can use in an result() call.
         You should not try and complete the page if its returned to you. If you see BrowserContent() in a helper result
         then you should just stop the completion and allow the user to recommend next steps.
         If the page you are returning contains news, data, or other content, start with a Markdown link [Link](http://example.com)
@@ -310,7 +331,7 @@ class Browser():
         <helpers>
         browser = Browser()
         page_content = browser.goto("https://google.com")
-        answer(page_content)
+        result(page_content)
         </helpers>
 
         :param url: The url to open in the browser
@@ -330,14 +351,14 @@ class Browser():
     ) -> BrowserContent:
         """
         Clicks on the element specified by the selector. Selectors are ids of elements on the page.
-        You should wrap the result of this call in an answer() call, i.e. answer(browser.click(selector_id))
+        You should wrap the result of this call in an result() call, i.e. result(browser.click(selector_id))
 
         Example:
         <helpers>
         browser = Browser()
         page_content = browser.goto("https://google.com")
         selector_id = browser.find_selector_or_mouse_x_y("What is the id of the search button?")
-        answer(selector_id)
+        result(selector_id)
         </helpers>
 
         The selector_id is #search-button-id
@@ -345,7 +366,7 @@ class Browser():
 
         <helpers>
         click_result = browser.click_selector(selector_id)
-        answer(click_result)
+        result(click_result)
         </helpers>
 
         :param selector: The selector of the element to click
@@ -363,8 +384,8 @@ class Browser():
     ) -> BrowserContent:
         """
         Inserts text into the element specified by the selector, and hits the enter key if required. Selectors are ids of elements on the page
-        or x, y coordinates for a mouse click. You should wrap the result of this call in an answer() call,
-        i.e. answer(browser.type_into(selector_id, "vegemite", hit_enter=True))
+        or x, y coordinates for a mouse click. You should wrap the result of this call in an result() call,
+        i.e. result(browser.type_into(selector_id, "vegemite", hit_enter=True))
 
         Example:
         User: search on google for "vegemite"
@@ -377,7 +398,7 @@ class Browser():
 
         <helpers>
         type_into_result = browser.type_into_selector_or_mouse_x_y(selector_id, "vegemite", hit_enter=True)
-        answer(type_into_result)
+        result(type_into_result)
         </helpers>
 
         :param selector: The selector of the element to insert text into
@@ -433,7 +454,7 @@ class Browser():
 
         <helpers>
         click_result = browser.mouse_move_x_y_and_click(x=190, y=80)
-        answer(click_result)
+        result(click_result)
         </helpers>
 
         :param x: The x coordinate of the mouse pointer.

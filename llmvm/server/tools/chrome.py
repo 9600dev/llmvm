@@ -620,10 +620,14 @@ class ChromeHelpersInternal():
         if element is None or not isinstance(element, ElementHandle):
             logging.debug(f'ChromeHelpersInternal.fill() Element {element} is not a valid ElementHandle')
             return
-        if not await element.is_editable():
-            logging.debug(f'ChromeHelpersInternal.fill() Element {element} is not editable')
-            return
-        await element.fill(value, timeout=2000)
+        try:
+            if not await element.is_editable():
+                logging.debug(f'ChromeHelpersInternal.fill() Element {element} is not editable')
+                return
+            await element.fill(value, timeout=2000)
+        except Exception as ex:
+            logging.debug(f'ChromeHelpersInternal.fill() Exception: {ex}')
+            raise ex
 
     async def mouse_move_x_y_and_click(self, x: int, y: int) -> None:
         logging.debug(f'ChromeHelpersInternal.mouse_move_x_y_and_click({x}, {y})')

@@ -10,7 +10,7 @@ import os
 import re
 import sys
 import scipy
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast, Any, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast, Any, Type, Tuple
 from urllib.parse import urlparse
 
 from llmvm.common.container import Container
@@ -21,15 +21,26 @@ from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, Do
                                   FunctionCallMeta, LLMCall,
                                   Message, PandasMeta, TextContent,
                                   User, coerce_to, awaitable_none)
+from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.runtime import Runtime
-from llmvm.server.tools.edgar import EdgarHelpers
-from llmvm.server.auto_global_dict import AutoGlobalDict
-from llmvm.server.tools.market import MarketHelpers
-from llmvm.server.tools.webhelpers import WebHelpers
 from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
+
+
+class PythonRuntimeBlockState:
+    def __init__(
+        self,
+        python_code: str,
+        runtime_state: AutoGlobalDict,
+        helpers: list[Callable],
+        answers: list[Answer],
+    ):
+        self.python_code = python_code
+        self.runtime_state = runtime_state
+        self.helpers = helpers
+        self.answers = answers
 
 
 class PythonRuntimeHost:
@@ -37,32 +48,14 @@ class PythonRuntimeHost:
         self,
         controller: ExecutionController,
         vector_search: VectorSearch,
-        tools: list[Callable] = [],
         answer_error_correcting: bool = False,
-        locals_dict = {},
-        globals_dict = {},
         thread_id = 0
     ):
-        self.original_query = ''
-        self.original_code = ''
         self.controller: ExecutionController = controller
         self.vector_search = vector_search
-        self.tools: list[Callable] = tools
-        self.locals_dict = locals_dict
-        self.globals_dict = globals_dict
-        self.answers: List[Answer] = []
-        self.messages_list: List[Message] = []
         self.answer_error_correcting = answer_error_correcting
         self.thread_id = thread_id
-        self.runtime = Runtime(
-            controller,
-            vector_search,
-            tools,
-            answer_error_correcting=answer_error_correcting,
-            locals_dict=locals_dict,
-            globals_dict=globals_dict
-        )
-        self.runtime.setup()
+        self.executed_code_blocks: list[PythonRuntimeBlockState] = []
 
     @staticmethod
     def get_code_blocks(code: str) -> List[str]:
@@ -103,27 +96,62 @@ class PythonRuntimeHost:
     @staticmethod
     def get_last_assignment(
         code: str,
-        locals_dict: Dict[str, Any],
+        runtime_state: AutoGlobalDict,
     ) -> Optional[Tuple[str, str]]:
         ast_parsed_code_block = ast.parse(Helpers.escape_newlines_in_strings(code))
-        last_stmt = ast_parsed_code_block.body[-1]
 
-        # Check if it's an assignment
-        if isinstance(last_stmt, ast.Assign):
-            # Get the target (left side of the assignment)
-            target = last_stmt.targets[0]
+        # Track only global-level variable assignments
+        global_var_assignments = []
 
-            # Check if the target is a simple variable name
-            if isinstance(target, ast.Name):
-                var_name = target.id
+        # Process only global-level statements
+        for stmt in ast_parsed_code_block.body:
+            # Regular assignments
+            if isinstance(stmt, ast.Assign):
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        global_var_assignments.append(target.id)
 
-                # Get the value from local_dict if it exists
-                if var_name in locals_dict:
-                    return (var_name, locals_dict[var_name])
-                else:
-                    return None
+            # With statements
+            elif isinstance(stmt, ast.With):
+                for item in stmt.items:
+                    if item.optional_vars and isinstance(item.optional_vars, ast.Name):
+                        global_var_assignments.append(item.optional_vars.id)
 
-        # If it's not an assignment or doesn't have a simple variable name target
+            # For loops
+            elif isinstance(stmt, ast.For):
+                if isinstance(stmt.target, ast.Name):
+                    global_var_assignments.append(stmt.target.id)
+
+            # Annotated assignments (x: int = 5)
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                global_var_assignments.append(stmt.target.id)
+
+            # Augmented assignments (x += 1)
+            elif isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name):
+                global_var_assignments.append(stmt.target.id)
+
+            # Function definitions
+            elif isinstance(stmt, ast.FunctionDef):
+                global_var_assignments.append(stmt.name)
+
+            # Class definitions
+            elif isinstance(stmt, ast.ClassDef):
+                global_var_assignments.append(stmt.name)
+
+            # Try/except blocks with exception variables
+            elif isinstance(stmt, ast.Try):
+                for handler in stmt.handlers:
+                    if handler.name:  # except Exception as e:
+                        global_var_assignments.append(handler.name)
+
+        # Check variables in reverse order (to get the last global assignment)
+        for var_name in reversed(global_var_assignments):
+            # Check locals first, then globals
+            if var_name in runtime_state:
+                return (var_name, runtime_state[var_name])
+            elif var_name in runtime_state:
+                return (var_name, runtime_state[var_name])
+
         return None
 
     @staticmethod
@@ -144,11 +172,15 @@ class PythonRuntimeHost:
         helpers: list[Callable],
         error: str,
         task_query: str,
-        locals_dict: Dict[Any, Any],
+        runtime_state: AutoGlobalDict,
     ) -> str:
         logging.debug(f'PythonRuntime.python_error_correction({python_code[0:100]}, {error[0:100]})')
         dictionary = ''
-        for key, value in locals_dict.items():
+
+        for key, value in runtime_state.items():
+            dictionary += '{} = "{}"\n'.format(key, Helpers.str_get_str(value)[:128].replace('\n', ' '))
+
+        for key, value in runtime_state.items():
             dictionary += '{} = "{}"\n'.format(key, Helpers.str_get_str(value)[:128].replace('\n', ' '))
 
         assistant = controller.execute_llm_call_simple(
@@ -190,7 +222,7 @@ class PythonRuntimeHost:
                     helpers=helpers,
                     error=str(ex),
                     task_query=task_query,
-                    locals_dict=locals_dict,
+                    runtime_state=runtime_state,
                 )
                 return assistant.get_str()
             except Exception as ex:
@@ -241,10 +273,22 @@ class PythonRuntimeHost:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)
 
-    def compile_and_execute(
+    def get_executed_code_blocks(self) -> list[PythonRuntimeBlockState]:
+        return self.executed_code_blocks
+
+    def compile_and_execute_code_block(
         self,
         python_code: str,
-    ) -> Dict[Any, Any]:
+        messages_list: list[Message],
+        helpers: list[Callable],
+        runtime_state: AutoGlobalDict,
+    ) -> list[Answer]:
+        """
+        Compiles and executes a code block.
+        'helpers' will be updated with any new functions defined in the code block.
+        'locals_dict' will be updated with any new variables defined in the code block.
+        Returns a list of Answer objects defined with result() calls within the code block.
+        """
         def build_exception_str(tb_string):
             def extract_relevant_traceback(tb_string):
                 match = re.search(r'File "<ast>",.*', tb_string, re.DOTALL)
@@ -266,34 +310,37 @@ class PythonRuntimeHost:
             logging.error(f'PythonRuntime.compile_and_execute() threw an exception while parsing:\n{python_code}\n, exception: {ex}')
             raise Exception(build_exception_str(traceback.format_exc()))
 
-        context = AutoGlobalDict(self.globals_dict, self.locals_dict)
+        runtime = Runtime(
+            self.controller,
+            self.vector_search,
+            helpers,
+            messages_list,
+            answer_error_correcting=self.answer_error_correcting,
+            runtime_state=runtime_state,
+        ).setup()
 
         compilation_result = compile(parsed_ast, filename="<ast>", mode="exec")
 
         try:
-            exec(compilation_result, context, context)
+            exec(compilation_result, runtime_state, runtime_state)
         except Exception as ex:
             logging.error(f'PythonRuntime.compile_and_execute() threw an exception while executing:\n{python_code}\n')
             raise Exception(build_exception_str(traceback.format_exc()))
 
-        self.locals_dict = context
-        # add any helpers the llm defined to the tools list
+        # add any helpers the llm defined to the passed in helpers list
         function_names = PythonRuntimeHost.get_function_names(python_code)
-        callables = {name: self.locals_dict[name] for name in function_names if name in self.locals_dict and callable(self.locals_dict[name])}
-        self.tools = self.tools + list(callables.values())
-        self.runtime.tools = self.runtime.tools + list(callables.values())
-        return self.locals_dict
+        callables = {name: runtime_state[name] for name in function_names if name in runtime_state and callable(runtime_state[name])}
+        for helper in list(callables.values()):
+            helpers.append(helper)
 
-    def run(
-        self,
-        python_code: str,
-        original_query: str,
-        messages: List[Message] = [],
-        locals_dict: Dict = {}
-    ) -> Dict[Any, Any]:
-        self.original_code = python_code
-        self.original_query = original_query
-        self.messages_list = messages
-        self.locals_dict = locals_dict
+        # keep a list of executed code blocks and their final state
+        self.executed_code_blocks.append(
+            PythonRuntimeBlockState(
+                python_code=python_code,
+                runtime_state=runtime_state.copy(),
+                helpers=helpers.copy(),
+                answers=runtime.answers.copy(),
+            )
+        )
 
-        return self.compile_and_execute(python_code)
+        return runtime.answers

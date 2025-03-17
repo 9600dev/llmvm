@@ -34,11 +34,11 @@ from llmvm.common.objects import (Assistant, AstNode, Content,
                                   StreamingStopNode, TextContent,
                                   TokenPriceCalculator, User, compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
+from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime_host import PythonRuntimeHost
 from llmvm.server.runtime import Runtime
-from llmvm.server.tools.chrome import ChromeHelpers
 from llmvm.server.vector_search import VectorSearch
 from llmvm.server.vector_store import VectorStore
 
@@ -65,9 +65,9 @@ except ValueError:
 
 app = FastAPI()
 
-tools = Helpers.flatten(list(
+helpers = Helpers.flatten(list(
     filter(
-        lambda x: x is not None, [Helpers.get_callables(logging, tool) for tool in Container().get('helper_functions')]
+        lambda x: x is not None, [Helpers.get_callables(logging, helper) for helper in Container().get('helper_functions')]
     )
 ))
 
@@ -78,7 +78,7 @@ os.makedirs(Container().get('log_directory'), exist_ok=True)
 os.makedirs(Container().get('vector_store_index_directory'), exist_ok=True)
 
 cache_session = PersistentCache(cache_directory=Container().get('cache_directory'))
-cache_memory: MemoryCache[int, dict[str, Any]] = MemoryCache()
+runtime_dict_cache: MemoryCache[int, dict[str, Any]] = MemoryCache()
 cdn_directory = Container().get('cdn_directory')
 
 
@@ -299,7 +299,7 @@ def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> Exec
 
     return ExecutionController(
         executor=executor,
-        tools=tools,
+        tools=helpers,
         vector_search=vector_search,
         thread_id=thread_id
     )
@@ -487,13 +487,6 @@ async def health():
     logging.debug('/health')
     return {'status': 'ok'}
 
-@app.get('/browser')
-async def browser(url: str = 'https://9600.dev'):
-    logging.debug(f'/browser?url={url}')
-    chrome = ChromeHelpers()
-    result = await chrome.get_url(url)
-    return JSONResponse(content=result)
-
 @app.post('/v1/chat/cookies', response_model=None)
 async def set_cookies(requests: Request):
     request_body = await requests.json()
@@ -568,30 +561,31 @@ async def tools_completions(request: SessionThreadModel):
                 return result
             else:
                 # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
-                locals_dict = __deserialize_locals_dict(thread.locals_dict)
-                locals_dict.update(cache_memory.get(thread.id) or {})
+                runtime_dict = __deserialize_locals_dict(thread.locals_dict)
+                runtime_dict.update(runtime_dict_cache.get(thread.id) or {})
 
                 # add the runtime defined tools to the list of tools
-                for key, value in locals_dict.items():
+                for key, value in runtime_dict.items():
                     if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
-                        tools.append(value)
+                        helpers.append(value)
 
                 # todo: this is a hack
-                result, locals_dict = await controller.aexecute_continuation(
+                result, runtime_state = await controller.aexecute_continuation(
                     messages=messages,
                     temperature=thread.temperature,
                     stream_handler=callback,
                     model=model,
                     compression=compression,
                     cookies=cookies,
-                    tools=cast(list[Callable], tools),
-                    locals_dict=locals_dict
+                    helpers=cast(list[Callable], helpers),
+                    runtime_state=AutoGlobalDict(runtime_dict),
+                    thinking=thread.thinking,
                 )
                 queue.put_nowait(QueueBreakNode())
 
                 # update the in-memory locals_dict with unserializable locals
-                cache_memory.set(thread.id, __get_unserializable_locals(locals_dict))
-                thread.locals_dict = __serialize_locals_dict(locals_dict)
+                runtime_dict_cache.set(thread.id, __get_unserializable_locals(runtime_state))
+                thread.locals_dict = __serialize_locals_dict(runtime_state)
                 return result
 
         task = asyncio.create_task(execute_and_signal())
@@ -638,7 +632,7 @@ if __name__ == '__main__':
     default_model_str = f'{default_controller}_model'
     default_model = Container().get_config_variable(default_model_str, 'LLMVM_MODEL', default='')
     role_color = Container().get_config_variable('client_info_bold_color', default='cyan')
-    tool_color = Container().get_config_variable('client_info_color', default='bold green')
+    helper_color = Container().get_config_variable('client_info_color', default='bold green')
     port=int(Container().get_config_variable('server_port', 'LLMVM_SERVER_PORT'))
 
     rich.print(f'[{role_color}]Default executor is: {default_controller}[/{role_color}]')
@@ -648,8 +642,8 @@ if __name__ == '__main__':
     rich.print(f'[{role_color}]Make sure to `playwright install`.[/{role_color}]')
     rich.print(f'[{role_color}]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.[/{role_color}]')
 
-    for tool in tools:
-        rich.print(f'[{tool_color}]Loaded helper: {tool.__name__}[/{tool_color}]')  # type: ignore
+    for helper in helpers:
+        rich.print(f'[{helper_color}]Loaded helper: {helper.__name__}[/{helper_color}]')  # type: ignore
 
     # you can run this using uvicorn to get better asynchronousy, but don't count on it yet.
     # uvicorn server:app --loop asyncio --workers 4 --log-level debug --host 0.0.0.0 --port 8011

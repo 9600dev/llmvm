@@ -21,7 +21,7 @@ class FunctionBindable():
         self,
         expr,
         func: str,
-        tools: list[Callable],
+        helpers: list[Callable],
         messages: list[Message],
         lineno: int,
         expr_instantiation,
@@ -34,7 +34,7 @@ class FunctionBindable():
         self.expr_instantiation = expr_instantiation
         self.messages: list[Message] = messages
         self.func = func.replace('"', '')
-        self.tools = tools
+        self.tools = helpers
         self.lineno = lineno
         self.scope_dict = scope_dict
         self.original_code = original_code

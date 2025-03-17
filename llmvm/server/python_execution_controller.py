@@ -17,6 +17,7 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, BrowserContent, Co
                                   LLMCall, MarkdownContent, Message,
                                   PandasMeta, PdfContent, Statement, System, TextContent,
                                   TokenCompressionMethod, User, awaitable_none)
+from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
@@ -679,12 +680,17 @@ class ExecutionController(Controller):
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         stream_handler: Callable[[AstNode], Awaitable[None]] = awaitable_none,
         template_args: dict[str, Any] = {},
-        tools: list[Callable] = [],
+        helpers: list[Callable] = [],
         cookies: list[dict[str, Any]] = [],
-        locals_dict: dict[str, Any] = {},
+        runtime_state: AutoGlobalDict = AutoGlobalDict({}, {}),
         thinking: int = 0,
-    ) -> Tuple[list[Message], dict[str, Any]]:
+    ) -> Tuple[list[Message], AutoGlobalDict]:
+        # we're making a copy because we return the state at the end
+        runtime_state = runtime_state.copy()
+
         def parse_code_block_result(result) -> list[AstNode]:
+            from matplotlib.pyplot import Figure  # type: ignore
+
             if isinstance(result, str):
                 return [TextContent(result)]
             elif isinstance(result, (int, float, bool, dict, complex)):
@@ -711,15 +717,16 @@ class ExecutionController(Controller):
                     return [TextContent(result.to_csv())]
                 else:
                     return [TextContent(result.head(10).to_csv()[0:1024])]
+            elif isinstance(result, Figure):
+                return [Helpers.matplotlib_figure_to_image_content(result)]
             else:
                 raise ValueError(f'Unknown content type: {type(result)}')
 
         from llmvm.server.python_runtime_host import PythonRuntimeHost
-        python_runtime = PythonRuntimeHost(
-            self,
-            tools=tools,
+        python_runtime_host = PythonRuntimeHost(
+            controller=self,
             vector_search=self.vector_search,
-            locals_dict=locals_dict,
+            answer_error_correcting=False,
             thread_id=self.thread_id
         )
 
@@ -734,16 +741,16 @@ class ExecutionController(Controller):
         messages = [self.__parse_template(m, template_args) for m in messages]
 
         # {{functions}} template
-        messages = [self.__parse_function(m, tools) for m in messages]
+        messages = [self.__parse_function(m, helpers) for m in messages]
 
         # bootstrap the continuation execution
         completed = False
         results: list[Statement] = []
-        old_model = python_runtime.controller.get_executor().default_model
-        if model: python_runtime.controller.get_executor().default_model = model
+        old_model = python_runtime_host.controller.get_executor().default_model
+        if model: python_runtime_host.controller.get_executor().default_model = model
 
         # inject the python_continuation_execution.prompt prompt
-        functions = [Helpers.get_function_description_flat(f) for f in tools]
+        functions = [Helpers.get_function_description_flat(f) for f in helpers]
 
         system_message, tools_message = Helpers.prompts(
             prompt_name=self.__execution_prompt(self.get_executor(), model),
@@ -906,26 +913,26 @@ class ExecutionController(Controller):
                         code_block_extracted = Helpers.extract_code_blocks(code_block.strip())
                         code_block = code_block_extracted[0] if code_block_extracted else code_block
 
-                if cookies: locals_dict['cookies'] = cookies
+                if cookies: runtime_state['cookies'] = cookies
 
                 code_execution_result: Optional[list[AstNode]] = []
                 hidden = False
+                answers = []
 
                 try:
-                    python_runtime.answers = []
                     # here we're using the original messages list because messages() wouldn't work without
                     # the original. we append the response to this messages list later in the code.
-                    locals_dict = python_runtime.run(
+                    answers = python_runtime_host.compile_and_execute_code_block(
                         python_code=code_block,
-                        original_query=messages[-1].get_str(),
-                        messages=messages,
-                        locals_dict=locals_dict
+                        messages_list=messages_copy,
+                        helpers=helpers,
+                        runtime_state=runtime_state,
                     )
+
                     # Python was executed without exceptions, reset the exception counter
-                    # and add any answer() results to the results list
+                    # and add any result() results to the results list
                     exception_counter = 0
                     code_blocks_executed.append(code_block)
-                    # results.extend(python_runtime.answers)
                 except Exception as ex:
                     # we call the assistant again, and the string will often contain the original code block
                     # even though we got an exception, we want to make sure we specify that we've executed it
@@ -933,8 +940,6 @@ class ExecutionController(Controller):
                     hidden = True
                     # update the code_execution_result to expose the exception for the next iteration
                     logging.debug('ExecutionController.aexecute_continuation() Exception executing code block: {}'.format(ex))
-                    # code_execution_result = Helpers.extract_stacktrace_until(traceback.format_exc(), type(python_runtime))
-                    # the python_runtime __compile_and_execute() method will add line numbers to the original code and exception
                     code_execution_result = parse_code_block_result(f'\n{str(ex)}')
 
                     exception_counter += 1
@@ -947,17 +952,17 @@ class ExecutionController(Controller):
 
                 # code_execution_result will be empty if the code block executed without exceptions
                 # and will include the exception if it threw
-                if python_runtime.answers and not code_execution_result:
-                    # code block successfully executed, grab the result from any answer() blocks and stuff them
+                if answers and not code_execution_result:
+                    # code block successfully executed, grab the result from any result() blocks and stuff them
                     # in the code_execution_result var
-                    code_execution_result = parse_code_block_result(python_runtime.answers)
-                elif not python_runtime.answers and code_execution_result:
+                    code_execution_result = parse_code_block_result(answers)
+                elif not answers and code_execution_result:
                     # exception!
                     # code_execution_result = parse_code_block_result(code_execution_result)
                     pass
-                elif not python_runtime.answers and not code_execution_result:
-                    # sometimes dove doesn't generate an answer() block, so we'll have to get the last assignment of the code and use that.
-                    last_assignment = PythonRuntimeHost.get_last_assignment(code_block, locals_dict)
+                elif not answers and not code_execution_result:
+                    # sometimes dove doesn't generate an result() block, so we'll have to get the last assignment of the code and use that.
+                    last_assignment = PythonRuntimeHost.get_last_assignment(code_block, runtime_state)
                     if last_assignment:
                         # todo: this forces a string, but we can deal with more than that these days
                         code_execution_result = parse_code_block_result(last_assignment[1])
@@ -979,7 +984,7 @@ class ExecutionController(Controller):
                 else:
                     write_client_stream(TextContent(f'<helpers_result>{code_execution_result_str}</helpers_result>\n\n'))
 
-                # todo: we're using a string here to embed the answer in the helpers_result
+                # todo: we're using a string here to embed the result in the helpers_result
                 # but I think we can probably have all sorts of stuff in here, including images.
                 messages_copy.append(response)
                 content_messages = []
@@ -994,8 +999,6 @@ class ExecutionController(Controller):
                 completed_code_user_message = User(content_messages, hidden=hidden)
                 # required to complete the continuation
                 messages_copy.append(completed_code_user_message)
-                # required to make messages() work
-                python_runtime.messages_list.append(completed_code_user_message)
 
             # we have a stop token and there are no code blocks. Assistant is finished, so we can just append the response
             elif response.stop_token and response.stop_token == '</complete>':
@@ -1031,9 +1034,8 @@ class ExecutionController(Controller):
                         result=response.get_str()
                     ))
                 completed = True
-                # results.extend(python_runtime.answers)
 
-        if model: python_runtime.controller.get_executor().default_model = old_model
+        if model: python_runtime_host.controller.get_executor().default_model = old_model
         dedupped: list[Statement] = list(reversed(Helpers.remove_duplicates(results, lambda a: a.result())))
 
         if messages_copy[-1].role() != 'assistant':
@@ -1051,4 +1053,4 @@ class ExecutionController(Controller):
         messages_copy = [m for m in messages_copy if not m.hidden]
         # only return the extra messages beyond the messages list that was passed in
 
-        return (messages_copy, locals_dict)
+        return (messages_copy, runtime_state)

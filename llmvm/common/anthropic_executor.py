@@ -20,12 +20,8 @@ from llmvm.common.perf import TokenStreamManager
 
 logging = setup_logging()
 
-prompt_caching_models = [
-    'claude-3-5-sonnet-20240620',
-    'claude-3-5-sonnet-20241022',
-    'claude-3-opus-20240229',
-    'claude-3-haiku-20240307',
-    'claude-3-haiku-20241022',
+tokens128k = [
+    'claude-3-7-sonnet-20250219',
 ]
 
 class AnthropicExecutor(Executor):
@@ -75,7 +71,7 @@ class AnthropicExecutor(Executor):
                             "media_type": Helpers.classify_image(content.get_bytes()),
                             "data": base64.b64encode(Helpers.anthropic_resize(content.get_bytes())).decode('utf-8') # type: ignore
                         },
-                        **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models and content is message.message[-1] else {}),
+                        **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and content is message.message[-1] else {}),
                         **({'url': content.url} if server_serialization else {}),
                         **({'content_type': 'image'} if server_serialization else {})
                     })
@@ -85,7 +81,7 @@ class AnthropicExecutor(Executor):
                 content_list.append({
                     'type': 'text',
                     'text': content.get_str(),
-                    **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and model in prompt_caching_models and content is message.message[-1] else {}),
+                    **({'cache_control': {'type': 'ephemeral'}} if message.prompt_cached and content is message.message[-1] else {}),
                     **({'url': content.url} if server_serialization else {}),
                     **({'content_type': 'text'} if server_serialization else {})
                 })
@@ -131,14 +127,19 @@ class AnthropicExecutor(Executor):
         else:
             raise ValueError(f'role not found or not supported: {message}')
 
-    def unpack_and_wrap_messages(self, messages: list[Message], model: Optional[str] = None) -> list[dict[str, str]]:
+    def unpack_and_wrap_messages(
+        self,
+        messages: list[Message],
+        model: Optional[str] = None,
+        raise_exception: bool = True,
+    ) -> list[dict[str, str]]:
         wrapped: list[dict[str, str]] = []
 
         if not messages or not all(isinstance(m, Message) for m in messages):
             logging.error('Messages must be a list of Message objects.')
             for m in [m for m in messages if not isinstance(m, Message)]:
                 logging.error(f'Invalid message: {m}, the type should be Message but its type is {type(m)}')
-            raise ValueError('Messages must be a list of Message objects.')
+            if raise_exception: raise ValueError('Messages must be a list of Message objects.')
 
         # deal with the system message
         system_messages = cast(list[System], Helpers.filter(lambda m: m.role() == 'system', messages))
@@ -152,7 +153,7 @@ class AnthropicExecutor(Executor):
         expanded_messages: list[Message] = [m for m in messages if m.role() != 'system'].copy()
 
         if expanded_messages[0].role() != 'user':
-            raise ValueError('First message must be from User')
+            if raise_exception: raise ValueError('First message must be from User')
 
         for message in expanded_messages:
             for i in range(len(message.message) - 1, -1, -1):
@@ -208,7 +209,7 @@ class AnthropicExecutor(Executor):
         self,
         messages: list[Message],
     ) -> int:
-        unpacked_messages: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages=messages)
+        unpacked_messages: list[dict[str, Any]] = self.unpack_and_wrap_messages(messages=messages, raise_exception=False)
         return await self.count_tokens_dict(unpacked_messages)
 
     async def count_tokens_dict(
@@ -309,7 +310,7 @@ class AnthropicExecutor(Executor):
                 temperature=temperature,
                 stop_sequences=stop_tokens,
                 thinking=thinking_block,
-                extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
+                extra_headers={"anthropic-beta": "output-128k-2025-02-19"} if model in tokens128k else {},
             )
             return TokenStreamManager(stream, token_trace)
         except Exception as e:

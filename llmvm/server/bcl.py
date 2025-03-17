@@ -1,21 +1,19 @@
 from __future__ import annotations
 import asyncio
 import subprocess
-import types
 from bs4 import BeautifulSoup
-from dataclasses import dataclass
 from typing import List, cast
 import datetime as dt
 import io
 import os
-from urllib.parse import urlencode
 import httpx
 import json
 import numpy as np
 from typing import Dict, List, Optional, Any, Tuple, Union
+import io
+from functools import wraps
+from contextlib import contextmanager
 
-
-from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import FunctionCallMeta, ImageContent, TextContent
@@ -67,7 +65,7 @@ class BCL():
         """
         Returns the most popular central bank interest rates as a natural language string. Dates are in American format.
         Example: rates = BCL.get_central_bank_rates()
-        answer(rates)
+        result(rates)
             American Central Bank: 5.00 % as of 09-19-2024
             ...
 
@@ -86,11 +84,11 @@ class BCL():
 
         # Process each row in the table body
         for row in table.find('tbody').find_all('tr'):  # type: ignore
-            cells = row.find_all('td')
+            cells = row.find_all('td')  # type: ignore
             if len(cells) >= 6:  # Ensure we have enough cells
-                name = cells[0].find('a').text.strip()
-                rate = cells[2].div.text.strip().replace(' %', '')
-                date = cells[5].div.text.strip()
+                name = cells[0].find('a').text.strip()  # type: ignore
+                rate = cells[2].div.text.strip().replace(' %', '')  # type: ignore
+                date = cells[5].div.text.strip()  # type: ignore
 
                 try:
                     rate_float = float(rate)
@@ -116,7 +114,7 @@ class BCL():
         """
         Returns the most popular currency rates for a given currency code as a natural language string. Try and use at least 3 decimal places.
         Example: rates = BCL.get_currency_rates(currency_code="AUD")
-        answer(rates)
+        result(rates)
 
         :param currency_code: The currency code to get the rates for.
         :type currency_code: str
@@ -136,7 +134,7 @@ class BCL():
         """
         Returns the current gold and silver spot prices in USD as a natural language string.
         Example: prices = BCL.get_gold_silver_price_in_usd()
-        answer(prices)
+        result(prices)
 
         :return: gold and silver prices as a string
         :rtype: str
@@ -151,7 +149,7 @@ class BCL():
         """
         Returns the most popular bitcoin rates as a natural language string. Try and use at least 3 decimal places.
         Example: rates = BCL.get_bitcoin_rates()
-        answer(rates)
+        result(rates)
 
         :return: bitcoin prices as a string
         :rtype: str
@@ -166,7 +164,7 @@ class BCL():
         """
         Returns the ratings and details for a given TV show as a natural language string.
         Examples: ratings = BCL.get_tvshow_ratings_and_details(tvshow_name="Breaking Bad")
-        answer(ratings)
+        result(ratings)
         """
         tvshow_name = tvshow_name.replace(' ', '+')
         result = httpx.get(f"https://api.tvmaze.com/search/shows?q={tvshow_name}").json()
@@ -236,6 +234,58 @@ class BCL():
         Examples: BCL.sample_lognormal(0, 1), BCL.sample_lognormal(10, 2)
         """
         return np.random.lognormal(mean, std_dev)
+
+    @staticmethod
+    def matplotlib_to_image(func=None, figsize=(28.0, 18.0), dpi=130):
+        """
+        A context manager that converts any matplotlib figure to an ImageContent object which will be sent to the user.
+        You must use this method if you want to use matplotlib in a helper function.
+        figsize's of (28.0, 18.0) or larger, and dpi of 130 or greater is required.
+        use fontsize > 24 for labels, titles and so on.
+        the context manager argument (like 'fig') is a matplotlib figure object,
+        you do not need to call plt.figure() to create it.
+
+        Example:
+        with BCL.matplotlib_to_image(figsize=(28.0, 18.0), dpi=130) as fig:
+            plt.plot([1, 2, 3], [4, 5, 6])
+            plt.title("My Plot")
+
+        :param func: The function to decorate (optional)
+        :param figsize: Figure size in inches (width, height)
+        :param dpi: Resolution in dots per inch
+        :returns: a matplotlib Figure object
+        """
+        # Set non-interactive backend before importing pyplot
+        import matplotlib
+        matplotlib.use('Agg')  # This prevents any window from appearing
+
+        from matplotlib import pyplot as plt
+        import io
+        from functools import wraps
+
+        class MatplotlibImageContext:
+            def __init__(self, figsize, dpi):
+                self.figsize = figsize
+                self.dpi = dpi
+                self.image_bytes: bytes | None = None
+
+            def __enter__(self):
+                plt.figure(figsize=self.figsize)
+                return plt.gcf()
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                fig = plt.gcf()
+                buffer = io.BytesIO()
+                fig.savefig(buffer, format='png', dpi=self.dpi, bbox_inches='tight')
+                plt.close(fig)
+                self.image_bytes = buffer.getvalue()
+                buffer.close()
+                write_client_stream(self.image_bytes)
+                return False
+
+            def get_image_content(self) -> ImageContent:
+                return ImageContent(cast(bytes, self.image_bytes))
+        return MatplotlibImageContext(figsize, dpi)
 
     @staticmethod
     def generate_graph_image(x_y_data_dict: Dict[str, Any], title: str, x_label: str, y_label: str) -> ImageContent:

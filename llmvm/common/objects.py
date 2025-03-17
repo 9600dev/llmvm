@@ -1347,6 +1347,12 @@ class FunctionCallMeta(Call):
     def token(self):
         return 'functioncallmeta'
 
+    def __enter__(self):
+        return self._result.__enter__()  # type: ignore
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self._result.__exit__(exc_type, exc_val, exc_tb)  # type: ignore
+
     def __float__(self):
         return float(self._result)  # type: ignore
 

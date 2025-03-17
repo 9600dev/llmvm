@@ -13,16 +13,6 @@ logging = setup_logging()
 
 class EdgarHelpers():
     """Helper functions for working with the SEC Edgar API"""
-
-    # class FormType(Enum):
-    #     TENK = '10-K'
-    #     TENQ = '10-Q'
-    #     EIGHTK = '8-K'
-    #     ANY = 'ANY'
-
-    #     def __str__(self):
-    #         return self.value
-
     @staticmethod
     def get_form_urls(
         ticker: str,
@@ -142,9 +132,16 @@ class EdgarHelpers():
         """
         Gets the 10-Q, 10-K or 8-K report text for a given company symbol/ticker for a given date.
         This is useful to get financial information for a company,
-        their current strategy, investments and risks. Use form_type = '' to
-        get the latest form of any type. form_type can be '10-Q', '10-K' or '8-K'.
-        date is a Python datetime.
+        their current strategy, investments and risks.
+
+        :param symbol: The company symbol/ticker
+        :type symbol: str
+        :param form_type: The form type to get. '' for latest form, '10-Q', '10-K' or '8-K'
+        :param date: The date to get the report for. Defaults to today.
+        :type date: datetime.datetime
+
+        :return: The report text
+        :rtype: str
         """
         logging.debug('get_report: {} {} {}'.format(symbol, form_type, str(date)))
 
