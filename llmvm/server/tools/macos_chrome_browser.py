@@ -2,6 +2,7 @@ import os
 import time
 import subprocess
 import re
+from typing import Tuple
 import unicodedata
 import tempfile
 from pathlib import Path
@@ -28,6 +29,22 @@ class MacOSChromeBrowser():
         users MacOS Chrome browser instance. It uses AppleScript to automate Chrome's functionality.
         """
         self.controller = controller
+
+    def _run_applescript(self, script) -> Tuple[int, str, str]:
+        process = subprocess.Popen(['osascript', '-e', script],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+        out, err = process.communicate()
+        return (process.returncode, out.decode('utf-8').strip(), err.decode('utf-8').strip())
+
+    def _get_tab_url(self) -> str:
+        applescript = f'''
+            tell application "Google Chrome"
+                get URL of active tab of window 1
+            end tell
+        '''
+        return_code, result, error = self._run_applescript(applescript)
+        return result
 
     def google_sheet_to_pandas(self, google_sheet_url) -> PandasMeta:
         """
@@ -97,11 +114,9 @@ class MacOSChromeBrowser():
         '''
 
         # Run AppleScript
-        result = subprocess.run(['osascript', '-e', applescript], capture_output=True, text=True)
-        logging.debug(result.stdout.strip())
-        if "No Google Doc is currently visible" in result.stdout:
-            logging.debug(result.stdout.strip())
-            raise ValueError("No Google Doc is currently visible to download.")
+        return_code, result, error = self._run_applescript(applescript)
+        if return_code != 0 or "No Google Doc is currently visible" in result:
+            raise ValueError(f"No Google Doc is currently visible to download. Error: {error}")
 
         # Get list of markdown files before download
         downloads_dir = Path.home() / "Downloads"
@@ -193,11 +208,11 @@ class MacOSChromeBrowser():
         '''
 
         # Run AppleScript
-        result = subprocess.run(['osascript', '-e', applescript], capture_output=True, text=True)
+        return_code, result, error = self._run_applescript(applescript)
 
-        if result.returncode != 0:
-            logging.error(f"Error executing AppleScript: {result.stderr}")
-            raise RuntimeError(f"Failed to save PDF: {result.stderr}")
+        if return_code != 0:
+            logging.error(f"Error executing AppleScript: {error}")
+            raise RuntimeError(f"Failed to save PDF: {error}")
 
         # Check if the file was created
         pdf_file = Path(pdf_path)
@@ -214,6 +229,7 @@ class MacOSChromeBrowser():
     def goto(self, url: str) -> MarkdownContent:
         """
         Navigates MacOS Chrome instance to the url and returns the content at the url as a MarkdownContent object.
+        If Chrome isn't already running, it will be launched first.
 
         Args:
             url (str): The URL to get Markdown content from.
@@ -231,6 +247,35 @@ class MacOSChromeBrowser():
         result(markdown_content)
         </helpers>
         """
+        # First check if Chrome is running and launch it if needed
+        check_chrome_script = '''
+        tell application "System Events"
+            set isRunning to (exists process "Google Chrome")
+        end tell
+        return isRunning
+        '''
+
+        return_code, is_running, error = self._run_applescript(check_chrome_script)
+
+        if return_code != 0:
+            logging.error(f"Error checking if Chrome is running: {error}")
+            raise RuntimeError(f"Failed to check Chrome status: {error}")
+
+        # If Chrome is not running, launch it
+        if is_running.lower() != "true":
+            launch_script = '''
+            tell application "Google Chrome"
+                activate
+                delay 2  -- Give Chrome time to fully launch
+            end tell
+            '''
+            return_code, result, error = self._run_applescript(launch_script)
+
+            if return_code != 0:
+                logging.error(f"Error launching Chrome: {error}")
+                raise RuntimeError(f"Failed to launch Chrome: {error}")
+
+        # Now navigate to the URL
         applescript = f'''
         on stripTrailingSlash(someURL)
             if someURL ends with "/" then
@@ -241,19 +286,27 @@ class MacOSChromeBrowser():
 
         tell application "Google Chrome"
             activate
-            set currentURL to URL of active tab of front window
 
-            set currentURLNoSlash to my stripTrailingSlash(currentURL)
-            set urlNoSlash to my stripTrailingSlash("{url}")
+            -- Check if there are any windows open
+            if (count of windows) is 0 then
+                make new window
+                set URL of active tab of front window to "{url}"
+                delay 2  -- Wait for page to load
+            else
+                set currentURL to URL of active tab of front window
 
-            -- Check if current URL matches target URL
-            if currentURLNoSlash is not urlNoSlash then
-                -- Open new tab with target URL
-                tell front window
-                    make new tab with properties {{URL:"{url}"}}
-                    -- Wait for the tab to be created and become active
-                    delay 2
-                end tell
+                set currentURLNoSlash to my stripTrailingSlash(currentURL)
+                set urlNoSlash to my stripTrailingSlash("{url}")
+
+                -- Check if current URL matches target URL
+                if currentURLNoSlash is not urlNoSlash then
+                    -- Open new tab with target URL
+                    tell front window
+                        make new tab with properties {{URL:"{url}"}}
+                        -- Wait for the tab to be created and become active
+                        delay 2
+                    end tell
+                end if
             end if
 
             -- Wait for page to load
@@ -265,26 +318,21 @@ class MacOSChromeBrowser():
         end tell
         '''
 
-        # Run AppleScript
-        result = subprocess.run(['osascript', '-e', applescript], capture_output=True, text=True)
+        return_code, result, error = self._run_applescript(applescript)
 
-        if result.returncode != 0:
-            logging.error(f"Error executing AppleScript: {result.stderr}")
-            raise RuntimeError(f"Failed to get HTML content: {result.stderr}")
+        if return_code != 0:
+            logging.error(f"Error executing AppleScript: {error}")
+            raise RuntimeError(f"Failed to get HTML content: {error}")
 
         # Process the HTML content
-        html_content = unicodedata.normalize('NFKD', result.stdout)
+        html_content = unicodedata.normalize('NFKD', result)
         return WebHelpers.convert_html_to_markdown(html_content, url=url)
 
-    def get_screenshot(self, url) -> ImageContent:
+    def get_screenshot(self) -> ImageContent:
         """
         Opens the specified URL and takes a screenshot of the visible content using AppleScript
 
-        Args:
-            url (str): The URL to screenshot.
-
-        Returns:
-            ImageContent: An ImageContent object containing the captured screenshot.
+        :return: An ImageContent object containing the captured screenshot.
 
         Example:
         User: using my macos chrome instance, screenshot the bbc.com website
@@ -292,15 +340,17 @@ class MacOSChromeBrowser():
         Assistant:
         <helpers>
         macos_browser = MacOSChromeBrowser()
-        screenshot_imagecontent = macos_browser.get_screenshot('https://www.bbc.com')
+        macos_browser.goto('https://www.bbc.com')
+        screenshot_imagecontent = macos_browser.get_screenshot()
         result(screenshot_imagecontent)
         </helpers>
         """
+
+        url = self._get_tab_url()
+
         # Create a temporary file for the screenshot
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
             screenshot_path = tmp.name
-
-        self.goto(url)
 
         # Escape the file path for AppleScript
         escaped_path = screenshot_path.replace('"', '\\"')
@@ -331,12 +381,11 @@ class MacOSChromeBrowser():
         do shell script "screencapture -x -R" & x & \",\" & y & \",\" & w & \",\" & h & space & quoted form of "{escaped_path}"
         '''
 
-        # Run AppleScript
-        result = subprocess.run(['osascript', '-e', applescript], capture_output=True, text=True)
+        return_code, result, error = self._run_applescript(applescript)
 
-        if result.returncode != 0:
-            logging.error(f"Error executing AppleScript: {result.stderr}")
-            raise RuntimeError(f"Failed to capture screenshot: {result.stderr}")
+        if return_code != 0:
+            logging.error(f"Error executing AppleScript: {error}")
+            raise RuntimeError(f"Failed to capture screenshot: {error}")
 
         # Check if the file was created
         screenshot_file = Path(screenshot_path)
@@ -348,7 +397,6 @@ class MacOSChromeBrowser():
                 os.unlink(screenshot_path)  # Clean up the file
                 return ImageContent(sequence=screenshot_data, url=url)
             time.sleep(0.5)
-
         raise RuntimeError(f"Screenshot file was not created at {screenshot_path}")
 
     def get_chrome_tabs_url_and_title(self) -> str:
@@ -386,14 +434,12 @@ class MacOSChromeBrowser():
             return output
         end tell
         '''
+        return_code, result, error = self._run_applescript(applescript)
 
-        # Run AppleScript
-        result = subprocess.run(['osascript', '-e', applescript], capture_output=True, text=True)
-
-        if result.returncode != 0:
-            logging.error(f"Error executing AppleScript: {result.stderr}")
-            raise RuntimeError(f"Failed to get Chrome tabs: {result.stderr}")
+        if return_code != 0:
+            logging.error(f"Error executing AppleScript: {error}")
+            raise RuntimeError(f"Failed to get Chrome tabs: {error}")
 
         # Remove the last newline if it exists
-        output = result.stdout.rstrip()
+        output = result.rstrip()
         return output
