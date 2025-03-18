@@ -249,12 +249,8 @@ class Runtime:
     async def delegate_task(self, task: str, expr_list: list[Any]) -> MarkdownContent:
         logging.debug(f'PythonRuntime.delegate({task}, {expr_list})')
 
-        last_user = self.last_user()
-        last_task = ' '.join([c.get_str() for c in last_user])
-        macro_task = f"The global macro task is {last_task}. Use this knowledge to solve the sub-task in the next messages."
-
         conversation, _ = await self.controller.aexecute_continuation(
-            messages=[User(TextContent(macro_task))] + self.controller.statement_to_message(expr_list) + [User(TextContent(task))],
+            messages=self.controller.statement_to_message(expr_list) + [User(TextContent(task))],
             temperature=0.0,
             model=self.controller.get_executor().default_model,
             runtime_state=self.runtime_state.copy(),
@@ -505,7 +501,7 @@ class Runtime:
     def search(
         self,
         expr: str,
-        total_links_to_return: int = 3,
+        total_links_to_return: int = 2,
         titles_seen: list[str] = [],
         preferred_search_engine: str = ''
     ) -> list[Content]:

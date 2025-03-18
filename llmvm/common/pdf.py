@@ -175,9 +175,9 @@ class Pdf():
                     img_stream = BytesIO(img['stream'].get_rawdata())
                     im = Image.open(img_stream)
                     buf = io.BytesIO()
-                    im.save(buf, format='PNG')
+                    im.convert('RGB').save(buf, format='PNG', optimize=True)
                     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-                        im.save(temp_file.name, format='PNG', optimize=False, compression_level=0)
+                        im.convert('RGB').save(temp_file.name, format='PNG', optimize=False, compression_level=0)
                         page_content.append(ImageContent(buf.getvalue(), url=temp_file.name))
                 else:
                     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
@@ -185,7 +185,7 @@ class Pdf():
                         page.crop(image_bbox).to_image(resolution=150, antialias=True).save(temp_file.name, format='PNG', optimize=False, compression_level=0)
                         im = Image.open(temp_file.name)
                         buf = io.BytesIO()
-                        im.save(buf, format='PNG')
+                        im.convert('RGB').save(buf, format='PNG')
                         page_content.append(ImageContent(buf.getvalue(), url=temp_file.name))
 
             content.extend(page_content)
