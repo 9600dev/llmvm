@@ -1,4 +1,5 @@
 import ast
+import asyncio
 import builtins
 import numpy as np
 from datetime import datetime
@@ -9,16 +10,16 @@ import os
 import re
 import sys
 import scipy
-from typing import Any, Callable, Optional, Tuple, Union, cast, Any, Type
+from typing import Any, Callable, Coroutine, Optional, Tuple, Union, cast, Any, Type
 from urllib.parse import urlparse
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handler
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, DownloadParams, FileContent,
-                                  FunctionCallMeta, LLMCall,
-                                  Message, PandasMeta, TextContent,
+from llmvm.common.objects import (Answer, Assistant, ContainerContent, Content, ContentEncoder, DownloadParams, FileContent,
+                                  FunctionCallMeta, LLMCall, MarkdownContent,
+                                  Message, PandasMeta, TextContent, TokenCompressionMethod,
                                   User, coerce_to, awaitable_none)
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
@@ -115,7 +116,8 @@ class Runtime:
         messages_list: list[Message],
         runtime_state: AutoGlobalDict,
         answer_error_correcting: bool = False,
-        thread_id = 0
+        thread_id = 0,
+        thinking: int = 0,
     ):
         self.runtime_state: AutoGlobalDict = runtime_state
         self.controller: ExecutionController = controller
@@ -128,6 +130,7 @@ class Runtime:
         self.answer_error_correcting = answer_error_correcting
         self.original_query = ''
         self.original_code = ''
+        self.thinking = thinking
 
     def setup(self) -> 'Runtime':
         """
@@ -201,8 +204,10 @@ class Runtime:
         self.runtime_state['pd'] = pd
         self.runtime_state['float'] = float
         self.runtime_state['int'] = int
+        self.runtime_state['asyncio'] = asyncio
 
         # llmvm runtime
+        self.runtime_state['delegate_task'] = self.delegate_task
         self.runtime_state['llm_bind'] = self.llm_bind
         self.runtime_state['llm_call'] = self.llm_call
         self.runtime_state['llm_list_bind'] = self.llm_list_bind
@@ -241,6 +246,25 @@ class Runtime:
     ########################
     ## llmvm runtime
     ########################
+    async def delegate_task(self, task: str, expr_list: list[Any]) -> MarkdownContent:
+        logging.debug(f'PythonRuntime.delegate({task}, {expr_list})')
+
+        last_user = self.last_user()
+        last_task = ' '.join([c.get_str() for c in last_user])
+        macro_task = f"The global macro task is {last_task}. Use this knowledge to solve the sub-task in the next messages."
+
+        conversation, _ = await self.controller.aexecute_continuation(
+            messages=[User(TextContent(macro_task))] + self.controller.statement_to_message(expr_list) + [User(TextContent(task))],
+            temperature=0.0,
+            model=self.controller.get_executor().default_model,
+            runtime_state=self.runtime_state.copy(),
+            stream_handler=get_stream_handler() or awaitable_none,
+            thinking=self.thinking,
+        )
+        assistant = cast(Assistant, Helpers.last(lambda x: x.role() == 'assistant', conversation, default=Assistant(TextContent(''))))
+        content = MarkdownContent(sequence=assistant.message)
+        return content
+
     def pandas_bind(self, expr) -> PandasMeta:
         logging.debug(f'PythonRuntime.pandas_bind({expr})')
 
@@ -361,7 +385,10 @@ class Runtime:
     def read_file(self, full_path_filename: str) -> TextContent:
         memory_dir = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default='~/.local/share/llmvm/memory')
 
-        if not os.path.exists(full_path_filename) and os.path.exists(f'{memory_dir}/{self.thread_id}/{full_path_filename}'):
+        full_path_filename_copy = full_path_filename
+        full_path_filename = os.path.expanduser(full_path_filename)
+
+        if not os.path.exists(full_path_filename) and os.path.exists(f'{memory_dir}/{self.thread_id}/{full_path_filename_copy}'):
             with open(f'{memory_dir}/{self.thread_id}/{full_path_filename}', 'r') as f:
                 return TextContent(f.read(), url=f'{memory_dir}/{self.thread_id}/{full_path_filename}')
 
@@ -455,22 +482,33 @@ class Runtime:
         bindable.bind(expr, func)
         return bindable
 
-    def download(self, expr: str) -> Content:
-        logging.debug(f'download({str(expr)})')
+    def download(self, expr: list[str]) -> list[Content]:
+        logging.debug(f'PythonRuntime.download({expr})')
 
         from llmvm.server.base_library.content_downloader import \
             WebAndContentDriver
         cookies = self.runtime_state['cookies'] if 'cookies' in self.runtime_state else []
 
         downloader = WebAndContentDriver(cookies=cookies)
-        download_params: DownloadParams = {
-            'url': expr,
-            'goal': self.original_query,
-            'search_term': ''
-        }
-        return downloader.download(download=download_params)
 
-    def search(self, expr: str, total_links_to_return: int = 3, titles_seen: list[str] = [], preferred_search_engine: str = '') -> list[Content]:
+        download_params: list[DownloadParams] = []
+        for url in expr:
+            download_params.append({
+                'url': url,
+                'goal': self.original_query,
+                'search_term': ''
+            })
+
+        result = asyncio.run(downloader.download_multiple_async(downloads=download_params))
+        return [content for _, content in result]
+
+    def search(
+        self,
+        expr: str,
+        total_links_to_return: int = 3,
+        titles_seen: list[str] = [],
+        preferred_search_engine: str = ''
+    ) -> list[Content]:
         logging.debug(f'PythonRuntime.search({str(expr)})')
         from llmvm.server.base_library.searcher import Searcher
 
@@ -733,7 +771,7 @@ def search(expr: str, total_links_to_return: int = 3, titles_seen: list[str] = [
     global _runtime
     return cast(Runtime, _runtime).search(expr, total_links_to_return, titles_seen)
 
-def download(expr: str) -> Content:
+def download(expr: list[str]) -> list[Content]:
     global _runtime
     return cast(Runtime, _runtime).download(expr)
 

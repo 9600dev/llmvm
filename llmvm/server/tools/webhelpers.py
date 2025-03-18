@@ -199,7 +199,6 @@ class WebHelpers():
         from llmvm.server.base_library.content_downloader import \
             WebAndContentDriver
 
-
         logging.debug('WebHelpers.get_url: {}'.format(url))
         downloader = WebAndContentDriver()
         download_params: DownloadParams = {'url': url, 'goal': '', 'search_term': ''}

@@ -26,7 +26,7 @@ Functions:
 
 {{functions}}
 
-There are also 17 special functions that I've added to our Python implementation that will help us:
+There are also 18 special functions that I've added to our Python implementation that will help us:
 
 T = TypeVar('T')
 
@@ -42,7 +42,7 @@ T = TypeVar('T')
 
 6. search(expression, total_links_to_return: int = 3, titles_seen: List[str] = []) -> str. Searches the Internet across various search engines to find content related to 'expression' and returns all of that content as a string. Use this if you need general search, news search, or product searching capability. If you have already called search() before, and do not want to include certain website titles in the results, you can pass in a list of string titles of those websites and they will be excluded from the search results. The argument 'total_links_to_return' is the number of search results you want to download, the default being three. Typically this is enough, but if you feel like you're not getting the content you require, or you have a particularly complicated task to solve, you can increase this total.
 
-7. download(expression) -> str. Downloads any web page, html, PDF file, news article or word document, converts it to text, and returns that text content as a string.
+7. download(expression_list: list[str]) -> list[Content]. Downloads the web pages, html, PDF files, CSV's or word documents in the list of urls in expression_list. Returns a list of Content objects representing the downloaded content in order of the urls in expression.
 
 8. result(expression) -> None. Allows you to capture a full answer, or partial result to the Users natural language query/question/task/problem so that I can emit that back to the User. All results that you've found and put in a result() call will be presented to you before you emit the final response to the User with the </complete> token.
 
@@ -63,6 +63,8 @@ T = TypeVar('T')
 16. last_assistant() -> list[Content]. Returns the last assistant message.
 
 17. last_user() -> list[Content]. Returns the last user message.
+
+18. async delegate_task(task: str, expr_list: list[Any]) -> MarkdownContent. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task.
 
 The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas (as pd) and scipy as (scipy). There are no other libraries available.
 
@@ -180,7 +182,7 @@ Example: Here is an example of using these special features to solve the user qu
 I'm downloading https://ten13.vc/team for you.
 <helpers>
 results = []
-var1 = download("https://ten13.vc/team")
+var1 = download(["https://ten13.vc/team"])
 var2 = llm_call([var1], "extract list of names")  # perform the first task
 </helpers>
 </complete>
@@ -283,16 +285,9 @@ Example: Here is an example of comparing the details of multiple documents. Note
 </{{scratchpad_token}}>
 I'm downloading the first paper.
 <helpers>
-paper1_text = download("https://ceur-ws.org/Vol-3432/paper17.pdf")
-paper1_summary = llm_call([paper1_text], "Summarize all opinions in the document") # Step 1: Summarize paper 1 as it might be too big to fit in the llm_call context window.
-result(paper1_summary)  # emit the summary to the User
-</helpers>
-
-I'm downloading the second paper.
-<helpers>
-paper2_text = download("https://arxiv.org/pdf/2306.14077v1.pdf")
-paper2_summary = llm_call([paper2_text], "Summarize all opinions in the document") # Step 2: Summarize paper 2 as it might be too big to fit in the llm_call context window.
-result(paper2_summary)  # emit the summary to the User
+paper_1, paper2 = download(["https://ceur-ws.org/Vol-3432/paper17.pdf", "https://arxiv.org/pdf/2306.14077v1.pdf"])
+paper1_summary = llm_call([paper_1], "Summarize all opinions in the document")
+paper2_summary = llm_call([paper_2], "Summarize all opinions in the document")
 </helpers>
 
 I'll find the differences between the two papers for you.
@@ -303,7 +298,7 @@ result(summary_of_differences) # Step 4: Show the result to the user
 </helpers>
 </complete>
 
-Example: Here is an example of finding the top restaurants in a particular location:
+Example: Here is an example of finding the top restaurants in a particular location
 
 {{user_colon_token}} Give me a menu summary of the top 3 restaurants in Brisbane Australia
 
@@ -404,14 +399,23 @@ result(var3)
 </helpers>
 </complete>
 
-Example: An example of downloading a webpage:
+Example: An example of breaking down a task into smaller subtasks and delegating them
 
-{{user_colon_token}} get https://9600.dev
+{{user_colon_token}} get top 3 headlines from cnn.com and the top 2 headlines from bbc.com and join them together
 
 {{assistant_colon_token}}
 <helpers>
-var1 = download("https://9600.dev")
-result(var1)
+tasks = [
+    delegate_task("get top 3 headlines from cnn.com", ["https://cnn.com"]),
+    delegate_task("get top 2 headlines from bbc.com", ["https://bbc.com"])
+]
+results = asyncio.run(asyncio.gather(*tasks))
+</helpers>
+
+I have the headlines, let's join them together.
+<helpers>
+headlines = llm_call([results], "join the headlines together")
+result(headlines)
 </helpers>
 </complete>
 
@@ -426,7 +430,7 @@ Example: An example of getting information from a url, seeing a useful image tha
 * see if there are any images in the article that might be useful and include them in the output
 </{{scratchpad_token}}>
 <helpers>
-var1 = download("https://en.wikipedia.org/wiki/Gravity")
+var1, = download(["https://en.wikipedia.org/wiki/Gravity"])
 result(var1)
 </helpers>
 
@@ -562,6 +566,7 @@ Thanks. I'm ready for your next message.
     - you cannot define variables in a <helpers></helpers> block that are the same name as helpers, tools, functions, or special methods.
     - you cannot use open() to open and read/write files, you must use the helpers instead.
     - try to avoid using the datetime module, use the BCL.datetime() helper instead.
+    - you cannot use await inside the <helpers></helpers> block. You can use asyncio.run(...).
 
 * I'm enabling the following Python features and strongly encourage them:
 

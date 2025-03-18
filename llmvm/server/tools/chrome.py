@@ -112,6 +112,21 @@ class ChromeHelpers():
     def set_cookies(self, cookies: List[Dict]):
         self.chrome.set_cookies(cookies)
 
+    async def concurrent_process_urls(self, urls: List[str], max_concurrent: int = 5) -> List[Tuple[str, str, bytes]]:
+        results = self.run_in_loop(self.chrome.process_urls_concurrently(urls, max_concurrent)).result()
+
+        # Optionally stream the screenshots to the client
+        for url, _, screenshot in results:
+            if screenshot:
+                write_client_stream(
+                    StreamNode(
+                        obj=screenshot,
+                        type='bytes',
+                        metadata={'type': 'bytes', 'url': url}
+                    ))
+
+        return results
+
     async def url(self) -> str:
         return self.run_in_loop(self.chrome.url()).result()
 
@@ -216,6 +231,117 @@ class ChromeHelpersInternal():
             'instagram.com': lambda page: self.wait(4000),
             'bsky.app': lambda page: self.wait(4000),
         }
+
+    async def _goto_for_concurrent(self, page, url: str) -> str:
+        import hashlib
+
+        try:
+            await page.goto(url, wait_until="commit")
+
+            domain = urlparse(url).netloc
+
+            if domain in self.wait_fors:
+                logging.debug(f'_goto_for_concurrent() waiting for {domain}')
+                wait_for_lambda = self.wait_fors[domain]
+                await wait_for_lambda(page)
+
+            stable_iterations_required = 2  # number of consecutive identical checks
+            check_interval = 100  # milliseconds between checks
+            max_checks = 20       # maximum checks to prevent infinite loops
+
+            stable_count = 0
+            previous_hash = None
+
+            for _ in range(max_checks):
+                await page.mouse.move(random.randint(1, 800), random.randint(1, 600))
+
+                content = await page.content()
+                # Calculate a hash of the content to compare quickly
+                current_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
+                if current_hash == previous_hash:
+                    stable_count += 1
+                else:
+                    stable_count = 0
+                # If we've seen the same content consecutively, assume it's stable
+                if stable_count >= stable_iterations_required:
+                    return content
+
+                previous_hash = current_hash
+                await page.wait_for_timeout(check_interval)
+
+            logging.debug('_goto_for_concurrent() reached maximum checks without finding stable content')
+            return await page.content()
+        except Error as ex:
+            logging.debug(f'_goto_for_concurrent() exception: {ex}')
+            return str("goto() failed with an exception: " + str(ex))
+
+    async def process_urls_concurrently(self, urls: List[str], max_concurrent: int = 5) -> List[Tuple[str, str, bytes]]:
+        results = []
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def process_single_url(url: str) -> Tuple[str, str, bytes]:
+            assert self.browser is not None
+
+            async with semaphore:
+                # Create a new isolated context for this URL
+                context = await self.browser.new_context(
+                    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    viewport={'width': 1920, 'height': 1080},
+                    accept_downloads=True
+                )
+
+                # Add cookies if needed
+                cookie_file = Container().get('chromium_cookies', '')
+                if os.path.exists(cookie_file):
+                    result = read_netscape_cookies(cookie_file)
+                    await context.add_cookies(result)
+
+                if self.cookies:
+                    await context.add_cookies(self.cookies)  # type: ignore
+
+                try:
+                    # Create a new page in this context
+                    page = await context.new_page()
+
+                    # Set up mouse tracking (copied from your __new_page method)
+                    await page.evaluate("""() => {
+                        window.mouseX = 0;
+                        window.mouseY = 0;
+
+                        document.addEventListener('mousemove', (e) => {
+                            window.mouseX = e.clientX;
+                            window.mouseY = e.clientY;
+                        });
+                    }""")
+
+                    # Use a modified version of your goto logic
+                    content = await self._goto_for_concurrent(page, url)
+
+                    # Take a screenshot
+                    screenshot = await page.screenshot(type='png')
+
+                    return (url, content, screenshot)
+                except Exception as e:
+                    logging.error(f"Error processing URL {url}: {str(e)}")
+                    return (url, f"Error: {str(e)}", b'')
+                finally:
+                    await context.close()
+
+        # Ensure browser is started
+        if self.is_closed:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(
+                headless=Container().get('chromium_headless', default=True),
+                args=self.args
+            )
+            self.is_closed = False
+
+        # Create tasks for all URLs
+        tasks = [process_single_url(url) for url in urls]
+
+        # Wait for all tasks to complete
+        results = await asyncio.gather(*tasks)
+        return results
 
     async def safe_click_element(self, element: ElementHandle, timeout=5000):
         try:

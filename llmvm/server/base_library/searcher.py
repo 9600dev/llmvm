@@ -1,8 +1,8 @@
 import asyncio
 import re
-from typing import Any, Callable, Dict, List, TypedDict
+from typing import Any, Callable, Dict, Iterator, List, TypedDict, cast
 
-from googlesearch import search as google_search
+from googlesearch import search as google_search, SearchResult
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream
@@ -57,7 +57,7 @@ class Searcher():
             TextContent("$SERPAPI_API_KEY not found, using googlesearch-python to talk to Google Search.\n")
         )
 
-        results = list(google_search(query, advanced=True))
+        results: list[SearchResult] = list(cast(Iterator[SearchResult], google_search(query, advanced=True)))
         return_results: List[Dict] = []
         for result in results:
             return_results.append({

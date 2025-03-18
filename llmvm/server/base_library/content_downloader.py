@@ -1,7 +1,7 @@
 import asyncio
 import os
 import tempfile
-from typing import Dict, List, Optional, Tuple, cast
+from typing import Dict, Optional, Tuple, cast
 from urllib.parse import urlparse
 import httpx
 import aiofiles
@@ -23,7 +23,7 @@ logging = setup_logging()
 class WebAndContentDriver():
     def __init__(
         self,
-        cookies: List[Dict] = [],
+        cookies: list[Dict] = [],
     ):
         self.cookies = cookies
 
@@ -210,3 +210,145 @@ class WebAndContentDriver():
             })
             return self.download(download_params)
 
+    async def download_multiple_async(
+        self, downloads: list[DownloadParams],
+        max_concurrent: int = 5
+    ) -> list[Tuple[DownloadParams, Content]]:
+        """
+        Download multiple URLs concurrently.
+
+        Args:
+            downloads: list of DownloadParams objects
+            max_concurrent: Maximum number of concurrent downloads
+
+        Returns:
+            list of tuples containing (original_download_params, content)
+        """
+        # Clean up URLs
+        for download in downloads:
+            if download['url'].startswith('"') and download['url'].endswith('"'):
+                download['url'] = download['url'][1:-1]
+            download['url'] = download['url'].replace(';fileType=text%2Fxml', '')
+
+        # Group URLs by type for efficient processing
+        pdf_urls = []
+        csv_urls = []
+        xml_urls = []
+        web_urls = []
+        file_urls = []
+        arxiv_urls = []
+
+        for download in downloads:
+            result = urlparse(download['url'])
+            if result.scheme == '' or result.scheme == 'file':
+                file_urls.append(download)
+            elif (result.scheme == 'http' or result.scheme == 'https'):
+                if '.pdf' in result.path:
+                    pdf_urls.append(download)
+                elif '.csv' in result.path:
+                    csv_urls.append(download)
+                elif '.xml' in result.path:
+                    xml_urls.append(download)
+                elif 'arxiv.org' in download['url']:
+                    arxiv_urls.append(download)
+                else:
+                    web_urls.append(download)
+
+        results = []
+
+        # Process file URLs (these are local and don't need parallelism)
+        for download in file_urls:
+            content = await self._process_file_url(download)
+            results.append((download, content))
+
+        # Process arxiv URLs (special case)
+        arxiv_results = await self._process_arxiv_urls(arxiv_urls)
+        results.extend(arxiv_results)
+
+        # Process web URLs in parallel (the main benefit)
+        if web_urls:
+            chrome_helper = ChromeHelpers(cookies=self.cookies)
+
+            # Extract just the URLs for parallel processing
+            urls = [download['url'] for download in web_urls]
+            url_to_download = {download['url']: download for download in web_urls}
+
+            # Process URLs concurrently
+            parallel_results = await chrome_helper.concurrent_process_urls(urls, max_concurrent)
+            await chrome_helper.close()
+
+            # Convert results back to Content objects
+            for url, html_content, _ in parallel_results:
+                download = url_to_download[url]
+
+                # Check if the result is a file path (for downloaded content)
+                if os.path.exists(html_content) and Helpers.is_pdf(open(html_content, 'rb')):
+                    content = PdfContent(sequence=b'', url=html_content)
+                elif os.path.exists(html_content):
+                    content = FileContent(sequence=b'', url=html_content)
+                else:
+                    content = WebHelpers.convert_html_to_markdown(html_content, url=download['url'])
+
+                results.append((download, content))
+
+        # Process PDF, CSV, and XML URLs (these could also be parallelized)
+        # For simplicity, I'll process these in sequence for now
+        for download in pdf_urls + csv_urls + xml_urls:
+            content = await self._process_special_url(download)
+            results.append((download, content))
+
+        return results
+
+    async def _process_file_url(self, download: DownloadParams) -> Content:
+        """Process a local file URL."""
+        result = urlparse(download['url'])
+        if '.pdf' in result.path:
+            return PdfContent(sequence=b'', url=str(result.path))
+        if '.htm' in result.path or '.html' in result.path:
+            return WebHelpers.convert_html_to_markdown(open(result.path, 'r').read(), url=download['url'])
+        return TextContent(f'WebAndContentDriver: nothing found for {download["url"]}')
+
+    async def _process_arxiv_urls(self, downloads: list[DownloadParams]) -> list[Tuple[DownloadParams, PdfContent]]:
+        """Process arxiv.org URLs in parallel."""
+        results = []
+
+        async def download_arxiv(download: DownloadParams):
+            download_url = download['url'].replace('/abs/', '/pdf/')
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+                await self.__requests_download(download_url, temp_file.name)
+                return download, PdfContent(sequence=b'', url=temp_file.name)
+
+        tasks = [download_arxiv(download) for download in downloads]
+        if tasks:
+            results = await asyncio.gather(*tasks)
+
+        return results
+
+    async def _process_special_url(self, download: DownloadParams) -> Content:
+        """Process PDF, CSV, or XML URLs."""
+        result = urlparse(download['url'])
+        chrome_helper = ChromeHelpers(cookies=self.cookies)
+
+        try:
+            if '.pdf' in result.path:
+                pdf_filename = await chrome_helper.pdf_url(download['url'])
+                await chrome_helper.close()
+                return cast(Content, PdfContent(sequence=b'', url=pdf_filename))
+            elif '.csv' in result.path:
+                csv_filename = await chrome_helper.download(download['url'])
+                await chrome_helper.close()
+                return cast(Content, FileContent(sequence=b'', url=csv_filename))
+            elif '.xml' in result.path:
+                xml_filename = await chrome_helper.download(download['url'])
+                await chrome_helper.close()
+
+                with open(xml_filename, 'r') as f:
+                    xml_file_content = f.read()
+                    xml_str = WebHelpers.convert_xml_to_text(xml_file_content)
+                    return cast(Content, TextContent(xml_str))
+            else:
+                raise ValueError(f"Unknown content type: {result.path}")
+        except Exception as e:
+            logging.debug(f'_process_special_url exception: {e}')
+            await chrome_helper.close()
+            return cast(Content, TextContent(f'Error processing {download["url"]}: {str(e)}'))
