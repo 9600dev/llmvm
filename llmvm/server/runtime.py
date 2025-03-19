@@ -18,7 +18,7 @@ from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handle
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, DownloadParams, FileContent,
                                   FunctionCallMeta, LLMCall, MarkdownContent,
-                                  Message, PandasMeta, SearchResult, TextContent,
+                                  Message, PandasMeta, SearchResult, Statement, TextContent,
                                   User, coerce_to, awaitable_none)
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
@@ -421,6 +421,16 @@ class Runtime:
                         values.append(c)
                 elif isinstance(content, str):
                     values.append(TextContent(content))
+                elif isinstance(content, FunctionCallMeta):
+                    func_result = content.result()
+                    if isinstance(func_result, Content):
+                        values.append(func_result.get_str())
+                    else:
+                        values.append(content.result())
+                elif isinstance(content, Content):
+                    values.append(content.get_str())
+                elif isinstance(content, Statement):
+                    values.append(str(content))
                 else:
                     values.append(content)
 
