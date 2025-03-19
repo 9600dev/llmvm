@@ -5,9 +5,10 @@ from typing import cast
 import unicodedata
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
+import warnings
 import re
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from markdownify import MarkdownConverter
 
 from llmvm.common.logging_helpers import setup_logging
@@ -98,6 +99,8 @@ class WebHelpers():
 
     @staticmethod
     def convert_html_to_markdown(html: str, url: str = '') -> MarkdownContent:
+        warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
+
         def clean_markdown(markdown_text: str) -> str:
             lines = []
             blank_counter = 0

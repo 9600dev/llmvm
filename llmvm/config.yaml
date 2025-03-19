@@ -31,7 +31,9 @@ helper_functions:
   - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
   - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile
   - llmvm.server.tools.webhelpers.WebHelpers.get_hackernews_latest
-  - llmvm.server.tools.edgar.EdgarHelpers.get_report
+  - llmvm.server.tools.edgar.EdgarHelpers.get_filings
+  - llmvm.server.tools.edgar.EdgarHelpers.get_form_filing_or_item_url_as_markdown
+  - llmvm.server.tools.edgar.EdgarHelpers.get_latest_filing_as_markdown
   - llmvm.server.tools.market.MarketHelpers.get_stock_price
   - llmvm.server.tools.market.MarketHelpers.get_current_market_capitalization
   - llmvm.server.tools.market.MarketHelpers.get_stock_volatility

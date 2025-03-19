@@ -264,7 +264,8 @@ def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> Exec
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
             default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
-            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=4096),
+            # default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=4096),
+            default_max_output_len=64000,
         )
     elif controller == 'gemini':
         executor = GeminiExecutor(
