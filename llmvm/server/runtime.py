@@ -426,13 +426,13 @@ class Runtime:
                     if isinstance(func_result, Content):
                         values.append(func_result.get_str())
                     else:
-                        values.append(content.result())
+                        values.append(TextContent(str(content.result())))
                 elif isinstance(content, Content):
-                    values.append(content.get_str())
-                elif isinstance(content, Statement):
-                    values.append(str(content))
-                else:
                     values.append(content)
+                elif isinstance(content, Statement):
+                    values.append(TextContent(str(content)))
+                else:
+                    values.append(TextContent(str(content)))
 
             with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{key}.meta', 'w') as f:
                 f.write(summary)
