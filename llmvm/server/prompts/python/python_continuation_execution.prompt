@@ -40,7 +40,7 @@ T = TypeVar('T')
 
 5. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. You can also pass Google Sheets urls (https://docs.google.com/spreadsheets/...) as the expression and it will return a Pandas DataFrame.
 
-6. download(expression_list: list[str | SearchResult]) -> list[Content]. Downloads the web pages, html, PDF files, CSV's or word documents in the list of urls in expression_list. Returns a list of Content objects representing the downloaded content in order of the urls in expression.
+6. download(expression_list: list[str | SearchResult]) -> list[Content]. Downloads the web pages, html, PDF files, CSV's or word documents in the list of urls in expression_list. Maximum of 5 downloads per call, otherwise an Exception is thrown. Returns a list of Content objects representing the downloaded content in order of the urls in expression.
 
 7. result(expression) -> None. Allows you to capture a full answer, or partial result to the Users natural language query/question/task/problem so that I can emit that back to the User. All results that you've found and put in a result() call will be presented to you before you emit the final response to the User with the </complete> token.
 

@@ -20,7 +20,7 @@ class Search():
     @staticmethod
     def google_search(
         expr: str,
-        total_links_to_return: int = 5,
+        total_links_to_return: int = 2,
         exclude_results: list[SearchResult] = [],
     ) -> list[SearchResult]:
         """
@@ -37,7 +37,7 @@ class Search():
 
         :param expr: The search query
         :type expr: str
-        :param total_links_to_return: The number of search results to return, default = 5
+        :param total_links_to_return: The number of search results to return, max is 5, default is 2
         :type total_links_to_return: int
         :param exclude_results: A list of SearchResult objects to exclude from the search results
         :type exclude_results: list[SearchResult]
@@ -84,7 +84,7 @@ class Search():
     @staticmethod
     def google_patent_search(
         query: str,
-        total_links_to_return: int = 5,
+        total_links_to_return: int = 3,
         exclude_results: list[SearchResult] = [],
     ) -> list[SearchResult]:
         """
@@ -101,7 +101,7 @@ class Search():
 
         :param expr: The search query
         :type expr: str
-        :param total_links_to_return: The number of search results to return
+        :param total_links_to_return: The number of search results to return, max is 5, default is 2
         :type total_links_to_return: int
         :param exclude_results: A list of SearchResult objects to exclude from the search results
         :type exclude_results: list[SearchResult]

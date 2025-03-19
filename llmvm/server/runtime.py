@@ -516,6 +516,9 @@ class Runtime:
                 'search_term': ''
             })
 
+        if len(download_params) > 5:
+            raise ValueError('Too many downloads requested, max is 5')
+
         result = asyncio.run(downloader.download_multiple_async(downloads=download_params))
         return [content for _, content in result]
 
