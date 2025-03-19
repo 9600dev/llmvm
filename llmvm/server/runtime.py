@@ -10,16 +10,15 @@ import os
 import re
 import sys
 import scipy
-from typing import Any, Callable, Coroutine, Optional, Tuple, Union, cast, Any, Type
+from typing import Any, Callable, Optional, Union, cast, Any, Type
 from urllib.parse import urlparse
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handler
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import (Answer, Assistant, ContainerContent, Content, ContentEncoder, DownloadParams, FileContent,
+from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, DownloadParams, FileContent,
                                   FunctionCallMeta, LLMCall, MarkdownContent,
-                                  Message, PandasMeta, TextContent, TokenCompressionMethod,
+                                  Message, PandasMeta, SearchResult, TextContent,
                                   User, coerce_to, awaitable_none)
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
@@ -219,7 +218,6 @@ class Runtime:
         self.runtime_state['read_file'] = self.read_file
         self.runtime_state['last_assistant'] = self.last_assistant
         self.runtime_state['last_user'] = self.last_user
-        self.runtime_state['search'] = self.search
         self.runtime_state['download'] = self.download
         self.runtime_state['pandas_bind'] = self.pandas_bind
         self.runtime_state['helpers'] = self.helpers
@@ -246,11 +244,24 @@ class Runtime:
     ########################
     ## llmvm runtime
     ########################
-    async def delegate_task(self, task: str, expr_list: list[Any]) -> MarkdownContent:
+    async def delegate_task(
+        self,
+        task: str,
+        expr_list: list[Any],
+        include_original_task: bool = True
+    ) -> MarkdownContent:
         logging.debug(f'PythonRuntime.delegate({task}, {expr_list})')
 
+        user_tasks = Helpers.compressed_user_messages(self.messages_list)
+        user_tasks_message = """
+        Here is a high level summary of the users previous task requests,
+        including the current high level task you've been asked to help with.
+        It may include extra instructions to help you with your sub-task below.\n\n
+        """
+        tasks_message = [User(TextContent(user_tasks_message + '\n\n'.join(user_tasks)))] if include_original_task else []
+
         conversation, _ = await self.controller.aexecute_continuation(
-            messages=self.controller.statement_to_message(expr_list) + [User(TextContent(task))],
+            messages=tasks_message + self.controller.statement_to_message(expr_list) + [User(TextContent(task))],
             temperature=0.0,
             model=self.controller.get_executor().default_model,
             runtime_state=self.runtime_state.copy(),
@@ -478,7 +489,7 @@ class Runtime:
         bindable.bind(expr, func)
         return bindable
 
-    def download(self, expr: list[str]) -> list[Content]:
+    def download(self, expr: list[str | SearchResult]) -> list[Content]:
         logging.debug(f'PythonRuntime.download({expr})')
 
         from llmvm.server.base_library.content_downloader import \
@@ -490,38 +501,13 @@ class Runtime:
         download_params: list[DownloadParams] = []
         for url in expr:
             download_params.append({
-                'url': url,
+                'url': url.url if isinstance(url, SearchResult) else url,
                 'goal': self.original_query,
                 'search_term': ''
             })
 
         result = asyncio.run(downloader.download_multiple_async(downloads=download_params))
         return [content for _, content in result]
-
-    def search(
-        self,
-        expr: str,
-        total_links_to_return: int = 2,
-        titles_seen: list[str] = [],
-        preferred_search_engine: str = ''
-    ) -> list[Content]:
-        logging.debug(f'PythonRuntime.search({str(expr)})')
-        from llmvm.server.base_library.searcher import Searcher
-
-        if isinstance(expr, User):
-            expr = ObjectTransformers.transform_content_to_string(expr.message, self.controller.get_executor(), xml_wrapper=False)
-
-        searcher = Searcher(
-            expr=expr,
-            controller=self.controller,
-            original_code=self.original_code,
-            original_query=self.original_query,
-            vector_search=self.vector_search,
-            total_links_to_return=total_links_to_return,
-            preferred_search_engine=preferred_search_engine
-        )
-        results = searcher.search(titles_seen=titles_seen)
-        return results
 
     def coerce(self, expr, type_name: Union[str, Type]) -> str:
         if isinstance(type_name, type):
@@ -763,11 +749,7 @@ def last_user() -> list[Content]:
     global _runtime
     return cast(Runtime, _runtime).last_user()
 
-def search(expr: str, total_links_to_return: int = 3, titles_seen: list[str] = []) -> list[Content]:
-    global _runtime
-    return cast(Runtime, _runtime).search(expr, total_links_to_return, titles_seen)
-
-def download(expr: list[str]) -> list[Content]:
+def download(expr: list[str | SearchResult]) -> list[Content]:
     global _runtime
     return cast(Runtime, _runtime).download(expr)
 

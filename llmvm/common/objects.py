@@ -1,5 +1,6 @@
 import base64
 import copy
+from dataclasses import dataclass, field
 import datetime as dt
 import importlib
 import json
@@ -636,6 +637,86 @@ class MarkdownContent(ContainerContent):
 
     def get_str(self) -> str:
         return '\n'.join([c.get_str() for c in self.sequence])
+
+
+@dataclass
+class SearchResult(TextContent):
+    def __init__(self, url: str, title: str, snippet: str, engine: str):
+        self.url = url
+        self.title = title
+        self.snippet = snippet
+        self.engine = engine
+        super().__init__(url=url, sequence="SearchResult(url={self.url}, title={self.title}, snippet={self.snippet}, engine={self.engine})")
+
+    def get_str(self) -> str:
+        return f"SearchResult(url={self.url}, title={self.title}, snippet={self.snippet}, engine={self.engine})"
+
+    def __str__(self):
+        return self.get_str()
+
+    def __repr__(self):
+        return self.get_str()
+
+    def to_json(self) -> dict:
+        json_result = super().to_json()
+        json_result['url'] = self.url
+        json_result['title'] = self.title
+        json_result['snippet'] = self.snippet
+        json_result['engine'] = self.engine
+        return json_result
+
+
+@dataclass
+class YelpResult(TextContent):
+    def __init__(self, title: str, link: str, neighborhood: str, snippet: str, reviews: str):
+        self.title = title
+        self.link = link
+        self.neighborhood = neighborhood
+        self.snippet = snippet
+        self.reviews = reviews
+        super().__init__(url=link, sequence="YelpResult(title={self.title}, link={self.link}, neighborhood={self.neighborhood}, snippet={self.snippet}, reviews={self.reviews})")
+
+    def get_str(self) -> str:
+        return f"YelpResult(title={self.title}, link={self.link}, neighborhood={self.neighborhood}, snippet={self.snippet} reviews={self.reviews[0:100]})"
+
+    def __str__(self):
+        return self.get_str()
+
+    def __repr__(self):
+        return self.get_str()
+
+    def to_json(self) -> dict:
+        json_result = super().to_json()
+        json_result['title'] = self.title
+        json_result['link'] = self.link
+        json_result['neighborhood'] = self.neighborhood
+        json_result['snippet'] = self.snippet
+        json_result['reviews'] = self.reviews
+        return json_result
+
+
+@dataclass
+class HackerNewsResult(TextContent):
+    def __init__(self, title: str, url: str, author: str, comment_text: str, created_at: str):
+        self.title = title
+        self.url = url
+        self.author = author
+        self.comment_text = comment_text
+        super().__init__(url=url, sequence="HackerNewsResult(title={self.title}, url={self.url}, author={self.author}, comment_text={self.comment_text}, created_at={self.created_at})")
+
+    def get_str(self) -> str:
+        return f"HackerNewsResult(title={self.title}, url={self.url}, author={self.author}, comment_text={self.comment_text}, created_at={self.created_at})"
+
+    def __str__(self):
+        return self.get_str()
+
+    def to_json(self) -> dict:
+        json_result = super().to_json()
+        json_result['title'] = self.title
+        json_result['url'] = self.url
+        json_result['author'] = self.author
+        json_result['comment_text'] = self.comment_text
+        return json_result
 
 class Message(AstNode):
     def __init__(

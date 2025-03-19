@@ -74,6 +74,18 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
+    def compressed_user_messages(messages: list[Message]) -> list[str]:
+        user_messages = []
+        for message in messages:
+            if (
+                isinstance(message, User)
+                and all([isinstance(c, TextContent) for c in message.message])
+                and not '<helpers' in message.get_str()
+            ):
+                user_messages.append(message.get_str()[0:500])
+        return user_messages
+
+    @staticmethod
     def matplotlib_figure_to_image_content(fig, dpi=130):
         import matplotlib.pyplot as plt
         buffer = io.BytesIO()
@@ -1297,6 +1309,9 @@ class Helpers():
     @staticmethod
     def get_callables(logging: Logger, input_str: str) -> Optional[Union[List[Callable], Callable]]:
         parts = input_str.split(".")
+
+        if input_str.startswith('search'):
+            logging.debug('hello')
 
         if len(parts) < 2:
             logging.error(f"Invalid input string: {input_str}")

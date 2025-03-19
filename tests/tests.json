@@ -94,5 +94,11 @@
     "prompt": "weather/prompt.txt",
     "files": [],
     "args": ["-p", "weather/prompt.txt"]
+  },
+  {
+    "name": "business-plan",
+    "prompt": "business-plan/prompt.txt",
+    "files": [],
+    "args": ["-p", "business-plan/prompt.txt"]
   }
 ]

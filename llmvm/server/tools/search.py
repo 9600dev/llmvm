@@ -127,7 +127,9 @@ class SerpAPISearcher(Searcher):
         self,
         query: str,
         location: str,
-    ) -> Dict:
+        total_links_to_return: int = 5,
+        total_reviews_to_return: int = 20,
+    ) -> list[dict]:
         params = {
             'find_desc': query,
             'find_loc': location,
@@ -138,28 +140,19 @@ class SerpAPISearcher(Searcher):
 
         if results.get('error'):
             rich.print_json(json.dumps(results, default=str))
-            return {}
-
-        place_id = ''
-        title = ''
-        link = ''
-        neighborhood = ''
-        snippet = ''
+            return []
 
         organic_results = results.get('organic_results', [])
-        for result in organic_results:
-            if result.get('place_ids'):
-                place_id = result.get('place_ids')[0]
-                title = result.get('title')
-                link = result.get('link')
-                neighborhood = result.get('neighborhoods')
-                snippet = result.get('snippet')
-                break
+        return_results = []
 
-        reviews_text = []
+        for result in [r for r in organic_results if r.get('place_ids')][0:total_links_to_return]:
+            place_id = result.get('place_ids')[0]
+            title = result.get('title')
+            link = result.get('link')
+            neighborhood = result.get('neighborhoods')
+            snippet = result.get('snippet')
 
-        if place_id:
-            # get the reviews
+            reviews_text = []
             params = {
                 'engine': 'yelp_reviews',
                 'place_id': place_id,
@@ -168,7 +161,7 @@ class SerpAPISearcher(Searcher):
             results = self.client.search(params)
 
             reviews = results.get('reviews', [])
-            for review in reviews:
+            for review in list(reviews)[0:total_reviews_to_return]:
                 if 'comment' in review and 'text' in review['comment']:
                     if 'user' in review and 'name' in review['user']:
                         name = review['user']['name']
@@ -180,15 +173,15 @@ class SerpAPISearcher(Searcher):
                         address = ''
                     reviews_text.append(f"{name} from {address} had this review: {review['comment']['text']}")
 
-            return {
+            item = {
                 'title': title,
                 'link': link,
                 'neighborhood': neighborhood,
                 'snippet': snippet,
                 'reviews': '\n\n'.join(reviews_text)
             }
-
-        return {}
+            return_results.append(item)
+        return return_results
 
     def search_research(
         self,

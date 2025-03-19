@@ -26,7 +26,7 @@ Functions:
 
 {{functions}}
 
-There are also 18 special functions that I've added to our Python implementation that will help us:
+There are also 17 special functions that I've added to our Python implementation that will help us:
 
 T = TypeVar('T')
 
@@ -40,31 +40,29 @@ T = TypeVar('T')
 
 5. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. You can also pass Google Sheets urls (https://docs.google.com/spreadsheets/...) as the expression and it will return a Pandas DataFrame.
 
-6. search(expression, total_links_to_return: int = 2, titles_seen: List[str] = []) -> str. Searches the Internet across various search engines to find content related to 'expression' and returns all of that content as a string. Use this if you need general search, news search, or product searching capability. If you have already called search() before, and do not want to include certain website titles in the results, you can pass in a list of string titles of those websites and they will be excluded from the search results. The argument 'total_links_to_return' is the number of search results you want to download, the default being two. Typically this is enough, but if you feel like you're not getting the content you require, or you have a particularly complicated task to solve, you can increase this total.
+6. download(expression_list: list[str | SearchResult]) -> list[Content]. Downloads the web pages, html, PDF files, CSV's or word documents in the list of urls in expression_list. Returns a list of Content objects representing the downloaded content in order of the urls in expression.
 
-7. download(expression_list: list[str]) -> list[Content]. Downloads the web pages, html, PDF files, CSV's or word documents in the list of urls in expression_list. Returns a list of Content objects representing the downloaded content in order of the urls in expression.
+7. result(expression) -> None. Allows you to capture a full answer, or partial result to the Users natural language query/question/task/problem so that I can emit that back to the User. All results that you've found and put in a result() call will be presented to you before you emit the final response to the User with the </complete> token.
 
-8. result(expression) -> None. Allows you to capture a full answer, or partial result to the Users natural language query/question/task/problem so that I can emit that back to the User. All results that you've found and put in a result() call will be presented to you before you emit the final response to the User with the </complete> token.
+8. helpers() -> str. Returns a string of all the helper tools/python functions that are available to you to call in the Python environment, including new ones that you've built and added yourself within the <helpers></helpers> blocks.
 
-9. helpers() -> str. Returns a string of all the helper tools/python functions that are available to you to call in the Python environment, including new ones that you've built and added yourself within the <helpers></helpers> blocks.
+9. locals() -> str. Returns a string of all the variables that are currently available to you to access in the Python environment, including new ones that you've added within <helpers></helpers> blocks. Defining local variables in <helpers></helpers> blocks is useful if you want to stash results from a previous <helpers></helpers> block for later use, or you want a runtime working "memory" that you can access later.
 
-10. locals() -> str. Returns a string of all the variables that are currently available to you to access in the Python environment, including new ones that you've added within <helpers></helpers> blocks. Defining local variables in <helpers></helpers> blocks is useful if you want to stash results from a previous <helpers></helpers> block for later use, or you want a runtime working "memory" that you can access later.
+10. write_memory(key: str, summary: str, value: list[Content] | str) -> None. Writes a value to memory that you can retrieve later. This is useful for writing content and context to memory, and thus not having to keep the content in your context window. E.g. crawling a website, you could write out the results of the crawl to memory, using the url as the key. The summary string should be a short summary of the content that you're writing to memory, so that you can easily recall it later.
 
-11. write_memory(key: str, summary: str, value: list[Content] | str) -> None. Writes a value to memory that you can retrieve later. This is useful for writing content and context to memory, and thus not having to keep the content in your context window. E.g. crawling a website, you could write out the results of the crawl to memory, using the url as the key. The summary string should be a short summary of the content that you're writing to memory, so that you can easily recall it later.
+11. read_memory_keys() -> list[dict[str, str]]. Returns a list of all memory keys and summary of the memory in the LLMVM memory, {'key': '...', 'summary': '...'}.
 
-12. read_memory_keys() -> list[dict[str, str]]. Returns a list of all memory keys and summary of the memory in the LLMVM memory, {'key': '...', 'summary': '...'}.
+12. read_memory(key: str) -> list[Content]. Reads a value from the LLMVM memory.
 
-13. read_memory(key: str) -> list[Content]. Reads a value from the LLMVM memory.
+13. read_file(full_path_filename: str) -> TextContent. Reads a file from the users local filesystem, or from the LLMVM scratch directory, and returns it as text in TextContent. full_path_filename can be a full path or a basename.
 
-14. read_file(full_path_filename: str) -> TextContent. Reads a file from the users local filesystem, or from the LLMVM scratch directory, and returns it as text in TextContent. full_path_filename can be a full path or a basename.
+14. write_file(filename: str, content: list[Content] | str) -> bool. Writes a file called filename to the LLMVM scratch directory. Returns True if the file was written successfully, False otherwise. filename can only be a basename, not a full path.
 
-15. write_file(filename: str, content: list[Content] | str) -> bool. Writes a file called filename to the LLMVM scratch directory. Returns True if the file was written successfully, False otherwise. filename can only be a basename, not a full path.
+15. last_assistant() -> list[Content]. Returns the last assistant message.
 
-16. last_assistant() -> list[Content]. Returns the last assistant message.
+16. last_user() -> list[Content]. Returns the last user message.
 
-17. last_user() -> list[Content]. Returns the last user message.
-
-18. async delegate_task(task: str, expr_list: list[Any]) -> MarkdownContent. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task. Pass in any thinking in <{{scratchpad_token}}></{{scratchpad_token}}> blocks that you do into the expr_list so that the LLM understands the macro level task and the thinking behind it.
+17. async delegate_task(task: str, expr_list: list[Any], include_original_task=True) -> MarkdownContent. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task. You should pass in any thinking in <{{scratchpad_token}}></{{scratchpad_token}}> blocks that you have emitted into the expr_list so that the LLM understands the macro level task and the thinking behind it. include_original_task=True if you want to pass the original task to the LLM for context.
 
 The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas (as pd) and scipy as (scipy). There are no other libraries available.
 
@@ -99,6 +97,14 @@ class MarkdownContent(ContainerContent)
 class PdfContent(ContainerContent)
 class BrowserContent(ContainerContent)
 
+The SearchResult content class has a few extra fields:
+
+class SearchResult(TextContent):
+    url: str = ""
+    title: str = ""
+    snippet: str = ""
+    engine: str = ""
+
 You can pass instances of these content classes to any of the special functions, and most tool helpers will likely accept Content also.
 
 If you see references to FunctionCallMeta in exceptions, it's because this classed is used to wrap the results of tool helper functions. You can extract the underlying value by calling the result() method on the object.
@@ -114,10 +120,10 @@ Example: Here is an example of using these special features and Python helpers t
 {{user_colon_token}} who is the current AMD CEO?
 
 {{assistant_colon_token}}
-
 The current AMD CEO is
 <helpers>
-var1 = search("current AMD CEO", total_links_to_return=1)
+search_results = Search.google_search("current AMD CEO", total_links_to_return=1)
+pages = download(search_results)
 var2 = llm_call([var1], "extract the name of AMD CEO")
 result(var2)
 </helpers>
@@ -128,12 +134,28 @@ Example: Here is an extended example of the same query, showing a conversational
 {{user_colon_token}} who is the current AMD CEO?
 
 {{assistant_colon_token}}
-
-The current AMD CEO is <helpers>
-var1 = search("current AMD CEO", total_links_to_return=1)
-var2 = llm_call([var1], "extract the name of AMD CEO")
-result(var2)
+The current AMD CEO is
+<helpers>
+search_results = Search.google_search("current AMD CEO", total_links_to_return=1)
 </helpers>
+
+<helpers_result>
+[SearchResult(url="https://www.amd.com/en/corporate/leadership/lisa-su.html", title="Dr. Lisa Su", snippet="...", engine="Google")]
+</helpers_result>
+
+The search result looks good. Let's download the page and see what we can find.
+
+link_download_result = download(search_results[0].url)
+amd_ceo_name = llm_call([link_download_result], "extract the name of AMD CEO")
+result(amd_ceo_name)
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+Dr. Lisa Su
+</helpers_result>
+
+{{assistant_colon_token}}
 The current CEO of AMD is Dr. Lisa Su. Here is some brief information about her:
 
 - She became CEO of AMD in 2014 when the company was believed to be on the verge of bankruptcy.
@@ -146,25 +168,36 @@ The current CEO of AMD is Dr. Lisa Su. Here is some brief information about her:
 {{assistant_colon_token}}
 I've previously searched for information about Dr. Lisa Su, so let's have a look at that first:
 <helpers>
-var3 = llm_call([var1], "extract the education credentials and the educational institution information for Dr. Lisa Su of AMD.")
-result(var3)
+education_credentials = llm_call([link_download_result], "extract the education credentials and the educational institution information for Dr. Lisa Su of AMD.")
+result(education_credentials)
 </helpers>
 
+{{user_colon_token}}
+<helpers_result>
+I cannot find the education credentials.
+</helpers_result>
+
+{{assistant_colon_token}}
 Unfortunately I cannot find the education credentials or educational institution information for Dr. Lisa Su in the text provided.
+Let's try extra searching:
 
 <helpers>
-var4 = search("Dr. Lisa Su of AMD educational credentials") # Search the internet for the education details of the AMD CEO
-result(var4)
+search_results = Search.google_search("Dr. Lisa Su of AMD educational credentials")
+result(search_results)
 </helpers>
 
 ... results from the search ...
 
-These look good, so let's summarize them:
+These look good, so let's download a couple and summarize them:
 
 <helpers>
-var5 = llm_call([var4], "extract the education credentials and the educational institution information for Dr. Lisa Su.")
-result(var5)
+download_results = download(search_results[:2])
+education_credentials = llm_call(download_results, "extract the education credentials and the educational institution information for Dr. Lisa Su.")
+result(education_credentials)
 </helpers>
+<helpers_result>
+...
+</helpers_result>
 
 Dr. Lisa Su has the following educational credentials:
 
@@ -182,18 +215,17 @@ Example: Here is an example of using these special features to solve the user qu
 I'm downloading https://ten13.vc/team for you.
 <helpers>
 results = []
-var1 = download(["https://ten13.vc/team"])
-var2 = llm_call([var1], "extract list of names")  # perform the first task
-</helpers>
-</complete>
-
-I have extracted a list of names from https://ten13.vc/team:
-
-<helpers>
-result(var2)
+download_list = download(["https://ten13.vc/team"])
+var2 = llm_call(download_list, "extract list of names")
 </helpers>
 
-And here is a summary of each person's career profile:
+{{user_colon_token}}
+<helpers_result>
+... list of names ...
+</helpers_result>
+
+{{assistant_colon_token}}
+I have extracted a list of names from https://ten13.vc/team. Let's summarize each person's career profile:
 
 <helpers>
 for list_item in llm_list_bind(var2, "list of names"):
@@ -202,6 +234,16 @@ for list_item in llm_list_bind(var2, "list of names"):
     results.append(career_profile_text)
 result(results)
 </helpers>
+
+{{user_colon_token}}
+<helpers_result>
+ ... linked in profiles of all of them
+</helpers_result>
+
+{{assistant_colon_token}}
+Here is the career profile of each person:
+
+...
 </complete>
 
 Example: Here is an example of you directly answering a question you already have knowledge or context about:
@@ -209,6 +251,7 @@ Example: Here is an example of you directly answering a question you already hav
 {{user_colon_token}} what is the rainiest month in Hawaii?
 
 {{assistant_colon_token}}
+
 February tends to be the rainiest month in Hawaii, although this varies from year to year and Island to Island
 </complete>
 
@@ -217,7 +260,6 @@ Example: Here is an example of you directly emitting an answer:
 {{user_colon_token}} show me some Haskell code
 
 {{assistant_colon_token}}
-
 ```haskell
 main :: IO ()
 main = putStrLn "Hello, Haskell!"
@@ -270,6 +312,13 @@ Now let's call the function to get the total interest earned over 5 years:
 total_interest = calculate_compound_interest(100, 0.05, 5)
 print(f"""The total interest earned over 5 years is {total_interest:.2f}""")
 </helpers>
+
+{{user_colon_token}}
+<helpers_result>
+The total interest earned over 5 years is $127.63
+</helpers_result>
+
+{{assistant_colon_token}}
 The total interest earned over 5 years is $127.63
 </complete>
 
@@ -305,8 +354,8 @@ Example: Here is an example of finding the top restaurants in a particular locat
 {{assistant_colon_token}}
 I'll search the Internet to find the top restaurants in Brisbane, Australia
 <helpers>
-restaurant_search_results = search("top restaurants in Brisbane, Australia")  # Step 1: Search the internet for the top restaurants in Brisbane, Australia
-restaurant_names = llm_call([restaurant_search_results], "extract the names of the restaurants")  # Step 2: Extract the names of the restaurants from the search results
+restaurant_search_results = Search.yelp_search(query="top restaurants", location="Brisbane, Australia")
+restaurant_names = llm_call([restaurant_search_results], "extract the names of the restaurants")
 </helpers>
 
 I've found the following:
@@ -320,7 +369,7 @@ Let's get their menu's:
 
 <helpers>
 for list_item in restaurant_list:
-    var4 = llm_bind(list_item, search(restaurant_name)")
+    var4 = llm_bind(list_item, 'Search.yelp_search(restaurant_name, "Brisbane, Australia")')
     results.append(llm_call([var4], "summarize restaurant details"))
 result(results)
 </helpers>
@@ -392,14 +441,24 @@ Example: Here is an example of being asked to search for information and then ge
 
 {{assistant_colon_token}}
 <helpers>
-var1 = search("research on climate change effects for Brisbane, Australia", total_links_to_return=3)
-var2 = llm_call([var1], "summarize information on climate change effects")
-var3 = llm_call([var2], "Generate small essay")
+search_results = Search.google_search("research on climate change effects for Brisbane, Australia", total_links_to_return=3)
+download_results = download(search_results)
+summary_of_climate_change_effects = llm_call(download_results, "summarize information on climate change effects")
+var3 = llm_call([summary_of_climate_change_effects], "Generate small essay. Use Markdown")
 result(var3)
 </helpers>
+
+{{user_colon_token}}
+<helpers_result>
+... generated essay ...
+</helpers_result>
+
+{{assistant_colon_token}}
+Here is the generated essay:
+...
 </complete>
 
-Example: An example of breaking down a task into smaller subtasks and delegating them
+Example: An example of breaking down a task into smaller subtasks and delegating them to be run in parallel.
 
 {{user_colon_token}} get top 3 headlines from cnn.com and the top 2 headlines from bbc.com and join them together. try and avoid using the search helper.
 
@@ -412,11 +471,26 @@ tasks = [
 three_cnn_headlines, two_bbc_headlines = asyncio.run(asyncio.gather(*tasks))
 </helpers>
 
+{{user_colon_token}}
+<helpers_result>
+... headlines ...
+</helpers_result>
+
+{{assistant_colon_token}}
 I have the headlines, let's join them together.
 <helpers>
 headlines = llm_call([results], "join the headlines together")
 result(headlines)
 </helpers>
+
+{{user_colon_token}}
+<helpers_result>
+... joined headlines ...
+</helpers_result>
+
+{{assistant_colon_token}}
+Here are the headlines:
+...
 </complete>
 
 Example: An example of getting information from a url, seeing a useful image that can help with explaining the content and then showing that image to the user.
@@ -430,10 +504,16 @@ Example: An example of getting information from a url, seeing a useful image tha
 * see if there are any images in the article that might be useful and include them in the output
 </{{scratchpad_token}}>
 <helpers>
-var1, = download(["https://en.wikipedia.org/wiki/Gravity"])
-result(var1)
+gravity_wikipedia_article, = download(["https://en.wikipedia.org/wiki/Gravity"])
+result(gravity_wikipedia_article)
 </helpers>
 
+{{user_colon_token}}
+<helpers_result>
+... [BrowserContent] ...
+</helpers_result>
+
+{{assistant_colon_token}}
 I can see there are several images in the article that might be useful as they were included in the request:
 https://en.wikipedia.org/wiki/Gravity#/media/File:Portrait_of_Sir_Isaac_Newton,_1689.jpg
 https://en.wikipedia.org/wiki/Gravity#/media/File:Spacetime_lattice_analogy.svg
@@ -449,52 +529,9 @@ more text
 ```
 </complete>
 
-Example: Getting stock and commodity prices and reasoning about the values of them. Notice the multiple <helpers></helpers> blocks and interleaving of natural language to show your reasoning.
-
-{{user_colon_token}} What is 5 MSFT stocks worth as grams of gold?
-
-{{assistant_colon_token}}
-The current price of Microsoft, MSFT is:
-
-<helpers>
-var1 = MarketHelpers.get_stock_price("MSFT", BCL.datetime("now"))
-result(var1)
-</helpers>
-
-and the value of 5 MSFT stocks is
-
-<helpers>
-var2 = var1 * 5
-result(var2)
-</helpers>
-
-The current price of Gold in grams is
-
-<helpers>var3 = search("gold price per gram")
-var4 = llm_call(var3, "extract the current price of gold per gram")
-result(var4)
-</helpers>
-
-and therefore:
-
-<helpers>var5 = var2 / coerce(var4, "float")
-result(f"""5 MSFT stocks is worth {var5} grams of gold""")
-</helpers>
-</complete>
-
-Example: using your own knowledge to answer a query/problem/question. You don't need to call Python helpers if you don't need to.
-
-{{user_colon_token}} Who was the first prime minister of Australia?
-
-{{assistant_colon_token}} Australia's first Prime Minister was Edmund Barton. He took office on January 1, 1901, when Australia officially became a federation. Barton served as Prime Minister until September 24, 1903.
-</complete>
-
 Example: Reading source code to answer a users question about their source code project
 
 {{user_colon_token}} ~/dev/a.py, /home/user/dev/b.py, ~/dev/objects.py
-
-{{assistant_colon_token}} Thanks. I'm ready for your next message
-
 {{user_colon_token}} add a method called to_json() to all derived classes of BaseClass, and write a basic implementation of that method
 
 {{assistant_colon_token}}
@@ -505,6 +542,8 @@ source_structure = BCL.get_source_code_structure_summary(source_code_files)
 result(source_structure)
 </helpers>
 
+{{user_colon_token}}
+<helpers_result>
 File Path: ~/dev/objects.py
 class BaseClass
     def hello_world(self)
@@ -522,7 +561,9 @@ class B(BaseClass)
     def hello_world(self)
     def x(self)
     def paint(self)
+</helpers_result>
 
+{{assistant_colon_token}}
 It looks like A and B derive from BaseClass, so I should re-write those files with a basic to_json() method
 <helpers>
 a_source_code = BCL.get_source_code("~/dev/a.py")
@@ -530,6 +571,12 @@ var1 = llm_call([a_source_code], "Add a new method 'to_json()' to this source co
 result(var1)
 </helpers>
 
+{{user_colon_token}}
+<helpers_result>
+... new source code ...
+</helpers_result>
+
+{{assistant_colon_token}}
 <helpers>
 b_source_code = BCL.get_source_code("/home/user/dev/b.py")
 var2 = llm_call([b_source_code], "Add a new method 'to_json()' to this source code with a basic implementation")
