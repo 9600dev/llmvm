@@ -18,7 +18,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import BrowserContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel, TokenThinkingNode
+from llmvm.common.objects import BrowserContent, HTMLContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel, TokenThinkingNode
 
 
 logging = setup_logging()
@@ -256,6 +256,9 @@ class ConsolePrinter:
             elif isinstance(content, ImageContent):
                 asyncio.run(StreamPrinter().display_image(content.sequence))
 
+            elif isinstance(content, HTMLContent):
+                Helpers.find_and_run_chrome_with_html(content.get_str())
+
             elif isinstance(content, PdfContent):
                 self.console.print(Markdown(f'[PdfContent({content.url})]'))
 
@@ -291,6 +294,8 @@ class ConsolePrinter:
                 elif sys.platform.startswith('darwin'):
                     cmd = 'dot -Tpdf {} | open -f -a Preview'.format(temp_file.name)
                 subprocess.run(cmd, text=True, shell=True, env=os.environ)
+            elif '```html' in s:
+                Helpers.find_and_run_chrome_with_html(Helpers.in_between(s, '```html', '```'))
 
         role_color = Container.get_config_variable('client_role_color', default='bold cyan')
 
@@ -299,7 +304,10 @@ class ConsolePrinter:
                 self.pprint('', message.message, escape)
             else:
                 self.pprint(f'[{role_color}]{message.role().capitalize()}[/{role_color}]: ', message.message, escape)
-            fire_helpers(message.get_str())
+
+            if not escape:
+                fire_helpers(message.get_str())
+
             if not escape and role_new_line: self.console.print('\n', end='')
 
     def print_thread(self, thread: SessionThreadModel, escape: bool = False, role_new_line: bool = True):

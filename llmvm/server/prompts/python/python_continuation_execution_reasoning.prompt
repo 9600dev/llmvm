@@ -140,6 +140,7 @@ It is highly recommended that you keep code blocks very short (1-4 lines of code
 * If you feel like the users problem, query, question is answered based on your understanding of the entire conversation, emit the token "</complete>". If not, keep going until the problem is solved.
 * Avoid asking the user to proceed, particularly if the problem isn't solved yet. Just keep going.
 * The <ast> module is the name of the Python module that we use to run the code in <helper></helper> blocks. You might see it in exceptions.
+* If you want to show HTML to the user via a helper that you build, build a full html page within the the HTMLContent class and return that: HTMLContent(html_string).
 * Always look at previous messages for context. Always!
 * Keep <helper></helper> blocks short (1-5 lines of code or so) unless you're definining a new function.
 * You're encouraged to write completed sub-tasks to memory and then retrieve them later so that you can free up your context window for other tasks.

@@ -12,7 +12,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content,
-                                  Executor, FileContent, ImageContent,
+                                  Executor, FileContent, HTMLContent, ImageContent,
                                   MarkdownContent, Message, PdfContent, System,
                                   TextContent, TokenCountCache, TokenNode, TokenPerf,
                                   TokenStopNode, User, awaitable_none)
@@ -178,6 +178,9 @@ class BedrockExecutor(Executor):
                     message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], FileContent):
                     content_list = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
+                elif isinstance(message.message[i], HTMLContent):
+                    content_list = cast(list[Content], ObjectTransformers.transform_html_to_content(cast(HTMLContent, message.message[i]), self))
                     message.message[i:i+1] = content_list
 
         # check to see if there are more than self.max_images images in the message list

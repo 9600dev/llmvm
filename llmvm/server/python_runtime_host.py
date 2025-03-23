@@ -1,6 +1,7 @@
 import ast
 import builtins
 import traceback
+import types
 import numpy as np
 import datetime as dt
 import inspect
@@ -273,6 +274,17 @@ class PythonRuntimeHost:
             logging.debug(f'  {str(line)}')
         return str(assistant.message)
 
+    def patch_function_globals(self, locals_dict, current_state_dict):
+        for key, value in locals_dict.items():
+            if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
+                # For each function, update its globals dictionary to include
+                # references from the current state
+                for global_name, global_value in current_state_dict.items():
+                    # Only update if the name doesn't already exist in the function's globals
+                    # or if we want to ensure the latest version is used
+                    if global_name != key:
+                        value.__globals__[global_name] = global_value
+
     def get_executed_code_blocks(self) -> list[PythonRuntimeBlockState]:
         return self.executed_code_blocks
 
@@ -318,6 +330,8 @@ class PythonRuntimeHost:
             answer_error_correcting=self.answer_error_correcting,
             runtime_state=runtime_state,
         ).setup()
+
+        self.patch_function_globals(runtime_state, runtime_state)
 
         compilation_result = compile(parsed_ast, filename="<ast>", mode="exec")
 

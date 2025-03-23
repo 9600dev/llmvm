@@ -12,7 +12,10 @@ import math
 import os
 import re
 import subprocess
+import platform
+import tempfile
 import traceback
+import types
 from bs4 import BeautifulSoup
 import dateparser
 import typing
@@ -74,6 +77,80 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
+    def find_and_run_chrome_with_html(html_content):
+        temp_file = None
+        try:
+            fd, temp_path = tempfile.mkstemp(suffix='.html')
+            with os.fdopen(fd, 'w') as f:
+                f.write(html_content)
+            temp_file = temp_path
+        except Exception as e:
+            return False, None
+
+        # Get file URL
+        file_url = f"file://{os.path.abspath(temp_file)}"
+
+        system = platform.system()  # type: ignore
+
+        if system == "Darwin":  # macOS
+            chrome_paths = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+            ]
+
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    subprocess.Popen([path, file_url],
+                                    start_new_session=True,  # Detaches the process
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL)
+                    return True, temp_file
+
+        elif system == "Linux":
+            chrome_commands = ["google-chrome", "chrome", "chromium", "chromium-browser"]
+
+            for cmd in chrome_commands:
+                try:
+                    # Check if the command exists
+                    which_result = subprocess.run(["which", cmd],
+                                                stdout=subprocess.PIPE,
+                                                stderr=subprocess.PIPE,
+                                                text=True)
+
+                    if which_result.returncode == 0:
+                        chrome_path = which_result.stdout.strip()
+                        # Use subprocess.Popen to avoid waiting for the browser to close
+                        subprocess.Popen([chrome_path, file_url],
+                                        start_new_session=True,  # Detaches the process
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.DEVNULL)
+                        return True, temp_file
+                except Exception as e:
+                    continue
+
+        if temp_file and os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+        return False, None
+
+    @staticmethod
+    def is_function(obj):
+        if isinstance(obj, (types.FunctionType, types.LambdaType)):
+            return True
+
+        if isinstance(obj, types.MethodType):
+            return True
+
+        if isinstance(obj, types.BuiltinFunctionType):
+            return True
+
+        if callable(obj) and not inspect.isclass(obj):
+            return True
+        return False
+
+    @staticmethod
     def compressed_user_messages(messages: list[Message]) -> list[str]:
         user_messages = []
         for message in messages:
@@ -96,13 +173,13 @@ class Helpers():
         return ImageContent(image_bytes)
 
     @staticmethod
-    def get_class_from_static_callable(callable_obj):
+    def get_class_from_static_callable(callable_obj) -> Optional[type]:
         if not callable(callable_obj):
             raise ValueError("Provided object must be callable")
 
         qualname_parts = callable_obj.__qualname__.split('.')
         if len(qualname_parts) < 2:
-            raise ValueError("Callable is not a class method or static method")
+            return None
 
         class_name = qualname_parts[-2]
         module = inspect.getmodule(callable_obj)
@@ -425,8 +502,6 @@ class Helpers():
                 # Remove line
                 if modified_lines[current_line] == line[1:]:
                     modified_lines.pop(current_line)
-                else:
-                    print(f"Warning: Mismatch at line {current_line + 1}")
             elif line.startswith("+"):
                 # Add line
                 modified_lines.insert(current_line, line[1:])

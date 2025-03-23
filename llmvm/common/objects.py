@@ -639,6 +639,27 @@ class MarkdownContent(ContainerContent):
         return '\n'.join([c.get_str() for c in self.sequence])
 
 
+class HTMLContent(ContainerContent):
+    def __init__(
+        self,
+        sequence: list[Content] | str,
+        url: str = '',
+    ):
+        if isinstance(sequence, str):
+            sequence = [TextContent(sequence)]
+        super().__init__(sequence, 'html', url)
+        self.sequence = sequence
+
+    def __str__(self):
+        return f'HTMLContent({self.url})'
+
+    def __repr__(self):
+        return f'HTMLContent({self.url.__str__()} sequence: {self.sequence})'
+
+    def get_str(self) -> str:
+        return '\n'.join([c.get_str() for c in self.sequence])
+
+
 @dataclass
 class SearchResult(TextContent):
     def __init__(self, url: str, title: str, snippet: str, engine: str):

@@ -128,8 +128,6 @@ def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
 def __serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
     temp_dict = {}
     for key, value in locals_dict.items():
-        if key == 'hello_world':
-            print('asdfasdfasdf')
         if isinstance(key, str) and key.startswith('__'):
             continue
         elif isinstance(value, types.FunctionType) and value.__module__ == 'builtins':
@@ -153,7 +151,8 @@ def __serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
                 'class_name': cls.__name__ if cls else None,
                 'is_static_method': is_static and cls is not None,
                 'qualname': value.__qualname__,
-                'module': value.__module__
+                'module': value.__module__,
+                'from_ast': value.__code__.co_filename == '<ast>',
             }
         elif isinstance(value, dict):
             temp_dict[key] = __serialize_locals_dict(value)
@@ -208,7 +207,13 @@ def __deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]
             code_bytes = base64.b64decode(value['code'])
             code = marshal.loads(code_bytes)
             # Recreate the function
-            func = types.FunctionType(code, result, value['name'], value['defaults'], value['closure'])
+            func = types.FunctionType(
+                code,
+                result,
+                value['name'],
+                value['defaults'],
+                value['closure'],
+            )
 
             # add the docstrings etc.
             if 'doc' in value:
@@ -222,6 +227,9 @@ def __deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]
 
             if 'module' in value:
                 func.__module__ = value['module']
+
+            if 'from_ast' in value and value['from_ast']:
+                func._from_ast = True  # type: ignore
 
             if value.get('is_method') and value.get('class_name') and value['class_name'] in result:
                 cls = result[value['class_name']]

@@ -16,9 +16,9 @@ from urllib.parse import urlparse
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handler
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, DownloadParams, FileContent,
-                                  FunctionCallMeta, LLMCall, MarkdownContent,
-                                  Message, PandasMeta, SearchResult, Statement, TextContent,
+from llmvm.common.objects import (Answer, Assistant, BrowserContent, Content, ContentEncoder, DownloadParams, FileContent,
+                                  FunctionCallMeta, ImageContent, LLMCall, MarkdownContent, HTMLContent,
+                                  Message, PandasMeta, PdfContent, SearchResult, Statement, TextContent,
                                   User, coerce_to, awaitable_none)
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
@@ -225,6 +225,14 @@ class Runtime:
         self.runtime_state['result'] = self.result
         self.runtime_state['print'] = self.print
 
+        self.runtime_state['MarkdownContent'] = MarkdownContent
+        self.runtime_state['HTMLContent'] = HTMLContent
+        self.runtime_state['FileContent'] = FileContent
+        self.runtime_state['ImageContent'] = ImageContent
+        self.runtime_state['PdfContent'] = PdfContent
+        self.runtime_state['BrowserContent'] = BrowserContent
+        self.runtime_state['TextContent'] = TextContent
+
         for helper in self._helpers:
             self.install_helper(helper)
 
@@ -236,7 +244,11 @@ class Runtime:
             self.runtime_state[cls.__name__] = InstantiationWrapper(cls, runtime=self)
         elif is_static:
             cls = Helpers.get_class_from_static_callable(helper)
-            self.runtime_state[cls.__name__] = CallWrapper(self, cls)
+            if cls:
+                self.runtime_state[cls.__name__] = CallWrapper(self, cls)
+            else:
+                # a function without a self, probably defined by the runtime itself
+                self.runtime_state[helper.__name__] = helper
 
         if helper not in self._helpers:
             self._helpers.append(helper)

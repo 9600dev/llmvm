@@ -721,6 +721,8 @@ class ExecutionController(Controller):
                 return [Helpers.matplotlib_figure_to_image_content(result)]
             elif asyncio.iscoroutine(result):
                 return [TextContent("The result is an asyncio.coroutine. You can use asyncio.run(result) to get the result, or run multiple coroutines in parallel using asyncio.run(asyncio.gather(*coroutines)).")]
+            elif Helpers.is_function(result):
+                return [TextContent(Helpers.get_function_description_flat(result))]
             else:
                 raise ValueError(f'Unknown content type: {type(result)}')
 

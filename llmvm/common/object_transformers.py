@@ -7,7 +7,7 @@ from typing import List, cast
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (BrowserContent, Content, Executor, FileContent, ImageContent, LLMCall,
+from llmvm.common.objects import (BrowserContent, Content, Executor, FileContent, HTMLContent, ImageContent, LLMCall,
                                   MarkdownContent, Message, PdfContent,
                                   StreamNode, SupportedMessageContent, TextContent, User)
 from llmvm.common.pdf import Pdf, PdfHelpers
@@ -157,6 +157,20 @@ class ObjectTransformers():
                 return [TextContent(markdown_content)]
 
     @staticmethod
+    def transform_html_to_content(content: HTMLContent, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
+        if content.original_sequence is not None and isinstance(content.sequence, list) and all([isinstance(c, SupportedMessageContent) for c in content.sequence]):
+            return cast(list[SupportedMessageContent], content.sequence)
+
+        if cache.get(content.url):
+            return ObjectTransformers.transform_html_to_content(cast(HTMLContent, cache.get(content.url)), executor, xml_wrapper)
+
+        html_content = content.get_str()
+        if xml_wrapper:
+            return cast(list[SupportedMessageContent], [TextContent(f'<html_content url={content.url}>')] + [TextContent(html_content)] + [TextContent('</html_content>')])
+        else:
+            return [TextContent(html_content)]
+
+    @staticmethod
     def transform_browser_to_content(content: BrowserContent, executor: Executor, xml_wrapper: bool = False) -> list[SupportedMessageContent]:
         if content.original_sequence is not None and isinstance(content.sequence, list) and all([isinstance(c, SupportedMessageContent) for c in content.sequence]):
             return cast(list[SupportedMessageContent], content.sequence)
@@ -198,6 +212,8 @@ class ObjectTransformers():
             return ObjectTransformers.transform_file_to_content(cast(FileContent, content), executor, xml_wrapper)
         elif isinstance(content, ImageContent):
             return [content]
+        elif isinstance(content, HTMLContent):
+            return ObjectTransformers.transform_html_to_content(cast(HTMLContent, content), executor, xml_wrapper)
         elif isinstance(content, TextContent):
             return [content]
         else:

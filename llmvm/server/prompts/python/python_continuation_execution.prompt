@@ -94,6 +94,7 @@ These are the most specific classes:
 class ImageContent(BinaryContent)
 class FileContent(BinaryContent)
 class MarkdownContent(ContainerContent)
+class HTMLContent(ContainerContent)
 class PdfContent(ContainerContent)
 class BrowserContent(ContainerContent)
 
@@ -639,6 +640,7 @@ Thanks. I'm ready for your next message.
 * You're encouraged to write completed sub-tasks to memory and then retrieve them later so that you can free up your context window for other tasks.
 * Keep <helper></helper> blocks short (1-5 lines of code or so) unless you're definining a new function.
 * The <ast> module is the name of the Python module that we use to run the code in <helper></helper> blocks. You might see it in exceptions.
+* If you want to show HTML to the user via a helper that you build, build a full html page within the the HTMLContent class and return that: HTMLContent(html_string).
 * Avoid asking the user to proceed, particularly if the problem isn't solved yet. Just keep going.
 * Always look at previous messages for context. Always!
 * Use citations in your responses if you have used web or document sources, and if you can't cite something, use a link to the source. Use Markdown format for citations [citation](url).

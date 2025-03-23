@@ -7,7 +7,7 @@ import transformers
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import Assistant, AstNode, BrowserContent, Content, FileContent, ImageContent, MarkdownContent, Message, PdfContent, System, TextContent, User, awaitable_none
+from llmvm.common.objects import Assistant, AstNode, BrowserContent, Content, FileContent, HTMLContent, ImageContent, MarkdownContent, Message, PdfContent, System, TextContent, User, awaitable_none
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.common.perf import TokenStreamManager
 
@@ -126,6 +126,9 @@ class DeepSeekExecutor(OpenAIExecutor):
                     message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], FileContent):
                     content_list = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    message.message[i:i+1] = content_list
+                elif isinstance(message.message[i], HTMLContent):
+                    content_list = cast(list[Content], ObjectTransformers.transform_html_to_content(cast(HTMLContent, message.message[i]), self))
                     message.message[i:i+1] = content_list
 
         # check to see if there are more than self.max_images images in the message list
