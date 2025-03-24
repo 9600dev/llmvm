@@ -11,6 +11,7 @@ import threading
 import time
 from importlib import resources
 from threading import Event
+import types
 from typing import Optional, Sequence, cast
 
 import click
@@ -360,11 +361,16 @@ class Repl():
         rich.print('[white](Ctrl-y+a yank entire message thread to clipboard)[/white]')
         rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
         rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
+        rich.print('[white](yy to yank the last message to the clipboard)[/white]')
         rich.print('[white](:w filename to save the current thread to a file)[/white]')
-        rich.print('[white](:.) to open the LLMVM memory/scratch directory in finder.')
-        rich.print('[white](cb Show all code blocks)[/white]')
-        rich.print('[white](ycb0 Copy code block 0, 1, 2... ycb for all)[/white]')
-        rich.print('[white](vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/white]')
+        rich.print('[white](:.) to open the LLMVM memory/sandbox directory in finder.')
+        rich.print('[white](:ohc open ```html block in browser)[/white]')
+        rich.print('[white](:otc open message thread in browser)[/white]')
+        rich.print('[white](:cb Show all code blocks)[/white]')
+        rich.print('[white](:ycb0 Copy code block 0, 1, 2... ycb for all)[/white]')
+        rich.print('[white](:vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/white]')
+        rich.print('[white](:sym show all functions that are defined in <helpers> by the LLM)[/white]')
+        rich.print('[white](:csym symbol(arg1,arg2) call the function with arguments)[/white]')
         rich.print('[white]($(command) to execute a shell command and capture in query)[/white]')
         rich.print('[white]($$(command) to execute a shell command and display to screen)[/white]')
         rich.print('')
@@ -404,7 +410,7 @@ class Repl():
         async def _(event):
             if 'last_thread' in globals():
                 last_thread_t: SessionThreadModel = last_thread
-                pyperclip.copy(str(last_thread_t.messages[-1].content))
+                pyperclip.copy(MessageModel.to_message(last_thread_t.messages[-1]).get_str())
                 rich.print('Last message copied to clipboard.')
                 self.__redraw(event)
             else:
@@ -646,6 +652,31 @@ class Repl():
                 if query.strip() == '':
                     continue
 
+                if query == ':sym':
+                    last_thread_t: SessionThreadModel = last_thread
+                    result = Helpers.deserialize_locals_dict(last_thread_t.locals_dict)
+                    for key, value in result.items():
+                        if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
+                            rich.print(f'def {value.__name__}{value.__code__.co_varnames}')
+                    continue
+
+                if query.startswith(':csym ') and len(query) > 6 and '(' in query and ')' in query:
+                    symbol_name = query[6:].split('(')[0]
+                    symbol_args = query[6:].split('(')[1].split(')')[0]
+                    # call the symbol
+                    last_thread_t: SessionThreadModel = last_thread
+                    result = Helpers.deserialize_locals_dict(last_thread_t.locals_dict)
+                    for key, value in result.copy().items():
+                        if (
+                            isinstance(value, types.FunctionType)
+                            and value.__code__.co_filename == '<ast>'
+                            and value.__name__ == symbol_name
+                        ):
+                            call_str = f'{value.__name__}({symbol_args.split(",") if "," in symbol_args else ""})'
+                            eval_result = eval(call_str, result)
+                            rich.print(eval_result)
+                    continue
+
                 if query == ':q':
                     # quit the assistant
                     tear_down(ctx)
@@ -655,6 +686,9 @@ class Repl():
                     thread_id = last_thread.id
                     directory = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default=f'~/.local/share/llmvm/memory/')
                     # macos only?
+                    if not os.path.exists(directory):
+                        os.makedirs(directory)
+
                     command = f'open {directory}/{thread_id}'
                     subprocess.run(command, shell=True)
                     continue
@@ -663,11 +697,11 @@ class Repl():
                 if query == 'yy':
                     # copy the last assistant message to the clipboard
                     last_thread_t: SessionThreadModel = last_thread
-                    pyperclip.copy(str(last_thread_t.messages[-1].content))
+                    pyperclip.copy(MessageModel.to_message(last_thread_t.messages[-1]).get_str())
                     rich.print('Last message copied to clipboard.')
                     continue
 
-                if query == 'cb':
+                if query == ':cb':
                     code_blocks = get_code_blocks()
                     for i in range(len(code_blocks)):
                         rich.print(f"[i] block {i}:")
@@ -676,27 +710,27 @@ class Repl():
                         console.print(Markdown(markdown_snippet))
                     continue
 
-                if query == 'ycb' or (
+                if query == ':ycb' or (
                     query.startswith('ycb')
-                    and query[3].isdigit()
+                    and query[4].isdigit()
                 ):
                     # find the code block to copy
-                    if query == 'ycb':
+                    if query == ':ycb':
                         pyperclip.copy('\n\n'.join(get_code_blocks()))
                     else:
-                        pyperclip.copy(get_code_blocks()[int(query[3])])
+                        pyperclip.copy(get_code_blocks()[int(query[4])])
                     continue
 
-                if query == 'vcb' or (
+                if query == ':vcb' or (
                     query.startswith('vcb')
-                    and query[3].isdigit()
+                    and query[4].isdigit()
                 ):
                     # find the code block to copy
-                    if query == 'vcb':
+                    if query == ':vcb':
                         result = '\n\n'.join(get_code_blocks())
                         self.open_default_editor(result)
                     else:
-                        self.open_default_editor(get_code_blocks()[int(query[3])])
+                        self.open_default_editor(get_code_blocks()[int(query[4])])
                     continue
 
                 # save a thread
@@ -1177,6 +1211,7 @@ def threads(
 ):
     global thread_id
     global last_thread
+
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
         default_executor_name='openai',

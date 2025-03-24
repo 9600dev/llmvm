@@ -515,6 +515,7 @@ async def tools_completions(request: SessionThreadModel):
     if not cache_session.has_key(thread.id) or thread.id == 0:
         temp = __get_thread(0)
         thread.id = temp.id
+
     # locals_dict needs to be set, grab it from the cache
     elif cache_session.has_key(thread.id) and not thread.locals_dict:
         thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore

@@ -1784,4 +1784,4 @@ class SessionThreadModel(BaseModel):
     thinking: int = 0
     cookies: list[dict[str, Any]] = []
     messages: list[MessageModel] = []
-    locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True)
+    locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=False)

@@ -8,6 +8,7 @@ import inspect
 import io
 import itertools
 import json
+import marshal
 import math
 import os
 import re
@@ -76,6 +77,63 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 
 class Helpers():
+    @staticmethod
+    def deserialize_locals_dict_item(item):
+        if isinstance(item, dict) and item.get('type') == 'function':
+            code_bytes = base64.b64decode(item['code'])
+            code = marshal.loads(code_bytes)
+            return types.FunctionType(code, globals(), item['name'], item['defaults'], item['closure'])
+        return item
+
+    @staticmethod
+    def deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]:
+        result = {}
+        for key, value in serialized_dict.items():
+            if isinstance(value, dict) and value.get('type') == 'function':
+                # Deserialize the function's code object
+                code_bytes = base64.b64decode(value['code'])
+                code = marshal.loads(code_bytes)
+                # Recreate the function
+                func = types.FunctionType(
+                    code,
+                    result,
+                    value['name'],
+                    value['defaults'],
+                    value['closure'],
+                )
+
+                # add the docstrings etc.
+                if 'doc' in value:
+                        func.__doc__ = value['doc']
+
+                if 'annotations' in value:
+                        func.__annotations__ = value['annotations']
+
+                if 'qualname' in value:
+                    func.__qualname__ = value['qualname']
+
+                if 'module' in value:
+                    func.__module__ = value['module']
+
+                if 'from_ast' in value and value['from_ast']:
+                    func._from_ast = True  # type: ignore
+
+                if value.get('is_method') and value.get('class_name') and value['class_name'] in result:
+                    cls = result[value['class_name']]
+                    if value.get('is_static_method'):
+                        func = staticmethod(func)
+
+                result[key] = func
+            elif isinstance(value, dict):
+                result[key] = Helpers.deserialize_locals_dict(value)
+            elif isinstance(value, list):
+                result[key] = [Helpers.deserialize_locals_dict_item(v) for v in value]
+            else:
+                result[key] = value
+        return result
+
+
+
     @staticmethod
     def find_and_run_chrome(filename: str):
         # Get file URL

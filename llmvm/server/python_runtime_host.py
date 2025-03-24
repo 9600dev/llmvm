@@ -329,6 +329,7 @@ class PythonRuntimeHost:
             messages_list,
             answer_error_correcting=self.answer_error_correcting,
             runtime_state=runtime_state,
+            thread_id=self.thread_id,
         ).setup()
 
         self.patch_function_globals(runtime_state, runtime_state)
