@@ -77,18 +77,9 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
-    def find_and_run_chrome_with_html(html_content):
-        temp_file = None
-        try:
-            fd, temp_path = tempfile.mkstemp(suffix='.html')
-            with os.fdopen(fd, 'w') as f:
-                f.write(html_content)
-            temp_file = temp_path
-        except Exception as e:
-            return False, None
-
+    def find_and_run_chrome(filename: str):
         # Get file URL
-        file_url = f"file://{os.path.abspath(temp_file)}"
+        file_url = f"file://{os.path.abspath(filename)}"
 
         system = platform.system()  # type: ignore
 
@@ -104,7 +95,7 @@ class Helpers():
                                     start_new_session=True,  # Detaches the process
                                     stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL)
-                    return True, temp_file
+                    return True, filename
 
         elif system == "Linux":
             chrome_commands = ["google-chrome", "chrome", "chromium", "chromium-browser"]
@@ -124,16 +115,25 @@ class Helpers():
                                         start_new_session=True,  # Detaches the process
                                         stdout=subprocess.DEVNULL,
                                         stderr=subprocess.DEVNULL)
-                        return True, temp_file
+                        return True, filename
                 except Exception as e:
                     continue
 
-        if temp_file and os.path.exists(temp_file):
+    @staticmethod
+    def find_and_run_chrome_with_html(html_content, filename: Optional[str] = None):
+        temp_file = None
+        if not filename:
             try:
-                os.remove(temp_file)
-            except:
-                pass
-        return False, None
+                fd, temp_path = tempfile.mkstemp(suffix='.html')
+                with os.fdopen(fd, 'w') as f:
+                    f.write(html_content)
+                temp_file = temp_path
+            except Exception as e:
+                return False, None
+        else:
+            temp_file = filename
+
+        Helpers.find_and_run_chrome(temp_file)
 
     @staticmethod
     def is_function(obj):
@@ -1585,6 +1585,18 @@ class Helpers():
 
         # return the shortest one
         return min(possibilities, key=len)
+
+    @staticmethod
+    def extract_blocks(markdown_text: str, block_type: str):
+        # Pattern to match code blocks with or without specified language
+        pattern = fr'```{block_type}(\w+\n)?(.*?)```'
+
+        # Using re.DOTALL to make the '.' match also newlines
+        matches = re.findall(pattern, markdown_text, re.DOTALL)
+
+        # Extracting just the code part (ignoring the optional language part)
+        code_blocks = [match[1].strip() for match in matches]
+        return code_blocks
 
     @staticmethod
     def extract_code_blocks(markdown_text):

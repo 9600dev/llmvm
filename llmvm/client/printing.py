@@ -294,8 +294,6 @@ class ConsolePrinter:
                 elif sys.platform.startswith('darwin'):
                     cmd = 'dot -Tpdf {} | open -f -a Preview'.format(temp_file.name)
                 subprocess.run(cmd, text=True, shell=True, env=os.environ)
-            elif '```html' in s:
-                Helpers.find_and_run_chrome_with_html(Helpers.in_between(s, '```html', '```'))
 
         role_color = Container.get_config_variable('client_role_color', default='bold cyan')
 
@@ -313,3 +311,138 @@ class ConsolePrinter:
     def print_thread(self, thread: SessionThreadModel, escape: bool = False, role_new_line: bool = True):
         self.print_messages([MessageModel.to_message(message) for message in thread.messages], escape=escape, role_new_line=role_new_line)
 
+
+class HTMLPrinter:
+    def __init__(self, filename: str):
+        self.filename = filename
+
+    def header(self):
+        HEADER = """
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Your Page Title</title>
+            <style>
+                /* Reset some default browser styling */
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }
+
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    background-color: #f8f9fa;
+                    padding: 20px;
+                    max-width: 1200px;
+                    margin: 0 auto;
+                }
+
+                /* Header styling */
+                header {
+                    background-color: #fff;
+                    padding: 2rem;
+                    border-radius: 8px;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                    margin-bottom: 2rem;
+                    text-align: center;
+                }
+
+                h1 {
+                    color: #2c3e50;
+                    margin-bottom: 0.5rem;
+                    font-weight: 600;
+                }
+
+                h2 {
+                    color: #3498db;
+                    font-weight: 500;
+                    margin-bottom: 1rem;
+                }
+
+                /* Paragraph styling - center aligned as requested */
+                p {
+                    margin-bottom: 1.5rem;
+                    font-size: 1.1rem;
+                    text-align: center;
+                    max-width: 800px;
+                    margin-left: auto;
+                    margin-right: auto;
+                    color: #555;
+                }
+
+                /* Responsive adjustments */
+                @media (max-width: 768px) {
+                    body {
+                        padding: 15px;
+                    }
+
+                    header {
+                        padding: 1.5rem;
+                    }
+
+                    h1 {
+                        font-size: 1.8rem;
+                    }
+
+                    h2 {
+                        font-size: 1.3rem;
+                    }
+
+                    p {
+                        font-size: 1rem;
+                    }
+                }
+            </style>
+        </head>
+        <body>
+        """
+        return HEADER
+
+    def get_str(self, messages: list[Message]):
+        import markdown2
+        from io import StringIO
+        s = StringIO()
+        def w(str):
+            s.write(f'\t\t{str}\n')
+
+        s.write(self.header())
+
+        for message in messages:
+            w(f'<h2>{message.role().capitalize()}</h2>\n')
+            for content in message.message:
+                if isinstance(content, TextContent) or isinstance(content, MarkdownContent):
+                    result = markdown2.markdown(content.get_str(), extras=['tables', 'fenced_code', 'codehilite'])
+                    w(f'{result}')
+                elif isinstance(content, ImageContent):
+                    w(f'<img src="data:{content.image_type};base64, {content.sequence}" alt={content.url}>')
+                elif isinstance(content, BrowserContent):
+                    w(f'<h3>[BrowserContent({content.url})]</h3>')
+                elif isinstance(content, FileContent):
+                    w(f'<h3>[FileContent[{content.url}])</h3>')
+                elif isinstance(content, HTMLContent):
+                    result = markdown2.markdown(content.get_str(), extras=['tables', 'fenced_code', 'codehilite'])
+                    w(f'{result}')
+                elif isinstance(content, PdfContent):
+                    w(f'<h3>[PdfContent({content.url})]</h3>')
+        s.write('</body>\n</html>')
+        val = s.getvalue()
+        s.close()  # close the file
+        return val
+
+    def print(self, s: str):
+        with open(self.filename, 'w') as f:
+            f.write(s)
+
+    def print_messages(
+        self,
+        messages: list[Message],
+        escape: bool = False,
+        role_new_line: bool = True
+    ):
+        with open(self.filename, 'w') as f:
+            f.write(self.get_str(messages))
