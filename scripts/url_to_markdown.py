@@ -75,7 +75,7 @@ def url_to_markdown(url: str, inline_images: bool = False, browser: bool = False
             image_url = url + image_url
 
         if image_url.startswith('http'):
-            image_bytes = asyncio.run(Helpers.download_bytes(image_url))
+            image_bytes = asyncio.run(Helpers.download_bytes(image_url, throw=False))
             if Helpers.is_image(image_bytes):
                 base64_image = base64.b64encode(image_bytes).decode('utf-8')
                 mime_type = Helpers.classify_image(image_bytes)

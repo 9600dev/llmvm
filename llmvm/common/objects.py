@@ -567,8 +567,8 @@ class FileContent(BinaryContent):
     def get_str(self) -> str:
         if self.is_local():
             with open(self.url, 'r') as f:
-                # return f.read()
-                return f"<file url={self.url}>\n{f.read()}\n</file>"
+                return f.read()
+                # return f"<file url={self.url}>\n{f.read()}\n</file>"
         elif isinstance(self.sequence, bytes):
             # convert the bytes to a string and return
             return self.sequence.decode('utf-8')
@@ -1785,4 +1785,4 @@ class SessionThreadModel(BaseModel):
     thinking: int = 0
     cookies: list[dict[str, Any]] = []
     messages: list[MessageModel] = []
-    locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=False)
+    locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True)

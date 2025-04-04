@@ -20,6 +20,7 @@ import types
 from bs4 import BeautifulSoup
 import dateparser
 import typing
+import textwrap
 from collections import Counter
 from enum import Enum, IntEnum
 from functools import reduce
@@ -79,6 +80,29 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 class Helpers():
     @staticmethod
+    def get_class_name_of_method(func) -> Optional[str]:
+        # Case 1: Bound instance method => __self__ is the instance
+        if hasattr(func, '__self__') and func.__self__ is not None:
+            # For a regular bound method, __self__ is the instance
+            # For a bound classmethod, __self__ is the class
+            cls = func.__self__ if inspect.isclass(func.__self__) else func.__self__.__class__
+            return cls.__name__
+
+        # Case 2: If it's a function or staticmethod, check __qualname__
+        # __qualname__ often looks like "MyClass.my_method" or "MyClass.NestedClass.my_method"
+        # If there's only one dot or none, it might just be "my_function" or something else.
+        qualname = getattr(func, '__qualname__', None)
+        if qualname and '.' in qualname:
+            parts = qualname.split('.')
+            # The last part is the function name; the rest are nested scopes/classes.
+            # e.g. "MyClass.my_method" => ["MyClass", "my_method"]
+            # or   "MyClass.InnerClass.my_method" => ["MyClass", "InnerClass", "my_method"]
+            # Usually, the second-to-last is the immediate class name.
+            if len(parts) > 1:
+                return parts[-2]  # e.g. 'MyClass' or 'InnerClass'
+        return None
+
+    @staticmethod
     def annotation_to_string(annotation: Any) -> str:
         """
         Convert a possibly complex type annotation into a readable string.
@@ -120,6 +144,7 @@ class Helpers():
          - The parameter types (`types`)
          - The return type (`return_type`)
          - The function name itself (`invoked_by`)
+         - The class name (`class_name`)
          - The docstring (`description`)
         """
         docstring = inspect.getdoc(function) or ""
@@ -145,6 +170,7 @@ class Helpers():
             "types": types,
             "return_type": return_type,
             "invoked_by": function.__name__,
+            "class_name": Helpers.get_class_name_of_method(function),
             "description": docstring,
         }
 
@@ -201,18 +227,19 @@ class Helpers():
             # e.g.: def my_method(a: int, b: str) -> int  # Instantiate with MyClass(). Doc here
             return (
                 f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}  # Instantiate with {cls.__name__}().\n'
-                f'"""\n'
-                f'{doc}\n'
-                f'"""'
+                f'    """\n'
+                f'{textwrap.indent(doc, " " * 4)}\n'
+                f'    """\n'
             )
         else:
             # Static method or function
             return (
-                f'@staticmethod\n'
-                f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}\n'
-                f'"""\n'
-                f'{doc}\n'
-                f'"""'
+                f'class {description["class_name"]}:\n'
+                f'    @staticmethod\n'
+                f'    def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}\n'
+                f'        """\n'
+                f'{textwrap.indent(doc, " " * 8)}\n'
+                f'        """\n'
             )
 
     @staticmethod
@@ -770,6 +797,8 @@ class Helpers():
             r'\[.*?\]\(.*?\)',    # Links
             r'!\[.*?\]\(.*?\)',   # Images
             r'^\s{0,3}```',       # Code blocks
+            r'\$\$[\s\S]*?\$\$',  # LaTeX block equations
+            r'\$.*?\$'            # LaTeX inline equations
         ]
         # Check if any pattern matches the text
         for pattern in patterns:
@@ -1006,7 +1035,7 @@ class Helpers():
         return resized.getvalue()
 
     @staticmethod
-    async def download_bytes(url_or_file: str) -> bytes:
+    async def download_bytes(url_or_file: str, throw: bool = True) -> bytes:
         url_result = urlparse(url_or_file)
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -1016,14 +1045,16 @@ class Helpers():
             async with httpx.AsyncClient() as client:
                 response = await client.get(url_or_file, headers=headers, follow_redirects=True, timeout=5)
                 if response.status_code != 200:
-                    raise ValueError(f'Helpers.download_bytes() Failed to download: {url_or_file}. Status code is: {response.status_code}')
+                    if throw: raise ValueError(f'Helpers.download_bytes() Failed to download: {url_or_file}. Status code is: {response.status_code}')
+                    return b''
                 return response.content
         else:
             try:
                 with open(url_or_file, 'rb') as file:
                     return file.read()
             except FileNotFoundError:
-                raise ValueError(f'Helpers.download_bytes() The supplied argument url_or_file: {url_or_file} is not a correct filename or url.')
+                if throw: raise ValueError(f'Helpers.download_bytes() The supplied argument url_or_file: {url_or_file} is not a correct filename or url.')
+                return b''
 
     @staticmethod
     async def download(url_or_file: str) -> str:
@@ -1476,6 +1507,8 @@ class Helpers():
             'blockquotes': r'^>\s',
             'horizontal_rules': r'^(-{3,}|\*{3,}|_{3,})$',
             'tables': r'\|[^|\r\n]*\|',
+            'latex_blocks': r'\$\$[\s\S]*?\$\$',  # LaTeX block equations
+            'latex_inline': r'\$[^\$\n]+?\$'      # LaTeX inline equations
         }
 
         # Count the number of matches for each pattern
@@ -2242,6 +2275,9 @@ class Helpers():
     def load_resources_prompt(prompt_name: str, module: str = 'llmvm.server.prompts.python') -> Dict[str, Any]:
         prompt_file = resources.files(module) / prompt_name
 
+        if not os.path.exists(str(prompt_file)):
+            raise ValueError(f'Prompt file {prompt_file} does not exist')
+
         with open(prompt_file, 'r') as f:  # type: ignore
             prompt = f.read()
 
@@ -2404,7 +2440,7 @@ class Helpers():
             return result
 
     @staticmethod
-    def prompt_message(
+    def prompt_user(
         prompt_name: str,
         template: Dict[str, str],
         user_token: str = 'User',

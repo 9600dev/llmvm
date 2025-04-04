@@ -166,7 +166,7 @@ class WebAndContentDriver():
 
         next_action: Assistant = controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='download_and_validate.prompt',
                     template={
                         'url': download['url'],

@@ -186,7 +186,7 @@ class PythonRuntimeHost:
 
         assistant = controller.execute_llm_call_simple(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='python_error_correction.prompt',
                     template={
                         'task': task_query,
@@ -236,7 +236,7 @@ class PythonRuntimeHost:
         python_code: str,
         error: str,
     ) -> str:
-        logging.debug(f'PythonRuntime.python_compile_error(): error {error}')
+        logging.debug(f'PythonRuntimeHost.python_compile_error(): error {error}')
         write_client_stream(TextContent(f'Python code failed to compile or run due to the following error or exception: {error}\n'))
 
         # SyntaxError, or other more global error. We should rewrite the entire code.
@@ -246,12 +246,16 @@ class PythonRuntimeHost:
 
             {python_code}
 
-            Failed to compile or run due to the following error:
+            When calling ast.parse(), the following code failed to parse or compile because of this error:
 
             {error}
 
-            Analyze the error, and rewrite the entire code above to fix the error.
-            Do not explain yourself, do not apologize. Just emit the re-written code and only the code.
+            Analyze the error, figure out the code fix, and then rewrite the entire code above to fix the error.
+
+            Do not explain yourself, do not apologize, do not use natural language.
+            Do not embed the code in ```python markdown blocks.
+            Do not embed the code in <helpers></helpers> blocks.
+            Just emit the fixed Python code that will parse and compile properly.
             '''
 
         assistant = controller.execute_llm_call_simple(
@@ -272,7 +276,7 @@ class PythonRuntimeHost:
         logging.debug('PythonRuntime.compile_error() Re-written Python code:')
         for line in lines:
             logging.debug(f'  {str(line)}')
-        return str(assistant.message)
+        return assistant.get_str()
 
     def patch_function_globals(self, locals_dict, current_state_dict):
         for key, value in locals_dict.items():

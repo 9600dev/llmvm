@@ -84,15 +84,16 @@ class ExecutionController(Controller):
         llm_call: LLMCall,
         template: dict[str, Any] = {},
     ) -> Assistant:
-        prompt = Helpers.load_and_populate_prompt(
-            prompt_name=llm_call.prompt_name,
-            template=template,
-            user_token=self.get_executor().user_token(),
-            assistant_token=self.get_executor().assistant_token(),
-            scratchpad_token=self.get_executor().scratchpad_token(),
-            append_token=self.get_executor().append_token(),
-        )
-        llm_call.user_message = User(TextContent(prompt['user_message']))
+        if llm_call.prompt_name:
+            prompt = Helpers.load_and_populate_prompt(
+                prompt_name=llm_call.prompt_name,
+                template=template,
+                user_token=self.get_executor().user_token(),
+                assistant_token=self.get_executor().assistant_token(),
+                scratchpad_token=self.get_executor().scratchpad_token(),
+                append_token=self.get_executor().append_token(),
+            )
+            llm_call.user_message = User(TextContent(prompt['user_message']))
 
         return await self.__execute_llm_call(
             llm_call
@@ -907,7 +908,7 @@ class ExecutionController(Controller):
                 try:
                     _ = ast.parse(Helpers.escape_newlines_in_strings(code_block))
                 except SyntaxError as ex:
-                    logging.debug('aexecute() SyntaxError trying to parse <helpers></helpers> code block: {}'.format(ex))
+                    logging.debug('ExecutionController.aexecute() SyntaxError trying to parse <helpers></helpers> code block: {}'.format(ex))
                     code_block = PythonRuntimeHost.fix_python_parse_compile_error(
                         controller=self,
                         python_code=code_block,
@@ -1037,7 +1038,20 @@ class ExecutionController(Controller):
                     results.append(Answer(
                         result=response.get_str()
                     ))
-                completed = True
+                    completed = True
+                else:
+                    logging.debug('ExecutionController.aexecute_continuation() Empty message returned. Pushing harder.')
+                    PUSH_HARDER_PROMPT = """
+                    You've returned an empty message. I need you to return your final result or continue
+                    to break down and solve the current problem.
+                    """
+                    messages_copy.append(
+                        User(
+                            TextContent(PUSH_HARDER_PROMPT),
+                            hidden=True
+                        )
+                    )
+                    completed = False
 
         if model: python_runtime_host.controller.get_executor().default_model = old_model
         dedupped: list[Statement] = list(reversed(Helpers.remove_duplicates(results, lambda a: a.result())))

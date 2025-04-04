@@ -10,7 +10,7 @@ from openai.types.chat import ChatCompletionMessageParam
 from openai.types.chat.completion_create_params import Function
 
 from llmvm.common.helpers import Helpers
-from llmvm.common.logging_helpers import setup_logging
+from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
 from llmvm.common.objects import (Assistant, AstNode, BrowserContent, Content,
                                   Executor, FileContent, HTMLContent, ImageContent,
@@ -148,7 +148,7 @@ class OpenAIExecutor(Executor):
         for message in expanded_messages:
             for i in range(len(message.message) - 1, -1, -1):
                 if isinstance(message.message[i], PdfContent):
-                    content_list = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_pdf_to_content(cast(PdfContent, message.message[i]), self, xml_wrapper=False))
                     message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], MarkdownContent):
                     content_list = cast(list[Content], ObjectTransformers.transform_markdown_to_content(cast(MarkdownContent, message.message[i]), self))
@@ -157,7 +157,7 @@ class OpenAIExecutor(Executor):
                     content_list = cast(list[Content], ObjectTransformers.transform_browser_to_content(cast(BrowserContent, message.message[i]), self))
                     message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], FileContent):
-                    content_list = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self))
+                    content_list = cast(list[Content], ObjectTransformers.transform_file_to_content(cast(FileContent, message.message[i]), self, xml_wrapper=False))
                     message.message[i:i+1] = content_list
                 elif isinstance(message.message[i], HTMLContent):
                     content_list = cast(list[Content], ObjectTransformers.transform_html_to_content(cast(HTMLContent, message.message[i]), self))
@@ -250,6 +250,8 @@ class OpenAIExecutor(Executor):
 
         messages_cast = cast(list[ChatCompletionMessageParam], messages)
         functions_cast = cast(list[Function], functions)
+
+        messages_trace(messages)
 
         token_trace = TokenPerf('aexecute_direct', 'openai', model, prompt_len=message_tokens)  # type: ignore
         token_trace.start()

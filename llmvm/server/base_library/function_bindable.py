@@ -69,7 +69,7 @@ class FunctionBindable():
         function_callable = function_callable[0]
         function_definition = Helpers.get_function_description_flat(cast(Callable, function_callable))
 
-        message = Helpers.prompt_message(
+        message = Helpers.prompt_user(
             prompt_name='llm_bind_global.prompt',
             template={
                 'function_definition': function_definition,

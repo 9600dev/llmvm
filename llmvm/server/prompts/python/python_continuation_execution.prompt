@@ -144,8 +144,8 @@ search_results = Search.google_search("current AMD CEO", total_links_to_return=1
 [SearchResult(url="https://www.amd.com/en/corporate/leadership/lisa-su.html", title="Dr. Lisa Su", snippet="...", engine="Google")]
 </helpers_result>
 
-The search result looks good. Let's download the page and see what we can find.
-
+The search result looks good. Let's download the page and see what we can find:
+<helpers>
 link_download_result = download(search_results[0].url)
 amd_ceo_name = llm_call([link_download_result], "extract the name of AMD CEO")
 result(amd_ceo_name)
@@ -181,7 +181,6 @@ I cannot find the education credentials.
 {{assistant_colon_token}}
 Unfortunately I cannot find the education credentials or educational institution information for Dr. Lisa Su in the text provided.
 Let's try extra searching:
-
 <helpers>
 search_results = Search.google_search("Dr. Lisa Su of AMD educational credentials")
 result(search_results)
@@ -190,7 +189,6 @@ result(search_results)
 ... results from the search ...
 
 These look good, so let's download a couple and summarize them:
-
 <helpers>
 download_results = download(search_results[:2])
 education_credentials = llm_call(download_results, "extract the education credentials and the educational institution information for Dr. Lisa Su.")
@@ -227,7 +225,6 @@ var2 = llm_call(download_list, "extract list of names")
 
 {{assistant_colon_token}}
 I have extracted a list of names from https://ten13.vc/team. Let's summarize each person's career profile:
-
 <helpers>
 for list_item in llm_list_bind(var2, "list of names"):
     linkedin_profile_text = llm_bind(list_item, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)")
@@ -286,7 +283,6 @@ Example: Here's an example of creating a python function that you can then call 
 {{assistant_colon_token}}
 
 Let's define a function that calculates compound interest first:
-
 <helpers>
 def calculate_compound_interest(principal, rate, time, compounds_per_year=1) -> float:
     """
@@ -308,7 +304,6 @@ def calculate_compound_interest(principal, rate, time, compounds_per_year=1) -> 
 </helpers>
 
 Now let's call the function to get the total interest earned over 5 years:
-
 <helpers>
 total_interest = calculate_compound_interest(100, 0.05, 5)
 print(f"""The total interest earned over 5 years is {total_interest:.2f}""")
@@ -341,7 +336,6 @@ paper2_summary = llm_call([paper_2], "Summarize all opinions in the document")
 </helpers>
 
 I'll find the differences between the two papers for you.
-
 <helpers>
 summary_of_differences = llm_call([paper1_summary, paper2_summary], "find the differences between the two paper summaries") # Step 3: find the differences between the opinions of the two papers
 result(summary_of_differences) # Step 4: Show the result to the user
@@ -360,14 +354,12 @@ restaurant_names = llm_call([restaurant_search_results], "extract the names of t
 </helpers>
 
 I've found the following:
-
 <helpers>
 restaurant_list = llm_list_bind(restaurant_names, "restaurant name", 3)
 result(restaurant_list)
 </helpers>
 
 Let's get their menu's:
-
 <helpers>
 for list_item in restaurant_list:
     var4 = llm_bind(list_item, 'Search.yelp_search(restaurant_name, "Brisbane, Australia")')
@@ -638,8 +630,8 @@ Thanks. I'm ready for your next message.
 * Users cannot see what is inside <helper_results></helper_results> blocks, so if you need to use data from inside the <helper_results> block, extract it out and pass it back to the User as part of your reply.
 * If you feel like the users problem, query, question is answered based on your understanding of the entire conversation, emit the token "</complete>". If not, keep going until the problem is solved.
 * You're encouraged to write completed sub-tasks to memory and then retrieve them later so that you can free up your context window for other tasks.
-* Keep <helper></helper> blocks short (1-5 lines of code or so) unless you're definining a new function.
-* The <ast> module is the name of the Python module that we use to run the code in <helper></helper> blocks. You might see it in exceptions.
+* Keep <helpers></helpers> blocks short (1-5 lines of code or so) unless you're definining a new function.
+* The <ast> module is the name of the Python module that we use to run the code in <helpers></helpers> blocks. You might see it in exceptions.
 * If you want to show HTML to the user via a helper that you build, build a full html page within the the HTMLContent class and return that: HTMLContent(html_string).
 * Avoid asking the user to proceed, particularly if the problem isn't solved yet. Just keep going.
 * Always look at previous messages for context. Always!

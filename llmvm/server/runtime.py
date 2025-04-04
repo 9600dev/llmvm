@@ -290,7 +290,7 @@ class Runtime:
         def pandas_bind_with_llm(expr_str: str) -> PandasMeta:
             assistant: Assistant = self.controller.execute_llm_call(
                 llm_call=LLMCall(
-                    user_message=Helpers.prompt_message(
+                    user_message=Helpers.prompt_user(
                         prompt_name='pandas_bind.prompt',
                         template={},
                         user_token=self.controller.get_executor().user_token(),
@@ -541,7 +541,7 @@ class Runtime:
         logging.debug(f'coerce({str(expr)[:50]}, {str(type_name)}) length of expr: {len(str(expr))}')
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='coerce.prompt',
                     template={
                         'string': Helpers.str_get_str(expr),
@@ -581,7 +581,7 @@ class Runtime:
 
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='llm_call.prompt',
                     template={
                         'llm_call_message': llm_instruction,
@@ -612,7 +612,7 @@ class Runtime:
 
         assistant: Assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='llm_list_bind.prompt',
                     template={
                         'goal': llm_instruction.replace('"', ''),

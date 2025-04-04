@@ -4,6 +4,7 @@ LLMVM is a CLI based productivity tool that uses Large Language Models and local
 
 It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 4 Turbo/4o/o3-mini models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
 
+> **Update April 3rd 2025**: The latest gpt-4o "gpt-4o-2024-11-20" is absolutely useless. Looks like they've RL'ed it in a way where it simply refuses to generate <helpers> blocks without "continue" encouragement. I suggest using gpt-4o-2024-08-06 or gpt-4o-2024-05-13. gpt-45 works quite well, but is slow.
 
 > **Update March 4th 2025**: Added Anthropic "thinking tokens" support. Use -z num_of_thinking_tokens to set the number of thinking tokens. Lots of bug fixes; browser works far better now. o3-mini works better - it does not like CoT examples, so the megaprompt has been split into reasoning and non-reasoning megaprompts.
 

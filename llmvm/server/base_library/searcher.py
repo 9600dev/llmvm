@@ -151,7 +151,7 @@ class Searcher():
         # todo: we should probably return the Search instance, so we can futz with it later on.
         query_expander = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='search_expander.prompt',
                     template={
                         'query': self.query,
@@ -210,7 +210,7 @@ class Searcher():
         # classify the search engine
         engine_rank = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='search_classifier.prompt',
                     template={
                         'query': '\n'.join(queries),
@@ -253,7 +253,7 @@ class Searcher():
             # take the first query, and figure out the location
             location = self.controller.execute_llm_call(
                 llm_call=LLMCall(
-                    user_message=Helpers.prompt_message(
+                    user_message=Helpers.prompt_user(
                         prompt_name='search_location.prompt',
                         template={
                             'query': queries[0],
@@ -324,7 +324,7 @@ class Searcher():
 
         result_rank = self.controller.execute_llm_call(
             llm_call=LLMCall(
-                user_message=Helpers.prompt_message(
+                user_message=Helpers.prompt_user(
                     prompt_name='search_ranker.prompt',
                     template={
                         'queries': '\n'.join(queries),

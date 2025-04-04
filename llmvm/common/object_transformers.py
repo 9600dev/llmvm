@@ -87,7 +87,7 @@ class ObjectTransformers():
                         else:
                             result.append(TextContent(f'Image at {url} is not an image.'))
                 elif url.startswith('http'):
-                    bytes_result = asyncio.run(Helpers.download_bytes(url))
+                    bytes_result = asyncio.run(Helpers.download_bytes(url, throw=False))
                     if bytes_result and Helpers.is_image(bytes_result):
                         result.append(ImageContent(bytes_result, url=url))
                     else:
