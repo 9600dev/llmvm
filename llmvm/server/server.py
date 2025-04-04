@@ -27,7 +27,7 @@ from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Assistant, AstNode, ChatCompletionRequest, ChatMessage, Content,
+from llmvm.common.objects import (Assistant, AstNode, Content,
                                   DownloadItemModel, Executor, Message,
                                   MessageModel, QueueBreakNode,
                                   SessionThreadModel, Statement,
