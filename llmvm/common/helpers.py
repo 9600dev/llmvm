@@ -434,7 +434,11 @@ class Helpers():
     @staticmethod
     def str_get_str(obj):
         if hasattr(obj, 'get_str'):
-            return obj.get_str()
+            # sometimes a class gets passed in, which doesn't have an self instance
+            try:
+                return obj.get_str()
+            except Exception as ex:
+                return str(obj)
         else:
             return str(obj)
 
