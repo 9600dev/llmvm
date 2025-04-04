@@ -26,7 +26,8 @@ from functools import reduce
 from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Generator, Iterator, List, Optional, TextIO, Tuple, Union
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Generator, Iterator, List, Optional, Tuple, Union, Tuple, get_args, get_origin, Union
+
 from urllib.parse import urljoin, urlparse
 from markdownify import markdownify as md
 import zlib
@@ -77,6 +78,143 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
 
 class Helpers():
+    @staticmethod
+    def annotation_to_string(annotation: Any) -> str:
+        """
+        Convert a possibly complex type annotation into a readable string.
+        E.g., Union[str, int] -> 'str | int', List[int] -> 'list[int]', etc.
+        """
+        if annotation is inspect.Signature.empty:
+            return "Any"
+        if annotation is None or annotation is type(None):
+            return "None"
+        if isinstance(annotation, type):
+            # e.g., <class 'int'> -> 'int'
+            return annotation.__name__
+
+        origin = get_origin(annotation)
+        if origin is Union:
+            # Handle union types (Python 3.10+ can appear as int | str)
+            args = get_args(annotation)
+            return " | ".join(Helpers.annotation_to_string(a) for a in args)
+        elif origin in (list, tuple, dict, set, frozenset):
+            # e.g., list[int], dict[str, int]
+            args = get_args(annotation)
+            if args:
+                return f"{origin.__name__}[{', '.join(Helpers.annotation_to_string(a) for a in args)}]"
+            else:
+                return origin.__name__
+        elif origin:
+            # Generic type from typing (e.g. typing.Iterable, typing.Callable)
+            args = get_args(annotation)
+            return f"{origin.__name__}[{', '.join(Helpers.annotation_to_string(a) for a in args)}]"
+
+        # Fallback
+        return str(annotation)
+
+    @staticmethod
+    def get_function_description_new(function: Callable, openai_format: bool = False) -> Dict[str, Any]:
+        """
+        Inspect a callable and return a dictionary describing:
+         - The parameter names (`parameters`)
+         - The parameter types (`types`)
+         - The return type (`return_type`)
+         - The function name itself (`invoked_by`)
+         - The docstring (`description`)
+        """
+        docstring = inspect.getdoc(function) or ""
+        signature = inspect.signature(function)
+
+        # Retrieve type hints (handles forward refs and generics if possible)
+        type_hints = typing.get_type_hints(function, None, None)
+
+        parameters: List[str] = []
+        types: List[str] = []
+        for param_name, param in signature.parameters.items():
+            # Use the type hint if available, otherwise fallback to "Any"
+            hint = type_hints.get(param_name, param.annotation)
+            param_type_str = Helpers.annotation_to_string(hint)
+            parameters.append(param_name)
+            types.append(param_type_str)
+
+        return_annotation = type_hints.get('return', signature.return_annotation)
+        return_type = return_annotation if return_annotation != inspect.Signature.empty else None
+
+        return {
+            "parameters": parameters,
+            "types": types,
+            "return_type": return_type,
+            "invoked_by": function.__name__,
+            "description": docstring,
+        }
+
+    @staticmethod
+    def is_static_method_new(func: Callable) -> Tuple[bool, Optional[type]]:
+        """
+        Heuristic: if the first parameter name is 'self', we assume it is an instance method.
+        If the first parameter is 'cls', we assume it is a class method.
+        Otherwise, we assume it is a static method.
+
+        Returns a tuple: (is_static_method: bool, owning_class_or_None)
+        """
+        # Attempt to discover the class (if bound method)
+        cls_candidate = getattr(func, '__self__', None)
+        if cls_candidate is not None:
+            # if it's an instance, get its class
+            if not inspect.isclass(cls_candidate):
+                cls_candidate = type(cls_candidate)
+
+        sig = inspect.signature(func)
+        params = list(sig.parameters.keys())
+        if params and params[0] == "self":
+            # Probably an instance method
+            return (False, cls_candidate)
+        # In more thorough code, you might also check `params[0] == "cls"` for a class method.
+        # For simplicity, we treat everything else as static
+        return (True, cls_candidate)
+
+    @staticmethod
+    def get_function_description_flat(function: Callable) -> str:
+        """
+        Build a string describing the Python function signature (without body),
+        including docstring (inline) and whether it's static or can be instantiated.
+        """
+        description = Helpers.get_function_description_new(function, openai_format=False)
+        parameter_type_list = [
+            f"{param}: {typ}"
+            for param, typ in zip(description['parameters'], description['types'])
+        ]
+
+        # Handle return type string
+        return_annotation = description['return_type']
+        if return_annotation is None:
+            return_type_str = "Any"
+        else:
+            return_type_str = Helpers.annotation_to_string(return_annotation)
+
+        # Determine if static or instance-based
+        is_static, cls = Helpers.is_static_method_new(function)
+
+        doc = description["description"] or "No docstring"
+        if not is_static and cls:
+            # Instance method
+            # e.g.: def my_method(a: int, b: str) -> int  # Instantiate with MyClass(). Doc here
+            return (
+                f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}  # Instantiate with {cls.__name__}().\n'
+                f'"""\n'
+                f'{doc}\n'
+                f'"""'
+            )
+        else:
+            # Static method or function
+            return (
+                f'@staticmethod\n'
+                f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}\n'
+                f'"""\n'
+                f'{doc}\n'
+                f'"""'
+            )
+
     @staticmethod
     def deserialize_locals_dict_item(item):
         if isinstance(item, dict) and item.get('type') == 'function':
@@ -2088,7 +2226,7 @@ class Helpers():
         return (f'{description["invoked_by"]}({", ".join(description["parameters"])})  # {description["description"] or "No docstring"}')
 
     @staticmethod
-    def get_function_description_flat(function: Callable) -> str:
+    def get_function_description_flat_old(function: Callable) -> str:
         description = Helpers.get_function_description(function, openai_format=False)
         parameter_type_list = [f"{param}: {typ}" for param, typ in zip(description['parameters'], description['types'])]
         return_type = description['return_type'].__name__ if description['return_type'] else 'Any'
@@ -2276,7 +2414,7 @@ class Helpers():
         module: str = 'llmvm.server.prompts.python'
     ) -> Message:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, scratchpad_token, append_token, module)
-        return User(TextContent(prompt['user_message']))
+        return User([TextContent(prompt['user_message'])])
 
     @staticmethod
     def prompts(
@@ -2289,4 +2427,4 @@ class Helpers():
         module: str = 'llmvm.server.prompts.python'
     ) -> Tuple[System, User]:
         prompt = Helpers.load_and_populate_prompt(prompt_name, template, user_token, assistant_token, scratchpad_token, append_token, module)
-        return (System(prompt['system_message']), User(TextContent(prompt['user_message'])))
+        return (System(prompt['system_message']), User([TextContent(prompt['user_message'])]))

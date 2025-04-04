@@ -806,7 +806,8 @@ class User(Message):
 
         # check to see if all elements are Content
         if not all(isinstance(m, Content) for m in message):
-            raise ValueError('User message must be a Content object or list of Content objects')
+            message_types = ', '.join([str(type(m)) for m in message])
+            raise ValueError('User message must be a Content object or list of Content objects, got: ' + message_types)
 
         super().__init__(message, hidden)
 

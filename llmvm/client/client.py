@@ -1,6 +1,9 @@
 import asyncio
 from enum import Enum
+import os
+import time
 from typing import Any, Awaitable, Callable, Optional, Union, cast
+import uuid
 
 import httpx
 import nest_asyncio
@@ -13,11 +16,13 @@ from llmvm.common.bedrock_executor import BedrockExecutor
 from llmvm.common.container import Container
 from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
+from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
                                   Message, MessageModel, SessionThreadModel,
                                   TextContent, User)
 from llmvm.common.openai_executor import OpenAIExecutor
+from llmvm.common.openai_tool_translator import OpenAIFunctionTranslator
 
 logging = setup_logging()
 nest_asyncio.apply()
@@ -31,7 +36,6 @@ class Mode(Enum):
 _printer = StreamPrinter()
 async def default_stream_handler(node: AstNode):
     await _printer.write(node)  # type: ignore
-
 
 
 def llm(
@@ -132,21 +136,43 @@ def get_executor(
     model_name: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> Executor:
+    return get_client(executor_name, model_name, api_key).get_executor(executor_name, model_name, api_key)
+
+
+def get_client(
+    executor_name: str,
+    model_name: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> 'LLMVMClient':
     if executor_name == 'anthropic' and not model_name:
-        model_name = 'claude-3-5-sonnet-latest'
+        model_name = 'claude-3-7-sonnet-latest'
     elif executor_name == 'openai' and not model_name:
         model_name = 'gpt-4o'
     elif executor_name == 'gemini' and not model_name:
-        model_name = 'gemini-1.5-pro'
-    else:
-        raise ValueError(f'Invalid executor name: {executor_name}')
+        model_name = 'gemini-2.5'
+    elif executor_name == 'deepseek' and not model_name:
+        model_name = 'deepseek-chat'
+    elif executor_name == 'bedrock' and not model_name:
+        model_name = 'amazon.nova-pro-v1:0'
+
+    if executor_name == 'anthropic' and not api_key:
+        api_key = Container().get_config_variable('ANTHROPIC_API_KEY', '')
+    elif executor_name == 'openai' and not api_key:
+        api_key = Container().get_config_variable('OPENAI_API_KEY', '')
+    elif executor_name == 'gemini' and not api_key:
+        api_key = Container().get_config_variable('GEMINI_API_KEY', '')
+    elif executor_name == 'deepseek' and not api_key:
+        api_key = Container().get_config_variable('DEEPSEEK_API_KEY', '')
+
+    if not executor_name or not model_name:
+        raise ValueError('executor_name, model_name, and api_key must be set')
 
     return LLMVMClient(
         api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
         default_executor_name=executor_name,
         default_model_name=model_name,
         api_key=api_key if api_key else ''
-    ).get_executor(executor_name, model_name, api_key)
+    )
 
 
 class LLMVMClient():
@@ -493,3 +519,114 @@ class LLMVMClient():
     ):
         response: httpx.Response = httpx.get(f'{self.api_endpoint}/search/{query}', timeout=400.0)
         return response.json()
+
+    async def openai_tool_call(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | list[Callable],
+        executor: Optional[Executor] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.0,
+        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
+        output_token_len: int = 4096,
+        thinking: bool = False,
+    ) -> dict:
+        python_types: list[str] = []
+
+        if not executor:
+            executor = self.default_executor
+
+        if not model:
+            model = self.model
+
+        if len(tools) == 0:
+            raise ValueError('tools must be a non-empty list of functions or callables')
+
+        tool_python_desc: list[str] = []
+        if isinstance(tools[0], dict):
+            # openai function description
+            tool_python_desc = [OpenAIFunctionTranslator.generate_python_function_signature_from_oai_description(cast(dict[str, Any], tool)) for tool in tools]
+        else:
+            # callable
+            tool_python_desc = [Helpers.get_function_description_flat(cast(Callable, tool)) for tool in tools]
+
+        system_message, tools_message = Helpers.prompts(
+            prompt_name='tool_call.prompt',
+            template={
+                'functions': '\n'.join(tool_python_desc),
+                'task': messages[-1].get_str(),
+                'types': '\n'.join(python_types),
+            },
+            user_token=executor.user_token(),
+            assistant_token=executor.assistant_token(),
+            scratchpad_token=executor.scratchpad_token(),
+            append_token=executor.append_token(),
+        )
+
+        assistant = await self.call_direct(
+            messages=[system_message] + messages + [tools_message],
+            executor=executor,
+            model=model,
+            temperature=temperature,
+            output_token_len=output_token_len,
+            stop_tokens=[],
+            stream_handler=stream_handler,
+            thinking=thinking,
+        )
+
+        logging.debug(f'LLMVMClient.openai_tool_call tool_call_prompt result: {assistant.get_str()}')
+
+        # assistant should return [python_call()]
+        tool_calls = OpenAIFunctionTranslator.parse_python_tool_call_result_to_oai_choices(assistant.get_str().strip())
+
+        assistant_result = None
+
+        if not tool_calls:
+            non_tool_result = await self.call_direct(
+                messages=[system_message] + messages,
+                executor=executor,
+                model=model,
+                temperature=temperature,
+                output_token_len=output_token_len,
+                stop_tokens=[],
+                stream_handler=stream_handler,
+                thinking=thinking,
+            )
+            assistant_result = non_tool_result.get_str().strip()
+
+        openai_response = {}
+        openai_response['id'] = f"chatcmpl-{uuid.uuid4().hex}"
+        openai_response['object'] = "chat.completion"
+        openai_response['created'] = int(time.time())
+        openai_response['model'] = model
+        openai_response['choices'] = [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": assistant_result,
+                "refusal": None,
+                "annotations": [],
+                **({"tool_calls": tool_calls} if tool_calls else {})
+            },
+            "finish_reason": "tool_calls" if tool_calls else "stop",
+            "logprobs": None,
+        }]
+
+        openai_response['usage'] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "prompt_tokens_details": {
+                "cached_tokens": 0,
+                "audio_tokens": 0,
+            },
+            "completion_tokens_details": {
+                "reasoning_tokens": 0,
+                "audio_tokens": 0,
+                "accepted_prediction_tokens": 0,
+                "rejected_prediction_tokens": 0,
+            },
+        }
+        if tool_calls:
+            openai_response['status'] = "requires_action"
+        return openai_response

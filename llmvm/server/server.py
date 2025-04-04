@@ -5,11 +5,11 @@ import marshal
 import os
 import shutil
 import sys
+import time
 import types
 from importlib import resources
 from typing import Any, Callable, Optional, cast
 
-import async_timeout
 import jsonpickle
 import nest_asyncio
 import rich
@@ -18,8 +18,8 @@ from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request,
                      UploadFile)
 from fastapi.param_functions import File
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from openai import AsyncOpenAI, OpenAI
 
+from llmvm.client.client import LLMVMClient, get_client
 from llmvm.common.anthropic_executor import AnthropicExecutor
 from llmvm.common.bedrock_executor import BedrockExecutor
 from llmvm.common.container import Container
@@ -27,14 +27,15 @@ from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Assistant, AstNode, Content,
+from llmvm.common.objects import (Assistant, AstNode, ChatCompletionRequest, ChatMessage, Content,
                                   DownloadItemModel, Executor, Message,
                                   MessageModel, QueueBreakNode,
                                   SessionThreadModel, Statement,
-                                  StreamingStopNode, TextContent,
+                                  StreamingStopNode, System, TextContent,
                                   TokenPriceCalculator, User, compression_enum)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.auto_global_dict import AutoGlobalDict
+from llmvm.common.openai_tool_translator import OpenAIFunctionTranslator
 from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime_host import PythonRuntimeHost
@@ -245,12 +246,24 @@ def __deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]
             result[key] = value
     return result
 
+
 def __deserialize_item(item):
     if isinstance(item, dict) and item.get('type') == 'function':
         code_bytes = base64.b64decode(item['code'])
         code = marshal.loads(code_bytes)
         return types.FunctionType(code, globals(), item['name'], item['defaults'], item['closure'])
     return item
+
+
+class PrettyJSONResponse(JSONResponse):
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            indent=2,
+            separators=(", ", ": "),
+        ).encode("utf-8") + b"\n"
 
 
 def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> ExecutionController:
@@ -337,42 +350,6 @@ async def stream_response(response):
         content += str(chunk)
         yield f"data: {jsonpickle.encode(chunk)}\n\n"
 
-
-@app.post('/v1/chat/completions')
-async def chat_completions(request: Request):
-    api_key = os.environ.get('OPENAI_API_KEY', default=''),
-    aclient = AsyncOpenAI(api_key=cast(str, api_key))
-    client = OpenAI(api_key=cast(str, api_key))
-
-    try:
-        # Construct the prompt from the messages
-        data = await request.json()
-        messages = data.get('messages', [])
-        prompt = ""
-        for msg in messages:
-            prompt += f'{msg["role"]}: {msg["content"]}\n'
-
-        # Get the JSON body of the request
-        if 'stream' in data and data['stream']:
-            response = await aclient.chat.completions.create(
-                model=data['model'],
-                temperature=0.0,
-                max_tokens=150,
-                messages=messages,
-                stream=True
-            )
-            return StreamingResponse(stream_response(response), media_type='text/event-stream')  # media_type="application/json")
-        else:
-            response = client.chat.completions.create(
-                model=data['model'],
-                temperature=0.0,
-                max_tokens=150,
-                messages=messages,
-                stream=False
-            )
-            return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get('/cdn/{filename}')
 def get_file(filename: str):
@@ -507,6 +484,270 @@ async def set_cookies(requests: Request):
     thread.cookies = cookies
     cache_session.set(thread.id, thread)
     return thread
+
+@app.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    request = await request.json()
+
+    if request.get('messages') and request.get('messages')[-1].get('content'):  # type: ignore
+        logging.debug(f'/v1/chat/completions: request {str(request["messages"][-1]["role"])}: {str(request["messages"][-1]["content"])[0:50]}')
+
+    queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+
+    def streamify_tool_call(full_response_json):
+        """
+        Given a JSON dict that represents the final completion with a tool call,
+        yield multiple SSE-like chunks that represent partial tokens of the function call.
+        """
+
+        base_id = full_response_json["id"]
+        base_created = full_response_json["created"]
+        base_model = full_response_json["model"]
+
+        # The typical structure:
+        for choice in full_response_json["choices"]:
+            tool_call = choice["message"]["tool_calls"][0]
+
+            function_name = tool_call["function"]["name"]
+            arguments_full = str(tool_call["function"]["arguments"]).replace('\'', '"')  # e.g. {"ticker": "NVDA"}
+
+            # 1) First chunk: declare function name with empty args
+            first_chunk = {
+                "id": base_id,
+                "object": "chat.completion.chunk",
+                "created": base_created,
+                "model": base_model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": tool_call["index"],
+                                    "id": tool_call["id"],
+                                    "type": tool_call["type"],
+                                    "function": {
+                                        "name": function_name,
+                                        "arguments": ""
+                                    }
+                                }
+                            ]
+                        },
+                        "finish_reason": None
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(first_chunk)}\n\n"
+
+            # 2) Then chunk up the arguments string in small pieces
+            #    (In a real scenario, the chunks might correspond to tokens.)
+            chunk_size = 20  # Just an example
+            for start_idx in range(0, len(arguments_full), chunk_size):
+                partial_args = arguments_full[start_idx : start_idx + chunk_size]
+
+                chunk = {
+                    "id": base_id,
+                    "object": "chat.completion.chunk",
+                    "created": base_created,
+                    "model": base_model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": tool_call["index"],
+                                        # Notice in streaming, we just keep adding partial
+                                        # arguments in each chunk.
+                                        "function": {
+                                            "arguments": partial_args
+                                        }
+                                    }
+                                ]
+                            },
+                            "finish_reason": None
+                        }
+                    ]
+                }
+                yield f"data: {json.dumps(chunk)}\n\n"
+
+            # 3) Final chunk that includes the finish_reason
+            final_chunk = {
+                "id": base_id,
+                "object": "chat.completion.chunk",
+                "created": base_created,
+                "model": base_model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        # At the end, the streaming API typically sets finish_reason to
+                        # "function_call" or "stop" or something else.
+                        "finish_reason": "tool_calls"
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n"
+        yield f"data: [DONE]\n\n"
+
+    async def stream_text_response(text_resp: str, model: str):
+        tokens = text_resp.split(" ")
+
+        for i, token in enumerate(tokens):
+            chunk = {
+                "id": f"chatcmpl-{int(time.time())}-{i}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [{"index": 0, "delta": {"content": token + " "}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+        # Indicate end of stream
+        yield "data: [DONE]\n\n"
+
+    async def stream_handler(ast_node: AstNode):
+        token_text = str(ast_node)
+        await queue.put(token_text)
+
+    async def event_stream():
+        chunk_idx = 0
+
+        while True:
+            token = await queue.get()
+            if token is None:
+                yield "data: [DONE]\n\n"
+                break
+            chunk = {
+                "id": f"chatcmpl-{int(time.time())}-{chunk_idx}",
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": request['model'],
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": token},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+            chunk_idx += 1
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+    # get default controller
+    controller = get_controller()
+    llmvm_client: LLMVMClient = get_client(executor_name=controller.get_executor().name(),
+                                           model_name=controller.get_executor().default_model)
+
+    def role_to_message(m: dict) -> Message:
+        if not isinstance(m, dict):
+            raise ValueError('Message must be a dict')
+
+        if not m.get('role'):
+            raise ValueError('Message must have a role')
+
+        content_str = ''
+
+        if m.get('content') and isinstance(m.get('content'), str):
+            content_str = str(m['content'])
+        elif m.get('content') and isinstance(m['content'], list):
+            for item in m['content']:
+                if isinstance(item, dict) and item.get('type') == 'text':
+                    content_str += str(item['text'])
+                elif isinstance(item, dict) and item.get('type') == 'image':
+                    content_str += f"[ImageContent({item['image_url']})]"
+        elif not m.get('content') and m.get('tool_calls'):
+            tool_calls: list[dict[str, Any]] = m.get('tool_calls')  # type: ignore
+            content_str = '\n'.join([OpenAIFunctionTranslator.generate_python_function_signature_from_oai_description(cast(dict[str, Any], tool)) for tool in tool_calls])
+
+        if m.get('role') == 'user':
+            return User(TextContent(content_str))
+        elif m.get('role') == 'assistant':
+            return Assistant(TextContent(content_str))
+        elif m.get('role') == 'tool':
+            return User(TextContent(content_str))
+        elif m.get('role') == 'system':
+            return System(content_str)
+        else:
+            return User(TextContent(content_str))
+
+    llmvm_messages: list[Message] = [role_to_message(m) for m in request['messages']]
+
+    # tool calling
+    if request.get('tools') and not request.get('messages')[-1].get('role') == 'tool':  # type: ignore
+        result = await llmvm_client.openai_tool_call(
+            messages=llmvm_messages,
+            tools=request['tools'],
+            executor=controller.get_executor(),
+            model=controller.get_executor().default_model,
+            temperature=float(request['temperature']) if request.get('temperature') else 0.0,
+            output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 4096,
+        )
+
+        if request.get('stream') and request['stream'] == True and result.get('choices')[0].get('message').get('tool_calls'):  # type: ignore
+            return StreamingResponse(streamify_tool_call(result))
+        elif request.get('stream') and request['stream'] == True:
+            return StreamingResponse(stream_text_response(result['choices'][0]['message']['content'], request['model']))
+        else:
+            return PrettyJSONResponse(result)
+
+    # streaming
+    if request.get('stream'):
+        async def llm_call():
+            try:
+                await llmvm_client.call_direct(
+                    messages=llmvm_messages,
+                    executor=controller.get_executor(),
+                    model=controller.get_executor().default_model,
+                    temperature=float(request['temperature']) if request.get('temperature') else 0.0,
+                    output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 4096,
+                    stream_handler=stream_handler,
+                )
+            finally:
+                await queue.put(None)
+
+        asyncio.create_task(llm_call())
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream"
+        )
+
+    # not streaming
+    else:
+        assistant = await llmvm_client.call_direct(
+            messages=llmvm_messages,
+            executor=controller.get_executor(),
+            model=controller.get_executor().default_model,
+            temperature=float(request['temperature']) if request.get('temperature') else 0.0,
+            output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 4096,
+        )
+
+        assistant_content = assistant.get_str().strip()
+
+        return {
+            "id": f"chatcmpl-{int(time.time())}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": request['model'],
+            "choices": [
+                {
+                    "index": 0,
+                    "message":
+                        {
+                            "role": "assistant",
+                            "content": assistant_content,
+                            "refusal": None,
+                            "annotations": []
+                        },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": len(' '.join(str(msg['content']) for msg in request['messages']).split()),
+                "completion_tokens": len(str(assistant_content).split()),
+                "total_tokens": len(' '.join(str(msg['content']) for msg in request['messages']).split()) + len(str(assistant_content).split())
+            }
+        }
 
 @app.post('/v1/tools/completions', response_model=None)
 async def tools_completions(request: SessionThreadModel):
