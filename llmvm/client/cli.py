@@ -47,7 +47,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import serialize_messages, setup_logging
 from llmvm.common.objects import (DownloadItemModel, ImageContent,
                                   MarkdownContent, Message, MessageModel,
-                                  PdfContent, SessionThreadModel, TextContent,
+                                  PdfContent, SessionThreadModel, TextContent, HTMLContent,
                                   User)
 
 invoke_context = None
@@ -657,12 +657,15 @@ class Repl():
                     result = Helpers.deserialize_locals_dict(last_thread_t.locals_dict)
                     for key, value in result.items():
                         if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
-                            rich.print(f'def {value.__name__}{value.__code__.co_varnames}')
+                            args = ', '.join(value.__code__.co_varnames)
+                            function_def_str = f'def {value.__name__}({args})'
+                            rich.print(function_def_str)
                     continue
 
                 if query.startswith(':csym ') and len(query) > 6 and '(' in query and ')' in query:
                     symbol_name = query[6:].split('(')[0]
-                    symbol_args = query[6:].split('(')[1].split(')')[0]
+                    call_str = query[6:]
+                    print(call_str)
                     # call the symbol
                     last_thread_t: SessionThreadModel = last_thread
                     result = Helpers.deserialize_locals_dict(last_thread_t.locals_dict)
@@ -672,8 +675,7 @@ class Repl():
                             and value.__code__.co_filename == '<ast>'
                             and value.__name__ == symbol_name
                         ):
-                            call_str = f'{value.__name__}({symbol_args.split(",") if "," in symbol_args else ""})'
-                            eval_result = eval(call_str, result)
+                            eval_result = eval(call_str, globals(), result)
                             rich.print(eval_result)
                     continue
 

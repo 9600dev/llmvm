@@ -723,6 +723,7 @@ class HackerNewsResult(TextContent):
         self.url = url
         self.author = author
         self.comment_text = comment_text
+        self.created_at = created_at
         super().__init__(url=url, sequence="HackerNewsResult(title={self.title}, url={self.url}, author={self.author}, comment_text={self.comment_text}, created_at={self.created_at})")
 
     def get_str(self) -> str:

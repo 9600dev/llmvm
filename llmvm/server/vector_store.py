@@ -63,7 +63,8 @@ class VectorStore():
             self.store = FAISS.load_local(
                 folder_path=self.store_directory,
                 embeddings=self.embeddings(),
-                index_name=self.index_name
+                index_name=self.index_name,
+                allow_dangerous_deserialization=True,
             )
             self.store.override_relevance_score_fn = self.__score_normalizer
         return self.store

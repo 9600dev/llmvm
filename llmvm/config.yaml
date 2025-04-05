@@ -20,13 +20,14 @@ deepseek_api_base: 'https://api.deepseek.com/v1'
 gemini_api_base: 'https://generativelanguage.googleapis.com/v1beta'
 bedrock_api_base: 'us-east-1'
 default_openai_model: 'gpt-4o'
-default_anthropic_model: 'claude-3-7-sonnet-20250219'
-default_gemini_model: 'gemini-2.0-flash-exp'
+default_anthropic_model: 'claude-3-7-sonnet-latest'
+default_gemini_model: 'gemini-2.5-pro-exp-03-25'
 default_deepseek_model: 'deepseek-chat'
 default_bedrock_model: 'amazon.nova-pro-v1:0'
 executor: 'anthropic'  # openai, anthropic, gemini, deepseek, bedrock
 override_max_input_tokens: None
 override_max_output_tokens: None
+full_processing: true
 helper_functions:
   - llmvm.server.tools.webhelpers.WebHelpers.search_linkedin_profile
   - llmvm.server.tools.webhelpers.WebHelpers.get_linkedin_profile

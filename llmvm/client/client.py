@@ -241,7 +241,7 @@ class LLMVMClient():
             if Container.get_config_variable('ANTHROPIC_API_KEY') or api_key:
                 return AnthropicExecutor(
                     api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'claude-3-5-sonnet-latest'
+                    default_model=cast(str, model_name) if model_name else 'claude-3-7-sonnet-latest'
                 )
             else:
                 raise ValueError('anthropic executor requested, but unable to find Anthropic API key.')
@@ -284,7 +284,7 @@ class LLMVMClient():
             if Container.get_config_variable('ANTHROPIC_API_KEY'):
                 return AnthropicExecutor(
                     api_key=Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    default_model='claude-3-5-sonnet-latest'
+                    default_model='claude-3-7-sonnet-latest'
                 )
             elif Container.get_config_variable('OPENAI_API_KEY'):
                 return OpenAIExecutor(

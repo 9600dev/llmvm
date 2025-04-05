@@ -126,135 +126,6 @@ def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
     return unserializable_locals
 
 
-def __serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
-    temp_dict = {}
-    for key, value in locals_dict.items():
-        if isinstance(key, str) and key.startswith('__'):
-            continue
-        elif isinstance(value, types.FunctionType) and value.__module__ == 'builtins':
-            continue
-        elif key == 'AutoGlobalDict':
-            continue
-        elif isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
-            is_static, cls = Helpers.is_static_method(value)
-
-            # Serialize the function's code object
-            code_bytes = marshal.dumps(value.__code__)
-            temp_dict[key] = {
-                'type': 'function',
-                'name': value.__name__,
-                'code': base64.b64encode(code_bytes).decode('ascii'),
-                'defaults': value.__defaults__,
-                'closure': value.__closure__,
-                'doc': value.__doc__,
-                'annotations': value.__annotations__,
-                'is_method': not is_static or cls is not None,
-                'class_name': cls.__name__ if cls else None,
-                'is_static_method': is_static and cls is not None,
-                'qualname': value.__qualname__,
-                'module': value.__module__,
-                'from_ast': value.__code__.co_filename == '<ast>',
-            }
-        elif isinstance(value, dict):
-            temp_dict[key] = __serialize_locals_dict(value)
-        elif isinstance(value, list):
-            temp_dict[key] = [__serialize_item(v) for v in value]
-        elif isinstance(value, (str, int, float, bool)):
-            temp_dict[key] = value
-        elif isinstance(value, (Content, AstNode, Message, Statement)):
-            temp_dict[key] = value
-        else:
-            try:
-                json.dumps(value)
-                temp_dict[key] = value
-            except:
-                # keep instances of tools alive until the server winds down
-                # if not isinstance(value, types.MethodType) and not isinstance(value, types.FunctionType):
-                    # self.locals_instance_state.append(InstanceState(thread_id=thread_id, locals_dict=value))
-                # actual functions can't be json serialized so we pass here
-                pass
-    return temp_dict
-
-def __serialize_item(item):
-    if isinstance(item, types.FunctionType) and item.__code__.co_filename == '<ast>':
-        code_bytes = marshal.dumps(item.__code__)
-        return {
-            'type': 'function',
-            'name': item.__name__,
-            'code': base64.b64encode(code_bytes).decode('ascii'),
-            'defaults': item.__defaults__,
-            'closure': item.__closure__
-        }
-    elif isinstance(item, (str, int, float, bool)):
-        return item
-    elif isinstance(item, (Content, AstNode, Message, Statement)):
-        return item
-    else:
-        try:
-            json.dumps(item)
-            return item
-        except:
-            # keep instances of tools alive until the server winds down
-            # if not isinstance(item, types.MethodType) and not isinstance(item, types.FunctionType):
-                # self.locals_instance_state.append(InstanceState(thread_id=thread_id, locals_dict=item))
-            # actual functions can't be json serialized so we pass here
-            pass
-
-def __deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]:
-    result = {}
-    for key, value in serialized_dict.items():
-        if isinstance(value, dict) and value.get('type') == 'function':
-            # Deserialize the function's code object
-            code_bytes = base64.b64decode(value['code'])
-            code = marshal.loads(code_bytes)
-            # Recreate the function
-            func = types.FunctionType(
-                code,
-                result,
-                value['name'],
-                value['defaults'],
-                value['closure'],
-            )
-
-            # add the docstrings etc.
-            if 'doc' in value:
-                    func.__doc__ = value['doc']
-
-            if 'annotations' in value:
-                    func.__annotations__ = value['annotations']
-
-            if 'qualname' in value:
-                func.__qualname__ = value['qualname']
-
-            if 'module' in value:
-                func.__module__ = value['module']
-
-            if 'from_ast' in value and value['from_ast']:
-                func._from_ast = True  # type: ignore
-
-            if value.get('is_method') and value.get('class_name') and value['class_name'] in result:
-                cls = result[value['class_name']]
-                if value.get('is_static_method'):
-                    func = staticmethod(func)
-
-            result[key] = func
-        elif isinstance(value, dict):
-            result[key] = __deserialize_locals_dict(value)
-        elif isinstance(value, list):
-            result[key] = [__deserialize_item(v) for v in value]
-        else:
-            result[key] = value
-    return result
-
-
-def __deserialize_item(item):
-    if isinstance(item, dict) and item.get('type') == 'function':
-        code_bytes = base64.b64decode(item['code'])
-        code = marshal.loads(code_bytes)
-        return types.FunctionType(code, globals(), item['name'], item['defaults'], item['closure'])
-    return item
-
-
 class PrettyJSONResponse(JSONResponse):
     def render(self, content: Any) -> bytes:
         return json.dumps(
@@ -459,8 +330,41 @@ async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     return cast(SessionThreadModel, cache_session.get(thread.id))
 
 @app.get('/v1/chat/get_threads')
-async def get_threads() -> list[SessionThreadModel]:
-    result = [cast(SessionThreadModel, cache_session.get(id)) for id in cache_session.keys()]
+async def get_threads():
+    def safe_json(obj):
+        try:
+            json.dumps(obj)  # Fast check
+            return obj
+        except (TypeError, ValueError):
+            return str(obj)  # Fallback to string
+
+    threads = []
+
+    for id in cache_session.keys():
+        raw = cache_session.get(id)
+
+        if isinstance(raw, dict):
+            raw = SessionThreadModel(**raw)
+
+        # Sanitize locals_dict
+        if isinstance(raw, SessionThreadModel):
+            raw.locals_dict = {
+                k: safe_json(v)
+                for k, v in raw.locals_dict.items()
+            }
+            threads.append(raw)
+
+    return threads
+    threads = []
+    for id in cache_session.keys():
+        raw = cache_session.get(id)
+        model = SessionThreadModel(**raw) if isinstance(raw, dict) else raw
+        threads.append(model.model_dump())
+    return threads
+
+
+    model = SessionThreadModel(**raw) if isinstance(raw, dict) else raw
+    result = [cast(SessionThreadModel, cache_session.get(id)).model_dump() for id in cache_session.keys()]
     return result
 
 @app.get('v1/chat/clear_threads')
@@ -814,7 +718,7 @@ async def tools_completions(request: SessionThreadModel):
                 return result
             else:
                 # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
-                runtime_dict = __deserialize_locals_dict(thread.locals_dict)
+                runtime_dict = Helpers.deserialize_locals_dict(thread.locals_dict)
                 runtime_dict.update(runtime_dict_cache.get(thread.id) or {})
 
                 # add the runtime defined tools to the list of tools
@@ -838,7 +742,7 @@ async def tools_completions(request: SessionThreadModel):
 
                 # update the in-memory locals_dict with unserializable locals
                 runtime_dict_cache.set(thread.id, __get_unserializable_locals(runtime_state))
-                thread.locals_dict = __serialize_locals_dict(runtime_state)
+                thread.locals_dict = Helpers.serialize_locals_dict(runtime_state)
                 return result
 
         task = asyncio.create_task(execute_and_signal())

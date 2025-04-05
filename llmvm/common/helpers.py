@@ -42,7 +42,7 @@ from docstring_parser import parse
 from PIL import Image
 
 from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent, HTMLContent,
-                                  Message, PandasMeta, StreamNode, SupportedMessageContent, System, TextContent, User)
+                                  Message, PandasMeta, Statement, StreamNode, SupportedMessageContent, System, TextContent, User)
 from llmvm.common.container import Container
 
 
@@ -59,7 +59,7 @@ def write_client_stream(obj):
 
         instance = frame.f_locals.get('self', None)
         if hasattr(instance, 'stream_handler'):
-            asyncio.run(instance.stream_handler(obj))
+            asyncio.run(instance.stream_handler(obj))  # type: ignore
             return
         frame = frame.f_back
 
@@ -73,12 +73,162 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
 
         instance = frame.f_locals.get('self', None)
         if hasattr(instance, 'stream_handler'):
-            return instance.stream_handler
+            return instance.stream_handler  # type: ignore
         frame = frame.f_back
     return None
 
 
 class Helpers():
+    @staticmethod
+    def serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
+        temp_dict = {}
+        for key, value in locals_dict.items():
+            if isinstance(key, str) and key.startswith('__'):
+                continue
+            elif isinstance(value, types.FunctionType) and value.__module__ == 'builtins':
+                continue
+            elif key == 'AutoGlobalDict':
+                continue
+            elif isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
+                temp_dict[key] = Helpers.serialize_function(value)
+            elif isinstance(value, dict):
+                temp_dict[key] = Helpers.serialize_locals_dict(value)
+            elif isinstance(value, list):
+                temp_dict[key] = [Helpers.serialize_item(v) for v in value]
+            elif isinstance(value, (str, int, float, bool)):
+                temp_dict[key] = value
+            elif isinstance(value, (Content, AstNode, Message, Statement)):
+                temp_dict[key] = value
+            else:
+                try:
+                    json.dumps(value)
+                    temp_dict[key] = value
+                except:
+                    # keep instances of tools alive until the server winds down
+                    # if not isinstance(value, types.MethodType) and not isinstance(value, types.FunctionType):
+                        # self.locals_instance_state.append(InstanceState(thread_id=thread_id, locals_dict=value))
+                    # actual functions can't be json serialized so we pass here
+                    pass
+        return temp_dict
+
+    @staticmethod
+    def serialize_item(item):
+        if isinstance(item, types.FunctionType) and item.__code__.co_filename == '<ast>':
+            return Helpers.serialize_function(item)
+        elif isinstance(item, (str, int, float, bool)):
+            return item
+        elif isinstance(item, (Content, AstNode, Message, Statement)):
+            return item
+        elif isinstance(item, dict):
+            return Helpers.serialize_locals_dict(item)
+        elif isinstance(item, list):
+            return [Helpers.serialize_item(v) for v in item]
+        else:
+            try:
+                json.dumps(item)
+                return item
+            except:
+                # keep instances of tools alive until the server winds down
+                # if not isinstance(item, types.MethodType) and not isinstance(item, types.FunctionType):
+                    # self.locals_instance_state.append(InstanceState(thread_id=thread_id, locals_dict=item))
+                # actual functions can't be json serialized so we pass here
+                pass
+
+    @staticmethod
+    def serialize_function(func):
+        is_static, cls = Helpers.is_static_method(func)
+
+        # Serialize the function's code object
+        code_bytes = marshal.dumps(func.__code__)
+        return {
+            'type': 'function',
+            'name': func.__name__,
+            'code': base64.b64encode(code_bytes).decode('ascii'),
+            'defaults': func.__defaults__,
+            'closure': func.__closure__,
+            'doc': func.__doc__,
+            'annotations': func.__annotations__,
+            'is_method': not is_static or cls is not None,
+            'class_name': cls.__name__ if cls else None,
+            'is_static_method': is_static and cls is not None,
+            'qualname': func.__qualname__,
+            'module': func.__module__,
+            'from_ast': func.__code__.co_filename == '<ast>',
+        }
+
+    @staticmethod
+    def deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]:
+        result = {}
+        # First pass: Create all basic items to establish the namespace
+        for key, value in serialized_dict.items():
+            if isinstance(value, dict) and value.get('type') == 'function':
+                # Skip functions on first pass
+                continue
+            elif isinstance(value, dict):
+                result[key] = Helpers.deserialize_locals_dict(value)
+            elif isinstance(value, list):
+                result[key] = [Helpers.deserialize_item(v, result) for v in value]
+            else:
+                result[key] = value
+
+        # Second pass: Now handle functions with the established namespace
+        for key, value in serialized_dict.items():
+            if isinstance(value, dict) and value.get('type') == 'function':
+                result[key] = Helpers.deserialize_function(value, result)
+
+        return result
+
+    @staticmethod
+    def deserialize_item(item, context=None):
+        if context is None:
+            context = globals()
+
+        if isinstance(item, dict) and item.get('type') == 'function':
+            return Helpers.deserialize_function(item, context)
+        elif isinstance(item, list):
+            return [Helpers.deserialize_item(v, context) for v in item]
+        elif isinstance(item, dict) and 'type' not in item:
+            return Helpers.deserialize_locals_dict(item)
+        else:
+            return item
+
+    @staticmethod
+    def deserialize_function(func_dict, context):
+        # Deserialize the function's code object
+        code_bytes = base64.b64decode(func_dict['code'])
+        code = marshal.loads(code_bytes)
+
+        # Recreate the function with proper context
+        func = types.FunctionType(
+            code,
+            context,
+            func_dict['name'],
+            func_dict['defaults'],
+            func_dict['closure']
+        )
+
+        # Restore all additional attributes that were serialized
+        if 'doc' in func_dict:
+            func.__doc__ = func_dict['doc']
+        if 'annotations' in func_dict:
+            func.__annotations__ = func_dict['annotations']
+        if 'qualname' in func_dict:
+            func.__qualname__ = func_dict['qualname']
+        if 'module' in func_dict:
+            func.__module__ = func_dict['module']
+        if 'from_ast' in func_dict and func_dict['from_ast']:
+            func._from_ast = True  # type: ignore
+
+        # Handle class methods properly
+        if func_dict.get('is_method') and func_dict.get('class_name'):
+            class_name = func_dict['class_name']
+            if class_name in context:
+                cls = context[class_name]
+                # Handle static methods
+                if func_dict.get('is_static_method'):
+                    func = staticmethod(func)
+        return func
+
     @staticmethod
     def get_class_name_of_method(func) -> Optional[str]:
         # Case 1: Bound instance method => __self__ is the instance
@@ -241,63 +391,6 @@ class Helpers():
                 f'{textwrap.indent(doc, " " * 8)}\n'
                 f'        """\n'
             )
-
-    @staticmethod
-    def deserialize_locals_dict_item(item):
-        if isinstance(item, dict) and item.get('type') == 'function':
-            code_bytes = base64.b64decode(item['code'])
-            code = marshal.loads(code_bytes)
-            return types.FunctionType(code, globals(), item['name'], item['defaults'], item['closure'])
-        return item
-
-    @staticmethod
-    def deserialize_locals_dict(serialized_dict: dict[str, Any]) -> dict[str, Any]:
-        result = {}
-        for key, value in serialized_dict.items():
-            if isinstance(value, dict) and value.get('type') == 'function':
-                # Deserialize the function's code object
-                code_bytes = base64.b64decode(value['code'])
-                code = marshal.loads(code_bytes)
-                # Recreate the function
-                func = types.FunctionType(
-                    code,
-                    result,
-                    value['name'],
-                    value['defaults'],
-                    value['closure'],
-                )
-
-                # add the docstrings etc.
-                if 'doc' in value:
-                        func.__doc__ = value['doc']
-
-                if 'annotations' in value:
-                        func.__annotations__ = value['annotations']
-
-                if 'qualname' in value:
-                    func.__qualname__ = value['qualname']
-
-                if 'module' in value:
-                    func.__module__ = value['module']
-
-                if 'from_ast' in value and value['from_ast']:
-                    func._from_ast = True  # type: ignore
-
-                if value.get('is_method') and value.get('class_name') and value['class_name'] in result:
-                    cls = result[value['class_name']]
-                    if value.get('is_static_method'):
-                        func = staticmethod(func)
-
-                result[key] = func
-            elif isinstance(value, dict):
-                result[key] = Helpers.deserialize_locals_dict(value)
-            elif isinstance(value, list):
-                result[key] = [Helpers.deserialize_locals_dict_item(v) for v in value]
-            else:
-                result[key] = value
-        return result
-
-
 
     @staticmethod
     def find_and_run_chrome(filename: str):

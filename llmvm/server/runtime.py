@@ -551,16 +551,18 @@ class Runtime:
         bindable.bind(expr, func)
         return bindable
 
-    def download(self, expr: list[str | SearchResult]) -> list[Content]:
+    def download(self, expr: list[str] | list[SearchResult]) -> list[Content]:
         logging.debug(f'PythonRuntime.download({expr})')
 
         from llmvm.server.base_library.content_downloader import \
             WebAndContentDriver
         cookies = self.runtime_state['cookies'] if 'cookies' in self.runtime_state else []
-
         downloader = WebAndContentDriver(cookies=cookies)
-
         download_params: list[DownloadParams] = []
+
+        if not isinstance(expr, list):
+            expr = [expr]
+
         for url in expr:
             download_params.append({
                 'url': url.url if isinstance(url, SearchResult) else url,
