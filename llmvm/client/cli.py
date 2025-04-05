@@ -663,11 +663,11 @@ class Repl():
                     continue
 
                 if query.startswith(':csym ') and len(query) > 6 and '(' in query and ')' in query:
+                    last_thread_t: SessionThreadModel = last_thread
                     symbol_name = query[6:].split('(')[0]
                     call_str = query[6:]
                     print(call_str)
                     # call the symbol
-                    last_thread_t: SessionThreadModel = last_thread
                     result = Helpers.deserialize_locals_dict(last_thread_t.locals_dict)
                     for key, value in result.copy().items():
                         if (
@@ -737,9 +737,9 @@ class Repl():
 
                 # save a thread
                 if query.startswith(':w ') and len(query) > 3:
+                    last_thread_t: SessionThreadModel = last_thread
                     # save the current thread to a file
                     filename = query[3:]
-                    last_thread_t: SessionThreadModel = last_thread
                     thread_text = get_string_thread_with_roles(last_thread_t)
                     with open(filename, 'w') as f:
                         f.write(thread_text)
@@ -747,9 +747,9 @@ class Repl():
                     continue
 
                 if query.startswith(':wh ') and len(query) > 4:
+                    last_thread_t: SessionThreadModel = last_thread
                     # save current thread to a file with HTML formatting
                     filename = query[4:]
-                    last_thread_t: SessionThreadModel = last_thread
                     html_printer = HTMLPrinter(filename)
                     html_printer.print_messages([MessageModel.to_message(message) for message in last_thread_t.messages])
                     rich.print(f'Thread saved to {filename}')
@@ -757,6 +757,7 @@ class Repl():
                     continue
 
                 if query.startswith(':ohc'):
+                    last_thread_t: SessionThreadModel = last_thread
                     with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
                         blocks = get_blocks('html')
                         if not blocks:
@@ -769,6 +770,7 @@ class Repl():
                     continue
 
                 if query.startswith(':otc'):
+                    last_thread_t: SessionThreadModel = last_thread
                     with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
                         html_printer = HTMLPrinter(temp_file.name)
                         html_printer.print_messages([MessageModel.to_message(message) for message in last_thread_t.messages])
