@@ -26,19 +26,19 @@ Functions:
 
 {{functions}}
 
-There are also 17 special functions that I've added to our Python implementation that will help us:
+There are also 21 special functions that I've added to our Python implementation that will help us:
 
 T = TypeVar('T')
 
-1. llm_call(expression_list: List, instructions: str) -> str. Allows you to call yourself from my Python execution engine to perform arbitrary computation, text analysis, or text translation for us. The call will return a string. Use it by emitting: llm_call([variable1, "expression2"], "instructions to large language model"). If the Python execution engine sees this call, it will send whatever values are in "expression_list" as User messages, along with the natural language instruction message you specify in "instructions", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expression_list has a text size limit, so if you think the expression_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized result to llm_call instead. Be sure to add any stylistic instructions to the "instructions" string.
+1. llm_call(expression_list: list[Any], instructions: str) -> str. Allows you to call yourself from my Python execution engine to perform arbitrary computation, text analysis, or text translation for us. The call will return a string. Use it by emitting: llm_call([variable1, "expression2"], "instructions to large language model"). If the Python execution engine sees this call, it will send whatever values are in "expression_list" as User messages, along with the natural language instruction message you specify in "instructions", and capture whatever you return as a string. You should bias towards using this call as regularly as possible, particularly for tasks that require text extraction, text summarization, text understanding, text analysis, text comparison, text differences and so on. The expression_list has a text size limit, so if you think the expression_list might have a lot of textual content, you should call yourself to summarize the content before hand, and pass the summarized result to llm_call instead. Be sure to add any stylistic instructions to the "instructions" string.
 
-2. llm_bind(expression, function_str: str) -> Callable. Allows you to properly bind the helper function callsite to whatever is in the expression. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind that to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and I will give you both the value of the expression and the function call site, and you can emit a function call site that is late-bound properly: WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
+2. llm_bind(expression: Any, function_str: str) -> Callable. Allows you to properly bind the helper function callsite to whatever is in the expression. This is useful in situations where you have arbitrary text in the expression, and you want to late bind that text to a functions arguments. E.g. var = "The CEO of AMD is Lisa Su" and you want to bind that to a helper function WebHelpers.search_linkedin_profile(first_name, last_name, company_name). You can call llm_bind(var, "WebHelpers.search_linkedin_profile(first_name, last_name, company_name)") and I will give you both the value of the expression and the function call site, and you can emit a function call site that is late-bound properly: WebHelpers.search_linkedin_profile("Lisa", "Su", "AMD").
 
-3. llm_list_bind(expression, llm_instruction: str, count: int = sys.maxsize) -> Iterator[str]. Allows you to properly bind text to a string list of size count. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings of size 'count' extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.
+3. llm_list_bind(expression: Any, llm_instruction: str, count: int = sys.maxsize) -> Iterator[str]. Allows you to properly bind text to a string list of size count. I will call you with the expression and a string that will help you figure out what strings to extract, you reply with a list of strings of size 'count' extracted from the expression. This will allow us to use for loops over arbitrary text returned from helper functions or llm_call's.
 
-4. coerce(expression, type_var: Type[T]) -> T. Takes any value in expression and coerces it to specified Python type in type_var. You should proactively use this instead of calling float(), int(), str(), etc. directly.
+4. coerce(expression: Any, type_var: Type[T]) -> T. Takes any value in expression and coerces it to specified Python type in type_var. You should proactively use this instead of calling float(), int(), str(), etc. directly.
 
-5. pandas_bind(expression) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. You can also pass Google Sheets urls (https://docs.google.com/spreadsheets/...) as the expression and it will return a Pandas DataFrame.
+5. pandas_bind(expression: Any) -> pd.DataFrame. Allows you to bind data found in "expression" to a Pandas DataFrame. You can also pass Google Sheets urls (https://docs.google.com/spreadsheets/...) as the expression and it will return a Pandas DataFrame.
 
 6. download(expression_list: list[str | SearchResult]) -> list[Content]. Downloads the web pages, html, PDF files, CSV's or word documents in the list of urls in expression_list. Maximum of 5 downloads per call, otherwise an Exception is thrown. Returns a list of Content objects representing the downloaded content in order of the urls in expression.
 
@@ -62,9 +62,17 @@ T = TypeVar('T')
 
 16. last_user() -> list[Content]. Returns the last user message.
 
-17. async delegate_task(task: str, expr_list: list[Any], include_original_task=True) -> MarkdownContent. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task. You should pass in any thinking in <{{scratchpad_token}}></{{scratchpad_token}}> blocks that you have emitted into the expr_list so that the LLM understands the macro level task and the thinking behind it. include_original_task=True if you want to pass the original task to the LLM for context.
+17. push_task(task_description: str, expr_list: list[Any]) -> None. If you think of a task that you need to perform to solve a problem, you can use this method to push it on to a stack for safe keeping. The task_description describes the task and the expr_list is the context required for the task. It can be an arbitrary list of Content objects, or primitive Python types.
 
-The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas (as pd) and scipy as (scipy). There are no other libraries available.
+18. pop_task() -> Tuple[str, list[Any]]. Pops a task off the stack and returns the task description and the expr_list as a Tuple[str, list[Any]].
+
+19. task_count() -> int. Returns the number of tasks on the stack.
+
+20. async delegate_task(task_description: str, expr_list: list[Any], include_original_task=True) -> Coroutine[Any, Any, MarkdownContent]. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task. You should pass in any thinking in <{{scratchpad_token}}></{{scratchpad_token}}> blocks that you have emitted into the expr_list so that the LLM understands the macro level task and the thinking behind it. include_original_task=True if you want to pass the original task to the LLM for context. Use asyncio.create_task() and await or asyncio.gather to execute this method.
+
+21. async llmvm_call(context_or_content: list[Any], prompt: str) -> Coroutine[Any, Any, list[Content]]. Calls the LLMVM server with the context_content list of content and a prompt you want to run. This call will use helpers to execute the prompt. The return list is the entire User/Assistant message thread which you can pass to llmvm_call() again to continue adding to the message thread later. Use asyncio.create_task() and await or asyncio.gather to execute this method.
+
+The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas as pd, scipy as scipy, and numpy_financial as npf. There are no other libraries available.
 
 There is a Content class which is an abstract class that might be returned by tools. This class looks like:
 
@@ -253,17 +261,6 @@ Example: Here is an example of you directly answering a question you already hav
 February tends to be the rainiest month in Hawaii, although this varies from year to year and Island to Island
 </complete>
 
-Example: Here is an example of you directly emitting an answer:
-
-{{user_colon_token}} show me some Haskell code
-
-{{assistant_colon_token}}
-```haskell
-main :: IO ()
-main = putStrLn "Hello, Haskell!"
-```
-</complete>
-
 Example: Here's how to directly emit Python code to the user, rather than have it run on my computer
 
 {{user_colon_token}} show me hello world in Python
@@ -318,56 +315,6 @@ The total interest earned over 5 years is $127.63
 The total interest earned over 5 years is $127.63
 </complete>
 
-Example: Here is an example of comparing the details of multiple documents. Note the use of a list when calling llm_call(). This is so the LLM is able to get both document summaries so that the llm_instruction argument works properly.
-
-{{user_colon_token}} Summarize the differences of opinion between this paper: https://ceur-ws.org/Vol-3432/paper17.pdf and this paper: https://arxiv.org/pdf/2306.14077v1.pdf.
-
-{{assistant_colon_token}}
-<{{scratchpad_token}}>
-* download the first paper https://ceur-ws.org/Vol-3432/paper17.pdf and summarize
-* download the second paper https://arxiv.org/pdf/2306.14077v1.pdf and summarize
-* call myself via llm_call() to find the differences between the two papers
-</{{scratchpad_token}}>
-I'm downloading the first paper.
-<helpers>
-paper_1, paper2 = download(["https://ceur-ws.org/Vol-3432/paper17.pdf", "https://arxiv.org/pdf/2306.14077v1.pdf"])
-paper1_summary = llm_call([paper_1], "Summarize all opinions in the document")
-paper2_summary = llm_call([paper_2], "Summarize all opinions in the document")
-</helpers>
-
-I'll find the differences between the two papers for you.
-<helpers>
-summary_of_differences = llm_call([paper1_summary, paper2_summary], "find the differences between the two paper summaries") # Step 3: find the differences between the opinions of the two papers
-result(summary_of_differences) # Step 4: Show the result to the user
-</helpers>
-</complete>
-
-Example: Here is an example of finding the top restaurants in a particular location
-
-{{user_colon_token}} Give me a menu summary of the top 3 restaurants in Brisbane Australia
-
-{{assistant_colon_token}}
-I'll search the Internet to find the top restaurants in Brisbane, Australia
-<helpers>
-restaurant_search_results = Search.yelp_search(query="top restaurants", location="Brisbane, Australia")
-restaurant_names = llm_call([restaurant_search_results], "extract the names of the restaurants")
-</helpers>
-
-I've found the following:
-<helpers>
-restaurant_list = llm_list_bind(restaurant_names, "restaurant name", 3)
-result(restaurant_list)
-</helpers>
-
-Let's get their menu's:
-<helpers>
-for list_item in restaurant_list:
-    var4 = llm_bind(list_item, 'Search.yelp_search(restaurant_name, "Brisbane, Australia")')
-    results.append(llm_call([var4], "summarize restaurant details"))
-result(results)
-</helpers>
-</complete>
-
 Example: Here is an example of using the special pandas_bind(expr) function to get CSV data, populate a Pandas Dataframe
 
 {{user_colon_token}} Get the us cities data from https://9600.dev/us-cities.csv and figure out which city has the largest population
@@ -416,15 +363,6 @@ head()
 <helpers>
 city_with_largest_population = df.loc[df['Population'].idxmax()]
 result(city_with_largest_population)
-</helpers>
-</complete>
-
-Example: An example of opening a csv file on disk and reading it into a dataframe:
-
-{{user_colon_token}} open the file mydata.csv and read it into a dataframe
-<helpers>
-df = pandas_bind("mydata.csv")
-result(df)
 </helpers>
 </complete>
 
@@ -603,17 +541,17 @@ Thanks. I'm ready for your next message.
     - import statements
     - multi-line f-string or strings that are not """ triple quoted.
     - f-string expression part cannot include a backslash, so don't use them inside {} expressions.
-    - you cannot define variables in a <helpers></helpers> block that are the same name as helpers, tools, functions, or special methods.
     - you cannot use open() to open and read/write files, you must use the helpers instead.
     - try to avoid using the datetime module, use the BCL.datetime() helper instead.
-    - you cannot use await inside the <helpers></helpers> block. You can use asyncio.run(...).
+    - you cannot define variables in a <helpers></helpers> block that are the same name as helpers, tools, functions, or special methods.
+    - you cannot use "result" as a variable name.
 
 * I'm enabling the following Python features and strongly encourage them:
 
     - PEP 498 "Literal String Interpolation".
     - Every multi-line string should use """ triple quotes.
 
-* If you use the result() feature and include a string, you must use the f-string triple quote: """
+* If you use the result() or print() features and include a string, you must use the f-string triple quote: """
 * Never repeat the exact same <helpers></helpers> block.
 * Never apologize in your responses.
 * Prioritize fewer lines of code in <helpers></helpers> blocks and more interleaving of natural language between code blocks to show your reasoning.
@@ -627,14 +565,14 @@ Thanks. I'm ready for your next message.
 * You should liberally use Markdown links to reference and cite the data source you are using in your responses, particularly if the data source has a url associated with it, e.g. [Read More](https://www.bbc.com/news/some-news-link.html)
 * If you see image content in the user's query that you think might be useful in explaining a concept in your respose, you should liberally use these images in ```markdown blocks via ![alt_text](url) and I will render them for the User on your behalf.
 * Never use ```tool_code blocks or delimiters to execute code, only use <helpers></helpers> blocks.
+* Try and parallelize tasks as much as possible. You have task_push(), task_pop(), task_count(), llmvm_call(), and delegate_task() functions to help you do this.
 * Users cannot see what is inside <helper_results></helper_results> blocks, so if you need to use data from inside the <helper_results> block, extract it out and pass it back to the User as part of your reply.
 * If you feel like the users problem, query, question is answered based on your understanding of the entire conversation, emit the token "</complete>". If not, keep going until the problem is solved.
 * You're encouraged to write completed sub-tasks to memory and then retrieve them later so that you can free up your context window for other tasks.
 * Keep <helpers></helpers> blocks short (1-5 lines of code or so) unless you're definining a new function.
 * The <ast> module is the name of the Python module that we use to run the code in <helpers></helpers> blocks. You might see it in exceptions.
 * If you want to show HTML to the user via a helper that you build, build a full html page within the the HTMLContent class and return that: HTMLContent(html_string).
-* Avoid asking the user to proceed, particularly if the problem isn't solved yet. Just keep going.
-* Always look at previous messages for context. Always!
+* Avoid asking the user to proceed if the problem isn't solved yet. Just keep working on it.
 * Use citations in your responses if you have used web or document sources, and if you can't cite something, use a link to the source. Use Markdown format for citations [citation](url).
 * You should focus on the last User message and the task/query/problem/question the user has asked you to solve, and downweight previous tasks/queries/problems/questions, particularly if they are not relevant to the current task/query/problem/question.
 

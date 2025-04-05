@@ -41,7 +41,7 @@ from dateutil.relativedelta import relativedelta
 from docstring_parser import parse
 from PIL import Image
 
-from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent,
+from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent, HTMLContent,
                                   Message, PandasMeta, StreamNode, SupportedMessageContent, System, TextContent, User)
 from llmvm.common.container import Container
 

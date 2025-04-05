@@ -6,23 +6,25 @@ from datetime import datetime
 import inspect
 import json
 import pandas as pd
+import numpy_financial as npf
 import os
 import re
 import sys
 import scipy
-from typing import Any, Callable, Optional, Union, cast, Any, Type
+from typing import Any, Callable, Optional, Tuple, Union, cast, Any, Type
 from urllib.parse import urlparse
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handler
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Answer, Assistant, BrowserContent, Content, ContentEncoder, DownloadParams, FileContent,
+from llmvm.common.objects import (Answer, Assistant, AstNode, BrowserContent, Content, ContentEncoder, DownloadParams, FileContent,
                                   FunctionCallMeta, ImageContent, LLMCall, MarkdownContent, HTMLContent,
-                                  Message, PandasMeta, PdfContent, SearchResult, Statement, TextContent,
-                                  User, coerce_to, awaitable_none)
+                                  Message, MessageModel, PandasMeta, PdfContent, SearchResult, Statement, TextContent,
+                                  User, coerce_to, awaitable_none, SessionThreadModel)
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.vector_search import VectorSearch
+from llmvm.client.client import LLMVMClient, get_client
 
 
 logging = setup_logging()
@@ -130,6 +132,7 @@ class Runtime:
         self.original_query = ''
         self.original_code = ''
         self.thinking = thinking
+        self.task_stack: list[Tuple[str, list[Any]]] = []
 
     def setup(self) -> 'Runtime':
         """
@@ -204,8 +207,13 @@ class Runtime:
         self.runtime_state['float'] = float
         self.runtime_state['int'] = int
         self.runtime_state['asyncio'] = asyncio
+        self.runtime_state['npf'] = npf
 
         # llmvm runtime
+        self.runtime_state['task_count'] = self.task_count
+        self.runtime_state['push_task'] = self.push_task
+        self.runtime_state['pop_task'] = self.pop_task
+        self.runtime_state['llmvm_call'] = self.llmvm_call
         self.runtime_state['delegate_task'] = self.delegate_task
         self.runtime_state['llm_bind'] = self.llm_bind
         self.runtime_state['llm_call'] = self.llm_call
@@ -256,13 +264,45 @@ class Runtime:
     ########################
     ## llmvm runtime
     ########################
+    def push_task(self, task_description: str, expr_list: list[Any]) -> None:
+        self.task_stack.append((task_description, expr_list))
+
+    def pop_task(self) -> Tuple[str, list[Any]]:
+        return self.task_stack.pop()
+
+    def task_count(self) -> int:
+        return len(self.task_stack)
+
+    async def llmvm_call(self, context_or_content: list[Any], prompt: str) -> list[Content]:
+        client: LLMVMClient = get_client(
+            executor_name=self.controller.get_executor().name(),
+            model_name=self.controller.get_executor().default_model
+        )
+
+        context_or_content = Helpers.flatten(context_or_content)
+        messages = Helpers.flatten([self.controller.statement_to_message(context_or_content), User(TextContent(prompt))])
+
+        session_thread = await client.call(
+            thread=SessionThreadModel(
+                messages=[MessageModel.from_message(message) for message in messages],
+                executor=self.controller.get_executor().name(),
+                model=self.controller.get_executor().default_model,
+                compression='auto',
+                output_token_len=self.controller.get_executor().max_output_tokens(),
+                temperature=0.0,
+                stop_tokens=[]
+            ),
+            stream_handler=get_stream_handler() or awaitable_none,
+        )
+        return Helpers.flatten([MessageModel.to_message(message).message for message in session_thread.messages])
+
     async def delegate_task(
         self,
-        task: str,
+        task_description: str,
         expr_list: list[Any],
         include_original_task: bool = True
     ) -> MarkdownContent:
-        logging.debug(f'PythonRuntime.delegate({task}, {expr_list})')
+        logging.debug(f'PythonRuntime.delegate({task_description}, {expr_list})')
 
         user_tasks = Helpers.compressed_user_messages(self.messages_list)
         user_tasks_message = """
@@ -273,7 +313,7 @@ class Runtime:
         tasks_message = [User(TextContent(user_tasks_message + '\n\n'.join(user_tasks)))] if include_original_task else []
 
         conversation, _ = await self.controller.aexecute_continuation(
-            messages=tasks_message + self.controller.statement_to_message(expr_list) + [User(TextContent(task))],
+            messages=tasks_message + self.controller.statement_to_message(expr_list) + [User(TextContent(task_description))],
             temperature=0.0,
             model=self.controller.get_executor().default_model,
             runtime_state=self.runtime_state.copy(),
@@ -567,7 +607,7 @@ class Runtime:
         write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {assistant.get_str()}\n'))
         return assistant.get_str()
 
-    def llm_call(self, expr_list: list[Any] | Any, llm_instruction: str) -> Assistant:
+    def llm_call(self, expr_list: list[Any] | Any, llm_instruction: str) -> Content:
         logging.debug(f'llm_call({str(expr_list)[:20]}, {repr(llm_instruction)})')
 
         if not isinstance(expr_list, list):
@@ -603,8 +643,8 @@ class Runtime:
             query=llm_instruction,
             original_query=self.original_query,
         )
-        write_client_stream(TextContent(f'llm_call() finished...\n\n'))
-        return assistant
+        write_client_stream(TextContent(f'\nllm_call() finished...\n\n'))
+        return TextContent(assistant.get_str())
 
     def llm_list_bind(self, expr, llm_instruction: str, count: int = sys.maxsize, list_type: Type[Any] = str) -> list[Any]:
         logging.debug(f'llm_list_bind({str(expr)[:20]}, {repr(llm_instruction)}, {count}, {list_type})')
@@ -734,7 +774,7 @@ def llm_bind(expr, func: str):
     global _runtime
     return cast(Runtime, _runtime).llm_bind(expr, func)
 
-def llm_call(expr_list: list, instruction: str) -> Assistant:
+def llm_call(expr_list: list, instruction: str) -> Content:
     global _runtime
     return cast(Runtime, _runtime).llm_call(expr_list, instruction)
 

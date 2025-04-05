@@ -92,7 +92,7 @@ def llmvm(
     compression: str = 'auto',
     mode: str = 'auto',
     thinking: int = 0,
-    stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
+    stream_handler: Callable[[AstNode], Awaitable[None]] = default_stream_handler,
     template_args: Optional[dict[str, Any]] = None,
 ) -> SessionThreadModel:
     if (
@@ -412,7 +412,7 @@ class LLMVMClient():
         compression: str = '',
         mode: str = '',
         thinking: int = 0,
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler,
+        stream_handler: Callable[[AstNode], Awaitable[None]] = default_stream_handler,
         template_args: Optional[dict[str, Any]] = None,
     ) -> SessionThreadModel:
         if (
@@ -420,6 +420,7 @@ class LLMVMClient():
             and not isinstance(messages, type(None))
         ):
             raise ValueError('the messages argument must be a list of Message objects')
+
 
         # deal with weird message types and inputs
         thread_messages: list[Message] = []
@@ -471,7 +472,7 @@ class LLMVMClient():
                     f'{self.api_endpoint}/v1/tools/completions',
                     json=thread.model_dump(),
                 ) as response:
-                    objs = await stream_response(response, StreamPrinter().write)
+                    objs = await stream_response(response, stream_handler)
 
             await response.aclose()
 
@@ -527,7 +528,7 @@ class LLMVMClient():
         executor: Optional[Executor] = None,
         model: Optional[str] = None,
         temperature: float = 0.0,
-        stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = None,
+        stream_handler: Callable[[AstNode], Awaitable[None]] = default_stream_handler,
         output_token_len: int = 4096,
         thinking: bool = False,
     ) -> dict:

@@ -60,6 +60,55 @@ class PythonRuntimeHost:
 
     @staticmethod
     def get_code_blocks(code: str) -> List[str]:
+        """
+        Extracts code blocks that are strictly enclosed by <helpers> and </helpers>
+        on their own lines (ignoring surrounding whitespace). Anything else (e.g.,
+        <helpers> in the middle of a sentence) is ignored.
+        """
+        lines = code.splitlines(keepends=True)
+        blocks = []
+        current_block_lines = []
+        inside_block = False
+
+        for line in lines:
+            stripped_line = line.strip()
+
+            # Start capturing if line is exactly <helpers>
+            if not inside_block and stripped_line == "<helpers>":
+                inside_block = True
+                current_block_lines = []
+                continue
+
+            # Stop capturing if line is exactly </helpers>
+            if inside_block and stripped_line == "</helpers>":
+                inside_block = False
+                block_text = "".join(current_block_lines).strip()
+
+                # Check if there's a fenced code block (```python ... ```) inside
+                markdown_pattern = re.compile(r'```(?:python)?\s*(.*?)\s*```', re.DOTALL)
+                nested_markdown = markdown_pattern.search(block_text)
+
+                if nested_markdown:
+                    # If a markdown code fence is found, extract only what's inside
+                    block_text = nested_markdown.group(1).strip()
+                else:
+                    # If the block starts with 'python\n', strip that off
+                    if block_text.startswith("python\n"):
+                        block_text = block_text[len("python\n"):].lstrip()
+
+                if block_text:
+                    blocks.append(block_text)
+
+                continue
+
+            # If currently inside a <helpers> block, accumulate lines
+            if inside_block:
+                current_block_lines.append(line)
+
+        return blocks
+
+    @staticmethod
+    def get_code_blocks_old(code: str) -> List[str]:
         def extract_code_blocks(text):
             # Pattern to match <helpers> blocks
             code_pattern = re.compile(r'<helpers>(.*?)</helpers>', re.DOTALL)

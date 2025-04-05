@@ -336,12 +336,12 @@ def __get_thread(id: int) -> SessionThreadModel:
 
 
 async def stream_response(response):
-    # this was changed mar 6, to support idle timoue so there's streaming issues, this will be the root cause
+    # this was changed mar 6, to support idle timeout so there's streaming issues, this will be the root cause
     content = ''
     response_iterator = response.__aiter__()
     while True:
         try:
-            chunk = await asyncio.wait_for(response_iterator.__anext__(), timeout=60)
+            chunk = await asyncio.wait_for(response_iterator.__anext__(), timeout=120)
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="Stream timed out")
         except StopAsyncIteration:
@@ -799,6 +799,8 @@ async def tools_completions(request: SessionThreadModel):
                 queue.put_nowait(QueueBreakNode())
 
         async def execute_and_signal() -> list[Message]:
+            stream_handler = callback
+
             if thread.current_mode == 'direct':
                 result = await controller.aexecute(
                     messages=messages,
