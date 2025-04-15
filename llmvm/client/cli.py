@@ -231,7 +231,7 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
                         message_str = Helpers.after_end(message_str, '```diff', '```')
                         continue
                     else:
-                        filename = answer
+                        filename = os.path.expanduser(answer)
             command = diff_info['command']
 
             if diff_info['command'] == 'patch':

@@ -900,6 +900,9 @@ class Helpers():
         current_hunk = []
 
         for line in diff_lines:
+            if line.startswith("@@ "):
+                continue
+
             if not line.strip() and current_hunk:  # Empty line and we have content
                 if any(l.startswith('+') or l.startswith('-') for l in current_hunk):
                     hunks.append(current_hunk)
