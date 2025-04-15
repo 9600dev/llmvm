@@ -59,6 +59,7 @@ except ValueError:
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/cdn'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/logs'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/faiss'), exist_ok=True)
+    os.makedirs(os.path.expanduser('~/.local/share/llmvm/memory'), exist_ok=True)
 
     config_file = resources.files('llmvm') / 'config.yaml'
     shutil.copy(str(config_file), os.path.expanduser('~/.config/llmvm/config.yaml'))
@@ -77,6 +78,7 @@ os.makedirs(Container().get('cache_directory'), exist_ok=True)
 os.makedirs(Container().get('cdn_directory'), exist_ok=True)
 os.makedirs(Container().get('log_directory'), exist_ok=True)
 os.makedirs(Container().get('vector_store_index_directory'), exist_ok=True)
+os.makedirs(Container().get('memory_directory'), exist_ok=True)
 
 cache_session = PersistentCache(cache_directory=Container().get('cache_directory'))
 runtime_dict_cache: MemoryCache[int, dict[str, Any]] = MemoryCache()
@@ -88,8 +90,9 @@ if (
     and not os.environ.get('ANTHROPIC_API_KEY')
     and not os.environ.get('GEMINI_API_KEY')
     and not os.environ.get('DEEPSEEK_API_KEY')
+    and not os.environ.get('BEDROCK_API_KEY')
 ):
-    rich.print('[red]Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or DEEPSEEK_API_KEY are set.[/red]')
+    rich.print('[red]Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, BEDROCK_API_KEY, or DEEPSEEK_API_KEY are set.[/red]')
     rich.print('One of these API keys needs to be set in your terminal environment[/red]')
     sys.exit(1)
 
@@ -156,15 +159,14 @@ def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> Exec
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
             default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
-            # default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=4096),
-            default_max_output_len=64000,
+            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=8192),
         )
     elif controller == 'gemini':
         executor = GeminiExecutor(
             api_key=os.environ.get('GEMINI_API_KEY', ''),
             default_model=default_model_config,
             default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
-            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=4096),
+            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
         )
     elif controller == 'deepseek':
         executor = DeepSeekExecutor(
@@ -703,6 +705,7 @@ async def tools_completions(request: SessionThreadModel):
                 queue.put_nowait(QueueBreakNode())
 
         async def execute_and_signal() -> list[Message]:
+            # don't touch, required for walking up the stack
             stream_handler = callback
 
             if thread.current_mode == 'direct':

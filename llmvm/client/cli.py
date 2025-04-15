@@ -45,7 +45,7 @@ from llmvm.client.printing import (ConsolePrinter, HTMLPrinter, StreamPrinter,
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import serialize_messages, setup_logging
-from llmvm.common.objects import (DownloadItemModel, ImageContent,
+from llmvm.common.objects import (Assistant, DownloadItemModel, ImageContent,
                                   MarkdownContent, Message, MessageModel,
                                   PdfContent, SessionThreadModel, TextContent, HTMLContent,
                                   User)
@@ -296,6 +296,17 @@ def apply_file_writes_and_diffs(message_str: str, prompt: bool = True) -> None:
         message_str = Helpers.after_end(message_str, '```', '```')
 
 
+def parse_optional_int(ctx, param, value):
+    if value is None:
+        return -1
+    elif value == '':
+        return 0
+    try:
+        return int(value)
+    except ValueError:
+        raise click.BadParameter('Must be an integer')
+
+
 class Repl():
     def __init__(
         self,
@@ -304,7 +315,7 @@ class Repl():
 
     def open_editor(self, editor: str, initial_text: str) -> str:
         temp_file_name = ''
-        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.md') as temp_file:
             temp_file.write(initial_text)
             temp_file.flush()
             temp_file_name = temp_file.name
@@ -948,6 +959,154 @@ def cd(args):
     os.chdir(full_path)
 
 
+@cli.command('todo', help='List all todo items in the specified todo file.')
+@click.option('--filename', '-f', type=str, required=False,
+              default=Container.get_config_variable('todo_file', 'LLMVM_TODO_FILE', default='~/.local/share/llmvm/todo.md'),
+              help='location of todo markdown file.')
+@click.option('--add', '-a', type=str, required=False, default='')
+@click.option('--edit', '-e', is_flag=True, required=False, default=False)
+@click.option('--insert', '-i', is_flag=True, required=False, default=False,
+              help='insert the todo list into the current thread.')
+@click.option('--extract_thread', '-t', is_flag=True, default=False,
+              help='extract todo items from the current thread.')
+@click.option('--extract', '-x', type=str, required=False, default='',
+              help='extract todo items from supplied text')
+def todo(
+    filename: str,
+    add: str,
+    edit: bool,
+    insert: bool,
+    extract_thread: bool,
+    extract: str = '',
+
+):
+    global thread_id
+    global last_thread
+    role_color = Container().get_config_variable('client_role_color', default='cyan')
+
+    if not os.path.exists(filename):
+        rich.print(f'[{role_color}]Todo file {filename} does not exist, creating.[/{role_color}]')
+        with open(filename, 'w') as f:
+            f.write('')
+
+    llmvm_client = LLMVMClient(
+        api_endpoint=Container().get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+        default_executor_name=Container().get_config_variable('LLMVM_EXECUTOR', default='anthropic'),
+        default_model_name=Container().get_config_variable('LLMVM_MODEL', default='claude-3-7-sonnet-latest'),
+        api_key='',
+        throw_if_server_down=False,
+    )
+
+    if edit:
+        editor = os.environ.get('EDITOR', 'vim')
+        if 'vim' in editor or 'nvim' in editor:
+            cmd = f'{editor} -c "normal G" -c "normal A" +startinsert {filename}'
+            proc = subprocess.Popen(cmd, shell=True, env=os.environ)
+        else:
+            proc = subprocess.Popen([editor, filename], env=os.environ)
+
+    elif add:
+        # check to see if there is a \n at the end of the file
+        with open(filename, 'r') as f:
+            last_line = f.readlines()[-1]
+            if not last_line.endswith('\n'):
+                with open(filename, 'a') as f:
+                    f.write('\n')
+
+        with open(filename, 'a') as f:
+            f.write(f'- [ ] {add}')
+            rich.print(f'[{role_color}]Added todo item:[/{role_color}] {add}')
+
+    elif insert:
+        todo_list = ''
+        with open(filename, 'r') as f:
+            todo_list = f.read()
+
+        if thread_id <= 0 and 'last_thread' in globals() and last_thread:
+            thread = last_thread
+        elif thread_id <= 0 and 'last_thread' in globals():
+            thread = SessionThreadModel(
+                id=-1,
+                executor=last_thread.executor,
+                model=last_thread.model,
+                current_mode=last_thread.current_mode,
+                cookies=last_thread.cookies,
+            )
+        elif thread_id <= 0:
+            thread = SessionThreadModel(id=-1)
+        else:
+            thread = asyncio.run(llmvm_client.get_thread(thread_id))
+
+        rich.print(f'[{role_color}]Inserting todo list into thread {thread_id}[/{role_color}]')
+        thread.messages.append(MessageModel.from_message(User(TextContent(todo_list))))
+        last_thread = thread
+        thread_id = last_thread.id
+
+    if extract_thread or extract:
+        todo_list = open(filename, 'r').read()
+
+        PROMPT = f"""
+        You're a personal assistant that helps users with their tasks. Your job is to look at the previous messages in this
+        thread and extract out all the relavent todo's and tasks, compare them to the current todo list, and then generate
+        a list of new tasks/todos. If there are no new tasks or todos, just emit "NONE". If it's not obvious that there
+        is really a new task or todo, just emit "NONE".
+
+        You should emit the new items as a list in markdown TODO list format, where "-" represents a task or todo
+        and "[ ]" represents that the task is not yet complete. If you're adding tasks/todos then you should always
+        start them as unfinished by using "- [ ] ... task sentence". Examples:
+
+        - [ ] this is an unfinished todo item 1 and its description
+        - [ ] todo item 2 which is unfinished
+        - [ ] another task or todo
+
+        The current todo list is:
+        {todo_list}
+
+        Only emit the markdown list of new todo and task items. Do not emit anything else.
+        If there are no new tasks or todos, just emit "NONE"
+        """
+        messages: list[Message] = []
+        if extract_thread:
+            # if we have a last_thread but the thread_id is 0 or -1, then we don't
+            # have a connection to the server, so we'll just use the last thread
+            if thread_id <= 0 and 'last_thread' in globals() and last_thread:
+                thread = last_thread
+            elif thread_id <= 0 and 'last_thread' in globals():
+                thread = SessionThreadModel(
+                    id=-1,
+                    executor=last_thread.executor,
+                    model=last_thread.model,
+                    current_mode=last_thread.current_mode,
+                    cookies=last_thread.cookies,
+                )
+            elif thread_id <= 0:
+                thread = SessionThreadModel(id=-1)
+            else:
+                thread = asyncio.run(llmvm_client.get_thread(thread_id))
+            messages = [MessageModel.to_message(m) for m in thread.messages]
+        else:
+            messages = [User(TextContent(extract))]
+
+        assistant: Assistant = asyncio.run(llmvm_client.call_direct(
+            messages=messages + [User(TextContent(PROMPT))],
+        ))
+
+        if assistant.get_str().strip() == 'NONE':
+            rich.print(f'[{role_color}]No new tasks or todos found.[/{role_color}]')
+            return
+        else:
+            with open(filename, 'a') as f:
+                for line in assistant.get_str().strip().split('\n'):
+                    if line.startswith('-'):
+                        rich.print(f"[{role_color}]Adding new task:[/{role_color}] {line}")
+                        f.write(line + '\n')
+
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            rich.print(line.strip())
+
+
 @cli.command('cookies', help='Set cookies for a message thread so that the tooling is able to access authenticated content.')
 @click.option('--file_location', '-l', type=str, required=False,
               help='location of cookies txt file in Netscape format.')
@@ -1028,7 +1187,7 @@ def act(
         try:
             llmvm_client = LLMVMClient(
                 api_endpoint=endpoint,
-                default_executor_name='openai',
+                default_executor_name='anthropic',
                 default_model_name='',
                 api_key='',
             )
@@ -1146,7 +1305,7 @@ def vector_search(
     global console
 
     results = LLMVMClient(
-        api_endpoint=endpoint, default_executor_name='openai', default_model_name='', api_key='',
+        api_endpoint=endpoint, default_executor_name='anthropic', default_model_name='', api_key='',
     ).search(query)
 
 
@@ -1218,7 +1377,7 @@ def threads(
 
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
-        default_executor_name='openai',
+        default_executor_name='anthropic',
         default_model_name='',
         api_key='',
     )
@@ -1252,7 +1411,7 @@ def thread(
 
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
-        default_executor_name='openai',
+        default_executor_name='',
         default_model_name='',
         api_key='',
     )
@@ -1283,7 +1442,7 @@ def messages(
 
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
-        default_executor_name='openai',
+        default_executor_name='anthropic',
         default_model_name='',
         api_key='',
     )
@@ -1310,7 +1469,7 @@ def new(
     global last_thread
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
-        default_executor_name='openai',
+        default_executor_name='anthropic',
         default_model_name='',
         api_key='',
     )

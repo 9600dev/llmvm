@@ -11,6 +11,7 @@ cache_directory: '~/.local/share/llmvm/cache'
 cdn_directory: '~/.local/share/llmvm/cdn'
 log_directory: '~/.local/share/llmvm/logs'
 memory_directory: '~/.local/share/llmvm/memory'
+todo_file: '~/.local/share/llmvm/todo.md'
 vector_store_index_directory: '~/.local/share/llmvm/faiss'
 vector_store_embedding_model: 'all-MiniLM-L6-v2' # 'BAAI/bge-base-en'
 vector_store_chunk_size: 500

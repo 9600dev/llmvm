@@ -671,7 +671,7 @@ class ExecutionController(Controller):
             original_query='',
             compression=compression
         )
-        return [response]
+        return messages + [response]
 
     async def aexecute_continuation(
         self,
