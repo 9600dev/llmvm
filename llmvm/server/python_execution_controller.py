@@ -43,9 +43,6 @@ class ExecutionController(Controller):
         if executor.name() == 'openai' and ('o1' in model or 'o3' in model):
             logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution_reasoning.prompt')
             return 'python_continuation_execution_reasoning.prompt'
-        elif executor.name() == 'anthropic' and 'research' in model:
-            logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution.prompt')
-            return 'python_continuation_execution_reasoning.prompt'
         else:
             logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution.prompt')
             return 'python_continuation_execution.prompt'

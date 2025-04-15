@@ -798,73 +798,172 @@ class Helpers():
 
     @staticmethod
     def apply_unified_diff(original_content, diff_content):
+        def in_between_including(line, start_marker, end_marker):
+            start_idx = line.find(start_marker)
+            end_idx = line.find(end_marker, start_idx + len(start_marker))
+            if start_idx == -1 or end_idx == -1:
+                return line  # fallback: return entire line
+            return line[start_idx:end_idx + len(end_marker)]
+
+        def after_end(line, start_marker, end_marker):
+            start_idx = line.find(start_marker)
+            if start_idx == -1:
+                return line
+            end_idx = line.find(end_marker, start_idx + len(start_marker))
+            if end_idx == -1:
+                return line
+            return line[end_idx + len(end_marker):]
+
         original_lines = original_content.splitlines()
         diff_lines = diff_content.splitlines()
         modified_lines = original_lines.copy()
+
+        # If first line is in the “botched” format, fix it.
+        if diff_lines and diff_lines[0].startswith("@@") and not diff_lines[0].endswith("@@") and "@@" in diff_lines[0][2:]:
+            # The line might look like: "@@ -6,6 +6,7 @@ extra stuff"
+            new_start_line = in_between_including(diff_lines[0], '@@', '@@')
+            next_line = after_end(diff_lines[0], '@@', '@@').strip()
+
+            diff_lines[0] = new_start_line
+            # Insert the leftover part as a new line if it’s non-empty
+            if next_line:
+                diff_lines.insert(1, next_line)
+
         current_line = 0
 
-        start_line = diff_lines[0]
-        if start_line.startswith("@@") and not start_line.endswith("@@") and "@@" in start_line[2:]:
-            # sonnet botched the format
-            new_start_line = Helpers.in_between_including(start_line, '@@', '@@')
-            next_line = Helpers.after_end(start_line, '@@', '@@').strip()
-            diff_lines.insert(1, next_line)
-            diff_lines[0] = new_start_line
+        i = 0
+        while i < len(diff_lines):
+            line = diff_lines[i]
 
-        for i, line in enumerate(diff_lines):
+            # Detect hunk headers: @@ -oldStart,oldLen +newStart,newLen @@
             if line.startswith("@@"):
-                # @@ -6,6 +6,7 @@ - hunk header
-                # Parse hunk header
-                _, old, new, _ = line.split()
-                old_start = int(old.split(',')[0][1:])
-                current_line = old_start - 1  # -1 because list indices start at 0
-            elif line.startswith("-"):
-                # Remove line
-                if modified_lines[current_line] == line[1:]:
+                parts = line.split()
+
+                # We expect something like:
+                # parts[0] = "@@"
+                # parts[1] = "-6,6"
+                # parts[2] = "+6,7"
+                # parts[-1] = "@@"  (Sometimes parts[3], or maybe 4 if there's weird spacing)
+
+                # Validate minimum length to avoid index errors
+                if len(parts) >= 3 and parts[0] == "@@":
+                    # old side is in parts[1], new side in parts[2]
+                    old_region = parts[1]  # e.g. "-6,6"
+                    new_region = parts[2]  # e.g. "+6,7"
+
+                    # Extract the start line from old_region
+                    # old_region looks like "-6,6" => start=6 length=6
+                    try:
+                        old_start_str = old_region.split(',')[0]  # => "-6"
+                        old_start = int(old_start_str[1:])        # => 6
+                    except ValueError:
+                        old_start = 1  # fallback
+
+                    current_line = old_start - 1  # adjust for 0-based indexing
+                i += 1
+                continue
+
+            # Deletions ("-"), Additions ("+"), or context
+            if line.startswith("-"):
+                # We have a removal. If it matches the current line, pop it.
+                # If your LLM sometimes omits or changes spaces, you may want a fuzzy match.
+                to_remove = line[1:]
+                if (0 <= current_line < len(modified_lines)
+                        and modified_lines[current_line] == to_remove):
                     modified_lines.pop(current_line)
+                else:
+                    # If you suspect minor whitespace diffs, you could do:
+                    #   if modified_lines[current_line].strip() == to_remove.strip():
+                    #       ...
+                    pass
             elif line.startswith("+"):
-                # Add line
-                modified_lines.insert(current_line, line[1:])
+                # This is an addition
+                to_add = line[1:]
+                if 0 <= current_line <= len(modified_lines):
+                    modified_lines.insert(current_line, to_add)
                 current_line += 1
             else:
-                # Context line
+                # Context line => just move the pointer
                 current_line += 1
 
-        return '\n'.join(modified_lines)
+            i += 1
+
+        return "\n".join(modified_lines)
 
     @staticmethod
     def apply_context_free_diff(original_content, diff_content):
-        original_lines = original_content.splitlines(True)  # Keep line endings
+        original_lines = original_content.splitlines()
         diff_lines = diff_content.splitlines()
 
-        modified_lines = []
-        original_index = 0
+        # Parse diff into hunks (blocks of changes with context)
+        hunks = []
+        current_hunk = []
 
-        for diff_line in diff_lines:
-            diff_line = diff_line.rstrip('\n')
-            if diff_line.startswith('+'):
-                # Add new line
-                modified_lines.append(diff_line[1:] + '\n')
-            elif diff_line.startswith('-'):
-                # Skip the line in the original content (effectively deleting it)
-                if original_index < len(original_lines):
-                    original_index += 1
+        for line in diff_lines:
+            if not line.strip() and current_hunk:  # Empty line and we have content
+                if any(l.startswith('+') or l.startswith('-') for l in current_hunk):
+                    hunks.append(current_hunk)
+                current_hunk = []
             else:
-                # Context line or unchanged line
-                if original_index < len(original_lines):
-                    if diff_line == original_lines[original_index].rstrip('\n'):
-                        modified_lines.append(original_lines[original_index])
-                        original_index += 1
-                    else:
-                        # Context mismatch - could indicate an error in the diff or original content
-                        modified_lines.append(original_lines[original_index])
-                        original_index += 1
+                current_hunk.append(line)
 
-        # Add any remaining lines from the original content
-        modified_lines.extend(original_lines[original_index:])
+        # Add the last hunk if it contains changes
+        if current_hunk and any(l.startswith('+') or l.startswith('-') for l in current_hunk):
+            hunks.append(current_hunk)
 
-        # Join the lines back into a single string
-        return ''.join(modified_lines)
+        # Process each hunk
+        result = original_lines.copy()
+
+        for hunk in hunks:
+            # Find the context before changes
+            context_before = []
+            for line in hunk:
+                if line.startswith('+') or line.startswith('-'):
+                    break
+                context_before.append(line)
+
+            # Skip if no context before changes
+            if not context_before:
+                continue
+
+            # Try to find this context in the result
+            start_idx = -1
+            for i in range(len(result) - len(context_before) + 1):
+                if all(result[i + j] == context_before[j] for j in range(len(context_before))):
+                    start_idx = i
+                    break
+
+            if start_idx == -1:
+                continue  # Context not found
+
+            # Apply the hunk at the found position
+            new_result = result[:start_idx + len(context_before)]  # Keep everything up to and including context
+
+            # Process the hunk lines after context
+            changes_start = len(context_before)
+            result_idx = start_idx + len(context_before)
+
+            for i in range(changes_start, len(hunk)):
+                line = hunk[i]
+
+                if line.startswith('+'):
+                    # Add new line
+                    new_result.append(line[1:])
+                elif line.startswith('-'):
+                    # Remove the next line in result if it matches
+                    if result_idx < len(result) and result[result_idx] == line[1:]:
+                        result_idx += 1
+                else:
+                    # Context line - copy from result and advance
+                    if result_idx < len(result):
+                        new_result.append(result[result_idx])
+                        result_idx += 1
+
+            # Add the rest of the result
+            new_result.extend(result[result_idx:])
+            result = new_result
+
+        return '\n'.join(result) + '\n'
 
     @staticmethod
     def write_markdown(markdown: MarkdownContent, dest: io.TextIOBase):

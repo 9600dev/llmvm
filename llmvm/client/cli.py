@@ -724,7 +724,7 @@ class Repl():
                     continue
 
                 if query == ':ycb' or (
-                    query.startswith('ycb')
+                    query.startswith(':ycb')
                     and query[4].isdigit()
                 ):
                     # find the code block to copy
@@ -735,7 +735,7 @@ class Repl():
                     continue
 
                 if query == ':vcb' or (
-                    query.startswith('vcb')
+                    query.startswith(':vcb')
                     and query[4].isdigit()
                 ):
                     # find the code block to copy
