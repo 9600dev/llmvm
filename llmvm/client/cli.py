@@ -1407,6 +1407,7 @@ def thread(
     endpoint: str,
 ):
     global thread_id
+    global last_thread
     global console
 
     llmvm_client = LLMVMClient(
@@ -1423,6 +1424,7 @@ def thread(
 
     thread = asyncio.run(llmvm_client.get_thread(int_id))
     console.print_thread(thread=thread)
+    last_thread = thread
     thread_id = thread.id
     return thread
 

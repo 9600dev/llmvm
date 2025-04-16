@@ -501,6 +501,10 @@ class HTMLPrinter:
             background-color: #f2f2f2;
         }
 
+        ul {
+            margin-left: 1.5rem;
+        }
+
         /* Responsive adjustments */
         @media (max-width: 768px) {
             body {
@@ -627,7 +631,7 @@ class HTMLPrinter:
             s.write(f'    <div class="message-body">\n')
 
             for content in message.message:
-                if isinstance(content, TextContent) or isinstance(content, MarkdownContent):
+                if isinstance(content, TextContent):
                     content_str = content.get_str()
 
                     # Advanced code block processing for better syntax highlighting
@@ -654,6 +658,12 @@ class HTMLPrinter:
                         code = html.escape(match.group(1))
                         return f'<code>{code}</code>'
 
+                    def code_block_replace(match):
+                        code = html.escape(match.group(1))
+                        return f'<pre><code class="language-python">{code}</code></pre>'
+
+                    content_str = re.sub(r'<helpers>(.*?)</helpers>', code_block_replace, content_str, flags=re.DOTALL)
+                    content_str = re.sub(r'<helpers_result>(.*?)</helpers_result>', code_block_replace, content_str, flags=re.DOTALL)
                     content_str = re.sub(r'`([^`]+)`', inline_code_replace, content_str)
 
                     # Convert markdown to HTML with extended options for better rendering
@@ -672,9 +682,14 @@ class HTMLPrinter:
                     # Apply final formatting
                     s.write(f'{result}\n')
 
+                elif isinstance(content, MarkdownContent):
+                    content_str = content.get_str() if len(content.get_str()) < 10000 else content.get_str()[:300] + '\n\n ... \n\n' + content.get_str()[-300:]
+                    s.write(f'    <div class="markdown-content">\n')
+                    s.write(f'        {markdown2.markdown(content_str, extras=["tables", "fenced-code-blocks", "break-on-newline"])}\n')
+                    s.write(f'    </div>\n')
                 elif isinstance(content, ImageContent):
                     s.write(f'    <div class="image-container">\n')
-                    s.write(f'        <img src="data:{content.image_type};base64, {content.sequence}" alt="{content.url}" />\n')
+                    s.write(f'        <img src="data:{content.image_type};base64,{base64.b64encode(content.sequence).decode("utf-8")}" alt="{content.url}" />\n')
                     s.write(f'    </div>\n')
                 elif isinstance(content, BrowserContent):
                     s.write(f'    <div class="browser-content">\n')

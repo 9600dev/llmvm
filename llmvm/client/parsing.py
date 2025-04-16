@@ -135,7 +135,7 @@ def parse_message_actions(role_type: type, message: str, actions: list[str]) -> 
 def parse_message_thread(message: str, actions: list[str]):
     def create_message(type) -> Message:
         MessageClass = globals()[type]
-        return MessageClass('')
+        return MessageClass(TextContent(''))
 
     messages = []
     roles = ['Assistant: ', 'System: ', 'User: ']

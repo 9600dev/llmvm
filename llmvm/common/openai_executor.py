@@ -182,6 +182,9 @@ class OpenAIExecutor(Executor):
                             expanded_messages[i].message.pop(j)
                             break
 
+        # remove empty assistant messages
+        expanded_messages = Helpers.filter(lambda m: m.role() != 'assistant' or m.get_str() == '', expanded_messages)
+
         # now build the json dictionary and return
         for i in range(len(expanded_messages)):
             wrapped.append(self.to_dict(expanded_messages[i], model, server_serialization=False))

@@ -421,7 +421,6 @@ class LLMVMClient():
         ):
             raise ValueError('the messages argument must be a list of Message objects')
 
-
         # deal with weird message types and inputs
         thread_messages: list[Message] = []
 

@@ -667,7 +667,7 @@ class SearchResult(TextContent):
         self.title = title
         self.snippet = snippet
         self.engine = engine
-        super().__init__(url=url, sequence="SearchResult(url={self.url}, title={self.title}, snippet={self.snippet}, engine={self.engine})")
+        super().__init__(url=url, sequence=f"SearchResult(url={self.url}, title={self.title}, snippet={self.snippet}, engine={self.engine})")
 
     def get_str(self) -> str:
         return f"SearchResult(url={self.url}, title={self.title}, snippet={self.snippet}, engine={self.engine})"
@@ -695,7 +695,7 @@ class YelpResult(TextContent):
         self.neighborhood = neighborhood
         self.snippet = snippet
         self.reviews = reviews
-        super().__init__(url=link, sequence="YelpResult(title={self.title}, link={self.link}, neighborhood={self.neighborhood}, snippet={self.snippet}, reviews={self.reviews})")
+        super().__init__(url=link, sequence=f"YelpResult(title={self.title}, link={self.link}, neighborhood={self.neighborhood}, snippet={self.snippet}, reviews={self.reviews})")
 
     def get_str(self) -> str:
         return f"YelpResult(title={self.title}, link={self.link}, neighborhood={self.neighborhood}, snippet={self.snippet} reviews={self.reviews[0:100]})"
@@ -724,7 +724,7 @@ class HackerNewsResult(TextContent):
         self.author = author
         self.comment_text = comment_text
         self.created_at = created_at
-        super().__init__(url=url, sequence="HackerNewsResult(title={self.title}, url={self.url}, author={self.author}, comment_text={self.comment_text}, created_at={self.created_at})")
+        super().__init__(url=url, sequence=f"HackerNewsResult(title={self.title}, url={self.url}, author={self.author}, comment_text={self.comment_text}, created_at={self.created_at})")
 
     def get_str(self) -> str:
         return f"HackerNewsResult(title={self.title}, url={self.url}, author={self.author}, comment_text={self.comment_text}, created_at={self.created_at})"
