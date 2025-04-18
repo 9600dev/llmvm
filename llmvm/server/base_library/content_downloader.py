@@ -224,6 +224,10 @@ class WebAndContentDriver():
         Returns:
             list of tuples containing (original_download_params, content)
         """
+
+        if not all('url' in d for d in downloads):
+            raise ValueError('All downloads must be DownloadParams objects.')
+
         # Clean up URLs
         for download in downloads:
             if download['url'].startswith('"') and download['url'].endswith('"'):

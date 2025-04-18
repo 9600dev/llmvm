@@ -35,5 +35,5 @@ Textual description of the crossword spaces, letters, and how they are layed out
 
 Remember wordplay can be involved in answers, consider double meanings of clues if you are stuck.
 
-You must solve (12), (15) and (18) Across, and (1), (2), (3) and (4) Down. Take as long as you like. Be thorough. Use the <scratchpad> to keep track of things and think through methodically how to solve the puzzle. Do not use the search() helper, but feel free to write code and use the other helpers if you think you need them. Remember, Across and Down words may intersect, and the letters at the intersection must be the same for the crossword to work. At the end, test the result to ensure you have the correct answer. You may start again if you need to.
+You must solve (12), (15) and (18) Across, and (1), (2), (3) and (4) Down. Take as long as you like. Be thorough. Use the <scratchpad> to keep track of things and think through methodically how to solve the puzzle. Do not use the search() helper, but you are encouraged to use code to both explore and test. Remember, Across and Down words may intersect, and the letters at the intersection must be the same for the crossword to work. At the end, test the result to ensure you have the correct answer. You may start again if you need to. 
 

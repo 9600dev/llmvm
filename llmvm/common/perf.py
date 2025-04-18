@@ -14,6 +14,9 @@ from anthropic.lib.streaming._types import ThinkingEvent, TextEvent, CitationEve
 from openai.types.chat.chat_completion_chunk import \
     ChatCompletionChunk as OAICompletionChunk
 from openai.types.chat.chat_completion import ChatCompletion as OAICompletion
+from openai.types.responses import Response, ResponseReasoningItem, ResponseContentPartAddedEvent, \
+    ResponseTextDeltaEvent, ResponseTextDoneEvent, ResponseContentPartDoneEvent, ResponseAudioDeltaEvent, ResponseAudioDoneEvent, \
+    ResponseCreatedEvent, ResponseCompletedEvent, ResponseInProgressEvent, ResponseOutputItemAddedEvent, ResponseOutputItemDoneEvent
 
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
@@ -150,6 +153,41 @@ class LoggingAsyncIterator:
                     return StreamingToken('', underlying=result, thinking=False)
             elif isinstance(result, str):
                 return StreamingToken(result, underlying=result, thinking=False)
+            # Responses API from OAI
+            elif isinstance(result, ResponseCreatedEvent):
+                return StreamingToken('', underlying=result, thinking=False)  # type: ignore
+            elif isinstance(result, ResponseOutputItemAddedEvent):
+                if result.item.type == "reasoning":
+                    summary_items = '\n'.join([summary.text for summary in result.item.summary])
+                    return StreamingToken(summary_items, underlying=result, thinking=True)  # type: ignore
+                elif result.item.type == "message":
+                    content_items = '\n'.join([content.text for content in result.item.content if content.type == "output_text"])
+                    refusal_items = '\n'.join([content.refusal for content in result.item.content if content.type == "refusal"])
+                    content_items += refusal_items
+                    return StreamingToken(content_items, underlying=result, thinking=False)  # type: ignore
+            elif isinstance(result, ResponseContentPartAddedEvent):
+                return StreamingToken(result.part.text, underlying=result, thinking=False)  # type: ignore
+            elif isinstance(result, ResponseTextDeltaEvent):
+                return StreamingToken(result.delta if result.delta else '', underlying=result, thinking=False)
+            elif isinstance(result, ResponseAudioDeltaEvent) or (hasattr(result, 'type') and result.type == 'response.reasoning_summary_part.added'):  # type: ignore
+                return StreamingToken(result.delta if result.delta else '', underlying=result, thinking=True)  # type: ignore
+            elif isinstance(result, ResponseTextDoneEvent):
+                return StreamingToken('\n', underlying=result, thinking=False)
+            elif isinstance(result, ResponseAudioDoneEvent):
+                return StreamingToken('\n', underlying=result, thinking=True)
+            # we've finished streaming, emit a newline
+            elif isinstance(result, ResponseOutputItemDoneEvent):
+                if result.item.type == "reasoning":
+                    return StreamingToken('\n', underlying=result, thinking=True)  # type: ignore
+                elif result.item.type == "message":
+                    return StreamingToken('\n', underlying=result, thinking=False)  # type: ignore
+            elif isinstance(result, ResponseCompletedEvent):
+                return StreamingToken('\n', underlying=result, thinking=False)  # type: ignore
+            elif (
+                isinstance(result, ResponseContentPartDoneEvent)
+                or isinstance(result, ResponseInProgressEvent)
+            ):
+                return StreamingToken('', underlying=result, thinking=False)
             else:
                 raise ValueError(f'Unknown completion type: {type(result)}, stream type: {type(self.original_iterator)}')
         except StopAsyncIteration:
@@ -177,6 +215,10 @@ class TokenStreamWrapper:
             return self
         else:
             return getattr(self.stream, name)
+
+    def aclose(self):
+        if hasattr(self.stream, 'close'):
+            self.stream.close()
 
     # we're proxying the .text_stream, which doesn't have get_final_message()
     # but we don't need it as we're streaming

@@ -17,6 +17,7 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, BrowserContent, Co
                                   LLMCall, MarkdownContent, Message,
                                   PandasMeta, PdfContent, Statement, System, TextContent,
                                   TokenCompressionMethod, User, awaitable_none)
+from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.vector_search import VectorSearch
 
@@ -39,8 +40,14 @@ class ExecutionController(Controller):
         self.exception_limit = exception_limit
         self.thread_id = thread_id
 
-    def __execution_prompt(self, executor: Executor, model: str) -> str:
-        if executor.name() == 'openai' and ('o1' in model or 'o3' in model):
+    def __execution_prompt(self, executor: Executor, model: str, thinking: int) -> str:
+        if (
+            executor.name() == 'openai'
+            and cast(OpenAIExecutor, executor).does_not_stop(model)
+        ) or (
+            executor.name() == 'anthropic'
+            and thinking > 0
+        ):
             logging.debug('ExecutionController.__execution_prompt() using python_continuation_execution_reasoning.prompt')
             return 'python_continuation_execution_reasoning.prompt'
         else:
@@ -755,7 +762,7 @@ class ExecutionController(Controller):
         functions = [Helpers.get_function_description_flat(f) for f in helpers]
 
         system_message, tools_message = Helpers.prompts(
-            prompt_name=self.__execution_prompt(self.get_executor(), model),
+            prompt_name=self.__execution_prompt(self.get_executor(), model, thinking),
             template={
                 'functions': '\n'.join(functions),
             },
@@ -764,6 +771,12 @@ class ExecutionController(Controller):
             scratchpad_token=self.get_executor().scratchpad_token(),
             append_token=self.get_executor().append_token(),
         )
+
+        if self.get_executor().name() == 'openai' and cast(OpenAIExecutor, self.get_executor()).responses(model):
+            # merge system and tools messages
+            # https://platform.openai.com/docs/guides/reasoning-best-practices
+            system_message = System("Formatting re-enabled\n" + system_message.get_str() + '\n\n' + tools_message.get_str())
+            tools_message = User(TextContent(''))
 
         # anthropic prompt caching through the first three messages
         assistant_reply = Assistant(TextContent('Yes, I am ready.'), hidden=True)
@@ -775,8 +788,13 @@ class ExecutionController(Controller):
         tools_message.pinned = 0  # pinned as the first message # todo: thread this through the system
         messages_copy = []
         messages_copy.append(system_message)
-        messages_copy.append(tools_message)
-        messages_copy.append(assistant_reply)
+        if not (
+            self.get_executor().name() == 'openai'
+            and cast(OpenAIExecutor, self.get_executor()).responses(model)
+        ):
+            messages_copy.append(tools_message)
+            messages_copy.append(assistant_reply)
+
         # strip prompt caching from all messages so we can only have it on the last message
         for message in messages:
             message.prompt_cached = False
@@ -796,7 +814,10 @@ class ExecutionController(Controller):
             if last_message_str.count(browser_content_start_token) > 1:
                 # remove all but the last BrowserContent message
                 last_message_str = Helpers.keep_last_browser_content(last_message_str)
-                messages_copy[-1] = Assistant(TextContent(last_message_str))
+                messages_copy[-1] = Assistant(
+                    TextContent(last_message_str),
+                    underlying=messages_copy[-1].underlying
+                )
 
             # undo the last prompt cached flag, because we're moving the cache checkpoint to the end
             prompt_cache_counter = 0
@@ -857,6 +878,19 @@ class ExecutionController(Controller):
             ):
                 response.stop_token = '</complete>'
 
+            if (
+                '</complete>' in response.get_str()
+                and response.stop_reason == ''
+                and (
+                    self.get_executor().name() == 'openai'
+                    or self.get_executor().name() == 'gemini'
+                    or self.get_executor().name() == 'deepseek'
+                    or self.get_executor().name() == 'bedrock'
+                )
+            ):
+                response.message = [TextContent(response.get_str().replace('</complete>', ''))]
+                response.stop_token = '</complete>'
+
             # Two Assistant messages in a row: we don't want two assistant messages in a row (which is what happens if you're asking
             # for a continuation), so we remove the last Assistant message and replace it with the Assistant response
             # we just got, plus the previous Assistant response.
@@ -884,7 +918,11 @@ class ExecutionController(Controller):
             if code_blocks and not response.stop_token == '</complete>':
                 # emit some debugging
                 code_block = '\n'.join(code_blocks)
-                write_client_stream(TextContent('</helpers>\n'))
+                if not (
+                    self.get_executor().name() == 'openai'
+                    and cast(OpenAIExecutor, self.get_executor()).does_not_stop(model)
+                ):
+                    write_client_stream(TextContent('</helpers>\n'))
                 write_client_stream(TextContent('Executing helpers code block locally.\n'))
 
                 no_indent_debug(logging, '')
@@ -1012,9 +1050,14 @@ class ExecutionController(Controller):
                 # empty assistant, maybe we got a </helpers_result> that was correct. this should be in the code_execution_result
                 elif code_blocks and code_execution_result:
                     results.extend([answer for answer in cast(list, code_execution_result) if isinstance(answer, Answer)])
-
+                elif '</complete>' in response.get_str().strip() or response.get_str().strip() == '':
+                    # grab a previous assistant, as the reasoning models are forced to emit </complete> at the end of the response
+                    last_assistant = Helpers.last(lambda m: m.role() == 'assistant', messages_copy)
+                    if last_assistant:
+                        results.append(Answer(
+                            result=last_assistant.get_str()
+                        ))
                 completed = True
-
             # code_blocks was filtered out, and we have a stop token, so it's trying to repeat the code again
             elif not code_blocks and response.stop_token == '</helpers>':
                 assistant_response_str = response.get_str()
@@ -1026,9 +1069,35 @@ class ExecutionController(Controller):
                         stop_reason=response.stop_reason,
                         stop_token=response.stop_token,
                         perf_trace=response.perf_trace,
+                        underlying=response.underlying,
                         hidden=True
                     )
                 )
+            # stupid reasoning models
+            elif (
+                not code_blocks
+                and response.stop_token == ""
+                and self.get_executor().name() == 'openai'
+                and cast(OpenAIExecutor, self.get_executor()).does_not_stop(model)
+            ):
+                messages_copy.append(
+                    Assistant(
+                        TextContent(assistant_response_str),
+                        total_tokens=response.total_tokens,
+                        stop_reason=response.stop_reason,
+                        stop_token=response.stop_token,
+                        perf_trace=response.perf_trace,
+                        underlying=response.underlying,
+                        hidden=True
+                    )
+                )
+                messages_copy.append(
+                    User(
+                        TextContent("""I didn't see a </complete> tag yet. If you're finished, emit the </complete> tag. If not, keep going. Use <helpers> if you need to!"""),
+                        hidden=True
+                    )
+                )
+                completed = False
             else:
                 # if there are no code blocks, we're done
                 if response.get_str().strip() != '':
@@ -1061,6 +1130,7 @@ class ExecutionController(Controller):
                     stop_reason=response.stop_reason,
                     stop_token=response.stop_token,
                     perf_trace=response.perf_trace,
+                    underlying=response.underlying
                 )
             )
 

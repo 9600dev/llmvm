@@ -208,6 +208,7 @@ class Runtime:
         self.runtime_state['int'] = int
         self.runtime_state['asyncio'] = asyncio
         self.runtime_state['npf'] = npf
+        self.runtime_state['re'] = re
 
         # llmvm runtime
         self.runtime_state['task_count'] = self.task_count
@@ -560,8 +561,10 @@ class Runtime:
         downloader = WebAndContentDriver(cookies=cookies)
         download_params: list[DownloadParams] = []
 
-        if not isinstance(expr, list):
+        if not isinstance(expr, (list, tuple)):
             expr = [expr]
+
+        expr = Helpers.flatten(expr)
 
         for url in expr:
             download_params.append({
@@ -606,8 +609,15 @@ class Runtime:
             original_query=self.original_query,
         )
         logging.debug('Coercing {} to {} resulted in {}'.format(expr, type_name, assistant.get_str()))
-        write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {assistant.get_str()}\n'))
-        return assistant.get_str()
+        write_client_stream(TextContent(f'Coercing {expr} to {type_name} resulted in {assistant.get_str()}. Trying to further coerce to {type_name}.\n'))
+
+        try:
+            coerce_result = eval(assistant.get_str())
+            return coerce_result
+        except Exception as ex:
+            if isinstance(type_name, type):
+                return coerce_to(assistant.get_str(), type_name)
+            raise ex
 
     def llm_call(self, expr_list: list[Any] | Any, llm_instruction: str) -> Content:
         logging.debug(f'llm_call({str(expr_list)[:20]}, {repr(llm_instruction)})')

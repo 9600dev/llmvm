@@ -69,7 +69,7 @@ helper_functions:
   - llmvm.server.tools.search_tool.Search.hackernews_search
 
 # optional client color Python rich syntax
-client_stream_token_color: 'bright_black'
-client_stream_thinking_token_color: 'cyan'
+client_stream_token_color: '#dddddd'
+client_stream_thinking_token_color: '#5f819d'
 client_role_color: 'bold cyan'
 client_repl_color: 'ansibrightcyan'

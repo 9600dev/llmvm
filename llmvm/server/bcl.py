@@ -112,9 +112,13 @@ class BCL():
     @staticmethod
     def get_currency_rates(currency_code: str) -> str:
         """
-        Returns the most popular currency rates for a given currency code as a natural language string. Try and use at least 3 decimal places.
-        Example: rates = BCL.get_currency_rates(currency_code="AUD")
+        Returns the most popular currency rates for a given currency code as a natural language string.
+        Example:
+        rates = BCL.get_currency_rates(currency_code="AUD")
         result(rates)
+
+        result:
+        ""AUD":1,"AED":2.340945,"AFN":46.158158,"ALL":55.758944,"AMD":248.942953,"ANG":1.140992, ..."
 
         :param currency_code: The currency code to get the rates for.
         :type currency_code: str

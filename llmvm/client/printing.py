@@ -12,13 +12,16 @@ from typing import Any, Awaitable, Callable, cast
 
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.theme import Theme
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.client.markdown_renderer import markdown__rich_console__
 from llmvm.common.object_transformers import ObjectTransformers
-from llmvm.common.objects import BrowserContent, HTMLContent, MarkdownContent, Message, Content, ImageContent, PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, StreamNode, SessionThreadModel, MessageModel, TokenThinkingNode
+from llmvm.common.objects import BrowserContent, HTMLContent, MarkdownContent, Message, Content, ImageContent, \
+    PdfContent, FileContent, AstNode, StreamingStopNode, TextContent, TokenNode, TokenStopNode, SessionThreadModel, \
+    MessageModel, TokenThinkingNode, StreamNode
 
 
 logging = setup_logging()
@@ -42,8 +45,10 @@ async def stream_response(response, print_lambda: Callable[[Any], Awaitable]) ->
             data = jsonpickle.decode(content)
 
             # tokens
-            if isinstance(data, TokenNode):
-                await print_lambda(data.token)
+            if isinstance(data, TokenThinkingNode):
+                await print_lambda(data)
+            elif isinstance(data, TokenNode):
+                await print_lambda(data)
             elif isinstance(data, TextContent):
                 await print_lambda(data.get_str())
             elif isinstance(data, (TokenStopNode, StreamingStopNode)):
@@ -212,6 +217,10 @@ class StreamPrinter():
 
 class ConsolePrinter:
     def __init__(self, file=sys.stdout):
+        client_assistant_color = Container.get_config_variable('client_assistant_color', default='white')
+        custom_theme = Theme({
+            "default": client_assistant_color
+        })
         self.console = Console(file=file)
 
     def print(self, any: Any, end: str = ''):
@@ -296,6 +305,7 @@ class ConsolePrinter:
                 subprocess.run(cmd, text=True, shell=True, env=os.environ)
 
         role_color = Container.get_config_variable('client_role_color', default='bold cyan')
+        assistant_color = Container.get_config_variable('client_assistant_color', default='white')
 
         for message in messages:
             if escape:

@@ -1,11 +1,13 @@
 import asyncio
 import base64
 import json
+import jsonpickle
 import os
 from typing import Any, Awaitable, Callable, Optional, cast
 
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
 from anthropic.types import ThinkingConfigParam
+from pydantic import BaseModel
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
@@ -61,6 +63,22 @@ class AnthropicExecutor(Executor):
 
     def to_dict(self, message: 'Message', model: Optional[str], server_serialization: bool = False) -> dict[str, Any]:
         content_list = []
+
+        # maintain thinking blocks as they have hashes.
+        if isinstance(message, Assistant) and message.underlying:
+            if isinstance(message.underlying, BaseModel):
+                result = cast(dict[str, Any], message.underlying.model_dump())
+                return {
+                    'role': message.role(),
+                    'content': result['content']
+                }
+            else:
+                result = json.loads(jsonpickle.encode(message.underlying, unpicklable=False, make_refs=False))  # type: ignore
+                return {
+                    'role': message.role(),
+                    'content': result['content']
+                }
+
         for content in message.message:
             if isinstance(content, ImageContent) and content.sequence:
                 if 'image/unknown' not in Helpers.classify_image(content.get_bytes()):
@@ -344,16 +362,19 @@ class AnthropicExecutor(Executor):
             thinking=thinking,
         )
 
-        text_response: str = ''
+        text_response: str = ""
+        thinking_response: str = ""
         perf = None
 
         async with await stream as stream_async:  # type: ignore
             async for token in stream_async:
                 if token.thinking:
                     await stream_handler(TokenThinkingNode(token.token))
+                    thinking_response += token.token
                 else:
                     await stream_handler(TokenNode(token.token))
-                text_response += token.token
+                    text_response += token.token
+
             await stream_handler(TokenStopNode())
             perf = stream_async.perf
 
@@ -362,11 +383,13 @@ class AnthropicExecutor(Executor):
 
         assistant = Assistant(
             message=TextContent(text_response.strip()),
+            thinking=TextContent(thinking_response.strip()),
             error=False,
             stop_reason=perf.stop_reason,
             stop_token=perf.stop_token,
             perf_trace=perf,
-            total_tokens=perf.total_tokens
+            total_tokens=perf.total_tokens,
+            underlying=perf.object
         )
 
         if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')

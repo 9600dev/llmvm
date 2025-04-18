@@ -2084,6 +2084,10 @@ class Helpers():
         return [x for x in iterable if predicate(x)]
 
     @staticmethod
+    def remove(predicate, iterable):
+        return [x for x in iterable if not predicate(x)]
+
+    @staticmethod
     def last(predicate, iterable, default=None):
         result = [x for x in iterable if predicate(x)]
         if result:

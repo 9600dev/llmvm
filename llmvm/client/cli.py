@@ -47,7 +47,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import serialize_messages, setup_logging
 from llmvm.common.objects import (Assistant, DownloadItemModel, ImageContent,
                                   MarkdownContent, Message, MessageModel,
-                                  PdfContent, SessionThreadModel, TextContent, HTMLContent,
+                                  PdfContent, SessionThreadModel, TextContent, HTMLContent, TokenPriceCalculator,
                                   User)
 
 invoke_context = None
@@ -305,6 +305,31 @@ def parse_optional_int(ctx, param, value):
         return int(value)
     except ValueError:
         raise click.BadParameter('Must be an integer')
+
+
+class ThinkingParamType(click.ParamType):
+    name = 'thinking'
+
+    def convert(self, value, param, ctx):
+        # First, try converting to int
+        try:
+            return int(value)
+        except ValueError:
+            pass
+
+        # Then check if it's a valid string option
+        value = value.lower()
+        if value in ('low', 'medium', 'high'):
+            if value == 'low':
+                return 0
+            elif value == 'medium':
+                return 1
+            else:
+                return 2
+        self.fail(f'{value} is not a valid thinking value. Must be an integer or one of "low", "medium", "high".', param, ctx)
+
+
+THINKING = ThinkingParamType()
 
 
 class Repl():
@@ -1520,11 +1545,11 @@ def new(
               default='lifo', help='context window compression method if the message is too large. Default is "lifo" last in first out.')
 @click.option('--file-writes', type=bool, required=False, default=False, is_flag=True, help='automatically apply file writes and diffs')
 @click.option('--temperature', type=float, required=False, default=0.2, help='temperature for the call.')
-@click.option('--output_token_len', type=int, required=False, default=4096, help='maximum output tokens for the call.')
+@click.option('--output_token_len', type=int, required=False, default=0, help='maximum output tokens for the call.')
 @click.option('--stop_tokens', type=str, required=False, multiple=True, help='stop tokens for the call.')
 @click.option('--escape', type=bool, is_flag=True, required=False, help='escape the message content.')
 @click.option('--throw', type=bool, is_flag=True, required=False, default=False, help='throw an exception if the LLMVM server is down. Default is false.')
-@click.option('--thinking', '-z', type=int, required=False, default=0, help='enable thinking mode, specifying a max thinking token length.')
+@click.option('--thinking', '-z', type=THINKING, required=False, default=0, help='enable thinking mode. Token count int for Anthropic, "low", "medium", or "high" for OpenAI.')
 @click.option('--context_messages', required=False, multiple=True, hidden=True)
 def message(
     message: Optional[str | bytes | Message],
@@ -1544,7 +1569,7 @@ def message(
     stop_tokens: list[str],
     escape: bool,
     throw: bool,
-    thinking: int,
+    thinking,
     context_messages: Sequence[Message] = [],
 ):
     global thread_id
@@ -1588,6 +1613,13 @@ def message(
     if not message and context_messages:
         message = context_messages[-1]
         context_messages = context_messages[:-1]
+
+    # deal with output token length and thinking tokens
+    if output_token_len == 0:
+        output_token_len = TokenPriceCalculator().max_output_tokens(model, executor=executor, default=4096)
+
+    if thinking > output_token_len:
+        raise ValueError(f'--thinking value {thinking} is greater than --output_token_len {output_token_len}. Thinking must be less than or equal to output_token_len.')
 
     # input is coming from a pipe, could be binary or text
     if not sys.stdin.isatty():

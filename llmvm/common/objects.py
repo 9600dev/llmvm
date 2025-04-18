@@ -846,6 +846,31 @@ class User(Message):
         return a + b  # type: ignore
 
 
+class Developer(Message):
+    def __init__(
+        self,
+        message: str = '''
+            You are a helpful assistant.
+        '''
+    ):
+        if not isinstance(message, str):
+            raise ValueError('Developer message must be a string')
+
+        super().__init__([TextContent(message)])
+
+    def role(self) -> str:
+        return 'developer'
+
+    def __str__(self):
+        return self.get_str()
+
+    def __repr__(self):
+        return f'Developer({self.message.__repr__()})'
+
+    def get_str(self) -> str:
+        return self.message[0].get_str()
+
+
 class System(Message):
     def __init__(
         self,
@@ -877,6 +902,7 @@ class Assistant(Message):
     def __init__(
         self,
         message: Content | list[Content],
+        thinking: Optional[Content] = None,
         error: bool = False,
         system_context: object = None,
         llm_call_context: object = None,
@@ -885,18 +911,21 @@ class Assistant(Message):
         perf_trace: object = None,
         hidden: bool = False,
         total_tokens: int = 0,
+        underlying: object = None,
     ):
         if isinstance(message, list):
             super().__init__(message, hidden)
         else:
             super().__init__([message], hidden)
         self.error = error
+        self.thinking = thinking
         self._system_context = system_context,
         self._llm_call_context: object = llm_call_context
         self.stop_reason: str = stop_reason
         self.stop_token: str = stop_token
         self.perf_trace: object = perf_trace
         self.total_tokens: int = total_tokens
+        self.underlying = underlying
 
     def role(self) -> str:
         return 'assistant'
@@ -1156,10 +1185,12 @@ def coerce_to(a: Any, type_var: Type[T]) -> Any:
         return a
 
     if isinstance(a, FunctionCallMeta):
-        a = str(a.result())
+        return coerce_to(a.result(), type_var)
     if isinstance(a, User):
         a = a.get_str()
     if isinstance(a, Assistant):
+        a = a.get_str()
+    if isinstance(a, TextContent):
         a = a.get_str()
 
     if isinstance(a, str):
@@ -1744,6 +1775,7 @@ class MessageModel(BaseModel):
     pinned: int = 0
     prompt_cached: bool = False
     total_tokens: int = 0  # only used on Assistant messages
+    underlying: Optional[object] = None  # only used on Assistant messages to keep track of id's on thinking tokens
 
     def to_message(self) -> Message:
         content_objects = [c.to_content() for c in self.content]
@@ -1753,7 +1785,7 @@ class MessageModel(BaseModel):
         elif self.role == 'system':
             msg = System(content_objects[0].get_str())
         elif self.role == 'assistant':
-            msg = Assistant(content_objects[0], total_tokens=self.total_tokens)
+            msg = Assistant(content_objects[0], total_tokens=self.total_tokens, underlying=self.underlying)
         else:
             raise ValueError(f"MessageModel.to_message() Unsupported role: {self.role}")
 
@@ -1771,6 +1803,7 @@ class MessageModel(BaseModel):
             pinned=message.pinned,
             prompt_cached=message.prompt_cached,
             total_tokens=message.total_tokens if isinstance(message, Assistant) else 0,
+            underlying=message.underlying if isinstance(message, Assistant) else None,
         )
 
 
