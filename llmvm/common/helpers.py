@@ -144,6 +144,11 @@ class Helpers():
             stream.feed(captured.decode('utf‑8', 'ignore'))
             return "\n".join(scr.display)
 
+        try:
+            os.system('reset')
+        except Exception:
+            pass
+
         return CSI_RE.sub(b'', captured).replace(b'\r', b'').decode('utf‑8', errors='replace')
 
     @staticmethod
