@@ -567,8 +567,16 @@ class Runtime:
         expr = Helpers.flatten(expr)
 
         for url in expr:
+            real_url = ''
+            if isinstance(url, str):
+                real_url = url
+            elif isinstance(url, SearchResult):
+                real_url = url.url
+            else:
+                raise ValueError(f'Unknown type for url: {type(url)}')
+
             download_params.append({
-                'url': url.url if isinstance(url, SearchResult) else url,
+                'url': real_url,
                 'goal': self.original_query,
                 'search_term': ''
             })
@@ -826,7 +834,7 @@ def last_user() -> list[Content]:
     global _runtime
     return cast(Runtime, _runtime).last_user()
 
-def download(expr: list[str | SearchResult]) -> list[Content]:
+def download(expr: list[str] | list[SearchResult]) -> list[Content]:
     global _runtime
     return cast(Runtime, _runtime).download(expr)
 

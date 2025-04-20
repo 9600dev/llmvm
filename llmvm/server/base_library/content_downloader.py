@@ -228,6 +228,8 @@ class WebAndContentDriver():
         if not all('url' in d for d in downloads):
             raise ValueError('All downloads must be DownloadParams objects.')
 
+        downloads = Helpers.flatten(downloads)
+
         # Clean up URLs
         for download in downloads:
             if download['url'].startswith('"') and download['url'].endswith('"'):
