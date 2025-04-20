@@ -1718,6 +1718,8 @@ def message(
         for path_name in path_names:
             if os.path.exists(path_name):
                 file_metadata.append(f"{os.path.abspath(path_name)}, filesize: {os.path.getsize(path_name)} bytes, number of tokens: {float(os.path.getsize(path_name)) * 0.75}")
+            else:
+                raise FileNotFoundError(f'File {path_name} not found')
         files_text = '\n'.join(file_metadata)
         if files_text:
             context_messages.append(User(TextContent(f"You have access to the following files: \n\n {files_text}")))

@@ -2,9 +2,9 @@
 
 LLMVM is a CLI based productivity tool that uses Large Language Models and local Python tools/helpers to reason about and execute your tasks. A CLI client (client.py) either connects directly to an LLM provider or will connect to a local server (server.py) that coordinates tool execution, [Retrieval Agumented Generation](https://blogs.nvidia.com/blog/what-is-retrieval-augmented-generation/), document search and more.
 
-It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, [OpenAI](https://openai.com/blog/openai-api) GPT 4 Turbo/4o/o3-mini models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
+It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, and [OpenAI](https://openai.com/blog/openai-api) GPT 4o/4.1/o3/o4 models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
 
-> **Update April 3rd 2025**: The latest gpt-4o "gpt-4o-2024-11-20" is absolutely useless. Looks like they've RL'ed it in a way where it simply refuses to generate <helpers> blocks without "continue" encouragement. I suggest using gpt-4o-2024-08-06 or gpt-4o-2024-05-13. gpt-45 works quite well, but is slow.
+> **Update April 19th 2025**: Got o3 o4mini and gpt4.1 working. All reasoning models work now. -z "low" "medium" "high" for OpenAI, or -z num_of_tokens for Anthropic.
 
 > **Update March 4th 2025**: Added Anthropic "thinking tokens" support. Use -z num_of_thinking_tokens to set the number of thinking tokens. Lots of bug fixes; browser works far better now. o3-mini works better - it does not like CoT examples, so the megaprompt has been split into reasoning and non-reasoning megaprompts.
 
@@ -36,24 +36,27 @@ Default model is: claude-3-7-sonnet-20250219
 
 Make sure to `playwright install`.
 If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.
-Loaded helper: datetime
 Loaded helper: search_linkedin_profile
 Loaded helper: get_linkedin_profile
 Loaded helper: get_hackernews_latest
-Loaded helper: get_report
+Loaded helper: get_filings
+Loaded helper: get_form_filing_or_item_url_as_markdown
+Loaded helper: get_latest_filing_as_markdown
 Loaded helper: get_stock_price
 Loaded helper: get_current_market_capitalization
 Loaded helper: get_stock_volatility
 Loaded helper: get_stock_price_history
 Loaded helper: get_stock_analysis
+Loaded helper: datetime
 Loaded helper: sample_normal
 Loaded helper: sample_binomial
 Loaded helper: sample_lognormal
 Loaded helper: sample_list
 Loaded helper: generate_graph_image
-Loaded helper: get_code_structure_summary
+Loaded helper: matplotlib_to_image
+Loaded helper: get_source_code_structure_summary
 Loaded helper: get_source_code
-Loaded helper: find_all_references
+Loaded helper: find_all_references_to_method
 Loaded helper: get_weather
 Loaded helper: address_lat_lon
 Loaded helper: get_currency_rates
@@ -62,6 +65,7 @@ Loaded helper: get_bitcoin_prices_in_usd
 Loaded helper: get_central_bank_rates
 Loaded helper: get_tvshow_ratings_and_details
 Loaded helper: search_and_replace
+Loaded helper: find
 Loaded helper: click_selector
 Loaded helper: close
 Loaded helper: find_and_click_on_expression
@@ -75,6 +79,11 @@ Loaded helper: get_screenshot
 Loaded helper: google_doc_to_markdown
 Loaded helper: google_sheet_to_pandas
 Loaded helper: goto
+Loaded helper: google_search
+Loaded helper: google_patent_search
+Loaded helper: bluesky_search
+Loaded helper: yelp_search
+Loaded helper: hackernews_search
 INFO:     Started server process [71093]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
@@ -136,7 +145,7 @@ Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidi
 query>> -p docs/turnbull-speech.pdf "what is Malcolm Turnbull advocating for?"
 ```
 
-![](docs/2024-07-03-16-28-03.png)
+![](docs/2025-04-19-21-54-56.png)
 
 LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extract text properly) and supply the LLM with the text as content for queries.
 
@@ -376,7 +385,7 @@ The code that performs error correction starts [here](https://github.com/9600dev
 
 You can define any arbitrary helper, and add it to the Python Runtime in ```pythonRuntime.setup()```. It'll automatically generate the helper tool's one-shot prompt example for the LLM, and will appear in the LLM responses for Python generated code. The LLMVM runtime will sort out the binding and marshalling of arguments via llm_bind().
 
-Here are the list of helpers written so far:
+Example helpers included (there are many more):
 
 ```python
 def BCL.datetime(self: object, expr: object, timezone: object) -> datetime  # Returns a datetime object from a string using datetime.strftime(). Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days"), datetime("now", "Australia/Brisbane")
@@ -518,6 +527,56 @@ This prototype shows that LLM's are capable of taking a user task, reasoning abo
 
 ## Other cute stuff
 
+#### Run arbitrary python code inside a message thread
+
+```python
+query>> generate a compound interest method
+
+<helpers>
+def calculate_compound_interest(principal, rate, time, compounds_per_year=1):
+    final_amount = principal * (1 + rate/compounds_per_year)**(compounds_per_year * time)
+    interest_earned = final_amount - principal
+
+    return {
+        "final_amount": final_amount,
+        "interest_earned": interest_earned
+    }
+</helpers>
+```
+
+You can execute arbitrary python that the LLM has created inside <helpers> blocks with `$ code` or by switching to python mode with `:py`.
+
+```python
+query>> $ calculate_compound_interest(100000, 0.05, 10)
+{'final_amount': 162889.4626777442, 'interest_earned': 62889.46267774419}
+```
+
+#### Capturing the output of arbitrary TUI or CLI programs with $(command)
+
+Use the `$(command)` command to capture the output of a TUI or CLI program:
+
+```python
+query>> $(htop)
+```
+
+![](docs/2025-04-19-21-39-11.png)
+
+... htop runs on your terminal screen ...
+Ctrl-C
+
+It then captures the last "frame" of the TUI output and sends it to the LLM:
+
+![](docs/2025-04-19-21-41-24.png)
+
+#### Output the message thread to a HTML file and open Chrome to view:
+
+```python
+query>> :otc
+Opening Chrome
+```
+
+#### The "act" command
+
 You can use the ```act``` command, which will search [awesome prompts](https://github.com/f/awesome-chatgpt-prompts) and set the System Prompt to "act" like the awesome prompt you select.
 
 A fun one is graphing "narrative extraction", which is useful for quickly summarizing news articles:
@@ -545,6 +604,8 @@ Gives us a GraphVis visualization (cut off to fit screen):
 And related narrative extraction + code:
 
 ![](docs/2023-08-29-15-55-13.png)
+
+#### Python code base exploration
 
 Using the LLM to inspect a sourcebase also works quite well:
 
@@ -578,27 +639,23 @@ the client that will shut down the server.
 These days, I mostly run Anthropic's models. Their super fast, cheap, and smart. In my .zshrc, I have aliases for servers and clients, with full performance tracing and debugging enabled:
 
 ```bash
-OPUS="claude-3-opus-20240229"
 SONNET="claude-3-7-sonnet-20250219"
-HAIKU="claude-3-haiku-20240307"
-INSTANT="claude-instant-1.2"
+GEMINIFLASH="gemini-2.5-flash-preview-04-17"
+O3="o3"
 
 # servers
-alias sopus='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llmvm_serve'
-alias ssonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llmvm_serve'
-alias shaiku='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llmvm_serve'
-alias sinstant='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$INSTANT LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" llmvm_serve'
-alias sgpt4o='LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4o" LLMVM_PROFILING="true" llmvm_serve'
+alias ssonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" llmvm_serve'
+alias sflash='GEMINI_API_KEY=$GEMINI_API_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="gemini" LLMVM_MODEL=$GEMINIFLASH LLMVM_PROFILING="true" llmvm_serve'
+alias so3='LLMVM_EXECUTOR="openai" LLMVM_MODEL=$O3 LLMVM_FULL_PROCESSING="true" LLMVM_PROFILING="true" llmvm_serve'
 
 # clients
-alias sonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" LLLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LMMVM_API_BASE="https://api.anthropic.com" llm'
-alias haiku='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$HAIKU LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" llm'
-alias opus='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$OPUS LLMVM_PROFILING="true" llm'
-alias instant='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_MODEL=$INSTANT LLMVM_PROFILING="true" LLMVM_API_BASE="https://api.anthropic.com" llm'
-alias gpt4o='LLMVM_EXECUTOR="openai" LLMVM_MODEL="gpt-4o" LLMVM_PROFILING="true" llm'
+alias sonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" llm'
+alias flash='GEMINI_API_KEY=$GEMINI_API_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="gemini" LLMVM_MODEL=$GEMINIFLASH LLMVM_PROFILING="true" llm'
+alias o3='OPENAI_API_KEY=$OPENAI_API_KEY LLMVM_EXECUTOR="openai" LLMVM_MODEL=$O3 LLMVM_FULL_PROCESSING="true" LLMVM_PROFILING="true" llm'
 
-alias h=haiku
-alias l=gpt4o
+alias llm=sonnet
+alias f=flash
+alias l=o3
 ```
 
 And the zsh functions:
@@ -622,7 +679,7 @@ function llmvm_serve() {
 And then it's as simple as:
 
 ```bash
-$ h "hello world"
+$ llm "hello world"
 
 Assistant: Hello! I'm an AI assistant created by Anthropic. How can I help you today?
 ```
