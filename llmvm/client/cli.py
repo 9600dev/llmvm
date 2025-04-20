@@ -1639,7 +1639,7 @@ def new(
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to send message to. The default is create new thread (or use last thread if in repl mode).')
 @click.option('--path', '-p', callback=parse_path, required=False, multiple=True,
-              help='Adds a single file, multiple files, directory of files, glob, or url to the User message stack.')
+              help='Adds a single file, multiple files, directory of files, glob, or url to the User message stack. If using a glob, put inside "" quotes.')
 @click.option('--path_names', '-pn', callback=parse_path, required=False, multiple=True,
               help='Adds a single file name, multiple file names, directory of file names, glob, or url to add to User message stack.')
 @click.option('--context', '-t', required=False, multiple=True,

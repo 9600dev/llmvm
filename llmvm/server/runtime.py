@@ -102,6 +102,13 @@ class CallWrapper:
         raise AttributeError(f"'{self.wrapped_class.__class__.__name__}' object has no attribute '{name}'")
 
 
+def m_isinstance(meta, type) -> bool:
+    if isinstance(meta, FunctionCallMeta):
+        return isinstance(meta.result(), type)
+
+    return isinstance(meta, type)
+
+
 class Runtime:
     """
     The runtime class is responsible for:
@@ -352,7 +359,7 @@ class Runtime:
             )
             return PandasMeta(expr_str=expr_str, pandas_df=pd.DataFrame(assistant.get_str()))
 
-        if isinstance(expr, str) and 'FileContent' in expr:
+        if m_isinstance(expr, str) and 'FileContent' in expr:
             # sometimes the LLM generates code which is the "FileContent(...)" representation of the variable
             # rather than the actual FileContent variable
             try:
@@ -363,14 +370,14 @@ class Runtime:
                 return pandas_bind_with_llm(expr)
 
         elif (
-            isinstance(expr, str)
+            m_isinstance(expr, str)
             and (
                 expr.startswith('gsheet://') or expr.startswith('https://docs.google.com/spreadsheets/')
             )
         ):
             return Helpers.get_google_sheet(expr)
         elif (
-            isinstance(expr, str)
+            m_isinstance(expr, str)
             and ('.csv' in expr or expr.startswith('http'))
         ):
             try:
@@ -387,15 +394,15 @@ class Runtime:
             except Exception as _:
                 return pandas_bind_with_llm(expr)
 
-        elif isinstance(expr, list) or isinstance(expr, dict):
+        elif m_isinstance(expr, list) or m_isinstance(expr, dict):
             df = pd.DataFrame(expr)
             return PandasMeta(expr_str=str(expr), pandas_df=df)
 
-        elif isinstance(expr, FileContent):
+        elif m_isinstance(expr, FileContent):
             df = pd.read_csv(expr.url)
             return PandasMeta(expr_str=expr.url, pandas_df=df)
 
-        elif isinstance(expr, str) and os.path.exists(os.path.expanduser(expr)):
+        elif m_isinstance(expr, str) and os.path.exists(os.path.expanduser(expr)):
             df = pd.read_csv(os.path.expanduser(expr))
             return PandasMeta(expr_str=os.path.expanduser(expr), pandas_df=df)
 
@@ -435,7 +442,7 @@ class Runtime:
             os.makedirs(os.path.expanduser(memory_dir) + f'/{self.thread_id}')
 
         with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{filename}', 'w') as f:
-            if isinstance(content, list):
+            if m_isinstance(content, list):
                 for c in content:
                     f.write(f'{c.get_str()}\n')
             elif isinstance(content, str):
@@ -464,7 +471,7 @@ class Runtime:
             if not os.path.exists(os.path.expanduser(memory_dir) + f'/{self.thread_id}'):
                 os.makedirs(os.path.expanduser(memory_dir) + f'/{self.thread_id}')
 
-            if not isinstance(value, list):
+            if not m_isinstance(value, list):
                 value = [value]  # type: ignore
 
             values = []
@@ -561,8 +568,8 @@ class Runtime:
         downloader = WebAndContentDriver(cookies=cookies)
         download_params: list[DownloadParams] = []
 
-        if not isinstance(expr, (list, tuple)):
-            expr = [expr]
+        if not m_isinstance(expr, list):
+            expr = [expr]  # type: ignore
 
         expr = Helpers.flatten(expr)
 
@@ -572,8 +579,8 @@ class Runtime:
                 real_url = url
             elif isinstance(url, SearchResult):
                 real_url = url.url
-            else:
-                raise ValueError(f'Unknown type for url: {type(url)}')
+            elif 'url' in url:
+                real_url = url['url']
 
             download_params.append({
                 'url': real_url,
@@ -582,13 +589,13 @@ class Runtime:
             })
 
         if len(download_params) > 5:
-            raise ValueError('Too many downloads requested, max is 5')
+            raise ValueError('Too many downloads requested, max is 5, got {}'.format(len(download_params)))
 
         result = asyncio.run(downloader.download_multiple_async(downloads=download_params))
         return [content for _, content in result]
 
     def coerce(self, expr, type_name: Union[str, Type]) -> str:
-        if isinstance(type_name, type):
+        if m_isinstance(type_name, type):
             type_name = type_name.__name__
 
         logging.debug(f'coerce({str(expr)[:50]}, {str(type_name)}) length of expr: {len(str(expr))}')
@@ -630,7 +637,7 @@ class Runtime:
     def llm_call(self, expr_list: list[Any] | Any, llm_instruction: str) -> Content:
         logging.debug(f'llm_call({str(expr_list)[:20]}, {repr(llm_instruction)})')
 
-        if not isinstance(expr_list, list):
+        if not m_isinstance(expr_list, list):
             expr_list = [expr_list]
 
         # search returns a list of MarkdownContent objects, and the llm_call is typically
@@ -735,7 +742,7 @@ class Runtime:
 
     def result(self, expr, check_answer: bool = True) -> Content:
         def __result(expr):
-            if isinstance(expr, Content):
+            if m_isinstance(expr, Content):
                 return expr
             else:
                 return TextContent(Helpers.str_get_str(expr))
@@ -743,7 +750,7 @@ class Runtime:
         logging.debug(f'PythonRuntime.result({Helpers.str_get_str(expr)[:20]})')
 
         # if we have a list of answers, maybe just return them.
-        if isinstance(expr, list) and all([isinstance(e, Assistant) for e in expr]):
+        if m_isinstance(expr, list) and all([m_isinstance(e, Assistant) for e in expr]):
             # collapse the assistant answers and continue
             expr = cast(list[Assistant], expr)
             last = expr[-1]

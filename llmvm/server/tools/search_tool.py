@@ -61,7 +61,9 @@ class Search():
                     snippet=result.description,
                     engine='Google',
                 ))
-            return return_results
+
+            return return_results[0:total_links_to_return]
+
 
         if not Container().get_config_variable('SERPAPI_API_KEY'):
             return python_library_google_search(query=expr)

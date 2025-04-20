@@ -225,10 +225,14 @@ class WebAndContentDriver():
             list of tuples containing (original_download_params, content)
         """
 
+        if not isinstance(downloads, list):
+            downloads = [downloads]
+
+        if isinstance(downloads, list):
+            downloads = Helpers.flatten(downloads)
+
         if not all('url' in d for d in downloads):
             raise ValueError('All downloads must be DownloadParams objects.')
-
-        downloads = Helpers.flatten(downloads)
 
         # Clean up URLs
         for download in downloads:
