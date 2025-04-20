@@ -765,6 +765,9 @@ class ExecutionController(Controller):
             prompt_name=self.__execution_prompt(self.get_executor(), model, thinking),
             template={
                 'functions': '\n'.join(functions),
+                'context_window_tokens': str(self.get_executor().max_input_tokens()),
+                'context_window_words': str(int(self.get_executor().max_input_tokens() * 0.75)),
+                'context_window_bytes': str(int(self.get_executor().max_input_tokens() * 4))
             },
             user_token=self.get_executor().user_token(),
             assistant_token=self.get_executor().assistant_token(),
@@ -891,6 +894,20 @@ class ExecutionController(Controller):
                 response.message = [TextContent(response.get_str().replace('</complete>', ''))]
                 response.stop_token = '</complete>'
 
+            if (
+                response.stop_reason == 'end_turn'
+                and response.stop_token == ''
+                and self.get_executor().name() == 'anthropic'
+                and '<helpers>' in response.get_str().strip()
+                and not '</helpers>' in response.get_str().strip()
+            ):
+                # check to see if this is an unterminated <helpers> block
+                # for whatever reason, anthropic seems to have regressed on this lately.
+                if PythonRuntimeHost.get_helpers_code_blocks(response.get_str().strip() + '\n</helpers>'):
+                    response.stop_token = '</helpers>'
+                    response.stop_reason = 'stop_sequence'
+                    response.message = [TextContent(response.get_str().strip() + '\n</helpers>')]
+
             # Two Assistant messages in a row: we don't want two assistant messages in a row (which is what happens if you're asking
             # for a continuation), so we remove the last Assistant message and replace it with the Assistant response
             # we just got, plus the previous Assistant response.
@@ -904,7 +921,7 @@ class ExecutionController(Controller):
 
             # extract any code blocks the Assistant wants to run
             assistant_response_str = response.get_str().replace('Assistant:', '').strip()
-            code_blocks: list[str] = PythonRuntimeHost.get_code_blocks(assistant_response_str)
+            code_blocks: list[str] = PythonRuntimeHost.get_helpers_code_blocks(assistant_response_str)
             code_blocks_remove = []
 
             # filter code_blocks we've already seen

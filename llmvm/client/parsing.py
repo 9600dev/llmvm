@@ -9,7 +9,7 @@ import urllib.parse
 from llmvm.common.objects import Content, ImageContent, MarkdownContent, MessageModel, PdfContent, FileContent, SessionThreadModel, TextContent, User, Message, Assistant, System
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from typing import List, Sequence
+from typing import List, Sequence, Set
 from urllib.parse import urlparse
 from asyncio import CancelledError
 
@@ -151,7 +151,74 @@ def parse_message_thread(message: str, actions: list[str]):
     return messages
 
 
-def parse_path(ctx, param, value) -> List[str]:
+def parse_path(ctx, param, raw_value) -> List[str]:
+    if not raw_value:
+        return []
+
+    # 1. normalise to a flat list of tokens
+    if isinstance(raw_value, (tuple, list)):
+        tokens = list(raw_value)
+    else:                       # str
+        # honour quotes/back‑slashes the same way a POSIX shell would
+        tokens = shlex.split(raw_value)
+
+    # 2. expand brace globs first (so "{a,b}.py" becomes two tokens, etc.)
+    expanded_tokens: List[str] = []
+    for tok in tokens:
+        if "{" in tok and "}" in tok:
+            expanded_tokens.extend(Helpers.glob_brace(tok))
+        else:
+            expanded_tokens.append(tok)
+    tokens = expanded_tokens
+
+    included: List[str] = []
+    excluded: Set[str] = set()
+
+    for tok in tokens:
+        tok = os.path.expanduser(tok)     # ~ or ~user
+
+        # 2. exclusions start with !
+        if tok.startswith("!"):
+            pattern = tok[1:]
+            matches = glob.glob(pattern, recursive=Helpers.is_glob_recursive(pattern))
+            if matches:
+                excluded.update(matches)
+            else:                         # nothing matched → exclude the literal
+                excluded.add(pattern)
+            continue
+
+        # 3. http/https are passed through untouched
+        if tok.startswith(("http://", "https://")):
+            included.append(tok)
+            continue
+
+        # 4. plain directory → recurse fully
+        if os.path.isdir(tok):
+            for dirpath, _, filenames in os.walk(tok):
+                included.extend(os.path.join(dirpath, f) for f in filenames)
+            continue
+
+        # 5. plain file
+        if os.path.isfile(tok):
+            included.append(tok)
+            continue
+
+        # 6. glob pattern
+        if Helpers.is_glob_pattern(tok):
+            matches = glob.glob(tok, recursive=Helpers.is_glob_recursive(tok))
+            included.extend(matches if matches else [tok])   # keep literal if no match
+            continue
+
+        # 7. anything else → keep literal token
+        included.append(tok)
+
+    # 8. apply exclusions and deduplicate while preserving order
+    result = [p for p in included if p not in excluded]
+    result = list(dict.fromkeys(result))   # stable dedupe
+    return result
+
+
+def parse_path_deprecated(ctx, param, value) -> List[str]:
     def parse_helper(value, exclusions):
         files = []
         # deal with ~
@@ -180,7 +247,7 @@ def parse_path(ctx, param, value) -> List[str]:
                 brace_items = Helpers.flatten([Helpers.glob_brace(item) for item in value if '{' in item and '}' in item])
                 files = files + brace_items
             else:
-                for filepath in glob.glob(item, recursive=Helpers.is_glob_recursive(item)):
+                for filepath in glob.glob(item, recursive=Helpers.is_glob_recursive(value)):
                     files.append(filepath)
         elif item.startswith('http'):
             files.append(item)
@@ -254,34 +321,34 @@ def parse_command_string(s, command):
         if option and not option.is_flag:
             tokens.append(part)
             path_part = ''
-            # special case path because of strange shell behavior with " "
-            if part == '-p' or part == '--path':
-                z = i
-                while (
-                    (z + 1 < len(parts))
-                    and (
-                        parse_path(None, None, parts[z + 1])
-                        or Helpers.glob_brace(parts[z + 1])
-                        or parts[z + 1].startswith('!')
-                    )
-                ):
-                    path_part += parts[z + 1] + ' '
-                    # tokens.append(parts[z + 1])
-                    skip_n += 1
-                    z += 1
-                if path_part:
-                    path_part = path_part.strip()
-                    tokens.append(f'{path_part}')
-                else:
-                    # couldn't find any path, so display that to the user
-                    logging.debug(f'Glob pattern not found for path: {parts[z + 1]}')
-                    z += 1
-                    skip_n += 1
-                    tokens.append('')
-            else:
-                if i + 1 < len(parts):
-                    tokens.append(parts[i + 1])
-                    skip_n += 1
+            # # special case path because of strange shell behavior with " "
+            # if part == '-p' or part == '--path':
+            #     z = i
+            #     while (
+            #         (z + 1 < len(parts))
+            #         and (
+            #             parse_path(None, None, parts[z + 1])
+            #             or Helpers.glob_brace(parts[z + 1])
+            #             or parts[z + 1].startswith('!')
+            #         )
+            #     ):
+            #         path_part += parts[z + 1] + ' '
+            #         # tokens.append(parts[z + 1])
+            #         skip_n += 1
+            #         z += 1
+            #     if path_part:
+            #         path_part = path_part.strip()
+            #         tokens.append(f'{path_part}')
+            #     else:
+            #         # couldn't find any path, so display that to the user
+            #         logging.debug(f'Glob pattern not found for path: {parts[z + 1]}')
+            #         z += 1
+            #         skip_n += 1
+            #         tokens.append('')
+            # else:
+            if i + 1 < len(parts):
+                tokens.append(parts[i + 1])
+                skip_n += 1
         elif option and option.is_flag:
             tokens.append(part)
         else:
@@ -293,7 +360,6 @@ def parse_command_string(s, command):
 
 def get_path_as_messages(
     path: List[str],
-    upload: bool = False,
     allowed_file_types: List[str] = []
 ) -> List[User]:
 
@@ -324,11 +390,8 @@ def get_path_as_messages(
             if os.path.isdir(file_path):
                 continue
             elif result.path.endswith('.pdf'):
-                if upload:
-                    with open(file_path, 'rb') as f:
-                        files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
-                else:
-                    files.append(User(PdfContent(b'', url=os.path.abspath(file_path))))
+                with open(file_path, 'rb') as f:
+                    files.append(User(PdfContent(f.read(), url=os.path.abspath(file_path))))
             elif result.path.endswith('.md'):
                 with open(file_path, 'r') as f:
                     file_content = f.read()
@@ -349,19 +412,12 @@ def get_path_as_messages(
                 except UnicodeDecodeError:
                     raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')
             elif Helpers.classify_image(open(file_path, 'rb').read()) in ['image/jpeg', 'image/png', 'image/webp']:
-                if upload:
-                    with open(file_path, 'rb') as f:
-                        files.append(User(ImageContent(f.read(), url=os.path.abspath(file_path))))
-                else:
-                    raw_image_data = open(file_path, 'rb').read()
-                    files.append(User(ImageContent(Helpers.load_resize_save(raw_image_data), url=os.path.abspath(file_path))))
+                raw_image_data = open(file_path, 'rb').read()
+                files.append(User(ImageContent(Helpers.load_resize_save(raw_image_data), url=os.path.abspath(file_path))))
             else:
                 try:
                     with open(file_path, 'r') as f:
-                        if upload:
-                            file_content = f.read().encode('utf-8')
-                        else:
-                            file_content = b''
+                        file_content = f.read().encode('utf-8')
                         files.append(User(FileContent(file_content, url=os.path.abspath(file_path))))
                 except UnicodeDecodeError:
                     raise ValueError(f'File {file_path} is not a valid text file, pdf or image.')

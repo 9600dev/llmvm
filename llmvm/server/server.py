@@ -14,7 +14,7 @@ import jsonpickle
 import nest_asyncio
 import rich
 import uvicorn
-from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request,
+from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request, Response,
                      UploadFile)
 from fastapi.param_functions import File
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -357,17 +357,6 @@ async def get_threads():
             threads.append(raw)
 
     return threads
-    threads = []
-    for id in cache_session.keys():
-        raw = cache_session.get(id)
-        model = SessionThreadModel(**raw) if isinstance(raw, dict) else raw
-        threads.append(model.model_dump())
-    return threads
-
-
-    model = SessionThreadModel(**raw) if isinstance(raw, dict) else raw
-    result = [cast(SessionThreadModel, cache_session.get(id)).model_dump() for id in cache_session.keys()]
-    return result
 
 @app.get('v1/chat/clear_threads')
 async def clear_threads() -> None:
@@ -378,6 +367,57 @@ async def clear_threads() -> None:
 async def health():
     logging.debug('/health')
     return {'status': 'ok'}
+
+@app.get('/python')
+async def execute_python_in_thread(thread_id: int, python_str: str):
+    logging.debug('/python')
+
+    if thread_id <= 0:
+        raise HTTPException(status_code=400, detail='Thread id must be greater than 0')
+
+    thread = __get_thread(thread_id)
+
+    # locals_dict needs to be set, grab it from the cache
+    if cache_session.has_key(thread.id) and not thread.locals_dict:
+        thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore
+
+    messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
+
+    from llmvm.server.python_runtime_host import PythonRuntimeHost
+    python_runtime_host = PythonRuntimeHost(
+        controller=get_controller(),
+        vector_search=vector_search,
+        answer_error_correcting=False,
+        thread_id=thread.id
+    )
+    runtime_state = AutoGlobalDict(thread.locals_dict)
+    try:
+        list_answers = python_runtime_host.compile_and_execute_code_block(
+            python_code=python_str,
+            messages_list=messages,
+            helpers=helpers,
+            runtime_state=runtime_state,
+        )
+        state_result = python_runtime_host.get_last_statement(python_str, runtime_state=runtime_state)
+    except Exception as ex:
+        logging.error(f'PythonRuntime.compile_and_execute() threw an exception while executing:\n{python_str}\n')
+        return Response(jsonpickle.encode({'var_name': '', 'var_value': '', 'results': [], 'error': str(ex)}, unpicklable=False), media_type='application/json')
+
+    if state_result or list_answers:
+        var_name, var_value = state_result or ('', '')
+        runtime_dict_cache.set(thread.id, __get_unserializable_locals(runtime_state))
+        thread.locals_dict = Helpers.serialize_locals_dict(runtime_state)
+        cache_session.set(thread.id, thread)
+
+        return_result = {
+            'var_name': var_name,
+            'var_value': var_value,
+            'results': list_answers,
+            'error': ''
+        }
+        return Response(jsonpickle.encode(return_result, unpicklable=False), media_type='application/json')
+    else:
+        return Response(jsonpickle.encode({'var_name': '', 'var_value': '', 'results': [], 'error': ''}, unpicklable=False), media_type='application/json')
 
 @app.post('/v1/chat/cookies', response_model=None)
 async def set_cookies(requests: Request):

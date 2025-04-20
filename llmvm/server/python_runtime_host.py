@@ -59,7 +59,7 @@ class PythonRuntimeHost:
         self.executed_code_blocks: list[PythonRuntimeBlockState] = []
 
     @staticmethod
-    def get_code_blocks(code: str) -> List[str]:
+    def get_helpers_code_blocks(code: str) -> List[str]:
         lines = code.splitlines(keepends=True)
         blocks = []
         current_block_lines = []
@@ -84,6 +84,56 @@ class PythonRuntimeHost:
                 current_block_lines.append(line)
 
         return blocks
+
+    @staticmethod
+    def get_last_statement(
+        code: str,
+        runtime_state: AutoGlobalDict,
+    ) -> Optional[Tuple[str, Any]]:
+
+        tree = ast.parse(code, mode="exec")
+        body = tree.body
+
+        if body and isinstance(body[-1], ast.Expr):
+            expr_code = compile(ast.Expression(body[-1].value),
+                                "<expr>", mode="eval")
+            value = eval(expr_code, runtime_state)
+            runtime_state["_"] = value
+            return ("_", value)
+
+        # 3b ── Otherwise look backwards for the last global assignment/def
+        for node in reversed(body):
+            if isinstance(node, ast.Assign):
+                target = node.targets[0]
+                if isinstance(target, ast.Name):
+                    name = target.id
+                    return (name, runtime_state.get(name))
+
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                name = node.target.id
+                return (name, runtime_state.get(name))
+
+            elif isinstance(node, (ast.AugAssign, ast.For, ast.With)) and isinstance(
+                getattr(node, "target", getattr(node, "optional_vars", None)), ast.Name
+            ):
+                name = (
+                    node.target.id
+                    if hasattr(node, "target")
+                    else node.optional_vars.id
+                )
+                return (name, runtime_state.get(name))
+
+            elif isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                name = node.name
+                return (name, runtime_state.get(name))
+
+            elif isinstance(node, ast.Try):
+                for h in reversed(node.handlers):
+                    if h.name:
+                        return (h.name, runtime_state.get(h.name))
+
+        # Nothing suitable found
+        return None
 
     @staticmethod
     def get_last_assignment(

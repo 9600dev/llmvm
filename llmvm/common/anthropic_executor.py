@@ -70,13 +70,13 @@ class AnthropicExecutor(Executor):
                 result = cast(dict[str, Any], message.underlying.model_dump())
                 return {
                     'role': message.role(),
-                    'content': result['content']
+                    'content': [{'type': 'text', 'text': c['text'].strip()} for c in result['content']]
                 }
             else:
                 result = json.loads(jsonpickle.encode(message.underlying, unpicklable=False, make_refs=False))  # type: ignore
                 return {
                     'role': message.role(),
-                    'content': result['content']
+                    'content': [{'type': 'text', 'text': c['text'].strip()} for c in result['content']]
                 }
 
         for content in message.message:

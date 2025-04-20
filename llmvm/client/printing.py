@@ -528,9 +528,6 @@ class HTMLPrinter:
     </style>
 </head>
 <body>
-    <header>
-        <h1>Message Conversation</h1>
-    </header>
     <div class="container">
 """
         return HEADER
@@ -623,7 +620,7 @@ class HTMLPrinter:
         # Default if no clear match
         return "plaintext"
 
-    def get_str(self, messages: list[Message]):
+    def get_str(self, messages: list[Message]) -> str:
         import markdown2
         import re
         import html

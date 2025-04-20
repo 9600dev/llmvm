@@ -1,0 +1,1 @@
+Get a list of the top 10 NYSE stocks, then figure out the five main players on the executive team of each of the stocks. Just need their names, titles, and a sentence on what they do at the company. Emit the result as a short markdown report.

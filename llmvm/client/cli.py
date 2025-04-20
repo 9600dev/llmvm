@@ -16,6 +16,7 @@ from typing import Optional, Sequence, cast
 
 import click
 import httpx
+import jsonpickle
 import nest_asyncio
 import pyperclip
 import rich
@@ -30,6 +31,7 @@ from prompt_toolkit.completion import WordCompleter, merge_completers
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
+from prompt_toolkit.filters import Condition
 from rich.markdown import Markdown
 from rich.text import Text
 
@@ -329,8 +331,31 @@ class ThinkingParamType(click.ParamType):
         self.fail(f'{value} is not a valid thinking value. Must be an integer or one of "low", "medium", "high".', param, ctx)
 
 
-THINKING = ThinkingParamType()
+def execute_python_in_thread(python_str: str, id: int, endpoint: str) -> None:
+    async def python_helper():
+        data = ''
+        async with httpx.AsyncClient(timeout=400.0) as client:
+            response = await client.get(f'{endpoint}/python', params={'thread_id': id, 'python_str': python_str})
+            response.raise_for_status()
+            data = response.json()
+        return data
 
+    data = asyncio.run(python_helper())
+    data = cast(dict, data)
+    if data and 'var_name' in data and 'var_value' in data and data['var_name'] and data['var_value']:
+        rich.print(f"{data['var_value']}")
+    if data and 'results' in data and data['results']:
+        for result in data['results']:
+            # answer object
+            if '_result' in result:
+                rich.print(result["_result"])
+    elif data and 'error' in data and data['error']:
+        rich.print(f"{data['error']}")
+
+
+THINKING = ThinkingParamType()
+multiline_enabled = [False]
+python_enabled = [False]
 
 class Repl():
     def __init__(
@@ -393,12 +418,15 @@ class Repl():
         rich.print('[white](Ctrl-e to open $EDITOR for multi-line User prompt)[/white]')
         rich.print('[white](Ctrl-g to open $EDITOR for full message thread editing)[/white]')
         rich.print('[white](Ctrl-r search prompt history)[/white]')
+        rich.print('[white](Ctrl-i multi-line repl toggle)[/white]')
+        rich.print('[white](Ctrl-u python in current thread repl toggle)[/white]')
         rich.print('[white](Ctrl-y+y yank the last message to the clipboard)[/white]')
         rich.print('[white](Ctrl-y+a yank entire message thread to clipboard)[/white]')
         rich.print('[white](Ctrl-y+c yank code blocks to clipboard)[/white]')
         rich.print('[white](Ctrl-y+p paste image from clipboard into message)[/white]')
         rich.print('[white](yy to yank the last message to the clipboard)[/white]')
         rich.print('[white](:w filename to save the current thread to a file)[/white]')
+        rich.print('[white](:wh filename to save the current thread as HTML to a file)[/white]')
         rich.print('[white](:.) to open the LLMVM memory/sandbox directory in finder.')
         rich.print('[white](:ohc open ```html block in browser)[/white]')
         rich.print('[white](:otc open message thread in browser)[/white]')
@@ -407,6 +435,8 @@ class Repl():
         rich.print('[white](:vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/white]')
         rich.print('[white](:sym show all functions that are defined in <helpers> by the LLM)[/white]')
         rich.print('[white](:csym symbol(arg1,arg2) call the function with arguments)[/white]')
+        rich.print('[white](:py switch python mode to execute python code in the current thread[/white]')
+        rich.print('[white]($ single line python code to execute in the current thread)[/white]')
         rich.print('[white]($(command) to execute a shell command and capture in query)[/white]')
         rich.print('[white]($$(command) to execute a shell command and display to screen)[/white]')
         rich.print('')
@@ -429,6 +459,8 @@ class Repl():
         global current_mode
         global last_thread
         global console
+        global python_enabled
+        global multiline_enabled
 
         ctx = click.Context(cli)
         history = FileHistory(os.path.expanduser('~/.local/share/llmvm/.repl_history'))
@@ -441,6 +473,18 @@ class Repl():
             text = self.open_editor(editor, event.app.current_buffer.text)
             event.app.current_buffer.text = text
             event.app.current_buffer.cursor_position = len(text) - 1
+
+        @kb.add('escape', 'm')
+        def _(event):
+            multiline_enabled[0] = not multiline_enabled[0]
+            rich.print(f"Multiline mode: {'enabled' if multiline_enabled[0] else 'disabled'}. Escape to exit.")
+            self.__redraw(event)
+
+        @kb.add('escape', 'p')
+        def _(event):
+            python_enabled[0] = not python_enabled[0]
+            rich.print('Switching python mode ' + ('on' if python_enabled[0] else 'off'))
+            self.__redraw(event)
 
         @kb.add('c-y', 'y')
         async def _(event):
@@ -588,6 +632,7 @@ class Repl():
             vi_mode=True,
             key_bindings=kb,
             complete_while_typing=True,
+            multiline=Condition(lambda: multiline_enabled[0]),
         )
 
         self.help()
@@ -656,10 +701,11 @@ class Repl():
                 pipe_task = asyncio.create_task(process_pipe_messages(self))
 
                 token_count = get_total_tokens(last_thread) if 'last_thread' in globals() else 0
+                repl_mode = "query" if not python_enabled[0] else "python"
 
-                repl_stats = f'[id: {thread_id}] query>> '
+                repl_stats = f'[id: {thread_id}] {repl_mode}>> '
                 if token_count > 0:
-                    repl_stats = f'[id: {thread_id} n_toks: {token_count}] query>> '
+                    repl_stats = f'[id: {thread_id} n_toks: {token_count}] {repl_mode}>> '
 
                 query = await session.prompt_async(
                     repl_stats,
@@ -671,12 +717,29 @@ class Repl():
 
                 pipe_task.cancel()
 
+                if query == ':py':
+                    python_enabled[0] = not python_enabled[0]
+                    rich.print('Switching python mode ' + ('on' if python_enabled[0] else 'off'))
+                    continue
+
+                # deal with python single liner
+                if query.startswith('$ ') and len(query) > 2:
+                    rest = query.split('$ ')[1]
+                    # execute the python command
+                    ctx.invoke(python,
+                        python_str=rest,
+                        id=thread_id,
+                        endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
+                    )
+                    continue
+
                 # deal with $(...) command substitution
                 if query.startswith('$$(') and query.endswith(')'):
                     command_substitution_result = Helpers.command_substitution(query)
                     console.print(Text.from_ansi(command_substitution_result))
                     continue
 
+                # deal with $(...) command substitution sent to the LLM
                 if (
                     isinstance(query, str)
                     and '$(' in query
@@ -715,12 +778,12 @@ class Repl():
                             rich.print(eval_result)
                     continue
 
-                if query == ':q':
+                if query.startswith(':q'):
                     # quit the assistant
                     tear_down(ctx)
                     break
 
-                if query == ':.':
+                if query.startswith(':.'):
                     thread_id = last_thread.id
                     directory = Container().get_config_variable('memory_directory', 'LLMVM_MEMORY_DIRECTORY', default=f'~/.local/share/llmvm/memory/')
                     # macos only?
@@ -788,7 +851,7 @@ class Repl():
                     filename = query[4:]
                     html_printer = HTMLPrinter(filename)
                     html_printer.print_messages([MessageModel.to_message(message) for message in last_thread_t.messages])
-                    rich.print(f'Thread saved to {filename}')
+                    rich.print(f'HTML thread saved to {filename}')
                     Helpers.find_and_run_chrome(filename)
                     continue
 
@@ -805,12 +868,30 @@ class Repl():
                         Helpers.find_and_run_chrome(temp_file.name)
                     continue
 
+                if query.startswith(':omc'):
+                    last_thread_t: SessionThreadModel = last_thread
+                    with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
+                        last_message = last_thread_t.messages[-1]
+                        html_printer = HTMLPrinter(temp_file.name)
+                        html_printer.print(html_printer.get_str([last_message.to_message()]))
+                        Helpers.find_and_run_chrome(temp_file.name)
+                    continue
+
                 if query.startswith(':otc'):
                     last_thread_t: SessionThreadModel = last_thread
                     with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
                         html_printer = HTMLPrinter(temp_file.name)
                         html_printer.print_messages([MessageModel.to_message(message) for message in last_thread_t.messages])
                         Helpers.find_and_run_chrome(temp_file.name)
+                    continue
+
+                if python_enabled[0]:
+                    # execute the python command
+                    ctx.invoke(python,
+                        python_str=query,
+                        id=thread_id,
+                        endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
+                    )
                     continue
 
                 # see if the first argument is a command
@@ -945,9 +1026,42 @@ def mode(
     rich.print(f'Switching mode from {old_mode} to {current_mode}')
 
 
+@cli.command('python', help='Execute python code in the current thread.')
+@click.argument('python_str', type=str, required=False, default='')
+@click.option('--id', '-i', type=int, required=False, default=0)
+@click.option('--endpoint', '-e', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'))
+def python(
+    python_str: str,
+    id: int,
+    endpoint: str,
+):
+    global last_thread
+    global thread_id
+
+    llmvm_client = LLMVMClient(
+        api_endpoint=endpoint,
+        default_executor_name='anthropic',
+        default_model_name='',
+        api_key='',
+    )
+    last_thread = asyncio.run(llmvm_client.get_thread(id))
+    thread_id = last_thread.id
+    id = thread_id
+
+    if id <= 0:
+        raise ValueError('Thread id must be greater than 0')
+
+    execute_python_in_thread(python_str, id, endpoint)
+
+    last_thread = asyncio.run(llmvm_client.get_thread(id))
+    thread_id = last_thread.id
+
+
 @cli.command('exit', hidden=True)
 def exit():
     tear_down(None)
+
 
 @cli.command('clear', hidden=True)
 def clear():
@@ -960,9 +1074,9 @@ def help():
 
 
 @cli.command('ls', hidden=True)
-@click.argument('args', type=str, required=False, default='')
+@click.argument('args', nargs=-1)
 def ls(args):
-    os.system(f'ls -la --color {args}')
+    os.system('ls -la --color ' + ' '.join(args).strip('"\''))
 
 
 @cli.command('cd', hidden=True)
@@ -1525,11 +1639,11 @@ def new(
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to send message to. The default is create new thread (or use last thread if in repl mode).')
 @click.option('--path', '-p', callback=parse_path, required=False, multiple=True,
-              help='path to a single file, multiple files, directory of files, glob, or url to add to User message stack.')
+              help='Adds a single file, multiple files, directory of files, glob, or url to the User message stack.')
+@click.option('--path_names', '-pn', callback=parse_path, required=False, multiple=True,
+              help='Adds a single file name, multiple file names, directory of file names, glob, or url to add to User message stack.')
 @click.option('--context', '-t', required=False, multiple=True,
               help='a string to add as a context message to the User message stack. Use quotes \"\' .. \'\" for multi-word strings.')
-@click.option('--upload', '-u', is_flag=True, required=True, default=False,
-              help='upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
 @click.option('--direct', '-d', is_flag=True, required=False, default=False,
               help='avoid using LLMVM tools and talk directly to the LLM provider. Default is false.')
 @click.option('--endpoint', '-e', type=str, required=False,
@@ -1555,8 +1669,8 @@ def message(
     message: Optional[str | bytes | Message],
     id: int,
     path: list[str],
+    path_names: list[str],
     context: list[str],
-    upload: bool,
     direct: bool,
     endpoint: str,
     cookies: str,
@@ -1596,12 +1710,22 @@ def message(
         if (compression.startswith('"') and compression.endswith('"')) or (compression.startswith("'") and compression.endswith("'")):  # NOQA
             compression = compression[1:-1]
 
-    if path:
-        context_messages = get_path_as_messages(path, upload, [])
-        logging.debug(f'path: {path}')
-
     if thinking == 0 and Container().get_config_variable('LLMVM_THINKING', default=0):
         thinking = int(Container().get_config_variable('LLMVM_THINKING', default=0))
+
+    if path_names:
+        file_metadata = []
+        for path_name in path_names:
+            if os.path.exists(path_name):
+                file_metadata.append(f"{os.path.abspath(path_name)}, filesize: {os.path.getsize(path_name)} bytes, number of tokens: {float(os.path.getsize(path_name)) * 0.75}")
+        files_text = '\n'.join(file_metadata)
+        if files_text:
+            context_messages.append(User(TextContent(f"You have access to the following files: \n\n {files_text}")))
+            logging.debug(f'path_names: {[os.path.abspath(path_name) for path_name in path_names]}')
+
+    if path:
+        context_messages.extend(get_path_as_messages(path, []))
+        logging.debug(f'path: {path}')
 
     if context:
         for c in reversed(context):

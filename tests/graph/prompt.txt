@@ -1,0 +1,10 @@
+Plot this as a bar graph: 
+
+
+A: 10
+B: 21
+C: 12
+D: 19
+E: 16.5
+
+Then look at the graph image and tell me what color the bars are. 

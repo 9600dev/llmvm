@@ -47,6 +47,9 @@ class PersistentCache:
         return dill.loads(serialized_key)
 
     def _write_cache(self, key: int, value):
+        if not os.path.exists(self.cache_directory):
+            os.makedirs(self.cache_directory)
+
         with open(self.cache_directory + f'/{key}.cache', 'wb') as f:
             dill.dump(value, f)
 
@@ -60,19 +63,28 @@ class PersistentCache:
         if cache_hit:
             return cache_hit
 
+        if not os.path.exists(self.cache_directory):
+            os.makedirs(self.cache_directory)
+
         with open(self.cache_directory + f'/{key}.cache', 'rb') as f:
             value = dill.load(f)
             self.cache[self._serialize_key(key)] = value
             return value
 
     def delete(self, key):
-        del self.cache[self._serialize_key(key)]
-        os.remove(self.cache_directory + f'/{key}.cache')
+        if key in self.cache:
+            del self.cache[self._serialize_key(key)]
+
+        if os.path.exists(self.cache_directory + f'/{key}.cache'):
+            os.remove(self.cache_directory + f'/{key}.cache')
 
     def has_key(self, key):
         return self._serialize_key(key) in self.cache or os.path.exists(self.cache_directory + f'/{key}.cache')
 
     def keys(self) -> List[int]:
+        if not os.path.exists(self.cache_directory):
+            return []
+
         result = [int(f.split('.')[0]) for f in os.listdir(self.cache_directory) if f.endswith('.cache') and f[0].isdigit()]
         return list(sorted(result))
 

@@ -1,0 +1,1 @@
+Get the top 5 NASDAQ stocks by volume, then build a markdown report of the leadership team of each company. You should only include the top 2-5 leaders, their titles, when they joined, and what percentage the stock has risen since they joined. 

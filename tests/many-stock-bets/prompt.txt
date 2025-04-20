@@ -1,0 +1,7 @@
+From the following stock list, figure out what the highest volatility stock is, and give me the odds that it will exceed a 5% daily swing on the next trading day. 
+
+MSFT
+NVDA
+AMD
+GME
+

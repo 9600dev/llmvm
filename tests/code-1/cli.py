@@ -1254,8 +1254,6 @@ def new(
               help='path to a single file, multiple files, directory of files, glob, or url to add to User message stack.')
 @click.option('--context', '-t', required=False, multiple=True,
               help='a string to add as a context message to the User message stack. Use quotes \"\' .. \'\" for multi-word strings.')
-@click.option('--upload', '-u', is_flag=True, required=True, default=False,
-              help='upload the files to the LLMVM server. If false, LLMVM server must be run locally. Default is false.')
 @click.option('--direct', '-d', is_flag=True, required=False, default=False,
               help='avoid using LLMVM tools and talk directly to the LLM provider. Default is false.')
 @click.option('--endpoint', '-e', type=str, required=False,
@@ -1281,7 +1279,6 @@ def message(
     id: int,
     path: list[str],
     context: list[str],
-    upload: bool,
     direct: bool,
     endpoint: str,
     cookies: str,
@@ -1321,7 +1318,7 @@ def message(
             compression = compression[1:-1]
 
     if path:
-        context_messages = get_path_as_messages(path, upload, [])
+        context_messages = get_path_as_messages(path, [])
         logging.debug(f'path: {path}')
 
     if context:

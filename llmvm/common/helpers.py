@@ -2,6 +2,7 @@ import ast
 import asyncio
 import base64
 import datetime as dt
+import fcntl
 import glob
 import importlib
 import inspect
@@ -11,10 +12,17 @@ import json
 import marshal
 import math
 import os
+import pty
 import re
+import selectors
+import signal
+import struct
 import subprocess
 import platform
+import sys
 import tempfile
+import termios
+import threading
 import traceback
 import types
 from bs4 import BeautifulSoup
@@ -40,6 +48,7 @@ import psutil
 from dateutil.relativedelta import relativedelta
 from docstring_parser import parse
 from PIL import Image
+import pyte
 
 from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent, HTMLContent,
                                   Message, PandasMeta, Statement, StreamNode, SupportedMessageContent, System, TextContent, User)
@@ -78,7 +87,65 @@ def get_stream_handler() -> Optional[Callable[[AstNode], Awaitable[None]]]:
     return None
 
 
+CSI_RE = re.compile(rb'\x1b\[[0-?]*[ -/]*[@-~]')
+
+
+def _winsize():
+    rows, cols = os.get_terminal_size(sys.stdout.fileno())
+    return rows, cols
+
+
+def _set_winsize(fd, rows, cols):
+    fcntl.ioctl(fd, termios.TIOCSWINSZ,
+                struct.pack("HHHH", rows, cols, 0, 0))
+
+
 class Helpers():
+    @staticmethod
+    def run_streaming(cmd: str, tui_threshold: float = 0.30) -> str:
+        master, slave = pty.openpty()
+
+        _set_winsize(slave, *_winsize())
+        signal.signal(signal.SIGWINCH,
+                    lambda *_: _set_winsize(slave, *_winsize()))
+
+        proc = subprocess.Popen(cmd, shell=True,
+                                stdin=slave, stdout=slave, stderr=slave,
+                                close_fds=True, preexec_fn=os.setsid, text=False)
+        os.close(slave)
+
+        sel       = selectors.DefaultSelector()
+        sel.register(master, selectors.EVENT_READ)
+        captured  = bytearray()
+
+        try:
+            while True:
+                for key, _ in sel.select():
+                    chunk = os.read(key.fd, 4096)
+                    if not chunk:
+                        raise StopIteration
+
+                    os.write(sys.stdout.fileno(), chunk)
+                    captured.extend(chunk)
+        except KeyboardInterrupt:
+            os.killpg(proc.pid, signal.SIGINT)
+        except StopIteration:
+            pass
+        finally:
+            sel.unregister(master)
+            os.close(master)
+            proc.wait()
+
+        tui = captured.count(b'\x1b') / max(1, len(captured)) >= tui_threshold
+
+        if tui:
+            scr, stream = pyte.Screen(*_winsize()), pyte.Stream(pyte.Screen(0, 0))
+            stream.screen = scr  # type: ignore
+            stream.feed(captured.decode('utf‑8', 'ignore'))
+            return "\n".join(scr.display)
+
+        return CSI_RE.sub(b'', captured).replace(b'\r', b'').decode('utf‑8', errors='replace')
+
     @staticmethod
     def serialize_locals_dict(locals_dict: dict[str, Any]) -> dict[str, Any]:
         temp_dict = {}
@@ -1026,13 +1093,22 @@ class Helpers():
     def command_substitution(input_string):
         def execute_command(match):
             command = match.group(1)
+
+            cmd = Helpers.command_substitution(command)
+
             try:
-                # Recursively handle nested substitutions
-                command = Helpers.command_substitution(command)
-                result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
-                return result.stdout.strip()
-            except subprocess.CalledProcessError as e:
+                return Helpers.run_streaming(cmd).strip()
+            except Exception as e:
                 return f"Error: {e}"
+
+            # try:
+            #     # Recursively handle nested substitutions
+            #     command = Helpers.command_substitution(command)
+            #     result = subprocess.run(command, shell=True, capture_output=True, text=True, check=True)
+            #     return result.stdout.strip()
+            # except subprocess.CalledProcessError as e:
+            #     return f"Error: {e}"
+
 
         pattern = r'\$\(((?:[^()]+|\((?:[^()]+|\([^()]*\))*\))*)\)'
         return re.sub(pattern, execute_command, input_string)
@@ -2027,7 +2103,7 @@ class Helpers():
         return code_blocks
 
     @staticmethod
-    def extract_code_blocks(markdown_text):
+    def extract_code_blocks(markdown_text) -> list:
         # Pattern to match code blocks with or without specified language
         pattern = r'```(\w+\n)?(.*?)```'
 
