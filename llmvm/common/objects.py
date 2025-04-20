@@ -1596,6 +1596,172 @@ class FunctionCallMeta(Call):
         a, b = coerce_types(other, self._result)
         return a <= b  # type: ignore
 
+    def __eq__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a == b
+
+    def __ne__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a != b
+
+    def __bool__(self):
+            return bool(self._result)
+
+    def __hash__(self):
+        return hash(self._result)
+
+    def __int__(self):
+        return int(self._result)          # type: ignore
+
+    def __index__(self):
+        return self._result.__index__()   # type: ignore
+
+    def __bytes__(self):
+        return bytes(self._result)        # type: ignore
+
+    def __complex__(self):
+        return complex(self._result)      # type: ignore
+
+    def __iter__(self):
+            return iter(self._result)         # type: ignore
+
+    def __next__(self):
+        return next(self._result)         # type: ignore  # works if _result is an iterator
+
+    def __reversed__(self):
+        return reversed(self._result)     # type: ignore
+
+    def __contains__(self, item):
+        return item in self._result       # type: ignore
+
+    def __call__(self, *args, **kwargs):
+        return self._result(*args, **kwargs)  # type: ignore
+
+    async def __aenter__(self):
+        return await self._result.__aenter__()    # type: ignore
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        return await self._result.__aexit__(exc_type, exc_val, exc_tb)  # type: ignore
+
+    def __abs__(self):
+        return abs(self._result)          # type: ignore
+
+    def __neg__(self):
+        return -self._result              # type: ignore
+
+    def __pos__(self):
+        return +self._result              # type: ignore
+
+    def __invert__(self):
+        return ~self._result              # type: ignore
+
+    def __await__(self):
+        return self._result.__await__()   # type: ignore
+
+    def __aiter__(self):
+        return self._result.__aiter__()   # type: ignore
+
+    async def __anext__(self):
+        return await self._result.__anext__()  # type: ignore
+
+    def __floordiv__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a // b                     # type: ignore
+
+    def __rfloordiv__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a // b                     # type: ignore
+
+    def __mod__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a % b                      # type: ignore
+
+    def __rmod__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a % b                      # type: ignore
+
+    def __pow__(self, other, modulo=None):
+        a, b = coerce_types(self._result, other)
+        return pow(a, b, modulo) if modulo is not None else pow(a, b)   # type: ignore
+
+    def __rpow__(self, other):
+        a, b = coerce_types(other, self._result)
+        return pow(a, b)                  # type: ignore
+
+    def __matmul__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a @ b                      # type: ignore
+
+    def __rmatmul__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a @ b                      # type: ignore
+
+    def __lshift__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a << b                     # type: ignore
+
+    def __rlshift__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a << b                     # type: ignore
+
+    def __rshift__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a >> b                     # type: ignore
+
+    def __rrshift__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a >> b                     # type: ignore
+
+    def __and__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a & b                      # type: ignore
+
+    def __rand__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a & b                      # type: ignore
+
+    def __or__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a | b                      # type: ignore
+
+    def __ror__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a | b                      # type: ignore
+
+    def __xor__(self, other):
+        a, b = coerce_types(self._result, other)
+        return a ^ b                      # type: ignore
+
+    def __rxor__(self, other):
+        a, b = coerce_types(other, self._result)
+        return a ^ b                      # type: ignore
+
+    def __setitem__(self, key, value):
+        if hasattr(self._result, '__setitem__'):
+            self._result[key] = value     # type: ignore
+        else:
+            raise TypeError(f"{type(self._result).__name__} does not support item assignment")
+
+    def __dir__(self):
+        return sorted(set(dir(type(self)) + dir(self.__dict__) + dir(self._result)))
+
+    def __copy__(self):
+        import copy
+        return copy.copy(self._result)    # type: ignore
+
+    def __deepcopy__(self, memo):
+        import copy
+        return copy.deepcopy(self._result, memo)  # type: ignore
+
+    def __delitem__(self, key):
+        if hasattr(self._result, '__delitem__'):
+            del self._result[key]         # type: ignore
+        else:
+            raise TypeError(f"{type(self._result).__name__} does not support item deletion")
+
+    def __len__(self):
+        return len(self._result)  # type: ignore
+
     def __format__(self, format_spec):
         return format(self._result, format_spec)
 
