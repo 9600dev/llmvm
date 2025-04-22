@@ -11,6 +11,62 @@ import pty
 import termios
 import struct
 
+TOKEN_RE = re.compile(r'(<[^>]+>)', re.IGNORECASE)
+
+SPECIAL_KEYS = {
+    # printable controls
+    '<ENTER>':      b'\n',
+    '<TAB>':        b'\t',
+    '<ESC>':        b'\x1b',
+    '<BACKSPACE>':  b'\x7f',
+
+    # common control‑letter combinations
+    '<CTRL-A>': b'\x01',  '<CTRL-B>': b'\x02',  '<CTRL-C>': b'\x03',
+    '<CTRL-D>': b'\x04',  '<CTRL-E>': b'\x05',  '<CTRL-F>': b'\x06',
+    '<CTRL-G>': b'\x07',  '<CTRL-H>': b'\x08',  '<CTRL-I>': b'\x09',
+    '<CTRL-J>': b'\x0a',  '<CTRL-K>': b'\x0b',  '<CTRL-L>': b'\x0c',
+    '<CTRL-M>': b'\x0d',  '<CTRL-N>': b'\x0e',  '<CTRL-O>': b'\x0f',
+    '<CTRL-P>': b'\x10',  '<CTRL-Q>': b'\x11',  '<CTRL-R>': b'\x12',
+    '<CTRL-S>': b'\x13',  '<CTRL-T>': b'\x14',  '<CTRL-U>': b'\x15',
+    '<CTRL-V>': b'\x16',  '<CTRL-W>': b'\x17',  '<CTRL-X>': b'\x18',
+    '<CTRL-Y>': b'\x19',  '<CTRL-Z>': b'\x1a',
+
+    # arrows & navigation (ANSI / VT100)
+    '<UP>':    b'\x1b[A',
+    '<DOWN>':  b'\x1b[B',
+    '<RIGHT>': b'\x1b[C',
+    '<LEFT>':  b'\x1b[D',
+    '<HOME>':  b'\x1b[H',
+    '<END>':   b'\x1b[F',
+    '<PGUP>':  b'\x1b[5~',
+    '<PGDN>':  b'\x1b[6~',
+    '<DEL>':   b'\x1b[3~',
+    '<INS>':   b'\x1b[2~',
+
+    # Function keys F1‑F12
+    '<F1>': b'\x1bOP',  '<F2>': b'\x1bOQ',  '<F3>': b'\x1bOR',  '<F4>': b'\x1bOS',
+    '<F5>': b'\x1b[15~','<F6>': b'\x1b[17~','<F7>': b'\x1b[18~','<F8>': b'\x1b[19~',
+    '<F9>': b'\x1b[20~','<F10>':b'\x1b[21~','<F11>':b'\x1b[23~','<F12>':b'\x1b[24~',
+}
+
+def llm_tokens_to_chunks(text: str) -> list:
+    """
+    Split TEXT into literal chunks and <TOKENS>, convert each token to the
+    appropriate byte sequence, and return the concatenated bytes object.
+    Unknown tokens are passed through unchanged (minus the angle‑brackets).
+    """
+    out_tokens = []
+    for chunk in TOKEN_RE.split(text):
+        if not chunk:
+            continue
+        if chunk.startswith('<') and chunk.endswith('>'):
+            token = chunk.upper()
+            result = SPECIAL_KEYS.get(token, token[1:-1].encode())  # unknown token => use raw text
+            out_tokens.append(result)
+        else:
+            out_tokens.append(chunk)
+    return out_tokens
+
 def strip_ansi(text):
     patterns = [
         # Shell prompt and status
@@ -20,50 +76,50 @@ def strip_ansi(text):
         r'✚|✱|◼',  # Git status symbols
         r' main ',  # Git branch indicators
         r'❯',  # Shell prompt characters
-        
+
         # Standard ANSI escape sequences
         r'\x1B(?:[@-Z\\-_]|\[[0-9?]*[ -/]*[@-~])',
-        
+
         # Terminal hyperlinks - modified to capture and preserve filename
         r'8;;file:\/\/\/.*?/(.*?)8;;',  # File links - replace with captured filename
         r'\x1B]8;;.*?\x1B\\',     # OSC hyperlinks
-        
+
         # Other terminal-specific sequences
         r'\x1B\][0-9];.*?\x07',   # OSC sequences terminated by BEL
         r'\x1B\][0-9];.*?\x1B\\', # OSC sequences terminated by ST
-        
+
         # Various control sequences
         r'[\x00-\x08\x0B\x0C\x0E-\x1A\x1C-\x1F\x7F]', # Control characters
         r'\x1B[@-_][0-9:;<=>?]*[-$@-~]',  # CSI and other extended sequences
-        
+
         # Color codes and formatting
         r'\x1B\[([0-9]{1,2}(;[0-9]{1,2})*)?[m|K]',  # SGR color and format codes
         r'\x1B\[38;5;\d+m',  # 256 color codes
         r'\x1B\[48;5;\d+m',  # 256 background color codes
-        
+
         # Less common but possible sequences
         r'\x1B%G',          # UTF-8 sequence
         r'\x1B\[(\d+)(;\d+)*m',  # Complex SGR sequences
         r'\x1B\[?[\d;]*[A-Za-z]',  # Catch-all for other CSI sequences
-        
+
         # Shell-specific cleanup
         r'=llsls>',  # Command artifacts
         r'^\s*$\n'   # Empty lines
     ]
-    
+
     # First handle the file links separately to preserve filenames
     cleaned = re.sub(r'8;;file:\/\/\/.*?/(.*?)8;;', r'\1', text)
-    
+
     # Then combine and apply the rest of the patterns
     combined_pattern = '|'.join(p for p in patterns if 'file:///' not in p)
     cleaned = re.sub(combined_pattern, '', cleaned)
-    
+
     # Clean up any leftover control characters but preserve newlines
     cleaned = re.sub(r'[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]', '', cleaned)
-    
+
     # Clean up multiple blank lines while preserving single newlines
     cleaned = re.sub(r'\n\s*\n', '\n', cleaned)
-    
+
     return cleaned.strip()
 
 def run_command(command_string, print_output=False):
@@ -118,7 +174,7 @@ def interactive_pipe(command_a, command_b, idle_timeout, filename=None, append=F
         else:
             command_b = './' + command_b[:first_space] + command_b[first_space:]
 
-    if os.path.exists(filename):
+    if filename and os.path.exists(filename):
         os.remove(filename)
 
     # Start command A with a pseudo-terminal
@@ -185,24 +241,17 @@ def interactive_pipe(command_a, command_b, idle_timeout, filename=None, append=F
                         response = run_command(command_b)
 
                         if response:
-                            # Send response back to process A
-                            try:
-                                if '<ENTER>' in response:
-                                    response = response.replace('<ENTER>', '')
-                                    if response.endswith('\n'):
-                                        response = response[:-1]
-                                    if response.endswith('\r'):
-                                        response = response[:-1]
-                                    if response.endswith('\n'):
-                                        response = response[:-1]
-                                    os.write(master_a, response.encode())
-                                    os.write(master_a, b'\n')
-                                else:
-                                    os.write(master_a, response.encode())
-                                break
+                            chunks = llm_tokens_to_chunks(response)
+                            for chunk in chunks:
+                                try:
+                                    if isinstance(chunk, bytes):
+                                        os.write(master_a, chunk)
 
-                            except OSError:
-                                raise EOFError("Process A stopped accepting input")
+                                    else:
+                                        os.write(master_a, chunk.encode())
+                                except OSError:
+                                    raise EOFError("Process A stopped accepting input")
+                            break
                         else:
                             print('No response from process B')
                             retry_counter += 1
