@@ -116,55 +116,47 @@ class StreamPrinter():
         if len(image_bytes) < 10:
             return
         try:
-            # Create a temporary file to store the output from kitty icat
             with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                # Check for Kitty
+                kitty_path = Helpers.find_kitty()
                 if (
-                    Helpers.is_emulator('kitty')
-                    and (
-                        shutil.which('kitty')
-                        or os.path.exists('/Applications/kitty.app/Contents/MacOS/kitty')
-                    )
+                    Helpers.is_emulator('kitty') and kitty_path
                     or (
                         Helpers.is_emulator('tmux')
-                        and (
-                            shutil.which('kitty')
-                            or os.path.exists('/Applications/kitty.app/Contents/MacOS/kitty')
-                        )
+                        and kitty_path
                         and Helpers.is_running('kitty')
                     )
                 ):
-                    # kitty + tmux is a feature of later versions of kitty, this may not work
-                    # Use kitty icat to save its output to the temporary file
-                    cmd_path = shutil.which('kitty') or '/Applications/kitty.app/Contents/MacOS/kitty'
                     process = subprocess.Popen(
-                        [cmd_path, 'icat', '--transfer-mode', 'file'],
+                        [kitty_path, 'icat', '--transfer-mode', 'file'],
                         stdin=subprocess.PIPE,
                         stdout=temp_file
                     )
                     process.communicate(input=image_bytes)
                     process.wait()
-                    # Now cat the temporary file to stderr
-                    subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
 
-                elif (
-                    Helpers.is_emulator('wezterm')
-                    and (
-                        shutil.which('wezterm')
-                    )
+                    subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
+                    return  # Done displaying with kitty
+
+                # Check for WezTerm
+                wezterm_path = Helpers.find_wezterm()
+                if (
+                    Helpers.is_emulator('wezterm') and wezterm_path
                     or (
                         Helpers.is_emulator('tmux')
-                        and (
-                            shutil.which('wezterm')
-                        )
+                        and wezterm_path
                         and Helpers.is_running('wezterm')
                     )
+                    or (
+                        Helpers.is_emulator('wezterm-gui')
+                        and wezterm_path
+                        and Helpers.is_running('wezterm-gui')
+                    )
                 ):
-                    cmd_path = shutil.which('wezterm')
-                    if not cmd_path:
+                    if not wezterm_path:
                         logging.debug('wezterm not found')
                         return
 
-                    # check to see if it's a webp image, because wezterm doesn't support webp
                     if Helpers.is_webp(image_bytes):
                         image_bytes = Helpers.convert_image_to_png(image_bytes)
 
@@ -172,22 +164,24 @@ class StreamPrinter():
 
                     if Helpers.is_image(image_bytes):
                         process = subprocess.Popen(
-                            [cmd_path, 'imgcat'],
+                            [wezterm_path, 'imgcat'],
                             stdin=subprocess.PIPE,
                             stdout=temp_file
                         )
                         process.communicate(input=image_bytes)
                         process.wait()
-                        # Now cat the temporary file to stderr
+
                         subprocess.run(['cat', temp_file.name], stdout=sys.stderr)
-                elif (
-                    shutil.which('viu')
-                ):
+                    return  # Done displaying with wezterm
+
+                # Fallback to viu if available
+                viu_path = shutil.which('viu')
+                if viu_path:
                     temp_file.write(image_bytes)
                     temp_file.flush()
-                    subprocess.run(['viu', temp_file.name], stdout=sys.stderr)
+                    subprocess.run([viu_path, temp_file.name], stdout=sys.stderr)
         except Exception as e:
-            pass
+            return
 
     async def write(self, node: AstNode):
         if logging.level <= 20:  # INFO

@@ -1674,6 +1674,46 @@ class Helpers():
             pass
 
     @staticmethod
+    def find_wezterm():
+        import shutil
+        # Try the standard way first
+        wezterm_path = shutil.which("wezterm")
+        if wezterm_path:
+            return wezterm_path
+
+        # Common fallback locations on macOS
+        possible_paths = [
+            "/Applications/WezTerm.app/Contents/MacOS/wezterm",
+            os.path.expanduser("~/Applications/WezTerm.app/Contents/MacOS/wezterm"),
+            "/usr/local/bin/wezterm",
+            "/opt/homebrew/bin/wezterm",  # for Homebrew on Apple Silicon
+        ]
+
+        for path in possible_paths:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+        return None
+
+    @staticmethod
+    def find_kitty():
+        import shutil
+        kitty_path = shutil.which("kitty")
+        if kitty_path:
+            return kitty_path
+
+        possible_paths = [
+            "/Applications/kitty.app/Contents/MacOS/kitty",
+            os.path.expanduser("~/Applications/kitty.app/Contents/MacOS/kitty"),
+            "/usr/local/bin/kitty",
+            "/opt/homebrew/bin/kitty",  # Homebrew install on Apple Silicon
+        ]
+
+        for path in possible_paths:
+            if os.path.isfile(path) and os.access(path, os.X_OK):
+                return path
+        return None
+
+    @staticmethod
     def is_running(process_name):
         for proc in psutil.process_iter():
             try:
@@ -1699,6 +1739,8 @@ class Helpers():
                     return 'kitty'
                 elif 'tmux' in name:
                     return 'tmux'
+                elif 'wezterm-gui' in name:
+                    return 'wezterm'
                 elif 'wezterm' in name:
                     return 'wezterm'
                 # If no match, check the next parent
