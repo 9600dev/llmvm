@@ -44,7 +44,6 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import nest_asyncio
-import psutil
 from dateutil.relativedelta import relativedelta
 from docstring_parser import parse
 from PIL import Image
@@ -1715,13 +1714,12 @@ class Helpers():
 
     @staticmethod
     def is_running(process_name):
-        for proc in psutil.process_iter():
-            try:
-                if process_name.lower() in proc.name().lower():
-                    return True
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
-        return False
+        try:
+            # Use 'ps' to list processes and grep for process_name
+            output = subprocess.check_output(['ps', 'aux'], text=True)
+            return process_name.lower() in output.lower()
+        except Exception:
+            return False
 
     @staticmethod
     def __find_terminal_emulator(process):
@@ -1753,9 +1751,14 @@ class Helpers():
 
     @staticmethod
     def is_emulator(emulator: str):
-        current_process = psutil.Process(os.getpid())
-        result = Helpers.__find_terminal_emulator(current_process)
-        return emulator == result
+        try:
+            pid = os.getpid()
+            # Get the parent process (emulator) of the current process
+            output = subprocess.check_output(['ps', '-o', 'comm=', '-p', str(pid)], text=True)
+            current_process_name = output.strip()
+            return emulator.lower() == current_process_name.lower()
+        except Exception:
+            return False
 
     @staticmethod
     def is_pdf(byte_stream):
