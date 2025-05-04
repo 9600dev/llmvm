@@ -40,8 +40,6 @@ from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime_host import PythonRuntimeHost
 from llmvm.server.runtime import Runtime
-from llmvm.server.vector_search import VectorSearch
-from llmvm.server.vector_store import VectorStore
 
 nest_asyncio.apply()
 
@@ -58,7 +56,6 @@ except ValueError:
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/download'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/cdn'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/logs'), exist_ok=True)
-    os.makedirs(os.path.expanduser('~/.local/share/llmvm/faiss'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/memory'), exist_ok=True)
 
     config_file = resources.files('llmvm') / 'config.yaml'
@@ -77,7 +74,6 @@ helpers = Helpers.flatten(list(
 os.makedirs(Container().get('cache_directory'), exist_ok=True)
 os.makedirs(Container().get('cdn_directory'), exist_ok=True)
 os.makedirs(Container().get('log_directory'), exist_ok=True)
-os.makedirs(Container().get('vector_store_index_directory'), exist_ok=True)
 os.makedirs(Container().get('memory_directory'), exist_ok=True)
 
 cache_session = PersistentCache(cache_directory=Container().get('cache_directory'))
@@ -97,14 +93,6 @@ if (
     sys.exit(1)
 
 
-vector_store = VectorStore(
-    store_directory=Container().get('vector_store_index_directory'),
-    index_name='index',
-    embedding_model=Container().get('vector_store_embedding_model'),
-    chunk_size=int(Container().get('vector_store_chunk_size')),
-    chunk_overlap=10
-)
-vector_search = VectorSearch(vector_store=vector_store)
 
 
 def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
@@ -195,7 +183,6 @@ def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> Exec
     return ExecutionController(
         executor=executor,
         tools=helpers,
-        vector_search=vector_search,
         thread_id=thread_id
     )
 
@@ -231,29 +218,6 @@ def get_file(filename: str):
         raise HTTPException(status_code=404, detail='File not found')
     return FileResponse(path=file_path)
 
-@app.get('/search/{query}')
-def search(query: str):
-    results = vector_search.search(query, max_results=10, min_score=0.7)
-    return results
-
-@app.post('/ingest')
-async def ingest(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
-    try:
-        name = os.path.basename(str(file.filename))
-
-        with open(f"{cdn_directory}/{name}", "wb") as buffer:
-            buffer.write(file.file.read())
-            background_tasks.add_task(
-                vector_search.ingest_file,
-                f"{cdn_directory}/{name}",
-                '',
-                str(file.filename),
-                {}
-            )
-        return {"filename": file.filename, "detail": "Ingestion started."}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Exception: {e}")
 
 @app.post('/download')
 async def download(
@@ -287,14 +251,7 @@ async def download(
             })
             queue.put_nowait(QueueBreakNode())
 
-            if content:
-                background_tasks.add_task(
-                    vector_search.ingest_text,
-                    controller.statement_to_str(content),
-                    controller.statement_to_str(content)[:25],
-                    download_item.url,
-                    {}
-                )
+            # Removed vector_search.ingest_text functionality
             return content
 
         task = asyncio.create_task(execute_and_signal())
@@ -386,7 +343,6 @@ async def execute_python_in_thread(thread_id: int, python_str: str):
     from llmvm.server.python_runtime_host import PythonRuntimeHost
     python_runtime_host = PythonRuntimeHost(
         controller=get_controller(),
-        vector_search=vector_search,
         answer_error_correcting=False,
         thread_id=thread.id
     )

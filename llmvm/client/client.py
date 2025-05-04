@@ -513,12 +513,6 @@ class LLMVMClient():
             model=model_name if model_name else self.model,
         )
 
-    def search(
-        self,
-        query: str,
-    ):
-        response: httpx.Response = httpx.get(f'{self.api_endpoint}/search/{query}', timeout=400.0)
-        return response.json()
 
     async def openai_tool_call(
         self,

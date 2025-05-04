@@ -19,7 +19,6 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, BrowserContent, Co
                                   TokenCompressionMethod, User, awaitable_none)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.auto_global_dict import AutoGlobalDict
-from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
 
@@ -29,14 +28,12 @@ class ExecutionController(Controller):
         self,
         executor: Executor,
         tools: list[Callable],
-        vector_search: VectorSearch,
         exception_limit: int = 3,
         thread_id: int = 0
     ):
         super().__init__()
         self.executor = executor
         self.tools = tools
-        self.vector_search = vector_search
         self.exception_limit = exception_limit
         self.thread_id = thread_id
 
@@ -178,28 +175,32 @@ class ExecutionController(Controller):
         tokens_per_message = (
             math.floor((llm_call.max_prompt_len - await self.executor.count_tokens([llm_call.user_message])) / len(llm_call.context_messages))  # noqa E501
         )
-        write_client_stream(TextContent(f'Performing context window compression type: similarity vector search with tokens per message {tokens_per_message}.\n'))  # noqa E501
+        write_client_stream(TextContent(f'Performing context window compression type: similarity with tokens per message {tokens_per_message}.\n'))  # noqa E501
 
-        # for all messages, do a similarity search
+        # Simple truncation approach instead of vector similarity
         similarity_messages = []
         for i in range(len(llm_call.context_messages)):
             prev_message = llm_call.context_messages[i]
 
-            similarity_chunks = await self.vector_search.chunk_and_rank(
-                query=query,
-                token_calculator=self.executor.count_tokens,
-                content=prev_message.get_str(),
-                chunk_token_count=256,
-                chunk_overlap=0,
-                max_tokens=tokens_per_message - 16,
-            )
-            similarity_message: str = '\n\n'.join([content for content, _ in similarity_chunks])
+            # Basic truncation approach
+            message_str = prev_message.get_str()
+            # Use a portion at the beginning and end to maintain context
+            trunc_size = tokens_per_message // 2
+            start_part = message_str[:trunc_size * 4]  # Rough character estimation
+            end_part = message_str[-trunc_size * 4:] if len(message_str) > trunc_size * 8 else ""
 
-            # check for the header of a statement_to_message. We probably need to keep this
-            if 'Result:\n' in prev_message.get_str():
-                similarity_message = 'Result:\n' + similarity_message
+            if len(start_part) + len(end_part) > 0:
+                truncated_message = start_part
+                if end_part:
+                    truncated_message += "\n\n... [content truncated] ...\n\n" + end_part
+            else:
+                truncated_message = message_str
 
-            similarity_messages.append(User(TextContent(similarity_message)))
+            # check for the header of a statement_to_message. We need to keep this
+            if 'Result:\n' in message_str and not truncated_message.startswith('Result:\n'):
+                truncated_message = 'Result:\n' + truncated_message
+
+            similarity_messages.append(User(TextContent(truncated_message)))
 
         total_similarity_tokens = sum(
             [await self.executor.count_tokens([m.message]) for m in similarity_messages]
@@ -241,10 +242,39 @@ class ExecutionController(Controller):
         )
 
         chunk_size = llm_call.max_prompt_len - map_reduce_prompt_tokens - await self.executor.count_tokens([llm_call.user_message]) - 32  # noqa E501
-        chunks = self.vector_search.chunk(
-            content=context_message.get_str(),
-            chunk_size=chunk_size,
-            overlap=0
+
+        # Simple text chunking implementation to replace vector_search.chunk
+        def simple_chunk_text(text, chunk_size, overlap=0):
+            # Approximate character count for token estimation (rough approximation)
+            char_per_token = 4
+            chars_per_chunk = chunk_size * char_per_token
+
+            # Create chunks with basic sentences splitting
+            chunks = []
+            start = 0
+            text_len = len(text)
+
+            while start < text_len:
+                end = min(start + chars_per_chunk, text_len)
+
+                # Try to end at a sentence boundary if possible
+                if end < text_len:
+                    for sentence_end in ['. ', '! ', '? ', '\n\n']:
+                        pos = text.rfind(sentence_end, start, end)
+                        if pos > start:
+                            end = pos + len(sentence_end)
+                            break
+
+                chunks.append(text[start:end])
+                start = end - (overlap * char_per_token)
+                if start < 0:
+                    start = 0
+
+            return chunks
+
+        chunks = simple_chunk_text(
+            context_message.get_str(),
+            chunk_size
         )
 
         for chunk in chunks:
@@ -572,25 +602,39 @@ class ExecutionController(Controller):
             # check to see if we're simply lifo'ing the context messages (last in first out)
             context_message = User(TextContent('\n\n'.join([m.get_str() for m in llm_call.context_messages])))
 
-            # see if we can do a similarity search or not.
+            # Since vector_search is removed, we'll simplify the approach
             write_client_stream(TextContent(
-                'Determining context window compression approach of either similarity vector search, or full map/reduce.\n'
+                'Using simplified context window compression approach.\n'
             ))
-            similarity_chunks = await self.vector_search.chunk_and_rank(
-                query=query,
-                token_calculator=self.executor.count_tokens,
-                content=context_message.get_str(),
-                chunk_token_count=256,
-                chunk_overlap=0,
-                max_tokens=max_prompt_len - await self.executor.count_tokens([llm_call.user_message]) - 16,  # noqa E501
-            )
 
-            # randomize and sample from the similarity_chunks
-            twenty_percent = math.floor(len(similarity_chunks) * 0.15)
-            similarity_chunks = random.sample(similarity_chunks, min(len(similarity_chunks), twenty_percent))
+            # Extract a sample of the context to make a decision
+            def extract_sample_chunks(text, num_chunks=5, chunk_size=256):
+                # Approximate character count
+                chars_per_chunk = chunk_size * 4
+                total_len = len(text)
+
+                if total_len <= chars_per_chunk:
+                    return [text]
+
+                chunks = []
+                # Take samples from beginning, middle and end
+                chunks.append(text[:chars_per_chunk])
+
+                if num_chunks > 2:
+                    middle_samples = num_chunks - 2
+                    for i in range(middle_samples):
+                        start = (total_len // (middle_samples + 1)) * (i + 1) - (chars_per_chunk // 2)
+                        start = max(0, start)
+                        end = min(total_len, start + chars_per_chunk)
+                        chunks.append(text[start:end])
+
+                chunks.append(text[-chars_per_chunk:])
+                return chunks
+
+            sample_chunks = extract_sample_chunks(context_message.get_str(), 5)
 
             decision_criteria: list[str] = []
-            for chunk, _ in similarity_chunks[:5]:
+            for chunk in sample_chunks[:5]:
                 assistant_similarity = await self.aexecute_llm_call_simple(
                     llm_call=LLMCall(
                         user_message=User(TextContent('')),
@@ -734,7 +778,6 @@ class ExecutionController(Controller):
         from llmvm.server.python_runtime_host import PythonRuntimeHost
         python_runtime_host = PythonRuntimeHost(
             controller=self,
-            vector_search=self.vector_search,
             answer_error_correcting=False,
             thread_id=self.thread_id
         )

@@ -23,7 +23,6 @@ from llmvm.common.objects import (Answer, Assistant, AstNode, BrowserContent, Co
                                   User, coerce_to, awaitable_none, SessionThreadModel)
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
-from llmvm.server.vector_search import VectorSearch
 from llmvm.client.client import LLMVMClient, get_client
 
 
@@ -54,8 +53,6 @@ class InstantiationWrapper:
                 params_call[name] = self.runtime
             elif param.annotation and param.annotation is ExecutionController:
                 params_call[name] = self.runtime.controller
-            elif param.annotation and param.annotation is VectorSearch:
-                params_call[name] = self.runtime.vector_search
             elif name == 'cookies':
                 cookies = self.runtime.runtime_state['cookies'] if 'cookies' in self.runtime.runtime_state else []
                 params_call[name] = cookies
@@ -119,7 +116,6 @@ class Runtime:
     def __init__(
         self,
         controller: ExecutionController,
-        vector_search: VectorSearch,
         helpers: list[Callable],
         messages_list: list[Message],
         runtime_state: AutoGlobalDict,
@@ -129,7 +125,6 @@ class Runtime:
     ):
         self.runtime_state: AutoGlobalDict = runtime_state
         self.controller: ExecutionController = controller
-        self.vector_search: VectorSearch = vector_search
         # for read/write filesystem
         self.thread_id = thread_id
         self._helpers: list[Callable] = helpers

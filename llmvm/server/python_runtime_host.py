@@ -25,7 +25,6 @@ from llmvm.common.objects import (Answer, Assistant, Content, ContentEncoder, Do
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.runtime import Runtime
-from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
 
@@ -48,12 +47,10 @@ class PythonRuntimeHost:
     def __init__(
         self,
         controller: ExecutionController,
-        vector_search: VectorSearch,
         answer_error_correcting: bool = False,
         thread_id = 0
     ):
         self.controller: ExecutionController = controller
-        self.vector_search = vector_search
         self.answer_error_correcting = answer_error_correcting
         self.thread_id = thread_id
         self.executed_code_blocks: list[PythonRuntimeBlockState] = []
@@ -369,7 +366,6 @@ class PythonRuntimeHost:
 
         runtime = Runtime(
             self.controller,
-            self.vector_search,
             helpers,
             messages_list,
             answer_error_correcting=self.answer_error_correcting,

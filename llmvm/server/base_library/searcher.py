@@ -13,7 +13,6 @@ from llmvm.server.base_library.content_downloader import WebAndContentDriver
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.tools.search import SerpAPISearcher
 from llmvm.server.tools.webhelpers import WebHelpers
-from llmvm.server.vector_search import VectorSearch
 
 logging = setup_logging()
 
@@ -26,7 +25,6 @@ class Searcher():
         controller: ExecutionController,
         original_code: str,
         original_query: str,
-        vector_search: VectorSearch,
         total_links_to_return: int = 3,
         preferred_search_engine: str = '',
     ):
@@ -47,7 +45,6 @@ class Searcher():
         self.index = 0
         self._result = None
         self.total_links_to_return: int = total_links_to_return
-        self.vector_search = vector_search
 
         if self.query.startswith('"') and self.query.endswith('"'):
             self.query = self.query[1:-1]
@@ -201,7 +198,6 @@ class Searcher():
             'Google Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Search is a general web search engine that is good at answering questions, finding knowledge and information, and has a complete scan of the Internet.'},  # noqa:E501
             'Google Patent Search': {'searcher': self.search_google_hook, 'parser': url_to_text, 'description': 'Google Patent Search is a search engine that is exceptional at findind matching patents for a given query.'},  # noqa:E501
             'Yelp Search': {'searcher': SerpAPISearcher().search_yelp, 'parser': yelp_to_text, 'description': 'Yelp is a search engine dedicated to finding geographically local establishments, restaurants, stores etc and extracing their user reviews.'},  # noqa:E501
-            'Local Files Search': {'searcher': self.vector_search.search, 'parser': local_to_text, 'description': 'Local file search engine. Searches the users hard drive for content in pdf, csv, html, doc and docx files.'},  # noqa:E501
             'Hacker News Search': {'searcher': SerpAPISearcher().search_hackernews_comments, 'parser': hackernews_comments_to_text, 'description': 'Hackernews (or hacker news) is search engine dedicated to technology, programming and science. This search engine finds and returns commentary from smart individuals about news, technology, programming and science articles. Rank this engine first if the search query specifically asks for "hackernews".'},  # noqa:E501
             'BlueSky Search': {'searcher': self.search_bluesky, 'parser': bsky_to_text, 'description': 'Searches BlueSky, X and Twitter for content.'},
             'Google Scholar Search': {'searcher': self.search_research_hook, 'parser': url_to_text, 'description': 'Google Scholar Search is a search engine to help find and summarize academic papers, studies, and research about particular topics'},  # noqa:E501
