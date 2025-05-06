@@ -151,21 +151,3 @@ build-backend = "poetry.core.masonry.api"
 select = [
   "F",
 ]
-
-[tool.uv.workspace]
-members = ["mcp/testing1", "mcp/currency"]
-
-[project]
-name = "llmvm-cli"
-version = "0.9.7"
-requires-python = ">=3.10"
-description = "Command Line LLM with client-side tools support."
-authors = [
-  { name = "9600 devs <contact@9600.dev>", email = "contact@9600.dev" }
-]
-readme = "README.md"
-packages = [ {include = "llmvm"} ]
-include = ["llmvm/client/awesome_prompts.csv", "llmvm/model_prices_and_context_window.json", "llmvm/server/prompts/**/*", "llmvm/config.yaml"]
-
-
-
