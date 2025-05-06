@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import builtins
+import math
 import numpy as np
 from datetime import datetime
 import inspect
@@ -211,6 +212,7 @@ class Runtime:
         self.runtime_state['asyncio'] = asyncio
         self.runtime_state['npf'] = npf
         self.runtime_state['re'] = re
+        self.runtime_state['math'] = math
 
         # llmvm runtime
         self.runtime_state['task_count'] = self.task_count

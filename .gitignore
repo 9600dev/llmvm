@@ -37,3 +37,6 @@ tests/comparisons
 tests/output
 tests/output*
 tests/comparisons*
+webui
+
+**/.claude/settings.local.json

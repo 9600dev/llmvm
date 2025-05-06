@@ -1979,10 +1979,12 @@ class SessionThreadModel(BaseModel):
     model: str = ''
     compression: str = ''
     temperature: float = 0.0
-    stop_tokens: list[str] = []
+    stop_tokens: list[str] = Field(default_factory=list)
     output_token_len: int = 0
     current_mode: str = 'tools'
     thinking: int = 0
-    cookies: list[dict[str, Any]] = []
-    messages: list[MessageModel] = []
-    locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True)
+    cookies: list[dict[str, Any]] = Field(default_factory=list)
+    messages: list[MessageModel] = Field(default_factory=list)
+    locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
+
+SessionThreadModel.model_rebuild()

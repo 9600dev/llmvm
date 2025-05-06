@@ -1719,7 +1719,7 @@ def message(
                 else:
                     bytes_buffer_content = bytes_buffer.read().decode('utf-8', errors='ignore')
                     if bytes_buffer_content:
-                        tty_message = User(TextContent(bytes_buffer.read().decode('utf-8', errors='ignore')))
+                        tty_message = User(TextContent(bytes_buffer_content))
                         if message:
                             context_messages.insert(0, tty_message)
                         else:

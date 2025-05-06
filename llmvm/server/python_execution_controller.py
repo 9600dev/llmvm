@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import copy
+import datetime
 import math
 import random
 from typing import Any, Awaitable, Callable, Optional, Tuple, cast
@@ -768,6 +769,8 @@ class ExecutionController(Controller):
                     return [TextContent(result.head(10).to_csv()[0:1024])]
             elif isinstance(result, Figure):
                 return [Helpers.matplotlib_figure_to_image_content(result)]
+            elif isinstance(result, datetime.datetime):
+                return [TextContent(str(result))]
             elif asyncio.iscoroutine(result):
                 return [TextContent("The result is an asyncio.coroutine. You can use asyncio.run(result) to get the result, or run multiple coroutines in parallel using asyncio.run(asyncio.gather(*coroutines)).")]
             elif Helpers.is_function(result):

@@ -1,4 +1,6 @@
 import base64
+import html
+from io import StringIO
 import sys
 import tempfile
 import os
@@ -8,6 +10,7 @@ import re
 import jsonpickle
 import async_timeout
 import asyncio
+import markdown2
 from typing import Any, Awaitable, Callable, cast
 
 from rich.console import Console
@@ -316,6 +319,316 @@ class ConsolePrinter:
         self.print_messages([MessageModel.to_message(message) for message in thread.messages], escape=escape, role_new_line=role_new_line)
 
 
+class HTMLMessageRenderer:
+    """Render Message objects to HTML with automatic code detection/high-lighting.
+
+    In addition to fenced blocks (```), this renderer now detects:
+    • Bare code blocks that *start* on a line matching language patterns.
+    • Custom <helpers> … </helpers> and <helpers_result> … </helpers_result> sections
+      (always Python) used by the toolchain.
+    """
+
+    # ---------------------------------------------------------------------
+    # Language-detection helpers
+    # ---------------------------------------------------------------------
+
+    _HELPERS_RE  = re.compile(
+        r"<helpers\b[^>]*>(.*?)</helpers\s*>",           # note \b and [^>]* then \s*
+        re.DOTALL | re.IGNORECASE,
+    )
+    _HELPERS_RES = re.compile(
+        r"<helpers_result\b[^>]*>(.*?)</helpers_result\s*>",
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    def _render_helpers(self, match: re.Match, lang_hint: str | None = "python") -> str:
+        """Return a <pre><code …> block that *includes* the wrapper tags."""
+        full_block = match.group(0)                 # <helpers> … </helpers>
+        inner      = match.group(1)
+        lang = self._detect_language(inner) if lang_hint is None else lang_hint
+        if lang is None:
+            lang = "plaintext"
+
+        escaped = (
+            html.escape(full_block)
+                .replace("    ", "&#160;&#160;&#160;&#160;")
+                .replace("\t",  "&#160;&#160;&#160;&#160;")
+        )
+        return f'\n<pre><code class="language-{lang}">{escaped}</code></pre>\n'
+
+    _LANG_START_PATTERNS: list[tuple[re.Pattern, str]] = [
+        # Bash / shell first because shebang must win
+        (re.compile(r"^#!.*\bsh\b"), "bash"),
+
+        # -------------------- Python --------------------
+        (re.compile(r"^\s*def\s+\w+\s*\(.*\)\s*:"), "python"),
+        (re.compile(r"^\s*async\s+def\s+\w+\s*\(.*\)\s*:"), "python"),
+        (re.compile(r"^\s*\w+\s*=.+"), "python"),
+        (re.compile(r"^\s*class\s+\w+(\s*\(.*\))?\s*:"), "python"),
+        (re.compile(r"^\s*(import|from)\s+[\w\.]+"), "python"),
+        (re.compile(r"^\s*@\w+"), "python"),
+
+        # ---------------- JavaScript / TypeScript ----------------
+        (re.compile(r"^\s*(?:const|let|var)\s+\w+\s*="), "javascript"),
+        (re.compile(r"^\s*function\s+\w+\s*\(.*\)\s*\{"), "javascript"),
+        (re.compile(r"^\s*export\s+(?:default\s+)?(?:class|function|const)"), "javascript"),
+        (re.compile(r"^\s*import\s+.+\s+from\s+['\"]"), "javascript"),
+
+        # ----------------------- HTML -----------------------
+        (re.compile(r"^\s*<!DOCTYPE\s+html>", re.IGNORECASE), "markup"),
+        (re.compile(r"^\s*<html\b", re.IGNORECASE), "markup"),
+        (re.compile(r"^\s*<\w+[^>]*>"), "markup"),
+
+        # ----------------------- JSON -----------------------
+        (re.compile(r"^\s*\{[\s\S]*:\s*.+"), "json"),  # rough but effective
+        (re.compile(r"^\s*\[[\s\S]*\]$"), "json"),
+
+        # ----------------------- CSS ------------------------
+        (re.compile(r"^\s*[.#]?[\w-]+\s*\{[^}]*\}"), "css"),
+    ]
+
+    # ---------------------------------------------------------------------
+    # Full-block language detection
+    # ---------------------------------------------------------------------
+    @staticmethod
+    def _detect_language(code_text: str) -> str:
+        """Attempt to detect the programming language looking at the **whole** block."""
+        text = code_text.strip()
+
+        # Python
+        if re.search(r"^\s*def\s+\w+\s*\(.*\)\s*:", text, re.MULTILINE) or \
+           re.search(r"^\s*async\s+def\s+\w+\s*\(.*\)\s*:", text, re.MULTILINE) or \
+           re.search(r"^\s*class\s+\w+(\s*\(.*\))?\s*:", text, re.MULTILINE) or \
+           re.search(r"^\s*(import|from)\s+\w+", text, re.MULTILINE) or \
+           re.search(r"^\s*@\w+", text, re.MULTILINE):
+            return "python"
+
+        # JavaScript / TypeScript
+        if re.search(r"(?:const|let|var)\s+\w+\s*=", text) or \
+           re.search(r"function\s+\w+\s*\(.*\)\s*\{", text) or \
+           re.search(r"=>\s*\{", text) or \
+           re.search(r"import\s+.*\s+from\s+['\"]", text) or \
+           re.search(r"export\s+(?:default\s+)?(?:class|function|const)", text):
+            return "javascript"
+
+        # HTML (Prism registers HTML/XML as "markup")
+        if re.search(r"<!DOCTYPE\s+html>", text, re.IGNORECASE) or \
+           re.search(r"<html\b", text, re.IGNORECASE):
+            return "markup"
+
+        # JSON
+        if (text.startswith("{") and text.endswith("}")) or \
+           (text.startswith("[") and text.endswith("]")):
+            return "json"
+
+        # Bash
+        if re.search(r"^#!.*\bsh\b", text) or \
+           re.search(r"^\s*echo\s+", text, re.MULTILINE):
+            return "bash"
+
+        # CSS
+        if re.search(r"[.#]?[\w-]+\s*\{[^}]*\}", text):
+            return "css"
+
+        return "plaintext"
+
+    # ---------------------------------------------------------------------
+    # Public rendering API
+    # ---------------------------------------------------------------------
+
+    def render_messages(self, messages: list["Message"]) -> str:
+        html_out = StringIO()
+
+        for msg in messages:
+            html_out.write(self._render_single_message(msg))
+
+        rendered = html_out.getvalue()
+        html_out.close()
+        return rendered
+
+    # ------------------------------------------------------------------
+    # Message-level rendering
+    # ------------------------------------------------------------------
+
+    def _render_single_message(self, message: "Message") -> str:
+        parts: list[str] = []
+        role = message.role().lower()
+        parts.append(f'<div class="message {role}">')
+        parts.append("    <div class=\"message-header\">")
+        parts.append(f"        <h2>{message.role().capitalize()}</h2>")
+        parts.append("    </div>")
+        parts.append("    <div class=\"message-body\">")
+
+        # ── coalesce adjacent TextContent so helper-blocks stay intact ──
+        buf: list[str] = []
+        def _flush():
+            if buf:
+                joined = "\n".join(buf)
+                parts.append(self._handle_markdown_and_code(joined))
+                buf.clear()
+
+        for content in message.message:
+            if isinstance(content, TextContent):
+                buf.append(content.get_str())
+            else:
+                _flush()
+                if isinstance(content, MarkdownContent):
+                    md = content.get_str()
+                    if len(md) > 10000:
+                        md = md[:300] + "\n\n … \n\n" + md[-300:]
+                    parts.append(markdown2.markdown(md, extras=["tables", "fenced-code-blocks", "break-on-newline"]))
+                elif isinstance(content, ImageContent):
+                    # NB: base64 import omitted for brevity; assume in scope
+                    parts.append(
+                        f'<div class="image-container">\n'
+                        f'<img src="data:{content.image_type};base64,'
+                        f'{base64.b64encode(content.sequence).decode()}" alt="{content.url}" />\n'
+                        f'</div>'
+                    )
+                # TODO: other content types (BrowserContent, FileContent, …) as required
+        _flush()
+
+        parts.append("    </div>\n</div>")
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Markdown / code processing pipeline
+    # ------------------------------------------------------------------
+    def _handle_markdown_and_code(self, text: str) -> str:
+        """
+        Pipeline:
+        0.   Turn <helpers>… and <helpers_result>… into <pre><code> blocks.
+        1.   Inline fenced ``` blocks.
+        2.   Auto-wrap bare (unfenced) code blocks.
+        3.   Inline single-back-tick code.
+        4.   Run markdown2.
+        """
+        # ------------------------------------------------------------------
+        # 0) custom helper blocks  -----------------------------------------
+        text = self._HELPERS_RE.sub(lambda m: self._render_helpers(m, "python"), text)
+        text = self._HELPERS_RES.sub(lambda m: self._render_helpers(m, None), text)
+
+        # ------------------------------------------------------------------
+        # 1) fenced  ```lang\n … ```  --------------------------------------
+        def fenced_repl(match: re.Match) -> str:
+            lang_hint = match.group(1).strip()
+            code      = match.group(2)
+            lang      = lang_hint or self._detect_language(code)
+
+            escaped = html.escape(code)
+            if lang == "python":
+                escaped = escaped.replace("    ", "&#160;&#160;&#160;&#160;").replace("\t", "&#160;&#160;&#160;&#160;")
+            return f'<pre><code class="language-{lang}">{escaped}</code></pre>'
+
+        text = re.sub(r"```([\w-]*)\n([\s\S]*?)```", fenced_repl, text)
+
+        # ------------------------------------------------------------------
+        # 2) bare-block auto-wrapper  --------------------------------------
+        text = self._auto_wrap_bare_code(text)
+
+        # ------------------------------------------------------------------
+        # 3) inline   `code`   ---------------------------------------------
+        text = re.sub(r'`([^`]+)`', lambda m: f'<code>{html.escape(m.group(1))}</code>', text)
+
+        # ------------------------------------------------------------------
+        # 4) markdown conversion  ------------------------------------------
+        return markdown2.markdown(
+            text,
+            extras=[
+                "tables",
+                "fenced-code-blocks",
+                "code-friendly",
+                "break-on-newline",
+                "smarty-pants",
+                "cuddled-lists",
+            ],
+        )
+
+    # ------------------------------------------------------------------
+    # Bare code-block auto-wrapper
+    # ------------------------------------------------------------------
+
+    def _auto_wrap_bare_code(self, text: str) -> str:
+        """
+        Scan the incoming plain-text message line-by-line.  If we see a line that
+        matches one of the registered “start-of-code” patterns *and* we are not
+        already inside a raw <pre>...</pre> HTML block, we gather the contiguous
+        code lines and wrap them in a <pre><code class="language-…"> … </code></pre>.
+
+        A “code line” is either:
+        • non-empty, or
+        • starts with at least one space or tab
+        so we capture typical indented blocks cleanly.
+        """
+        import html
+
+        lines = text.splitlines()
+        n = len(lines)
+        out: list[str] = []        # <--- here’s the missing variable
+        i = 0
+        in_pre = False
+
+        while i < n:
+            line = lines[i]
+
+            if line.lstrip().startswith(("<helpers", "</helpers")):
+                out.append(line)
+                i += 1
+                continue
+
+            # ── 1. Pass raw <pre> blocks straight through ─────────────────────────
+            if "<pre" in line:
+                in_pre = True
+                out.append(line)
+                i += 1
+                continue
+
+            if in_pre:
+                out.append(line)
+                if "</pre>" in line:
+                    in_pre = False
+                i += 1
+                continue
+
+            # ── 2. Does this line look like the *start* of code? ──────────────────
+            detected_lang = None
+            for pat, lang in self._LANG_START_PATTERNS:
+                if pat.search(line):
+                    detected_lang = lang
+                    break
+
+            if detected_lang:
+                # ── 2a.  Slurp up the whole contiguous block ────────────────────
+                block: list[str] = [line]
+
+                i += 1
+                while i < n and (
+                    lines[i].strip() == ""                       # blank line
+                    or lines[i].startswith((" ", "\t"))          # indented
+                    or lines[i].lstrip().startswith(("#", "//")) # comment
+                    or any(pat.search(lines[i])                  # OR *another*
+                        for pat, _ in self._LANG_START_PATTERNS)  # code line
+                ):
+                    block.append(lines[i])
+                    i += 1
+
+                code_block = "\n".join(block)
+                escaped = (
+                    html.escape(code_block)
+                    .replace("    ", "&#160;&#160;&#160;&#160;")
+                    .replace("\t", "&#160;&#160;&#160;&#160;")
+                )
+                out.append(
+                    f'<pre><code class="language-{detected_lang}">{escaped}</code></pre>'
+                )
+            else:
+                # ── 3. Regular text line ────────────────────────────────────────
+                out.append(line)
+                i += 1
+
+        return "\n".join(out)
+
+
 class HTMLPrinter:
     def __init__(self, filename: str):
         self.filename = filename
@@ -338,12 +651,14 @@ class HTMLPrinter:
         }
 
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            line-height: 1.6;
-            color: #333;
+            font-family: ui-sans-serif, -apple-system, system-ui, "Segoe UI", Helvetica, "Apple Color Emoji", Arial, sans-serif, "Segoe UI Emoji", "Segoe UI Symbol";
+            font-size: 16px;
+            line-height: 1.3;
+            color: rgb(13, 13, 13);
             background-color: #f8f9fa;
             padding: 20px;
             max-width: 1200px;
+            font-feature-settings: normal;
             margin: 0 auto;
         }
 
@@ -364,7 +679,7 @@ class HTMLPrinter:
         h1 {
             color: #2c3e50;
             margin-bottom: 0.5rem;
-            font-weight: 600;
+            font-weight: 700;
         }
 
         .message {
@@ -376,7 +691,7 @@ class HTMLPrinter:
         }
 
         .message-header {
-            padding: 0.8rem 1.5rem;
+            padding: 0.6rem 1.5rem;
             border-bottom: 1px solid #eee;
         }
 
@@ -391,24 +706,28 @@ class HTMLPrinter:
         }
 
         .message-body {
-            padding: 1.5rem;
+            padding: 1.0rem;
+        }
+
+        .message-body h2 {
+            margin-bottom: 1rem;
         }
 
         h2 {
-            font-weight: 500;
+            font-weight: 600;
             margin: 0;
-            font-size: 1.2rem;
+            font-size: 1rem;
         }
 
         p {
             margin-bottom: 1rem;
             font-size: 1rem;
-            color: #555;
+            color: #0d0d0d;
         }
 
-        /* Code formatting */
         pre[class*="language-"] {
-            margin: 1.5rem 0;
+            padding: 1.5rem 1.5rem 1.5rem;
+            margin: 1.0rem 0;
             border-radius: 8px;
             max-height: 500px;
             overflow: auto;
@@ -416,8 +735,11 @@ class HTMLPrinter:
         }
 
         code {
-            font-family: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, monospace;
-            font-size: 0.9em;
+            white-space: pre-wrap !important;
+            word-break: break-word !important;
+            overflow-x: hidden !important;
+            font-family: 'JetBrains Mono', 'Fira Code', Consolas, Monaco, monospace !important;
+            font-size: 0.7em;
             font-feature-settings: "liga" 0; /* Disable ligatures */
         }
 
@@ -507,6 +829,12 @@ class HTMLPrinter:
 
         ul {
             margin-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        ol {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
         }
 
         /* Responsive adjustments */
@@ -550,168 +878,11 @@ class HTMLPrinter:
 </html>"""
         return FOOTER
 
-    def _detect_language(self, code_text):
-        """Try to detect the programming language from the code content."""
-        # More comprehensive language detection
-        code_text = code_text.strip()
-
-        # Python detection
-        if re.search(r'^\s*def\s+\w+\s*\(.*\)\s*:', code_text, re.MULTILINE) or \
-           re.search(r'^\s*class\s+\w+(\s*\(.*\))?\s*:', code_text, re.MULTILINE) or \
-           re.search(r'^\s*import\s+\w+', code_text, re.MULTILINE) or \
-           re.search(r'^\s*from\s+[\w\.]+\s+import', code_text, re.MULTILINE) or \
-           re.search(r'^\s*@\w+', code_text, re.MULTILINE):
-            return "python"
-
-        # JavaScript/TypeScript detection
-        elif re.search(r'(const|let|var)\s+\w+\s*=', code_text) or \
-             re.search(r'function\s+\w+\s*\(.*\)\s*\{', code_text) or \
-             re.search(r'=>\s*\{', code_text) or \
-             re.search(r'import\s+.*\s+from\s+[\'"]', code_text) or \
-             re.search(r'export\s+(default\s+)?(class|function|const)', code_text):
-            if re.search(r':\s*(string|number|boolean|any|void|React)', code_text):
-                return "typescript"
-            return "javascript"
-
-        # HTML detection
-        elif re.search(r'<!DOCTYPE\s+html>', code_text, re.IGNORECASE) or \
-             re.search(r'<html\b', code_text, re.IGNORECASE) or \
-             (re.search(r'<\w+>', code_text) and re.search(r'</\w+>', code_text)):
-            return "markup"
-
-        # CSS detection
-        elif re.search(r'[\.\#]?[\w-]+\s*\{[^}]*\}', code_text) and \
-             re.search(r':\s*[\w\-\'"\s\d#]+;', code_text):
-            return "css"
-
-        # JSON detection
-        elif (code_text.startswith('{') and code_text.endswith('}')) or \
-             (code_text.startswith('[') and code_text.endswith(']')):
-            if re.search(r'"\s*:\s*[{\[\"\w]', code_text):
-                return "json"
-
-        # Shell/Bash detection
-        elif re.search(r'^#!.*sh', code_text) or \
-             re.search(r'^\s*\$\s+', code_text, re.MULTILINE) or \
-             re.search(r'^\s*echo\s+', code_text, re.MULTILINE) or \
-             re.search(r'^\s*if\s+\[\[', code_text, re.MULTILINE):
-            return "bash"
-
-        # SQL detection
-        elif re.search(r'SELECT\s+.+\s+FROM', code_text, re.IGNORECASE) or \
-             re.search(r'CREATE\s+TABLE', code_text, re.IGNORECASE) or \
-             re.search(r'INSERT\s+INTO', code_text, re.IGNORECASE):
-            return "sql"
-
-        # C/C++ detection
-        elif re.search(r'#include\s+[<"][\w\.]+[>"]', code_text) or \
-             re.search(r'int\s+main\s*\(', code_text) or \
-             re.search(r'(void|int|char|float|double)\s+\w+\s*\(', code_text):
-            if re.search(r'std::', code_text) or re.search(r'class\s+\w+\s*\{', code_text):
-                return "cpp"
-            return "c"
-
-        # Default if no clear match
-        return "plaintext"
-
     def get_str(self, messages: list[Message]) -> str:
-        import markdown2
-        import re
-        import html
-        from io import StringIO
         s = StringIO()
-
         s.write(self.header())
 
-        for message in messages:
-            role = message.role().lower()
-            s.write(f'<div class="message {role}">\n')
-            s.write(f'    <div class="message-header">\n')
-            s.write(f'        <h2>{message.role().capitalize()}</h2>\n')
-            s.write(f'    </div>\n')
-            s.write(f'    <div class="message-body">\n')
-
-            for content in message.message:
-                if isinstance(content, TextContent):
-                    content_str = content.get_str()
-
-                    # Advanced code block processing for better syntax highlighting
-                    def code_replace(match):
-                        code = match.group(2)
-                        lang = match.group(1).strip() if match.group(1) else self._detect_language(code)
-
-                        # Escape HTML in code to prevent rendering issues
-                        escaped_code = html.escape(code)
-
-                        # For Python code, preserve indentation which is semantically important
-                        if lang == "python":
-                            escaped_code = escaped_code.replace("    ", "&#160;&#160;&#160;&#160;")
-                            escaped_code = escaped_code.replace("\t", "&#160;&#160;&#160;&#160;")
-
-                        return f'<pre><code class="language-{lang}">{escaped_code}</code></pre>'
-
-                    # Replace markdown code blocks with HTML that Prism can highlight
-                    # More robust pattern to handle various code block formats
-                    content_str = re.sub(r'```([\w-]*)\n(.*?)```', code_replace, content_str, flags=re.DOTALL)
-
-                    # Handle inline code with backticks
-                    def inline_code_replace(match):
-                        code = html.escape(match.group(1))
-                        return f'<code>{code}</code>'
-
-                    def code_block_replace(match):
-                        code = html.escape(match.group(1))
-                        return f'<pre><code class="language-python">{code}</code></pre>'
-
-                    content_str = re.sub(r'<helpers>(.*?)</helpers>', code_block_replace, content_str, flags=re.DOTALL)
-                    content_str = re.sub(r'<helpers_result>(.*?)</helpers_result>', code_block_replace, content_str, flags=re.DOTALL)
-                    content_str = re.sub(r'`([^`]+)`', inline_code_replace, content_str)
-
-                    # Convert markdown to HTML with extended options for better rendering
-                    result = markdown2.markdown(
-                        content_str,
-                        extras=[
-                            'tables',
-                            'fenced-code-blocks',
-                            'code-friendly',
-                            'break-on-newline',
-                            'smarty-pants',  # For better typography
-                            'cuddled-lists'  # Better list formatting
-                        ]
-                    )
-
-                    # Apply final formatting
-                    s.write(f'{result}\n')
-
-                elif isinstance(content, MarkdownContent):
-                    content_str = content.get_str() if len(content.get_str()) < 10000 else content.get_str()[:300] + '\n\n ... \n\n' + content.get_str()[-300:]
-                    s.write(f'    <div class="markdown-content">\n')
-                    s.write(f'        {markdown2.markdown(content_str, extras=["tables", "fenced-code-blocks", "break-on-newline"])}\n')
-                    s.write(f'    </div>\n')
-                elif isinstance(content, ImageContent):
-                    s.write(f'    <div class="image-container">\n')
-                    s.write(f'        <img src="data:{content.image_type};base64,{base64.b64encode(content.sequence).decode("utf-8")}" alt="{content.url}" />\n')
-                    s.write(f'    </div>\n')
-                elif isinstance(content, BrowserContent):
-                    s.write(f'    <div class="browser-content">\n')
-                    s.write(f'        <h3>Browser Content: {content.url}</h3>\n')
-                    s.write(f'    </div>\n')
-                elif isinstance(content, FileContent):
-                    s.write(f'    <div class="file-content">\n')
-                    s.write(f'        <h3>File Content: {content.url}</h3>\n')
-                    s.write(f'    </div>\n')
-                elif isinstance(content, HTMLContent):
-                    result = markdown2.markdown(content.get_str(), extras=['tables', 'fenced-code-blocks'])
-                    s.write(f'    <div class="html-content">\n')
-                    s.write(f'        {result}\n')
-                    s.write(f'    </div>\n')
-                elif isinstance(content, PdfContent):
-                    s.write(f'    <div class="pdf-content">\n')
-                    s.write(f'        <h3>PDF Content: {content.url}</h3>\n')
-                    s.write(f'    </div>\n')
-
-            s.write(f'    </div>\n')
-            s.write(f'</div>\n')
+        s.write(HTMLMessageRenderer().render_messages(messages))
 
         s.write(self.footer())
         val = s.getvalue()

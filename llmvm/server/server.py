@@ -288,8 +288,8 @@ async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     cache_session.set(thread.id, thread)
     return cast(SessionThreadModel, cache_session.get(thread.id))
 
-@app.get('/v1/chat/get_threads')
-async def get_threads():
+@app.get('/v1/chat/get_threads', response_model=list[SessionThreadModel])
+async def get_threads() -> list[SessionThreadModel]:
     def safe_json(obj):
         try:
             json.dumps(obj)  # Fast check
