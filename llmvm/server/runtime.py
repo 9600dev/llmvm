@@ -3,6 +3,8 @@ import asyncio
 import builtins
 from dataclasses import asdict, dataclass
 import math
+import matplotlib
+from matplotlib import pyplot as plt
 import numpy as np
 from datetime import datetime
 import inspect
@@ -218,6 +220,7 @@ class Runtime:
         self.runtime_state['datetime'] = datetime
         self.runtime_state['numpy'] = np
         self.runtime_state['scipy'] = scipy
+        self.runtime_state['scipy.stats'] = scipy.stats
         self.runtime_state['np'] = np
         self.runtime_state['pd'] = pd
         self.runtime_state['float'] = float
@@ -226,6 +229,8 @@ class Runtime:
         self.runtime_state['npf'] = npf
         self.runtime_state['re'] = re
         self.runtime_state['math'] = math
+        self.runtime_state['matplotlib'] = matplotlib
+        self.runtime_state['plt'] = plt
 
         # llmvm runtime
         self.runtime_state['todos'] = self.todos
