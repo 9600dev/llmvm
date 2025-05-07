@@ -54,7 +54,6 @@ except ValueError:
     os.makedirs(os.path.expanduser('~/.local/share/llmvm'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/cache'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/download'), exist_ok=True)
-    os.makedirs(os.path.expanduser('~/.local/share/llmvm/cdn'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/logs'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/memory'), exist_ok=True)
 
@@ -72,13 +71,11 @@ helpers = Helpers.flatten(list(
 
 
 os.makedirs(Container().get('cache_directory'), exist_ok=True)
-os.makedirs(Container().get('cdn_directory'), exist_ok=True)
 os.makedirs(Container().get('log_directory'), exist_ok=True)
 os.makedirs(Container().get('memory_directory'), exist_ok=True)
 
 cache_session = PersistentCache(cache_directory=Container().get('cache_directory'))
 runtime_dict_cache: MemoryCache[int, dict[str, Any]] = MemoryCache()
-cdn_directory = Container().get('cdn_directory')
 
 
 if (
@@ -128,7 +125,12 @@ class PrettyJSONResponse(JSONResponse):
         ).encode("utf-8") + b"\n"
 
 
-def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> ExecutionController:
+def get_controller(
+        thread_id: int = 0,
+        controller: Optional[str] = None,
+        max_input_tokens: Optional[int] = None,
+        max_output_tokens: Optional[int] = None
+    ) -> ExecutionController:
     if not controller:
         controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
 
@@ -146,29 +148,29 @@ def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> Exec
             api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
-            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
-            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=8192),
+            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
+            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=8192),
         )
     elif controller == 'gemini':
         executor = GeminiExecutor(
             api_key=os.environ.get('GEMINI_API_KEY', ''),
             default_model=default_model_config,
-            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
-            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
+            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
+            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
         )
     elif controller == 'deepseek':
         executor = DeepSeekExecutor(
             api_key=os.environ.get('DEEPSEEK_API_KEY', ''),
             default_model=default_model_config,
-            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
-            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
+            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
+            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
         )
     elif controller == 'bedrock':
         executor = BedrockExecutor(
             api_key='',
             default_model=default_model_config,
-            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='bedrock', default=300000),
-            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='bedrock', default=4096),
+            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='bedrock', default=300000),
+            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='bedrock', default=4096),
             region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
         )
     else:
@@ -176,8 +178,8 @@ def get_controller(thread_id: int = 0, controller: Optional[str] = None) -> Exec
             api_key=os.environ.get('OPENAI_API_KEY', ''),
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
-            default_max_input_len=override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
-            default_max_output_len=override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
+            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
+            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
         )
 
     return ExecutionController(
@@ -209,14 +211,6 @@ async def stream_response(response):
             break
         content += str(chunk)
         yield f"data: {jsonpickle.encode(chunk)}\n\n"
-
-
-@app.get('/cdn/{filename}')
-def get_file(filename: str):
-    file_path = os.path.join(cdn_directory, filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail='File not found')
-    return FileResponse(path=file_path)
 
 
 @app.post('/download')
@@ -731,6 +725,7 @@ async def tools_completions(request: SessionThreadModel):
                     temperature=thread.temperature,
                     stream_handler=callback,
                     model=model,
+                    max_output_tokens=thread.output_token_len,
                     compression=compression,
                     cookies=cookies,
                     helpers=cast(list[Callable], helpers),

@@ -8,7 +8,6 @@ executor_trace: '~/.local/share/llmvm/executor.trace'
 chromium_headless: true
 chromium_cookies: '~/.local/share/llmvm/cookies.txt'
 cache_directory: '~/.local/share/llmvm/cache'
-cdn_directory: '~/.local/share/llmvm/cdn'
 log_directory: '~/.local/share/llmvm/logs'
 memory_directory: '~/.local/share/llmvm/memory'
 todo_file: '~/.local/share/llmvm/todo.md'
@@ -41,6 +40,7 @@ helper_functions:
   - llmvm.server.tools.market.MarketHelpers.get_stock_volatility
   - llmvm.server.tools.market.MarketHelpers.get_stock_price_history
   - llmvm.server.tools.market.MarketHelpers.get_stock_analysis
+  - llmvm.server.tools.market.MarketHelpers.get_options_chain
   - llmvm.server.bcl.BCL.datetime
   - llmvm.server.bcl.BCL.sample_normal
   - llmvm.server.bcl.BCL.sample_binomial

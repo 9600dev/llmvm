@@ -101,6 +101,13 @@ def _set_winsize(fd, rows, cols):
 
 class Helpers():
     @staticmethod
+    def all(iterable, func):
+        for x in iterable:
+            if not func(x):
+                return False
+        return True
+
+    @staticmethod
     def run_streaming(cmd: str, tui_threshold: float = 0.30) -> str:
         master, slave = pty.openpty()
 

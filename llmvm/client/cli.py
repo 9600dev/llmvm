@@ -1587,9 +1587,10 @@ def new(
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
               default='lifo', help='context window compression method if the message is too large. Default is "lifo" last in first out.')
+@click.option('--output_token_len', '-o', type=int, required=False, default=0,
+              help='maximum output tokens for the call.')
 @click.option('--file-writes', type=bool, required=False, default=False, is_flag=True, help='automatically apply file writes and diffs')
 @click.option('--temperature', type=float, required=False, default=0.2, help='temperature for the call.')
-@click.option('--output_token_len', type=int, required=False, default=0, help='maximum output tokens for the call.')
 @click.option('--stop_tokens', type=str, required=False, multiple=True, help='stop tokens for the call.')
 @click.option('--escape', type=bool, is_flag=True, required=False, help='escape the message content.')
 @click.option('--throw', type=bool, is_flag=True, required=False, default=False, help='throw an exception if the LLMVM server is down. Default is false.')
@@ -1606,10 +1607,10 @@ def message(
     cookies: str,
     executor: str,
     model: str,
+    output_token_len: int,
     compression: str,
     file_writes: bool,
     temperature: float,
-    output_token_len: int,
     stop_tokens: list[str],
     escape: bool,
     throw: bool,
@@ -1672,7 +1673,7 @@ def message(
 
     # deal with output token length and thinking tokens
     if output_token_len == 0:
-        output_token_len = TokenPriceCalculator().max_output_tokens(model, executor=executor, default=4096)
+        output_token_len = TokenPriceCalculator().max_output_tokens(model, executor=executor, default=8192)
 
     if thinking > output_token_len:
         raise ValueError(f'--thinking value {thinking} is greater than --output_token_len {output_token_len}. Thinking must be less than or equal to output_token_len.')

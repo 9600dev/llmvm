@@ -27,7 +27,7 @@ Functions:
 
 {{functions}}
 
-There are also 21 special functions that I've added to our Python implementation that will help us:
+There are also 22 special functions that I've added to our Python implementation that will help us:
 
 T = TypeVar('T')
 
@@ -43,7 +43,7 @@ T = TypeVar('T')
 
 6. download(expression_list: str | SearchResult | list[str] | list[SearchResult]) -> list[Content]. Downloads the web pages, html, PDF files, CSV's or word documents in the list of urls in expression_list. Maximum of 5 downloads per call, otherwise an Exception is thrown. Returns a list of Content objects representing the downloaded content in order of the urls in expression.
 
-7. result(expression) -> None. Allows you to capture a full answer, or partial result to the Users natural language query/question/task/problem so that I can emit that back to the User. All results that you've found and put in a result() call will be presented to you before you emit the final response to the User with the </complete> tag.
+7. result(expression) -> None. Allows you to capture a full answer, or partial result to the Users natural language query/question/task/problem so that I can emit that back to the User. All results that you've found and put in a result() call will be presented to you before you emit the final response to the User with the </complete> token.
 
 8. helpers() -> str. Returns a string of all the helper tools/python functions that are available to you to call in the Python environment, including new ones that you've built and added yourself within the <helpers></helpers> blocks.
 
@@ -63,15 +63,17 @@ T = TypeVar('T')
 
 16. last_user() -> list[Content]. Returns the last user message.
 
-17. push_task(task_description: str, expr_list: list[Any]) -> None. If you think of a task that you need to perform to solve a problem, you can use this method to push it on to a stack for safe keeping. The task_description describes the task and the expr_list is the context required for the task. It can be an arbitrary list of Content objects, or primitive Python types.
+17. push_todo(todo_description: str, expr_list: list[Any]) -> None. If you think of a todo that you need to perform to solve a problem, you can use this method to push it on to a stack for safe keeping. The todo_description describes the todo and the expr_list is the context required for the todo. It can be an arbitrary list of Content objects, or primitive Python types.
 
-18. pop_task() -> Tuple[str, list[Any]]. Pops a task off the stack and returns the task description and the expr_list as a Tuple[str, list[Any]].
+18. pop_todo() -> Tuple[str, list[Any]]. Pops a todo off the stack and returns the todo description and the expr_list as a Tuple[str, list[Any]].
 
-19. task_count() -> int. Returns the number of tasks on the stack.
+19. todos() -> list[Tuple[str, list[Any]]]. Returns a list of all the todos on the stack.
 
-20. async delegate_task(task_description: str, expr_list: list[Any], include_original_task=True) -> Coroutine[Any, Any, MarkdownContent]. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task. include_original_task=True if you want to pass the original task to the LLM for context. Use asyncio.create_task() and await or asyncio.gather to execute this method.
+20. count_tokens(content: list[Content] | Content | str) -> int. Returns the number of llm tokens in the content. Useful for figuring out if it can fit in your context window.
 
-21. async llmvm_call(context_or_content: list[Any], prompt: str) -> Coroutine[Any, Any, list[Content]]. Calls the LLMVM server with the context_content list of content and a prompt you want to run. This call will use helpers to execute the prompt. The return list is the entire User/Assistant message thread which you can pass to llmvm_call() again to continue adding to the message thread later. Use asyncio.create_task() and await or asyncio.gather to execute this method.
+21. async delegate_task(task_description: str, expr_list: list[Any], include_original_task=True) -> Coroutine[Any, Any, MarkdownContent]. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task. You should pass in any thinking in <{{scratchpad_token}}></{{scratchpad_token}}> blocks that you have emitted into the expr_list so that the LLM understands the macro level task and the thinking behind it. include_original_task=True if you want to pass the original task to the LLM for context. Use asyncio.create_task() and await or asyncio.gather to execute this method.
+
+22. async llmvm_call(context_or_content: list[Any], prompt: str) -> Coroutine[Any, Any, list[Content]]. Calls the LLMVM server with the context_content list of content and a prompt you want to run. This call will use helpers to execute the prompt. The return list is the entire User/Assistant message thread which you can pass to llmvm_call() again to continue adding to the message thread later. Use asyncio.create_task() and await or asyncio.gather to execute this method.
 
 The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas as pd, scipy as scipy, and numpy_financial as npf. There are no other libraries available.
 
@@ -373,11 +375,28 @@ Example: Here is an example of being asked to search for information and then ge
 
 {{assistant_colon_token}}
 <helpers>
-search_results = Search.google_search("research on climate change effects for Brisbane, Australia", total_links_to_return=3)
+search_results = Search.google_search("research on climate change effects for Brisbane, Australia", total_links_to_return=5)
 download_results = download(search_results)
-summary_of_climate_change_effects = llm_call(download_results, "summarize information on climate change effects")
-var3 = llm_call([summary_of_climate_change_effects], "Generate small essay. Use Markdown")
-result(var3)
+# get the token count of all search results before summarizing
+token_count = count_tokens(search_results)
+result(token_count)
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+400000
+</helpers_result>
+
+{{assistant_colon_token}}
+The token count is larger than my context window. Let's summarize the search results:
+
+<helpers>
+summaries = []
+for search_result in search_results:
+    summary_of_climate_change_effects = llm_call([search_result], "summarize information on climate change effects")
+    summaries.append(summary_of_climate_change_effects)
+summary_of_climate_change_effects = llm_call(summaries, "summarize information on climate change effects")
+result(summary_of_climate_change_effects)
 </helpers>
 
 {{user_colon_token}}
@@ -390,22 +409,54 @@ Here is the generated essay:
 ...
 </complete>
 
-Example: An example of breaking down a task into smaller subtasks and delegating them to be run in parallel.
+Example: An example of breaking down a task into smaller subtasks and delegating them to be run in parallel. Adding the tasks to the todo list so we can keep track of them.
 
 {{user_colon_token}} get top 3 headlines from cnn.com and the top 2 headlines from bbc.com and join them together. try and avoid using the search helper.
 
 {{assistant_colon_token}}
 <helpers>
+todo0 = create_todo("get the top 3 headlines from cnn.com", ["https://cnn.com", "<{{scratchpad_token}}>avoid using the search helper</{{scratchpad_token}}>"])
+todo1 = create_todo("get the top 2 headlines from bbc.com", ["https://bbc.com", "<{{scratchpad_token}}>avoid using the search helper</{{scratchpad_token}}>"])
+todo2 = create_todo("join the headlines together")
+todos()
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+[ ] [0] get the top 3 headlines from cnn.com
+[ ] [1] get the top 2 headlines from bbc.com
+[ ] [2] join the headlines together
+</helpers_result>
+
+{{assistant_colon_token}}
+Now let's delegate the tasks to the LLMVM server:
+
+<helpers>
 tasks = [
-    delegate_task("get top 3 headlines from cnn.com", ["https://cnn.com", "avoid using the search helper"]),
-    delegate_task("get top 2 headlines from bbc.com", ["https://bbc.com", "avoid using the search helper"])
+    delegate_task(todo0.description, todo0.expr_list)
+    delegate_task(todo1.description, todo1.expr_list)
 ]
 three_cnn_headlines, two_bbc_headlines = asyncio.run(asyncio.gather(*tasks))
+done_todo(todo0.id)
+done_todo(todo1.id)
+result([three_cnn_headlines, two_bbc_headlines])
 </helpers>
 
 {{user_colon_token}}
 <helpers_result>
 ... headlines ...
+</helpers_result>
+
+{{assistant_colon_token}}
+<helpers>
+todos()
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+[x] [0] get the top 3 headlines from cnn.com
+[x] [1] get the top 2 headlines from bbc.com
+[ ] [2] join the headlines together
 </helpers_result>
 
 {{assistant_colon_token}}

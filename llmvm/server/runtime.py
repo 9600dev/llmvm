@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import builtins
+from dataclasses import asdict, dataclass
 import math
 import numpy as np
 from datetime import datetime
@@ -106,6 +107,18 @@ def m_isinstance(meta, type) -> bool:
 
     return isinstance(meta, type)
 
+@dataclass
+class Todo(AstNode):
+    id: int
+    done: bool
+    description: str
+    expr_list: list[Any]
+
+    def __str__(self):
+        return f"[{'x' if self.done else ' '}] [{self.id}] {self.description}"
+
+    def get_str(self):
+        return str(self)
 
 class Runtime:
     """
@@ -135,7 +148,7 @@ class Runtime:
         self.original_query = ''
         self.original_code = ''
         self.thinking = thinking
-        self.task_stack: list[Tuple[str, list[Any]]] = []
+        self.todo_list: list[Todo] = []
 
     def setup(self) -> 'Runtime':
         """
@@ -215,11 +228,13 @@ class Runtime:
         self.runtime_state['math'] = math
 
         # llmvm runtime
-        self.runtime_state['task_count'] = self.task_count
-        self.runtime_state['push_task'] = self.push_task
-        self.runtime_state['pop_task'] = self.pop_task
+        self.runtime_state['todos'] = self.todos
+        self.runtime_state['create_todo'] = self.create_todo
+        self.runtime_state['get_todo'] = self.get_todo
+        self.runtime_state['done_todo'] = self.done_todo
         self.runtime_state['llmvm_call'] = self.llmvm_call
         self.runtime_state['delegate_task'] = self.delegate_task
+        self.runtime_state['count_tokens'] = self.count_tokens
         self.runtime_state['llm_bind'] = self.llm_bind
         self.runtime_state['llm_call'] = self.llm_call
         self.runtime_state['llm_list_bind'] = self.llm_list_bind
@@ -269,14 +284,25 @@ class Runtime:
     ########################
     ## llmvm runtime
     ########################
-    def push_task(self, task_description: str, expr_list: list[Any]) -> None:
-        self.task_stack.append((task_description, expr_list))
+    def create_todo(self, todo_description: str, expr_list: list[Any] = []) -> Todo:
+        todo = Todo(id=len(self.todo_list), done=False, description=todo_description, expr_list=expr_list)
+        self.todo_list.append(todo)
+        return todo
 
-    def pop_task(self) -> Tuple[str, list[Any]]:
-        return self.task_stack.pop()
+    def get_todo(self, id: int) -> Todo:
+        if id < len(self.todo_list):
+            return self.todo_list[id]
+        else:
+            raise ValueError(f"Todo with id {id} not found")
 
-    def task_count(self) -> int:
-        return len(self.task_stack)
+    def done_todo(self, id: int) -> None:
+        if id < len(self.todo_list):
+            self.todo_list[id].done = True
+        else:
+            raise ValueError(f"Todo with id {id} not found")
+
+    def todos(self) -> str:
+        return '\n'.join([str(todo) for todo in self.todo_list])
 
     async def llmvm_call(self, context_or_content: list[Any], prompt: str) -> list[Content]:
         client: LLMVMClient = get_client(
@@ -406,6 +432,21 @@ class Runtime:
         else:
             return pandas_bind_with_llm(expr)
 
+    def count_tokens(self, content: list[Content] | Content | str) -> int:
+        token_count = 0
+        if isinstance(content, list) and Helpers.all(content, lambda x: isinstance(x, Content)):
+            token_count = asyncio.run(self.controller.get_executor().count_tokens([User(content)]))
+            return token_count
+        elif isinstance(content, Content):
+            token_count = asyncio.run(self.controller.get_executor().count_tokens([User(content)]))
+            return token_count
+        elif isinstance(content, str):
+            token_count = asyncio.run(self.controller.get_executor().count_tokens([User([TextContent(content)])]))
+            return token_count
+        else:
+            token_count = asyncio.run(self.controller.get_executor().count_tokens([User([TextContent(Helpers.str_get_str(content))])]))
+            return token_count
+
     def last_assistant(self) -> list[Content]:
         logging.debug('last_assistant()')
         if len(self.messages_list) == 0:
@@ -441,7 +482,7 @@ class Runtime:
         with open(os.path.expanduser(memory_dir) + f'/{self.thread_id}/{filename}', 'w') as f:
             if m_isinstance(content, list):
                 for c in content:
-                    f.write(f'{c.get_str()}\n')
+                    f.write(Helpers.str_get_str(c))
             elif isinstance(content, str):
                 f.write(content)
         return True
@@ -593,7 +634,7 @@ class Runtime:
 
     def coerce(self, expr, type_name: Union[str, Type]) -> str:
         if m_isinstance(type_name, type):
-            type_name = type_name.__name__
+            type_name = type_name.__name__  # type: ignore
 
         logging.debug(f'coerce({str(expr)[:50]}, {str(type_name)}) length of expr: {len(str(expr))}')
         assistant = self.controller.execute_llm_call(

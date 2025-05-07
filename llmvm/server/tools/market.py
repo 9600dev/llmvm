@@ -1,5 +1,7 @@
 import datetime as dt
-from typing import Dict
+from typing import Any, Dict, Optional, Tuple
+
+import pandas as pd
 
 
 class MarketHelpers():
@@ -195,3 +197,64 @@ class MarketHelpers():
         builder += f"Revenue Estimates:\n"
         builder += f"{str(ticker.revenue_estimate)}\n\n"
         return builder
+
+    @staticmethod
+    def get_options_chain(
+        symbol: str,
+        nearest_date: Optional[dt.datetime] = None
+    ) -> dict[str, Any]:
+        """
+        Get options chain data for a given stock symbol and expiration date.
+        Example:
+        chain = MarketHelpers.get_options_chain('NVDA', BCL.datetime('now'))
+        print(chain['expiration'])
+        print(chain['calls'])
+        print(chain['puts'])
+
+        'expiration' is the expiration dt.datetime of the options chain.
+        'puts' and 'calls' are pandas DataFrames with the following columns:
+
+        ['contractSymbol', 'lastTradeDate', 'strike', 'lastPrice', 'bid', 'ask',
+         'change', 'percentChange', 'volume', 'openInterest', 'impliedVolatility',
+         'inTheMoney', 'contractSize', 'currency']
+
+        :param symbol: The stock symbol
+        :type symbol: str
+        :param nearest_date: The nearest expiration date to get the options chain for. Default is soonest expiration.
+        :type nearest_date: Optional[dt.datetime]
+        :return: a dictionary containing the expiration date, and the calls and puts for that expiration date
+        :rtype: dict[str, Any]
+        """
+        import yfinance as yf
+        # Create ticker object
+        ticker = yf.Ticker(symbol)
+
+        # Get all available expiration dates
+        exp_dates = ticker.options
+
+        if not exp_dates:
+            raise ValueError(f'No expiration dates found for {symbol}')
+
+        # If no target date provided, use today
+        if nearest_date is None:
+            nearest_date = dt.datetime.now()
+
+        # Convert expiration dates from strings to date objects
+        exp_dates_as_dates = [dt.datetime.strptime(date_str, '%Y-%m-%d').date() for date_str in exp_dates]
+
+        # Find the closest expiration date
+        closest_date: dt.date = min(exp_dates_as_dates, key=lambda x: abs(x - nearest_date.date()))
+        closest_date_str = closest_date.strftime('%Y-%m-%d')
+
+        # Get options chain for the closest expiration date
+        options = ticker.option_chain(closest_date_str)
+
+        # Extract calls and puts
+        calls = options.calls
+        puts = options.puts
+
+        return {
+            'expiration': dt.datetime(closest_date.year, closest_date.month, closest_date.day),
+            'calls': calls,
+            'puts': puts
+        }
