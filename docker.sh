@@ -11,11 +11,11 @@ fi
 
 set -o errexit -o pipefail -o noclobber -o nounset
 
-OPENAI_API_KEY=${OPENAI_API_KEY:-}
-ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-SEC_API_KEY=${SEC_API_KEY:-}
-SERPAPI_API_KEY=${SERPAPI_API_KEY:-}
-GEMINI_API_KEY=${GEMINI_API_KEY:-}
+OPENAI_API_KEY="${OPENAI_API_KEY:-""}"
+ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-""}"
+GEMINI_API_KEY="${GEMINI_API_KEY:-""}"
+SEC_API_KEY="${SEC_API_KEY:-""}"
+SERPAPI_API_KEY="${SERPAPI_API_KEY:-""}"
 
 CONTNAME=llmvm-container
 IMGNAME=llmvm-image
@@ -152,7 +152,8 @@ run() {
     # echo ssh into container via ssh llmvm:llmvm@$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTNAME)
     echo "container: $CONTNAME"
     echo "ip address: $(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTNAME)"
-    echo "ssh'ing into container via ssh llmvm@localhost -p 2222, password is 'llmvm'"
+    echo "you can ssh into a container bash shell via ssh llmvm@localhost. password is 'llmvm'"
+    echo "ssh'ing into llmvm.client via ssh llmvm@localhost -p 2222, password is 'llmvm'"
     echo ""
     ssh llmvm@localhost -p 2222
 }
@@ -177,9 +178,9 @@ build() {
     BUILD_CMD="DOCKER_BUILDKIT=1 docker buildx build \
         --build-arg OPENAI_API_KEY=$OPENAI_API_KEY \
         --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+        --build-arg GEMINI_API_KEY=$GEMINI_API_KEY \
         --build-arg SEC_API_KEY=$SEC_API_KEY \
         --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY \
-        --build-arg GEMINI_API_KEY=$GEMINI_API_KEY \
         -f $BUILDDIR/Dockerfile \
         --platform $PLATFORM \
         -t $IMGNAME \

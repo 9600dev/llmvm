@@ -2,7 +2,6 @@ import json
 import os
 from typing import Any, Awaitable, Callable, Optional, cast
 from importlib import resources
-import transformers
 
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
@@ -190,6 +189,8 @@ class DeepSeekExecutor(OpenAIExecutor):
         self,
         messages: list[dict[str, Any]],
     ) -> int:
+        import transformers
+
         with resources.path("llmvm.common", "deepseek_tokenizer") as tokenizer_path:
             # Convert path to str just to be sure HF Transformers sees it as a string path
             os.environ["TOKENIZERS_PARALLELISM"] = "true"
