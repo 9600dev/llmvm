@@ -428,6 +428,30 @@ class Helpers():
         return (True, cls_candidate)
 
     @staticmethod
+    def get_methods_and_statics(obj: object) -> List[Callable]:
+        cls = obj.__class__
+        result: List[Callable] = []
+
+        for name, member in inspect.getmembers(obj):
+            # skip private/dunder attributes
+            if name.startswith("__"):
+                continue
+
+            # must be callable at runtime
+            if not callable(member):
+                continue
+
+            # attribute must come from the class namespace
+            if name not in cls.__dict__:
+                continue
+
+            class_attr = cls.__dict__[name]
+            # include normal functions (instance methods) and staticmethod objects
+            if inspect.isfunction(class_attr) or isinstance(class_attr, staticmethod):
+                result.append(member)
+        return result
+
+    @staticmethod
     def get_function_description_flat(function: Callable) -> str:
         """
         Build a string describing the Python function signature (without body),

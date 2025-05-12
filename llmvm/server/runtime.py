@@ -150,7 +150,6 @@ class Runtime:
         self.original_query = ''
         self.original_code = ''
         self.thinking = thinking
-        self.todo_list: list[Todo] = []
 
     def setup(self) -> 'Runtime':
         """
@@ -233,6 +232,7 @@ class Runtime:
         self.runtime_state['plt'] = plt
 
         # llmvm runtime
+        self.runtime_state['todo_list'] = []
         self.runtime_state['todos'] = self.todos
         self.runtime_state['create_todo'] = self.create_todo
         self.runtime_state['get_todo'] = self.get_todo
@@ -290,24 +290,24 @@ class Runtime:
     ## llmvm runtime
     ########################
     def create_todo(self, todo_description: str, expr_list: list[Any] = []) -> Todo:
-        todo = Todo(id=len(self.todo_list), done=False, description=todo_description, expr_list=expr_list)
-        self.todo_list.append(todo)
+        todo = Todo(id=len(self.runtime_state['todo_list']), done=False, description=todo_description, expr_list=expr_list)
+        self.runtime_state['todo_list'].append(todo)
         return todo
 
     def get_todo(self, id: int) -> Todo:
-        if id < len(self.todo_list):
-            return self.todo_list[id]
+        if id < len(self.runtime_state['todo_list']):
+            return self.runtime_state['todo_list'][id]
         else:
             raise ValueError(f"Todo with id {id} not found")
 
     def done_todo(self, id: int) -> None:
-        if id < len(self.todo_list):
-            self.todo_list[id].done = True
+        if id < len(self.runtime_state['todo_list']):
+            self.runtime_state['todo_list'][id].done = True
         else:
             raise ValueError(f"Todo with id {id} not found")
 
     def todos(self) -> str:
-        return '\n'.join([str(todo) for todo in self.todo_list])
+        return '\n'.join([str(todo) for todo in self.runtime_state['todo_list']])
 
     async def llmvm_call(self, context_or_content: list[Any], prompt: str) -> list[Content]:
         client: LLMVMClient = get_client(
@@ -815,9 +815,9 @@ class Runtime:
 
         # let's check the answer
         if not self.answer_error_correcting:
-            write_client_stream(TextContent(f'I am double checking a result: result("{snippet} ...")\n'))
+            write_client_stream(TextContent(f'result("{snippet} ...")\n'))
         else:
-            write_client_stream(TextContent(f'I have a new result, double checking it: result("{snippet} ...")\n'))
+            write_client_stream(TextContent(f'result("{snippet} ...")\n'))
 
         # if the original query is referring to an image, it's because we were in tool mode
         # so this is a todo: hack to fix answers() so that it works for images

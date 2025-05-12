@@ -61,6 +61,7 @@ helper_functions:
   - llmvm.server.bcl.BCL.search_and_replace
   - llmvm.server.bcl.BCL.find
   - llmvm.server.tools.browser.Browser
+  - llmvm.server.tools.sheets.GoogleSheetsManager
   - llmvm.server.tools.macos_chrome_browser.MacOSChromeBrowser
   - llmvm.server.tools.search_tool.Search.google_search
   - llmvm.server.tools.search_tool.Search.google_patent_search

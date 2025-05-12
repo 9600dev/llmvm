@@ -780,7 +780,10 @@ class ExecutionController(Controller):
             elif Helpers.is_function(result):
                 return [TextContent(Helpers.get_function_description_flat(result))]
             else:
-                raise ValueError(f'Unknown content type: {type(result)}')
+                logging.error(f'Unknown content type: {type(result)}, returning shape')
+                methods = f'The result is an instance of type {type(result)} with the following methods and static methods:\n'
+                methods += f'\n'.join([Helpers.get_function_description_flat(f) for f in Helpers.get_methods_and_statics(result)])
+                return [TextContent(methods)]
 
         from llmvm.server.python_runtime_host import PythonRuntimeHost
         python_runtime_host = PythonRuntimeHost(
