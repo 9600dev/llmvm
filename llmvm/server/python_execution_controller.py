@@ -230,8 +230,14 @@ class ExecutionController(Controller):
         original_query: str,
         llm_call: LLMCall,
     ) -> Assistant:
-        prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message])
-        write_client_stream(TextContent(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n'))
+        prompt_len = await self.executor.count_tokens(
+            llm_call.context_messages + [llm_call.user_message]
+        )
+        write_client_stream(
+            TextContent(
+                f'Performing context window compression type: map/reduce with token length {prompt_len}.\n'
+            )
+        )
 
         # collapse the context messages into single message
         context_message = User(TextContent('\n\n'.join([m.get_str() for m in llm_call.context_messages])))
@@ -597,76 +603,22 @@ class ExecutionController(Controller):
         elif prompt_len > max_prompt_len and compression == TokenCompressionMethod.SIMILARITY:
             return await self.__similarity(llm_call, query)
         else:
-            # let's figure out what method to use
-            write_client_stream(TextContent(f'The message prompt length: {prompt_len} is bigger than the max prompt length: {max_prompt_len} for executor {llm_call.executor.name()}\n'))  # noqa E501
-            write_client_stream(TextContent(f'Context window compression strategy: {compression.name}.\n'))
-            # check to see if we're simply lifo'ing the context messages (last in first out)
-            context_message = User(TextContent('\n\n'.join([m.get_str() for m in llm_call.context_messages])))
-
-            # Since vector_search is removed, we'll simplify the approach
-            write_client_stream(TextContent(
-                'Using simplified context window compression approach.\n'
-            ))
-
-            # Extract a sample of the context to make a decision
-            def extract_sample_chunks(text, num_chunks=5, chunk_size=256):
-                # Approximate character count
-                chars_per_chunk = chunk_size * 4
-                total_len = len(text)
-
-                if total_len <= chars_per_chunk:
-                    return [text]
-
-                chunks = []
-                # Take samples from beginning, middle and end
-                chunks.append(text[:chars_per_chunk])
-
-                if num_chunks > 2:
-                    middle_samples = num_chunks - 2
-                    for i in range(middle_samples):
-                        start = (total_len // (middle_samples + 1)) * (i + 1) - (chars_per_chunk // 2)
-                        start = max(0, start)
-                        end = min(total_len, start + chars_per_chunk)
-                        chunks.append(text[start:end])
-
-                chunks.append(text[-chars_per_chunk:])
-                return chunks
-
-            sample_chunks = extract_sample_chunks(context_message.get_str(), 5)
-
-            decision_criteria: list[str] = []
-            for chunk in sample_chunks[:5]:
-                assistant_similarity = await self.aexecute_llm_call_simple(
-                    llm_call=LLMCall(
-                        user_message=User(TextContent('')),
-                        context_messages=[],
-                        executor=llm_call.executor,
-                        model=llm_call.model,
-                        temperature=llm_call.temperature,
-                        max_prompt_len=llm_call.max_prompt_len,
-                        completion_tokens_len=llm_call.completion_tokens_len,
-                        prompt_name='document_chunk.prompt',
-                    ),
-                    template={
-                        'query': str(query),
-                        'document_chunk': chunk,
-                    },
+            # Default behaviour is to summarize the context with map/reduce
+            write_client_stream(
+                TextContent(
+                    f'The message prompt length: {prompt_len} is bigger than the max prompt length: {max_prompt_len} for executor {llm_call.executor.name()}\n'
                 )
+            )
+            write_client_stream(
+                TextContent(
+                    f'Context window compression strategy: {compression.name}.\n'
+                )
+            )
+            write_client_stream(
+                TextContent('Using simplified context window compression approach.\n')
+            )
 
-                decision_criteria.append(assistant_similarity.get_str())
-                logging.debug('aexecute_llm_call() map_reduce_required, query_or_task: {}, response: {}'.format(
-                    query,
-                    assistant_similarity.message,
-                ))
-                if 'No' in assistant_similarity.get_str():
-                    # we can break early, as the 'map_reduced_required' flag will not be set below
-                    break
-
-            map_reduce_required = all(['Yes' in d for d in decision_criteria])
-            if map_reduce_required:
-                return await self.__map_reduce(query, original_query, llm_call)
-            else:
-                return await self.__similarity(llm_call, query)
+            return await self.__map_reduce(query, original_query, llm_call)
 
     def execute_llm_call(
         self,
