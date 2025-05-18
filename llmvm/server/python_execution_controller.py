@@ -230,7 +230,7 @@ class ExecutionController(Controller):
         original_query: str,
         llm_call: LLMCall,
     ) -> Assistant:
-        prompt_len = self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message])
+        prompt_len = await self.executor.count_tokens(llm_call.context_messages + [llm_call.user_message])
         write_client_stream(TextContent(f'Performing context window compression type: map/reduce with token length {prompt_len}.\n'))
 
         # collapse the context messages into single message
