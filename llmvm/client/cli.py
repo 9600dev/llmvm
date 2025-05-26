@@ -429,6 +429,7 @@ class Repl():
         rich.print('[white](:wh filename to save the current thread as HTML to a file)[/white]')
         rich.print('[white](:.) to open the LLMVM memory/sandbox directory in finder.')
         rich.print('[white](:ohc open ```html block in browser)[/white]')
+        rich.print('[white](:omc open last message in browser)[/white]')
         rich.print('[white](:otc open message thread in browser)[/white]')
         rich.print('[white](:cb Show all code blocks)[/white]')
         rich.print('[white](:ycb0 Copy code block 0, 1, 2... ycb for all)[/white]')
@@ -1780,6 +1781,7 @@ def message(
 
     thread: SessionThreadModel = SessionThreadModel()
 
+    stream_printer = StreamPrinter()
     thread = asyncio.run(llmvm_client.call(
         thread=id,
         messages=thread_messages,
@@ -1792,14 +1794,19 @@ def message(
         compression=compression,
         cookies=cookies_list,
         thinking=thinking,
-        stream_handler=StreamPrinter().write,
+        stream_handler=stream_printer.write,
     ))
+    
+    # Finalize the stream if inline markdown is enabled
+    stream_printer.finalize_stream()
 
     if not thread.messages:
         rich.print(f'No messages were returned from either the LLMVM server, or the LLM model {model}.')
         return
 
-    console.print_messages([MessageModel.to_message(thread.messages[-1])], escape)
+    # Skip final markdown rendering if inline rendering was used
+    if not stream_printer.inline_markdown_render:
+        console.print_messages([MessageModel.to_message(thread.messages[-1])], escape)
 
     serialize_messages([MessageModel.to_message(m) for m in thread.messages])
 

@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable, cast
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.theme import Theme
+from rich.control import Control
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
@@ -114,6 +115,12 @@ class StreamPrinter():
         self.markdown_mode = False
         self.token_color = Container.get_config_variable('client_stream_token_color', default='bright_black')
         self.thinking_token_color = Container.get_config_variable('client_stream_thinking_token_color', default='cyan')
+        self.inline_markdown_render = Container.get_config_variable('client_repl_markdown_inline_render', default=False)
+        self.current_line = ''
+        self.line_count = 0
+        self.rendered_lines = []
+        self.printed_on_current_line = False
+        self.in_helpers_block = False
 
     async def display_image(self, image_bytes):
         if len(image_bytes) < 10:
@@ -186,6 +193,55 @@ class StreamPrinter():
         except Exception as e:
             return
 
+    def _clear_current_line(self):
+        """Clear the current line in the terminal"""
+        # Move cursor to beginning of line and clear it
+        self.console.file.write('\r\033[K')
+        self.console.file.flush()
+        self.printed_on_current_line = False
+
+    def _render_line_as_markdown(self, line: str):
+        """Render a line as markdown using rich"""
+        if not line.strip():
+            return
+
+        # Clear the current line first
+        self._clear_current_line()
+
+        # Check if this line is inside helpers tags
+        if self.in_helpers_block:
+            # Render as Python code with syntax highlighting
+            from rich.syntax import Syntax
+            syntax = Syntax(line, "python", theme="monokai", background_color="default", word_wrap=True, padding=0)
+            self.console.print(syntax)
+        else:
+            # Apply the custom markdown renderer
+            Markdown.__rich_console__ = markdown__rich_console__
+
+            # Create markdown object and render it
+            md = Markdown(line)
+            self.console.print(md)  # Remove end='' to ensure proper line ending
+
+        # Store that we've rendered this line
+        self.rendered_lines.append(self.line_count)
+
+
+    def finalize_stream(self):
+        """Finalize the stream by rendering any remaining partial line"""
+        if self.inline_markdown_render and self.current_line.strip():
+            # Render the final partial line
+            self._render_line_as_markdown(self.current_line)
+            
+    def _check_helpers_tags(self, line: str):
+        """Check if line contains opening or closing helpers tags"""
+        # Check for opening tags
+        if '<helpers>' in line or '<helpers_result>' in line:
+            self.in_helpers_block = True
+            
+        # Check for closing tags
+        if '</helpers>' in line or '</helpers_result>' in line:
+            self.in_helpers_block = False
+
     async def write(self, node: AstNode):
         if logging.level <= 20:  # INFO
             token_color = self.token_color
@@ -204,12 +260,72 @@ class StreamPrinter():
                 string = node.token
             elif isinstance(node, TokenStopNode) or isinstance(node, StreamingStopNode):
                 string = node.print_str
+                # Finalize the stream when we hit a stop node
+                if self.inline_markdown_render:
+                    self.finalize_stream()
+                    return
             else:
                 string = str(node)
 
             if string:
                 self.buffer += string
-                self.console.print(string, end='', style=f"{token_color}", highlight=False)
+
+                if self.inline_markdown_render:
+                    # Check if we've hit a newline
+                    if '\n' in string:
+                        # Split on newlines
+                        parts = string.split('\n')
+
+                        # Complete the current line with the first part
+                        self.current_line += parts[0]
+
+                        # Only print tokens if we haven't already printed on this line
+                        if parts[0]:
+                            self.console.print(parts[0], end='', style=f"{token_color}", highlight=False)
+                            self.printed_on_current_line = True
+
+                        if self.current_line.strip() and self.printed_on_current_line: self._clear_current_line()
+                        if self.current_line.strip(): 
+                            # Check for helpers tags before rendering
+                            self._check_helpers_tags(self.current_line)
+                            self._render_line_as_markdown(self.current_line)
+                        else:
+                            self._clear_current_line()
+                            self.console.print()
+
+                        # Process any additional complete lines in the middle
+                        for i in range(1, len(parts) - 1):
+                            self.line_count += 1
+                            if parts[i].strip():
+                                # First print the tokens
+                                self.console.print(parts[i], end='', style=f"{token_color}", highlight=False)
+                                self.printed_on_current_line = True
+                                # Clear before rendering
+                                self._clear_current_line()
+                                # Check for helpers tags before rendering
+                                self._check_helpers_tags(parts[i])
+                                # Then render as markdown
+                                self._render_line_as_markdown(parts[i])
+                            else:
+                                # Empty line
+                                self.console.print()
+
+                        # Start new current line
+                        self.line_count += 1
+                        self.current_line = parts[-1]
+
+                        # Print the start of the new line if not empty
+                        if self.current_line:
+                            self.console.print(self.current_line, end='', style=f"{token_color}", highlight=False)
+                            self.printed_on_current_line = True
+                    else:
+                        # No newline - accumulate in current line and print token
+                        self.current_line += string
+                        self.console.print(string, end='', style=f"{token_color}", highlight=False)
+                        self.printed_on_current_line = True
+                else:
+                    # Normal mode - just print tokens
+                    self.console.print(string, end='', style=f"{token_color}", highlight=False)
 
 
 class ConsolePrinter:

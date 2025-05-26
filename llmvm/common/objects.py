@@ -977,6 +977,8 @@ class Assistant(Message):
         return assistant
 
 
+ContentContent = Union[str, Content, User, Assistant]
+
 ########################################################################################
 ## Interface classes
 ########################################################################################
