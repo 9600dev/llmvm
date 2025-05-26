@@ -121,6 +121,7 @@ class StreamPrinter():
         self.rendered_lines = []
         self.printed_on_current_line = False
         self.in_helpers_block = False
+        self.printed_length = 0  # Track actual printed characters for accurate wrapping
 
     async def display_image(self, image_bytes):
         if len(image_bytes) < 10:
@@ -195,12 +196,39 @@ class StreamPrinter():
 
     def _clear_current_line(self):
         """Clear the current line in the terminal"""
-        # Move cursor to beginning of line and clear it
-        self.console.file.write('\r\033[K')
+        # Calculate how many lines the current line takes up
+        if self.printed_length > 0 and self.printed_on_current_line:
+            # Get terminal width
+            terminal_width = self.console.width
+            # Use the tracked printed length for accurate calculation
+            lines_used = max(1, (self.printed_length + terminal_width - 1) // terminal_width)  # Ceiling division
+            
+            # Clear all the lines that were used
+            for i in range(lines_used):
+                if i > 0:
+                    # Move up one line
+                    self.console.file.write('\033[1A')
+                # Move to beginning of line and clear it
+                self.console.file.write('\r\033[K')
+                
+            # After clearing, cursor is at the beginning of the first line
+        else:
+            # Simple case - just clear current line
+            self.console.file.write('\r\033[K')
+            
         self.console.file.flush()
         self.printed_on_current_line = False
+        self.printed_length = 0
+        
+    def _get_visible_length(self, text: str) -> int:
+        """Get the visible length of text, excluding ANSI escape sequences"""
+        import re
+        # Remove ANSI escape sequences
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        visible_text = ansi_escape.sub('', text)
+        return len(visible_text)
 
-    def _render_line_as_markdown(self, line: str):
+    def _render_line_as_markdown(self, line: str, should_highlight_as_python: bool = False):
         """Render a line as markdown using rich"""
         if not line.strip():
             return
@@ -208,8 +236,8 @@ class StreamPrinter():
         # Clear the current line first
         self._clear_current_line()
 
-        # Check if this line is inside helpers tags
-        if self.in_helpers_block:
+        # Check if this line should be highlighted as Python
+        if should_highlight_as_python:
             # Render as Python code with syntax highlighting
             from rich.syntax import Syntax
             syntax = Syntax(line, "python", theme="monokai", background_color="default", word_wrap=True, padding=0)
@@ -232,15 +260,18 @@ class StreamPrinter():
             # Render the final partial line
             self._render_line_as_markdown(self.current_line)
             
-    def _check_helpers_tags(self, line: str):
-        """Check if line contains opening or closing helpers tags"""
-        # Check for opening tags
+    def _check_helpers_tags(self, line: str) -> bool:
+        """Check if line contains opening or closing helpers tags. Returns True if this line should be syntax highlighted."""
+        # Check if we're currently in a helpers block or if this line contains helpers tags
+        should_highlight = self.in_helpers_block or '<helpers>' in line or '<helpers_result>' in line or '</helpers>' in line or '</helpers_result>' in line
+        
+        # Update state for next line
         if '<helpers>' in line or '<helpers_result>' in line:
             self.in_helpers_block = True
-            
-        # Check for closing tags
-        if '</helpers>' in line or '</helpers_result>' in line:
+        elif '</helpers>' in line or '</helpers_result>' in line:
             self.in_helpers_block = False
+            
+        return should_highlight
 
     async def write(self, node: AstNode):
         if logging.level <= 20:  # INFO
@@ -283,12 +314,13 @@ class StreamPrinter():
                         if parts[0]:
                             self.console.print(parts[0], end='', style=f"{token_color}", highlight=False)
                             self.printed_on_current_line = True
+                            self.printed_length += len(parts[0])
 
                         if self.current_line.strip() and self.printed_on_current_line: self._clear_current_line()
                         if self.current_line.strip(): 
                             # Check for helpers tags before rendering
-                            self._check_helpers_tags(self.current_line)
-                            self._render_line_as_markdown(self.current_line)
+                            should_highlight = self._check_helpers_tags(self.current_line)
+                            self._render_line_as_markdown(self.current_line, should_highlight)
                         else:
                             self._clear_current_line()
                             self.console.print()
@@ -300,12 +332,13 @@ class StreamPrinter():
                                 # First print the tokens
                                 self.console.print(parts[i], end='', style=f"{token_color}", highlight=False)
                                 self.printed_on_current_line = True
+                                self.printed_length = len(parts[i])
                                 # Clear before rendering
                                 self._clear_current_line()
                                 # Check for helpers tags before rendering
-                                self._check_helpers_tags(parts[i])
+                                should_highlight = self._check_helpers_tags(parts[i])
                                 # Then render as markdown
-                                self._render_line_as_markdown(parts[i])
+                                self._render_line_as_markdown(parts[i], should_highlight)
                             else:
                                 # Empty line
                                 self.console.print()
@@ -313,16 +346,19 @@ class StreamPrinter():
                         # Start new current line
                         self.line_count += 1
                         self.current_line = parts[-1]
+                        self.printed_length = 0  # Reset for new line
 
                         # Print the start of the new line if not empty
                         if self.current_line:
                             self.console.print(self.current_line, end='', style=f"{token_color}", highlight=False)
                             self.printed_on_current_line = True
+                            self.printed_length = len(self.current_line)
                     else:
                         # No newline - accumulate in current line and print token
                         self.current_line += string
                         self.console.print(string, end='', style=f"{token_color}", highlight=False)
                         self.printed_on_current_line = True
+                        self.printed_length += len(string)
                 else:
                     # Normal mode - just print tokens
                     self.console.print(string, end='', style=f"{token_color}", highlight=False)
