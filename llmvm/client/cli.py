@@ -410,6 +410,7 @@ class Repl():
         rich.print(f'$LLMVM_EXECUTOR: {Container.get_config_variable("LLMVM_EXECUTOR", default="(not set)")}')
         rich.print(f'$LLMVM_MODEL: {Container.get_config_variable("LLMVM_MODEL", default="(not set)")}')
         rich.print(f'$LLMVM_FULL_PROCESSING: {str(Container.get_config_variable("LLMVM_FULL_PROCESSING", default="(not set)")).lower()}')
+        rich.print(f'$LLMVM_PROFILING: {str(Container.get_config_variable("LLMVM_PROFILING", default="(not set)")).lower()}')
         rich.print()
         rich.print(f'Named pipe: {pipe_path}')
         rich.print('[bold]Keys:[/bold]')
@@ -1796,7 +1797,7 @@ def message(
         thinking=thinking,
         stream_handler=stream_printer.write,
     ))
-    
+
     # Finalize the stream if inline markdown is enabled
     stream_printer.finalize_stream()
 
@@ -1805,7 +1806,7 @@ def message(
         return
 
     # Skip final markdown rendering if inline rendering was used
-    if not stream_printer.inline_markdown_render:
+    if not stream_printer.inline_markdown_render or not Helpers.is_callee('repl'):
         console.print_messages([MessageModel.to_message(thread.messages[-1])], escape)
 
     serialize_messages([MessageModel.to_message(m) for m in thread.messages])

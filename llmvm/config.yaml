@@ -74,4 +74,4 @@ client_stream_token_color: '#dddddd'
 client_stream_thinking_token_color: '#5f819d'
 client_role_color: 'bold cyan'
 client_repl_color: 'ansibrightcyan'
-client_repl_markdown_inline_render: false
+client_markdown_inline: true

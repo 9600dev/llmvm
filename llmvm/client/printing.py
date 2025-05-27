@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.theme import Theme
 from rich.control import Control
+from rich.text import Text
 
 from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
@@ -115,12 +116,14 @@ class StreamPrinter():
         self.markdown_mode = False
         self.token_color = Container.get_config_variable('client_stream_token_color', default='bright_black')
         self.thinking_token_color = Container.get_config_variable('client_stream_thinking_token_color', default='cyan')
-        self.inline_markdown_render = Container.get_config_variable('client_repl_markdown_inline_render', default=False)
+        self.inline_markdown_render = Container.get_config_variable('client_markdown_inline', default=False)
         self.current_line = ''
         self.line_count = 0
         self.rendered_lines = []
         self.printed_on_current_line = False
         self.in_helpers_block = False
+        self.in_code_block = False
+        self.in_diff_block = False
         self.printed_length = 0  # Track actual printed characters for accurate wrapping
 
     async def display_image(self, image_bytes):
@@ -202,7 +205,7 @@ class StreamPrinter():
             terminal_width = self.console.width
             # Use the tracked printed length for accurate calculation
             lines_used = max(1, (self.printed_length + terminal_width - 1) // terminal_width)  # Ceiling division
-            
+
             # Clear all the lines that were used
             for i in range(lines_used):
                 if i > 0:
@@ -210,16 +213,16 @@ class StreamPrinter():
                     self.console.file.write('\033[1A')
                 # Move to beginning of line and clear it
                 self.console.file.write('\r\033[K')
-                
+
             # After clearing, cursor is at the beginning of the first line
         else:
             # Simple case - just clear current line
             self.console.file.write('\r\033[K')
-            
+
         self.console.file.flush()
         self.printed_on_current_line = False
         self.printed_length = 0
-        
+
     def _get_visible_length(self, text: str) -> int:
         """Get the visible length of text, excluding ANSI escape sequences"""
         import re
@@ -228,7 +231,11 @@ class StreamPrinter():
         visible_text = ansi_escape.sub('', text)
         return len(visible_text)
 
-    def _render_line_as_markdown(self, line: str, should_highlight_as_python: bool = False):
+    def _render_line_as_markdown(
+        self, line: str,
+        should_highlight_as_python: bool = False,
+        should_highlight_as_diff: bool = False
+    ):
         """Render a line as markdown using rich"""
         if not line.strip():
             return
@@ -237,7 +244,16 @@ class StreamPrinter():
         self._clear_current_line()
 
         # Check if this line should be highlighted as Python
-        if should_highlight_as_python:
+        if should_highlight_as_diff:
+            text = Text()
+            if line.startswith('+'):
+                text.append(line, style='green')
+            elif line.startswith('-'):
+                text.append(line, style='red')
+            else:
+                text.append(line, style='default')
+            self.console.print(text)
+        elif should_highlight_as_python:
             # Render as Python code with syntax highlighting
             from rich.syntax import Syntax
             syntax = Syntax(line, "python", theme="monokai", background_color="default", word_wrap=True, padding=0)
@@ -259,18 +275,73 @@ class StreamPrinter():
         if self.inline_markdown_render and self.current_line.strip():
             # Render the final partial line
             self._render_line_as_markdown(self.current_line)
-            
+
+    def _check_in_code_block(self, line: str) -> bool:
+        if self.in_helpers_block:
+            return True
+
+        line = line.strip()
+
+        if line == '```' and self.in_code_block:
+            self.in_code_block = False
+            return False
+
+        if (
+            line.startswith('```python') or
+            line.startswith('```javascript') or
+            line.startswith('```html') or
+            line.startswith('```json') or
+            line.startswith('```css') or
+            line.startswith('```digraph') or
+            line.startswith('```mermaid') or
+            line.startswith('```haskell') or
+            line.startswith('```rust') or
+            line.startswith('```java') or
+            line.startswith('```c') or
+            line.startswith('```c++') or
+            line.startswith('```c#') or
+            line.startswith('```ruby') or
+            line.startswith('```php') or
+            line.startswith('```bash')
+        ):
+            self.in_code_block = True
+            return self.in_code_block
+        return self.in_code_block
+
+    def _check_in_diff_block(self, line: str) -> bool:
+        line = line.strip()
+
+        if line.startswith('```diff'):
+            self.in_diff_block = True
+            return self.in_diff_block
+
+        elif line == '```' and self.in_diff_block:
+            self.in_diff_block = False
+            return self.in_diff_block
+
+        elif self.rendered_lines and self.rendered_lines[-1] == '```':
+            self.in_diff_block = False
+            return self.in_diff_block
+
+        return self.in_diff_block
+
     def _check_helpers_tags(self, line: str) -> bool:
         """Check if line contains opening or closing helpers tags. Returns True if this line should be syntax highlighted."""
         # Check if we're currently in a helpers block or if this line contains helpers tags
-        should_highlight = self.in_helpers_block or '<helpers>' in line or '<helpers_result>' in line or '</helpers>' in line or '</helpers_result>' in line
-        
+        should_highlight = (
+            self.in_helpers_block or
+            '<helpers>' in line or
+            '<helpers_result>' in line or
+            '</helpers>' in line or
+            '</helpers_result>' in line
+        )
+
         # Update state for next line
         if '<helpers>' in line or '<helpers_result>' in line:
             self.in_helpers_block = True
         elif '</helpers>' in line or '</helpers_result>' in line:
             self.in_helpers_block = False
-            
+
         return should_highlight
 
     async def write(self, node: AstNode):
@@ -316,11 +387,14 @@ class StreamPrinter():
                             self.printed_on_current_line = True
                             self.printed_length += len(parts[0])
 
-                        if self.current_line.strip() and self.printed_on_current_line: self._clear_current_line()
-                        if self.current_line.strip(): 
+                        if self.current_line.strip() and self.printed_on_current_line:
+                            self._clear_current_line()
+
+                        if self.current_line.strip():
                             # Check for helpers tags before rendering
-                            should_highlight = self._check_helpers_tags(self.current_line)
-                            self._render_line_as_markdown(self.current_line, should_highlight)
+                            should_highlight = self._check_helpers_tags(self.current_line) or self._check_in_code_block(self.current_line)
+                            should_diff_highlight = self._check_in_diff_block(self.current_line)
+                            self._render_line_as_markdown(self.current_line, should_highlight, should_diff_highlight)
                         else:
                             self._clear_current_line()
                             self.console.print()
@@ -336,9 +410,10 @@ class StreamPrinter():
                                 # Clear before rendering
                                 self._clear_current_line()
                                 # Check for helpers tags before rendering
-                                should_highlight = self._check_helpers_tags(parts[i])
+                                should_highlight = self._check_helpers_tags(parts[i]) or self._check_in_code_block(parts[i])
+                                should_diff_highlight = self._check_in_diff_block(self.current_line)
                                 # Then render as markdown
-                                self._render_line_as_markdown(parts[i], should_highlight)
+                                self._render_line_as_markdown(parts[i], should_highlight, should_diff_highlight)
                             else:
                                 # Empty line
                                 self.console.print()
