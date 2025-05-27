@@ -239,6 +239,11 @@ alias sonnet=LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-sonnet-4-20250514" L
 or if you're using conda or pyenv and want to hack on the source code and have your changes instantly reflected in the command line call:
 
 ```bash
+conda create -n llmvm python=3.13
+conda activate llmvm
+```
+
+```bash
 function llm() {
     current_env=$CONDA_DEFAULT_ENV
     conda activate llmvm

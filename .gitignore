@@ -38,5 +38,7 @@ tests/output
 tests/output*
 tests/comparisons*
 webui
+.claude
+.build-cache
 
 **/.claude/settings.local.json
