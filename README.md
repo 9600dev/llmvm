@@ -165,9 +165,14 @@ I am a helpful assistant that has access to tools. Use "mode" to switch tools on
 
 For the best experience, turning on all logging and very thorough (but expensive) content analysis, run the client and server with these settings:
 
-```bash
-LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-4-sonnet-20250514" LLMVM_PROFILING="true" python -m llmvm.client
 
+```bash
+# client
+LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-4-sonnet-20250514" LLMVM_PROFILING="true" python -m llmvm.client
+```
+
+```bash
+# server
 LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-4-sonnet-20250514" LLMVM_PROFILING="true" python -m llmvm.server
 ```
 
@@ -228,7 +233,7 @@ query>> -p **/*.py !**/__init__.py !**/__main__.py "explain this codebase as a t
 I bash/fish/zsh alias llm:
 
 ```bash
-alias sonnet=LLMVM_EXECUTOR="anthopic" LLMVM_MODEL="claude-sonnet-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" python -m llmvm.client
+alias sonnet=LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-sonnet-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" python -m llmvm.client
 ```
 
 or if you're using conda or pyenv and want to hack on the source code and have your changes instantly reflected in the command line call:
@@ -248,46 +253,52 @@ function llmvm_serve() {
     conda activate $current_env
 }
 
-alias sonnet=LLMVM_EXECUTOR="anthopic" LLMVM_MODEL="claude-sonnet-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" llm
+alias llmvm=LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-sonnet-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" llmvm_serve
+
+alias sonnet=LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-sonnet-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" llm
+
+alias opus=LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-opus-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" llm
 ```
 
 and then:
 
 ```bash
-cat somecode.py | sonnet -o direct "rewrite this code; make it cleaner and easier to read"
+cat somecode.py | opus -o direct "rewrite this code; make it cleaner and easier to read"
 ```
 
 Image understanding is supported on Anthropic Claude models and OpenAI's GPT 4o vision model.
 
 ```bash
-cat docs/beach.jpg | llm "generate a dalle prompt for the exact inverse of this image"
+cat docs/beach.jpg | sonnet "generate a dalle prompt for the exact inverse of this image"
 ```
 
 ![](docs/2023-11-11-12-59-39.png)
 
 ```bash
-llm "generate cat names" > cat_names.txt
+sonnet "generate cat names" > cat_names.txt
 ```
 
 ```bash
-llm -p meeting_notes.txt "correct spelling mistakes and extract action items"
+sonnet -p meeting_notes.txt "correct spelling mistakes and extract action items"
 ```
 
 And some really nice Unix pipe foo:
 
 ```bash
-llm "download the latest news about Elon Musk as bullet points" | \
-llm "write a small blog post from the bullet points in the previous message" | \
-llm "create a nice html file to display the content" > output.html
+sonnet "download the latest news about Elon Musk as bullet points" | \
+opus "write a small blog post from the bullet points in the previous message" | \
+opus "create a nice html file to display the content" > output.html
 ```
 
 ### As a Client REPL
 
-![](docs/2024-07-03-16-29-13.png)
+![](docs/2025-05-26-21-16-13.png)
 
-It integrates well with [vim](https://neovim.io/) or your favorite editor to build multiline queries, or edit long message threads.
+It integrates well with [vim](https://neovim.io/) or your favorite editor to build multiline queries (Ctrl-e), or edit long message threads (Ctrl-g).
 
 You can even Ctrl-y + p to paste images into the REPL for upload and parsing by Anthropic Claude multimodal, OpenAI's vision models, or Gemini 2.5+ models.
+
+`yy` yanks, or Ctrl-y + y for the yank hotkey. There are many more commands to explore.
 
 ## Install
 
@@ -620,6 +631,17 @@ Ctrl-C
 It then captures the last "frame" of the TUI output and sends it to the LLM:
 
 ![](docs/2025-04-19-21-41-24.png)
+
+#### LLMVM can apply diffs!
+
+![](docs/2025-05-26-21-19-59.png)
+
+```
+Found the filename: /Users/joelpob/dev/llmvm/README.md the diff wants to patch.
+Apply diff to: /Users/joelpob/dev/llmvm/README.md? (y/n)
+```
+
+Tread carefully, diffs generated from LLMs aren't always correct!
 
 #### Output the message thread to a HTML file and open Chrome to view:
 
