@@ -2,7 +2,11 @@
 
 LLMVM is a CLI based productivity tool that uses Large Language Models and local Python tools/helpers to reason about and execute your tasks. A CLI client (client.py) either connects directly to an LLM provider or will connect to a local server (server.py) that coordinates tool execution, [Retrieval Agumented Generation](https://blogs.nvidia.com/blog/what-is-retrieval-augmented-generation/), document search and more.
 
-It supports [Anthropic's](https://www.anthropic.com) Claude 3 (Opus, Sonnet and Haiku) vision models, and [OpenAI](https://openai.com/blog/openai-api) GPT 4o/4.1/o3/o4 models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
+It does not use traditional tool calling API's, instead, it allows the LLM to interleave natural language and code, generally resulting in significantly better task deconstruction and execution. This is a [similar approach](https://towardsdev.com/codeact-the-engine-behind-manus-how-llms-are-learning-to-code-their-way-to-action-17c6c0fe1068) that [Manus](https://manus.im) uses, although LLMVM has been doing this since before it was cool.
+
+LLMVM supports [Anthropic's](https://www.anthropic.com) Claude 4 (Opus Sonnet), Claude 3 (Opus, Sonnet and Haiku) models, and [OpenAI](https://openai.com/blog/openai-api) GPT 4o/4.1/o3/o4 models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
+
+> **Update May 26th 2025**: Claude 4 models work out of the box, no changes. Made auto-rendering of Markdown for streaming tokens the default. Turn on and off via client_markdown_inline in config.yaml.
 
 > **Update April 19th 2025**: Got o3 o4mini and gpt4.1 working. All reasoning models work now. -z "low" "medium" "high" for OpenAI, or -z num_of_tokens for Anthropic.
 
@@ -32,7 +36,8 @@ $ playwright install
 $ python -m llmvm.server
 
 Default executor is: anthropic
-Default model is: claude-3-7-sonnet-20250219
+Default model is: claude-sonnet-4-20250514
+Default port is: 8011 $LLMVM_SERVER_PORT or config to change.
 
 Make sure to `playwright install`.
 If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.
@@ -47,6 +52,7 @@ Loaded helper: get_current_market_capitalization
 Loaded helper: get_stock_volatility
 Loaded helper: get_stock_price_history
 Loaded helper: get_stock_analysis
+Loaded helper: get_options_chain
 Loaded helper: datetime
 Loaded helper: sample_normal
 Loaded helper: sample_binomial
@@ -73,6 +79,25 @@ Loaded helper: find_selector_or_mouse_x_y
 Loaded helper: goto
 Loaded helper: mouse_move_x_y_and_click
 Loaded helper: type_into_selector_or_mouse_x_y
+Loaded helper: append_row
+Loaded helper: append_rows
+Loaded helper: batch_update
+Loaded helper: clear_worksheet
+Loaded helper: create_spreadsheet
+Loaded helper: create_worksheet
+Loaded helper: find_all_cells
+Loaded helper: find_cell
+Loaded helper: get_all_values
+Loaded helper: get_cell_value
+Loaded helper: get_range_values
+Loaded helper: get_values_as_dataframe
+Loaded helper: get_worksheet
+Loaded helper: list_all_spreadsheets
+Loaded helper: list_worksheets
+Loaded helper: open_spreadsheet
+Loaded helper: update_cell
+Loaded helper: update_range
+Loaded helper: update_with_dataframe
 Loaded helper: get_chrome_tabs_url_and_title
 Loaded helper: get_pdf
 Loaded helper: get_screenshot
@@ -84,7 +109,7 @@ Loaded helper: google_patent_search
 Loaded helper: bluesky_search
 Loaded helper: yelp_search
 Loaded helper: hackernews_search
-INFO:     Started server process [71093]
+INFO:     Started server process [31441]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8011 (Press CTRL+C to quit)
@@ -94,33 +119,75 @@ INFO:     Uvicorn running on http://0.0.0.0:8011 (Press CTRL+C to quit)
 $ python -m llmvm.client
 
 ...
-I am a helpful assistant that has access to tools. Use "mode" to
-switch tools on and off.
 
-query>>
+$LLMVM_EXECUTOR: anthropic
+$LLMVM_MODEL: claude-sonnet-4-20250514
+$LLMVM_FULL_PROCESSING: true
+$LLMVM_PROFILING: true
+
+Named pipe: /tmp/llmvm_client_pipe_31629
+Keys:
+(Ctrl-c or "exit" to exit, or cancel current request)
+(Ctrl-n to create a new thread)
+(Ctrl-e to open $EDITOR for multi-line User prompt)
+(Ctrl-g to open $EDITOR for full message thread editing)
+(Ctrl-r search prompt history)
+(Ctrl-i multi-line repl toggle)
+(Ctrl-u python in current thread repl toggle)
+(Ctrl-y+y yank the last message to the clipboard)
+(Ctrl-y+a yank entire message thread to clipboard)
+(Ctrl-y+c yank code blocks to clipboard)
+(Ctrl-y+p paste image from clipboard into message)
+(yy to yank the last message to the clipboard)
+(:w filename to save the current thread to a file)
+(:wh filename to save the current thread as HTML to a file)
+(:.) to open the LLMVM memory/sandbox directory in finder.
+(:ohc open ```html block in browser)
+(:omc open last message in browser)
+(:otc open message thread in browser)
+(:cb Show all code blocks)
+(:ycb0 Copy code block 0, 1, 2... ycb for all)
+(:vcb0 $EDITOR code block 0, 1, 2... vcb for all)
+(:sym show all functions that are defined in <helpers> by the LLM)
+(:csym symbol(arg1,arg2) call the function with arguments)
+(:py switch python mode to execute python code in the current thread
+($ single line python code to execute in the current thread)
+($(command) to execute a shell command and capture in query)
+($$(command) to execute a shell command and display to screen)
+
+(If the LLMVM server.py is not running, messages are executed directly)
+("message" is the default command, so you can omit it)
+
+I am a helpful assistant that has access to tools. Use "mode" to switch tools on and off.
+
+[id: 0] query>>
 ```
 
 For the best experience, turning on all logging and very thorough (but expensive) content analysis, run the client and server with these settings:
 
 ```bash
-LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-3-7-sonnet-20250219" LLMVM_PROFILING="true" python -m llmvm.client  # and llmvm.server
+LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-4-sonnet-20250514" LLMVM_PROFILING="true" python -m llmvm.client
+
+LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="anthropic" LLMVM_MODEL="claude-4-sonnet-20250514" LLMVM_PROFILING="true" python -m llmvm.server
 ```
 
 Quick intro video here:
 
 [![llmvm walkthrough](https://img.youtube.com/vi/Bfq0eSxtOZo/0.jpg)](https://www.youtube.com/watch?v=Bfq0eSxtOZo)
 
-
 Now let's explore some use cases:
 
 ### Tool Use: Controlling the Browser
 
 ```bash
-query>> go to https://ten13.vc/team and get the names of the people that work there
+query>> who is the leader of the current f1 championship?
 ```
 
-![](docs/2024-07-03-16-25-15.png)
+![](docs/2025-05-26-20-31-07.png)
 
+...
+
+![](docs/2025-05-26-20-31-56.png)
 
 The LLMVM server is coordinating with the LLM to deconstruct the query into executable code calls various Python helpers that can be executed in the server process on behalf of the LLM. In this case, the server is using a headless Chromium instance to download the website url, screenshot and send progress back to the client, convert the website to Markdown, and hand the markdown to the LLM for name extraction. More on how this works later.
 
@@ -130,12 +197,11 @@ The LLMVM server is coordinating with the LLM to deconstruct the query into exec
 query>> I have 5 MSFT stocks and 10 NVDA stocks, what is my net worth in grams of gold?
 ```
 
-![](docs/2024-07-03-16-26-29.png)
+![](docs/2025-05-26-20-33-23.png)
 
 ...
 
-![](docs/2024-07-03-16-26-52.png)
-
+![](docs/2025-05-26-20-33-48.png)
 
 Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidia. We're also using Google Search functionality to find the latest price of gold.
 
@@ -145,7 +211,7 @@ Here we're calling Yahoo Finance to get the latest prices of Microsoft and NVidi
 query>> -p docs/turnbull-speech.pdf "what is Malcolm Turnbull advocating for?"
 ```
 
-![](docs/2025-04-19-21-54-56.png)
+![](docs/2025-05-26-20-35-37.png)
 
 LLMVM will parse and extract PDF's (including using OCR if the PDF doesn't extract text properly) and supply the LLM with the text as content for queries.
 
@@ -162,25 +228,36 @@ query>> -p **/*.py !**/__init__.py !**/__main__.py "explain this codebase as a t
 I bash/fish/zsh alias llm:
 
 ```bash
-alias llm=LLMVM_EXECUTOR="anthopic" LLMVM_MODEL="claude-3-haiku-20240307" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" python -m llmvm.client
+alias sonnet=LLMVM_EXECUTOR="anthopic" LLMVM_MODEL="claude-sonnet-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" python -m llmvm.client
 ```
 
-or if you're using pyenv and want to hack on the source code and have your changes instantly reflected in the command line call:
+or if you're using conda or pyenv and want to hack on the source code and have your changes instantly reflected in the command line call:
 
 ```bash
 function llm() {
-    local pyenv_ver=$(cat $HOME/llmvm/.python-version)
-    $PYENV_ROOT/versions/$pyenv_ver/bin/python -m llmvm.client "$@"
+    current_env=$CONDA_DEFAULT_ENV
+    conda activate llmvm
+    PYTHONPATH=$HOME/dev/llmvm python -m llmvm.client "$@"
+    conda activate $current_env
 }
+
+function llmvm_serve() {
+    current_env=$CONDA_DEFAULT_ENV
+    conda activate llmvm
+    PYTHONPATH=$HOME/dev/llmvm python -m llmvm.server
+    conda activate $current_env
+}
+
+alias sonnet=LLMVM_EXECUTOR="anthopic" LLMVM_MODEL="claude-sonnet-4-20250514" LLMVM_PROFILING="true" LLMVM_FULL_PROCESSING="true" llm
 ```
 
 and then:
 
 ```bash
-cat somecode.py | llm -o direct "rewrite this code; make it cleaner and easier to read"
+cat somecode.py | sonnet -o direct "rewrite this code; make it cleaner and easier to read"
 ```
 
-Image understanding is supported on Anthropic Claude 3 models and OpenAI's GPT 4o vision model.
+Image understanding is supported on Anthropic Claude models and OpenAI's GPT 4o vision model.
 
 ```bash
 cat docs/beach.jpg | llm "generate a dalle prompt for the exact inverse of this image"
@@ -210,7 +287,7 @@ llm "create a nice html file to display the content" > output.html
 
 It integrates well with [vim](https://neovim.io/) or your favorite editor to build multiline queries, or edit long message threads.
 
-You can even Ctrl-y + p to paste images into the REPL for upload and parsing by Anthropic Claude 3 multimodal, or OpenAI's vision models.
+You can even Ctrl-y + p to paste images into the REPL for upload and parsing by Anthropic Claude multimodal, OpenAI's vision models, or Gemini 2.5+ models.
 
 ## Install
 
@@ -220,7 +297,7 @@ Ensure you have the following environment variables set:
 
 ```bash
 ANTHROPIC_API_KEY   # your Anthropic API key
-OPENAI_API_KEY     # your Openai API key, or ...
+OPENAI_API_KEY      # your Openai API key, or ...
 GEMINI_API_KEY      # your Gemini API key
 EDITOR              # set this to your favorite terminal editor (vim or emacs or whatever) so you can /edit messages or /edit_ast the Python code before it gets executed etc.
 ```
@@ -259,11 +336,11 @@ You can ssh into the docker container: ssh llmvm@127.0.0.1 -p 2222
 
 ### Configuring Anthropic vs. OpenAI
 
-* open `~/.config/llmvm/config.yaml` and change executor to 'anthropic' or 'openai', 'deepseek' or 'bedrock':
+* open `~/.config/llmvm/config.yaml` and change executor to 'anthropic' or 'openai', 'gemini', 'deepseek' or 'bedrock':
 
 ```yaml
 executor: 'anthropic'  # or 'openai', or 'gemini' or 'deepseek', or 'bedrock'
-anthropic_model: 'claude-3-7-sonnet-20250219'
+anthropic_model: 'claude-sonnet-4-20250514'
 ```
 
 or, you can set environment variables that specify the execution backend and the model you'd like to use:
@@ -315,7 +392,12 @@ query>> get https://9600.dev/authors.html and get all the author names
 
 Produces:
 
-![](docs/2024-03-16-20-30-45.png)
+![](docs/2025-05-26-20-44-55.png)
+
+...
+
+![](docs/2025-05-26-20-45-12.png)
+
 
 When LLMVM_FULL_PROCESSING="true", all searches and their search results performed by LLMVM will be first "checked" to see if the url the Search Engine returned contains the actual data LLMVM cares about, and if not, will find the best available link on the page to click next to get the required data. (for example, Google links directly to the summary of arxiv.org papers, rather than the PDF paper itself, LLMVM will click the "View PDF" link to get the PDF)
 
@@ -330,7 +412,7 @@ I want to loosely compare the language outputs of two LLM calls, I can embed the
 > Ignore formatting and line breaks as differences. You can explain your reasoning for your choice after the # character, so: true # explanation
 
 ```bash
-haiku -s -t \"$(haiku -s generate two sentences about prime ministers)\" -t \"$(haiku -s generate two sentences about presidents)\" -p scripts/compare.prompt
+sonnet -s -t \"$(sonnet -s generate two sentences about prime ministers)\" -t \"$(sonnet-s generate two sentences about presidents)\" -p scripts/compare.prompt
 ```
 
 gives:
@@ -356,22 +438,15 @@ Assistant(Hello! How can I assist you today? Is there anything specific you'd li
 
 `llm()` connects directly to the specified executor (Anthropic, OpenAI, Gemini, DeepSeek or Amazon Nova), and `llmvm()` connects to an instance of the LLMVM server for tool handling and so on.
 
-## Architecture
-
-![](docs/2024-03-16-12-16-18.png)
-
-
 ### You can:
 
 * Write arbitrary natural language queries that get translated into Python code and cooperatively executed.
-* Upload .pdf, .txt, .csv and .html and have them ingested by FAISS and searchable by the LLMVM.
+* Use everything from the command line, unix philosophy, pipes, named pipes, etc.
+* Use the command line REPL with hotkeys or quick commands for yanking code blocks, html, interacting with the Python that the LLM generates, executing shell commands and ingesting their results etc.
+* Have the LLM build arbitrary Python helpers/tools inside the Python runtime that can then be immediately used by you, or the LLM itself.
 * Add arbitrary Python helpers by modifying ~/.config/llmvm/config.yaml and adding your Python based helpers. Note: you may need to hook the helper in [python_runtime.py](https://github.com/9600dev/llmvm/blob/master/prompts/python/python_tool_execution.prompt). You may also need to show examples of its use in [prompts/python/python_tool_execution.prompt](https://github.com/9600dev/llmvm/blob/master/prompts/python/python_tool_execution.prompt)
 * [server.py](https://github.com/9600dev/llmvm/blob/master/server.py) via /v1/chat/completions endpoint, mimics and forwards to OpenAI's /v1/chat/completions API.
 * Use [client.py](https://github.com/9600dev/llmvm/blob/master/client.py) without running the server. Tools no longer work, but most other things do.
-* TODO: build real time streaming, so you can wire up pipelines of llmvm execution to arbitrary streams of incoming data.
-* TODO: search is weak. Make it better.
-* TODO: all the threading and asyncio stuff is not great. Fix it. Might use RxPy.
-* TODO: local llama can work, but doesn't work well.
 
 ## Advanced Architectural Details
 
@@ -381,37 +456,15 @@ Each step of statement execution is carefully evaluated. Calls to user defined h
 
 The code that performs error correction starts [here](https://github.com/9600dev/llmvm/blob/01816aeb7107c5a747ee62ac3475b5037d3a83d7/python_runtime.py#L219), but there's still a bit more work to do here, including having the LLM engage in a "pdb" style debugging session, where locals in the Python runtime can be inspected for code-rewriting decisions.
 
-### Helpers
-
-You can define any arbitrary helper, and add it to the Python Runtime in ```pythonRuntime.setup()```. It'll automatically generate the helper tool's one-shot prompt example for the LLM, and will appear in the LLM responses for Python generated code. The LLMVM runtime will sort out the binding and marshalling of arguments via llm_bind().
-
-Example helpers included (there are many more):
-
-```python
-def BCL.datetime(self: object, expr: object, timezone: object) -> datetime  # Returns a datetime object from a string using datetime.strftime(). Examples: datetime("2020-01-01"), datetime("now"), datetime("-1 days"), datetime("now", "Australia/Brisbane")
-def WebHelpers.search_linkedin_profile(first_name: string, last_name: string, company_name: string) -> str  # Searches for the LinkedIn profile of a given first name and last name and optional company name and returns the LinkedIn profile information as a string. If you call this method you do not need to call get_linkedin_profile().
-def WebHelpers.get_linkedin_profile(linkedin_url: string) -> str  # Extracts the career information from a person's LinkedIn profile from a given LinkedIn url and returns the career information as a string.
-def EdgarHelpers.get_report(symbol: string, form_type: string, date: object) -> str  # Gets the 10-Q, 10-K or 8-K report text for a given company symbol/ticker for a given date. This is useful to get financial information for a company, their current strategy, investments and risks. Use form_type = '' to get the latest form of any type. form_type can be '10-Q', '10-K' or '8-K'. date is a Python datetime.
-def MarketHelpers.get_stock_price(symbol: string, date: string) -> float  # Get the closing price of the specified stock symbol at the specified date
-def MarketHelpers.get_current_market_capitalization(symbol: string) -> str  # Get the current market capitalization of the specified stock symbol
-def MarketHelpers.get_stock_volatility(symbol: object, days: object) -> float  # Calculate the volatility of a stock over a given number of days.
-def MarketHelpers.get_stock_price_history(symbol: object, start_date: object, end_date: object) -> Dict  # Get the closing prices of the specified stock symbol between the specified start and end dates
-def BCL.sample_normal(self: object, mean: object, std_dev: object) -> float  # Returns a random sample from a normal distribution with the given mean and standard deviation. Examples: sample_normal(0, 1), sample_normal(10, 2)
-def BCL.sample_binomial(self: object, n: object, p: object) -> float  # Returns a random sample from a binomial distribution with the given number of trials and probability of success. Examples: sample_binomial(10, 0.5), sample_binomial(100, 0.1)
-def BCL.sample_lognormal(self: object, mean: object, std_dev: object) -> float  # Returns a random sample from a lognormal distribution with the given mean and standard deviation. Examples: sample_lognormal(0, 1), sample_lognormal(10, 2)
-def BCL.sample_list(self: object, data: object) -> Any  # Returns a random sample from a list. Examples: sample_list([1, 2, 3]), sample_list(["a", "b", "c"])
-def BCL.generate_graph_image(self: object, data: object, title: object, x_label: object, y_label: object) -> NoneType  # Generates a graph image from the given data and returns it as bytes.
-def BCL.get_code_structure_summary(source_file_paths: object) -> str  # Gets all class names, method names, and docstrings for each of the source code files listed in source_files. This method does not return any source code, only class names, method names and their docstrings.
-def BCL.get_source_code(source_file_path: string) -> str  # Gets the source code from the file at the given file path.
-def BCL.get_all_references(source_file_paths: string, method_name: string) -> str  # Find's all references to the given method in the source code files listed in source_files.
-```
-
-Downloading web content (html, PDF's etc), and searching the web is done through special functions: ```download()``` and ```search()``` which are defined in the LLMVM runtimes base class libraries. ```download()``` as mentioned uses Chromium via Microsoft Playwright so that we can avoid web server blocking issues that tend to occur with requests.get(). ```search()``` uses [SerpAPI](https://serpapi.com/), which may require a paid subscription.
-
-
 ### Walkthrough of tool binding and execution
 
-For our first example:
+LLMVM does not use traditional tool calling APIs, instead it allows the LLM to emit and interleave both natural language and code. LLMVM captures the streamed output of the LLM, finds the code blocks to execute, and executes them in a local python runtime instance, returning the result of code execution back to the LLM to either continue or stop. This loop continues until the tasks are completed. The LLM has the ability to peek at the locals dictionary of the runtime, and enter a debug loop if required.
+
+LLMVM also has ~20 or so special helpers which the LLM can use to orchestrate its own execution and computation, allowing the LLM to overcome it's own context window limitations, emphasize chain of thought, or procedurally deconstruct and delegate tasks to clones of itself:
+
+![](docs/2025-05-26-20-58-54.png)
+
+A quick walkthrough of an example:
 
 ```bash
 query>> go to https://ten13.vc/team and extract all the names
@@ -519,9 +572,9 @@ cat cookie.txt | python extract_chrome_json.py >> ~/.local/share/llmvm/cookies.t
 
 ### The Problem this prototype solves
 
-ChatGPT supports 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a).
+Most LLMs support 'function calling' by passing a query (e.g. "What's the weather in Boston") and a JSON blob with the signatures of supporting functions available to be called locally (i.e. def get_weather(location: str)...). Examples seen [here](https://medium.com/@lucgagan/understanding-chatgpt-functions-and-how-to-use-them-6643a7d3c01a).
 
-However, this interaction is usually User Task -> LLM decides what helper function to call -> local host calls helper function -> work with result, and does not allow for arbitrary deconstruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution.
+However, this interaction is usually User Task -> LLM decides what helper function to call -> local host calls helper function -> work with result, and does not allow for arbitrary deconstruction of a task into a series of helper function calls that can be intermixed with both control flow, or cooperative sub-task execution. The LLM also misses out on valuable context: the previous code that's been executed, the types of variables, and so on.
 
 This prototype shows that LLM's are capable of taking a user task, reasoning about how to deconstruct the task into sub-tasks, understanding how to program, schedule and execute those sub-tasks on its own or via a virtual machine, and working with the VM to resolve error cases. We ask the LLM to use [Python](https://github.com/bazelbuild/python) expressed as [A-normal form](https://en.wikipedia.org/wiki/A-normal_form) as the programming language, and execute Python statement-by-statement on a local Python interpreter. When errors arise (syntax errors, exceptions, or semantic problems), we pause execution and work with the LLM to understand and resolve the error by exposing the locals dictionary, and allowing the LLM to "debug" the current execution state.
 
@@ -574,6 +627,8 @@ It then captures the last "frame" of the TUI output and sends it to the LLM:
 query>> :otc
 Opening Chrome
 ```
+
+![](docs/2025-05-26-21-04-52.png)
 
 #### The "act" command
 
@@ -629,134 +684,9 @@ the client that will shut down the server.
 ## Things to do
 
 * Error handling still needs a lot of work. I need to move this to be more continuation passing style than execute blocks of code then re-write.
-* Working on Source Code insights (mode 'code'). You'll be able to hand it a project directory and work with the LLM to understand what the code is doing. Check out [source.py](https://github.com/9600dev/llmvm/blob/master/source.py)
 * Playwright browser control integration from the LLM -- it should be straight forward to have cooperative execution for the task of proceeding through web app flows (login, do stuff, extract info, logout).
 * Fix bugs and refactor. The code is still pretty hacky as I've re-written it several times with different approaches.
 * Write some better docs.
-
-## How I run LLMVM
-
-These days, I mostly run Anthropic's models. Their super fast, cheap, and smart. In my .zshrc, I have aliases for servers and clients, with full performance tracing and debugging enabled:
-
-```bash
-SONNET="claude-3-7-sonnet-20250219"
-GEMINIFLASH="gemini-2.5-flash-preview-04-17"
-O3="o3"
-
-# servers
-alias ssonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" llmvm_serve'
-alias sflash='GEMINI_API_KEY=$GEMINI_API_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="gemini" LLMVM_MODEL=$GEMINIFLASH LLMVM_PROFILING="true" llmvm_serve'
-alias so3='LLMVM_EXECUTOR="openai" LLMVM_MODEL=$O3 LLMVM_FULL_PROCESSING="true" LLMVM_PROFILING="true" llmvm_serve'
-
-# clients
-alias sonnet='ANTHROPIC_API_KEY=$ANT_KEY LLMVM_EXECUTOR="anthropic" LLMVM_FULL_PROCESSING="true" LLMVM_MODEL=$SONNET LLMVM_PROFILING="true" llm'
-alias flash='GEMINI_API_KEY=$GEMINI_API_KEY LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR="gemini" LLMVM_MODEL=$GEMINIFLASH LLMVM_PROFILING="true" llm'
-alias o3='OPENAI_API_KEY=$OPENAI_API_KEY LLMVM_EXECUTOR="openai" LLMVM_MODEL=$O3 LLMVM_FULL_PROCESSING="true" LLMVM_PROFILING="true" llm'
-
-alias llm=sonnet
-alias f=flash
-alias l=o3
-```
-
-And the zsh functions:
-
-```bash
-function llm() {
-    current_env=$CONDA_DEFAULT_ENV
-    conda activate llmvm
-    PYTHONPATH=$HOME/dev/llmvm python -m llmvm.client "$@"
-    conda activate $current_env
-}
-
-function llmvm_serve() {
-    current_env=$CONDA_DEFAULT_ENV
-    conda activate llmvm
-    PYTHONPATH=$HOME/dev/llmvm python -m llmvm.server
-    conda activate $current_env
-}
-```
-
-And then it's as simple as:
-
-```bash
-$ llm "hello world"
-
-Assistant: Hello! I'm an AI assistant created by Anthropic. How can I help you today?
-```
-
-### Adding extra context to your requests
-
-It's often helpful to pass in your command line history plus a little info about yourself to help the models rationalize your request:
-
-In the file $HOME/dev/context.md, I have:
-
-```md
-# Personal Information
-
-My name is Sonny.
-I live in the Bay Area in California.
-I'm really interested in LLM's, hiking, biking and eating.
-
-Today's date is {date +"%A, %d %B, %Y"}.
-```
-
-Anything in { } brackets in this file, will be replaced by the return result from the execution of that command.
-
-```bash
-function con() {
-    if [ "$#" -ne 1 ]; then
-        echo "Usage: context 'instruction or query'"
-        return 1
-    fi
-
-    local instruction=$1
-    local result=$(cat ~/.zsh_history | tail -n 100 | cut -d';' -f2-)
-    temp_file=$(mktemp)
-    echo "The following is my linux command history for the last little while. It might be useful for future messages.\n\n" >> "$temp_file"
-    echo result >> "$temp_file"
-
-    # parse and execute commands in the context file
-    local context_file=$HOME/dev/context.md
-    local context_temp=$(mktemp)
-
-    while IFS= read -r line || [ -n "$line" ]; do
-        # Replace {command} with the output of the command
-        processed_line=$(echo "$line" | awk '{
-            while (match($0, /\{[^}]+\}/)) {
-                cmd = substr($0, RSTART+1, RLENGTH-2)
-                cmd | getline result
-                close(cmd)
-                $0 = substr($0, 1, RSTART-1) result substr($0, RSTART+RLENGTH)
-            }
-            print
-        }')
-        echo "$processed_line" >> "$context_temp"
-    done < "$context_file"
-
-    l -p $temp_file -p $context_temp $instruction
-    rm $temp_file
-    rm $context_temp
-}
-```
-
-```bash
-$ con "hey there, can you give me a list of things to do?"
-```
-
-```md
-Assistant:
-
-Seeing as you life in the Bay Area, it offers a wide range of activities and attractions to suit various interests. Here are some ideas for things you can do today:
-
-### Outdoor Activities:
-1. **Golden Gate Park**: Explore the park's gardens, museums, and recreational areas.
-2. **Hiking**: Try trails in places like Muir Woods, Mount Tamalpais, or the Marin Headlands.
-3. **Biking**: Rent a bike and ride across the Golden Gate Bridge.
-4. **Beaches**: Visit Ocean Beach, Baker Beach, or Crissy Field for a relaxing day by the water.
-
-### Cultural Experiences:
-1. **Museums**: Check out the San Francisco Museum of Modern Art (SFMOMA), the Exploratorium, or the California Academy of Sciences.
-```
 
 ### Scripts directory
 
@@ -810,3 +740,4 @@ python buffer.py -s 500 "htop -C" | sonnet "find spotify pid" | num | xargs kill
 
 `scripts/chrome-pdf.sh`: A MacOS osascript script that will create a PDF from the current Chrome tab, save it to a temporary location, and then find a running instance of the llmvm client and paste the PDF into it.
 
+### Have Fun!
