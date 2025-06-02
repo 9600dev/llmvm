@@ -5,7 +5,6 @@ import { Send, Paperclip, Image, Code, Settings, Lasso } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ThreadSettingsDialog, { ThreadSettings } from "./ThreadSettingsDialog";
 import DrawingTool from "./DrawingTool";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface MessageInputProps {
   onSend: (content: string, files?: File[]) => void;
@@ -19,42 +18,24 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
   const [files, setFiles] = useState<File[]>([]);
   const [isPythonMode, setIsPythonMode] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
-  const [capturedImages, setCapturedImages] = useState<string[]>([]);
-  const [showCaptureDialog, setShowCaptureDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
 
   const handleSend = () => {
-    if (!message.trim() && files.length === 0 && capturedImages.length === 0) return;
-
-    // Convert captured images to files
-    const imageFiles = capturedImages.map((dataUrl, index) => {
-      const arr = dataUrl.split(',');
-      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
-      const bstr = atob(arr[1]);
-      let n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      while(n--) {
-        u8arr[n] = bstr.charCodeAt(n);
-      }
-      return new File([u8arr], `captured-${Date.now()}-${index}.png`, { type: mime });
-    });
-
-    const allFiles = [...files, ...imageFiles];
+    if (!message.trim() && files.length === 0) return;
 
     if (isPythonMode && onPythonExecute) {
       onPythonExecute(message);
     } else {
-      onSend(message, allFiles);
+      onSend(message, files);
     }
     setMessage("");
     setFiles([]);
-    setCapturedImages([]);
-    setShowCaptureDialog(false);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && !showCaptureDialog) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -125,33 +106,32 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
   };
 
   const handleDrawingCapture = (images: string[]) => {
-    setCapturedImages(images);
-    setShowCaptureDialog(true);
+    // Convert captured images to files
+    const imageFiles = images.map((dataUrl, index) => {
+      const arr = dataUrl.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/png';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while(n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      return new File([u8arr], `captured-${Date.now()}-${index}.png`, { type: mime });
+    });
+
+    // Add to existing files
+    setFiles(prev => [...prev, ...imageFiles]);
+    
+    // Focus the textarea
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 100);
+
     toast({
       title: "Images captured",
-      description: `${images.length} element(s) captured. Add a message to send with the images.`,
+      description: `${images.length} element(s) added to message. Type your prompt and press Enter.`,
     });
   };
-
-  const handleCancelCapture = () => {
-    setCapturedImages([]);
-    setShowCaptureDialog(false);
-  };
-
-  // Close dialog and send when Enter is pressed in the dialog
-  useEffect(() => {
-    if (showCaptureDialog) {
-      const handleDialogKeyPress = (e: KeyboardEvent) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          handleSend();
-        }
-      };
-
-      window.addEventListener("keydown", handleDialogKeyPress);
-      return () => window.removeEventListener("keydown", handleDialogKeyPress);
-    }
-  }, [showCaptureDialog, message, capturedImages]);
 
   return (
     <>
@@ -184,6 +164,7 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
         onDragOver={handleDragOver}
       >
         <Textarea
+          ref={textareaRef}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyPress={handleKeyPress}
@@ -224,7 +205,7 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
               if (!isDrawingMode) {
                 toast({
                   title: "Drawing mode activated",
-                  description: "Draw to lasso elements or underline text. Press Enter when done.",
+                  description: "Draw to lasso elements or underline text. Press Enter or click again when done.",
                 });
               }
             }}
@@ -276,7 +257,7 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
 
           <Button
             onClick={handleSend}
-            disabled={!message.trim() && files.length === 0 && capturedImages.length === 0}
+            disabled={!message.trim() && files.length === 0}
             className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 h-8 w-8 p-0"
           >
             <Send size={16} />
@@ -295,47 +276,6 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
       onCapture={handleDrawingCapture}
       onDeactivate={() => setIsDrawingMode(false)}
     />
-
-    {/* Capture Dialog */}
-    <Dialog open={showCaptureDialog} onOpenChange={setShowCaptureDialog}>
-      <DialogContent className="sm:max-w-[600px]">
-        <DialogHeader>
-          <DialogTitle>Add message for captured images</DialogTitle>
-        </DialogHeader>
-        
-        {/* Preview captured images */}
-        <div className="grid grid-cols-3 gap-2 mb-4 max-h-48 overflow-y-auto">
-          {capturedImages.map((img, index) => (
-            <img 
-              key={index} 
-              src={img} 
-              alt={`Captured ${index + 1}`}
-              className="w-full h-24 object-contain border rounded"
-            />
-          ))}
-        </div>
-
-        {/* Message input */}
-        <Textarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Describe what you want to do with these images..."
-          className="min-h-[100px] resize-none"
-          autoFocus
-        />
-
-        {/* Actions */}
-        <div className="flex justify-end gap-2 mt-4">
-          <Button variant="outline" onClick={handleCancelCapture}>
-            Cancel
-          </Button>
-          <Button onClick={handleSend} disabled={!message.trim()}>
-            Send with images
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
     </>
   );
 };

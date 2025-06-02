@@ -282,15 +282,8 @@ async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     cache_session.set(thread.id, thread)
     return cast(SessionThreadModel, cache_session.get(thread.id))
 
-@app.get('/v1/chat/get_threads', response_model=list[SessionThreadModel])
-async def get_threads() -> list[SessionThreadModel]:
-    def safe_json(obj):
-        try:
-            json.dumps(obj)  # Fast check
-            return obj
-        except (TypeError, ValueError):
-            return str(obj)  # Fallback to string
-
+@app.get('/v1/chat/get_threads')
+async def get_threads():
     threads = []
 
     for id in cache_session.keys():
@@ -299,13 +292,17 @@ async def get_threads() -> list[SessionThreadModel]:
         if isinstance(raw, dict):
             raw = SessionThreadModel(**raw)
 
-        # Sanitize locals_dict
         if isinstance(raw, SessionThreadModel):
-            raw.locals_dict = {
-                k: safe_json(v)
-                for k, v in raw.locals_dict.items()
-            }
-            threads.append(raw)
+            # Convert to dict excluding locals_dict, then add serialized locals_dict
+            thread_dict = raw.model_dump(exclude={'locals_dict'})
+            
+            # Add properly serialized locals_dict if client needs it
+            if raw.locals_dict:
+                thread_dict['locals_dict'] = Helpers.serialize_locals_dict(raw.locals_dict)
+            else:
+                thread_dict['locals_dict'] = {}
+                
+            threads.append(thread_dict)
 
     return threads
 
