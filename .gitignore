@@ -16,8 +16,7 @@ faiss/
 geckodriver.log
 .llmvm.history
 dist/
-package-lock.json
-package.json
+.vite/
 playwright.config.js
 example.spec.js
 demo-todo-app.spec.js
