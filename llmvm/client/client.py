@@ -366,6 +366,16 @@ class LLMVMClient():
             session_thread = SessionThreadModel.model_validate(response.json())
             return session_thread
 
+    async def set_thread_title(
+        self,
+        id: int,
+        title: str,
+    ) -> SessionThreadModel:
+        async with httpx.AsyncClient(timeout=400.0) as client:
+            response = await client.post(f'{self.api_endpoint}/v1/chat/set_thread_title', json={'id': id, 'title': title})
+            session_thread = SessionThreadModel.model_validate(response.json())
+            return session_thread
+
     async def get_threads(
         self,
     ) -> list[SessionThreadModel]:

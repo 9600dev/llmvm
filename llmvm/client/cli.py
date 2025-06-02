@@ -870,6 +870,18 @@ class Repl():
                         Helpers.find_and_run_chrome(temp_file.name)
                     continue
 
+                if query.startswith(':title '):
+                    llmvm_client = LLMVMClient(
+                        api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+                        default_executor_name='',
+                        default_model_name='',
+                        api_key='',
+                    )
+                    last_thread_t: SessionThreadModel = last_thread
+                    title = query[7:]
+                    asyncio.run(llmvm_client.set_thread_title(last_thread_t.id, title))
+                    continue
+
                 if query.startswith(':omc'):
                     last_thread_t: SessionThreadModel = last_thread
                     with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
@@ -1458,7 +1470,8 @@ def threads(
     for thread in threads:
         if len(thread.messages) > 0:
             message_content = thread.messages[-1].to_message().get_str().replace('\n', ' ')[0:75]
-            rich.print(f'[{thread.id}]: {message_content}')
+            title = thread.title if thread.title else ''
+            rich.print(f'[{thread.id}]: {title} - {message_content}')
 
     active_threads = [t for t in threads if len(t.messages) > 0]
 

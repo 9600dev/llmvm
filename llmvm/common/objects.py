@@ -1980,6 +1980,7 @@ class MessageModel(BaseModel):
 
 class SessionThreadModel(BaseModel):
     id: int = -1
+    title: str = ''
     executor: str = ''
     model: str = ''
     compression: str = ''

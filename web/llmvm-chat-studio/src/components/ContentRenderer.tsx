@@ -180,6 +180,19 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
       }
     }
 
+    // FileContent type (must check before browser content since it also has url)
+    if (content.type === 'FileContent' || content.content_type === 'file') {
+      return (
+        <Card className="p-4">
+          <div className="flex items-center gap-2 mb-2 text-sm text-gray-600">
+            <FileText size={16} />
+            <span>File Content: {content.url || 'Unknown file'}</span>
+          </div>
+          {/* Don't render the base64 content for files */}
+        </Card>
+      );
+    }
+
     // Browser content
     if (content.type === 'browser' || content.url) {
       return (
@@ -193,7 +206,7 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
               {content.text}
             </div>
           )}
-          {content.sequence && (
+          {content.sequence && typeof content.sequence === 'string' && content.type !== 'FileContent' && (
             <div className="mt-4 space-y-2">
               <ContentRenderer content={content.sequence} isStreaming={isStreaming} />
             </div>

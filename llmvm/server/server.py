@@ -271,6 +271,17 @@ async def get_thread(id: int) -> SessionThreadModel:
     thread = __get_thread(id)
     return thread
 
+@app.post('/v1/chat/set_thread_title')
+async def set_thread_title(request: Request):
+    request = await request.json()
+    id = request['id']
+    title = request['title']
+
+    thread = __get_thread(id)
+    thread.title = title
+    cache_session.set(thread.id, thread)
+    return thread
+
 @app.post('/v1/chat/set_thread')
 async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     thread = request
@@ -295,13 +306,13 @@ async def get_threads():
         if isinstance(raw, SessionThreadModel):
             # Convert to dict excluding locals_dict, then add serialized locals_dict
             thread_dict = raw.model_dump(exclude={'locals_dict'})
-            
+
             # Add properly serialized locals_dict if client needs it
             if raw.locals_dict:
                 thread_dict['locals_dict'] = Helpers.serialize_locals_dict(raw.locals_dict)
             else:
                 thread_dict['locals_dict'] = {}
-                
+
             threads.append(thread_dict)
 
     return threads

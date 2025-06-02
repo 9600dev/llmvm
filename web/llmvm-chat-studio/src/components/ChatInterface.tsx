@@ -45,6 +45,8 @@ const ChatInterface = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [llmvmService] = useState(() => getLLMVMService());
   const [isConnected, setIsConnected] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
   const [threads, setThreads] = useState<Thread[]>([
     {
       id: "1",
@@ -89,30 +91,36 @@ const ChatInterface = () => {
               
               // Convert LLMVM threads to UI threads
               const uiThreads: Thread[] = sortedThreads.map(llmvmThread => {
-                // Get the first user message for the title
-                const firstUserMessage = llmvmThread.messages.find(msg => msg.role === 'user');
                 let title = `Thread ${llmvmThread.id}`;
                 
-                if (firstUserMessage && firstUserMessage.content) {
-                  // Extract text content from the message
-                  let textContent = '';
-                  if (typeof firstUserMessage.content === 'string') {
-                    textContent = firstUserMessage.content;
-                  } else if (Array.isArray(firstUserMessage.content)) {
-                    // Find first text content in the array
-                    const textItem = firstUserMessage.content.find((item: any) => 
-                      typeof item === 'string' || item.content_type === 'text' || item.type === 'text'
-                    );
-                    if (textItem) {
-                      textContent = typeof textItem === 'string' ? textItem : (textItem.text || textItem.sequence || '');
-                    }
-                  }
+                // Use explicit title if available
+                if (llmvmThread.title) {
+                  title = llmvmThread.title;
+                } else {
+                  // Otherwise, get the first user message for the title
+                  const firstUserMessage = llmvmThread.messages.find(msg => msg.role === 'user');
                   
-                  // Take first 30 characters and clean up
-                  if (textContent) {
-                    title = textContent.substring(0, 30).trim();
-                    if (textContent.length > 30) {
-                      title += '...';
+                  if (firstUserMessage && firstUserMessage.content) {
+                    // Extract text content from the message
+                    let textContent = '';
+                    if (typeof firstUserMessage.content === 'string') {
+                      textContent = firstUserMessage.content;
+                    } else if (Array.isArray(firstUserMessage.content)) {
+                      // Find first text content in the array
+                      const textItem = firstUserMessage.content.find((item: any) => 
+                        typeof item === 'string' || item.content_type === 'text' || item.type === 'text'
+                      );
+                      if (textItem) {
+                        textContent = typeof textItem === 'string' ? textItem : (textItem.text || textItem.sequence || '');
+                      }
+                    }
+                    
+                    // Take first 30 characters and clean up
+                    if (textContent) {
+                      title = textContent.substring(0, 30).trim();
+                      if (textContent.length > 30) {
+                        title += '...';
+                      }
                     }
                   }
                 }
@@ -186,19 +194,20 @@ const ChatInterface = () => {
 
       // Process each file
       for (const file of files) {
-        if (file.type.startsWith('image/')) {
-          // Convert image to base64
-          const base64 = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-              const result = reader.result as string;
-              // Remove data:image/xxx;base64, prefix
-              const base64Data = result.split(',')[1];
-              resolve(base64Data);
-            };
-            reader.readAsDataURL(file);
-          });
+        // Convert file to base64
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result as string;
+            // Remove data:xxx;base64, prefix
+            const base64Data = result.split(',')[1];
+            resolve(base64Data);
+          };
+          reader.readAsDataURL(file);
+        });
 
+        if (file.type.startsWith('image/')) {
+          // Handle images with ImageContent
           processedContent.push({
             type: "image",
             content_type: "image",
@@ -207,16 +216,35 @@ const ChatInterface = () => {
             url: ""
           });
           messageType = "image";
+        } else {
+          // Handle all other files with FileContent
+          processedContent.push({
+            type: "FileContent",
+            content_type: "file",
+            sequence: base64,
+            url: file.name // Use filename for display
+          });
+          messageType = "file";
         }
-        // Handle other file types as needed
       }
 
       messageContent = processedContent.length > 1 ? processedContent : processedContent[0] || content;
     }
 
+    // Create display text for UI
+    let displayContent = content;
+    if (!content && files && files.length > 0) {
+      const imageCount = files.filter(f => f.type.startsWith('image/')).length;
+      const fileCount = files.filter(f => !f.type.startsWith('image/')).length;
+      const parts = [];
+      if (imageCount > 0) parts.push(`${imageCount} image${imageCount > 1 ? 's' : ''}`);
+      if (fileCount > 0) parts.push(`${fileCount} file${fileCount > 1 ? 's' : ''}`);
+      displayContent = `[${parts.join(' and ')}]`;
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: content || "[Image]", // Display text in UI
+      content: displayContent, // Display text in UI
       role: "user",
       timestamp: new Date(),
       type: messageType,
@@ -551,6 +579,50 @@ const ChatInterface = () => {
     }
   };
 
+  const handleTitleClick = () => {
+    if (activeThread) {
+      setEditedTitle(activeThread.title);
+      setEditingTitle(true);
+    }
+  };
+
+  const handleTitleSave = async () => {
+    if (!activeThread || !editedTitle.trim()) {
+      setEditingTitle(false);
+      return;
+    }
+
+    const newTitle = editedTitle.trim();
+    
+    // Update local state
+    setThreads(prev => prev.map(thread =>
+      thread.id === activeThreadId
+        ? { ...thread, title: newTitle }
+        : thread
+    ));
+
+    // Update on server if connected
+    if (isConnected && activeThread.llmvmThreadId) {
+      try {
+        await llmvmService.setThreadTitle(activeThread.llmvmThreadId, newTitle);
+      } catch (error) {
+        console.error('Failed to update thread title on server:', error);
+        // Optionally revert the title on error
+      }
+    }
+
+    setEditingTitle(false);
+  };
+
+  const handleTitleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleTitleSave();
+    } else if (e.key === 'Escape') {
+      setEditingTitle(false);
+    }
+  };
+
   return (
     <div className="flex h-full w-full bg-white">
       {/* Sidebar */}
@@ -577,9 +649,25 @@ const ChatInterface = () => {
               {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </Button>
             <div>
-              <h1 className="text-lg font-semibold text-gray-900">
-                {activeThread?.title || "LLMVM Chat"}
-              </h1>
+              {editingTitle ? (
+                <input
+                  type="text"
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  onKeyPress={handleTitleKeyPress}
+                  onBlur={handleTitleSave}
+                  className="text-lg font-semibold text-gray-900 bg-transparent border-b-2 border-blue-500 outline-none"
+                  autoFocus
+                />
+              ) : (
+                <h1 
+                  className="text-lg font-semibold text-gray-900 cursor-pointer hover:text-blue-600"
+                  onClick={handleTitleClick}
+                  title="Click to edit title"
+                >
+                  {activeThread?.title || "LLMVM Chat"}
+                </h1>
+              )}
               <p className="text-sm text-gray-600">
                 Model: {activeThread?.settings.model} • Mode: {activeThread?.mode}
               </p>

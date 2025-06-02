@@ -100,6 +100,15 @@ export class LLMVMService {
     }
   }
 
+  async setThreadTitle(threadId: string, title: string): Promise<void> {
+    try {
+      await this.client.setThreadTitle(Number(threadId), title);
+    } catch (error) {
+      console.error('Failed to set thread title:', error);
+      throw error;
+    }
+  }
+
   async sendMessage(
     threadId: string,
     content: string | LLMVMContent[],

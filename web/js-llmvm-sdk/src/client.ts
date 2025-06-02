@@ -135,6 +135,21 @@ export class LLMVMClient {
   }
 
   /**
+   * Set thread title
+   */
+  async setThreadTitle(id: number, title: string): Promise<void> {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/v1/chat/set_thread_title`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({ id, title })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to set thread title: ${response.statusText}`);
+    }
+  }
+
+  /**
    * Set cookies for a thread
    */
   async setCookies(id: number, cookies: Array<{[key: string]: any}>): Promise<SessionThreadModel> {

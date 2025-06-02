@@ -203,15 +203,57 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
     console.log("captureElements called, paths:", paths);
     const capturedImages: string[] = [];
     
-    // Hide the canvas temporarily during capture
+    console.log("Number of paths to process:", paths.length);
+
+    // Create an overlay canvas to draw annotations
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.style.position = 'fixed';
+    overlayCanvas.style.top = '0';
+    overlayCanvas.style.left = '0';
+    overlayCanvas.style.width = '100%';
+    overlayCanvas.style.height = '100%';
+    overlayCanvas.style.pointerEvents = 'none';
+    overlayCanvas.style.zIndex = '10000';
+    overlayCanvas.width = window.innerWidth;
+    overlayCanvas.height = window.innerHeight;
+    
+    const overlayCtx = overlayCanvas.getContext('2d');
+    if (!overlayCtx) return;
+
+    // Draw all paths on the overlay
+    overlayCtx.strokeStyle = '#3B82F6';
+    overlayCtx.lineWidth = 3;
+    overlayCtx.lineCap = 'round';
+    overlayCtx.lineJoin = 'round';
+
+    // Hide the original canvas
     if (canvasRef.current) {
       canvasRef.current.style.display = 'none';
     }
 
-    console.log("Number of paths to process:", paths.length);
+    // Add overlay to DOM
+    document.body.appendChild(overlayCanvas);
 
     for (const path of paths) {
       try {
+        // Draw the path on overlay
+        overlayCtx.beginPath();
+        if (path.length > 0) {
+          overlayCtx.moveTo(path[0].x, path[0].y);
+          path.forEach(point => {
+            overlayCtx.lineTo(point.x, point.y);
+          });
+          
+          if (isClosedPath(path)) {
+            overlayCtx.closePath();
+            overlayCtx.stroke();
+            overlayCtx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+            overlayCtx.fill();
+          } else {
+            overlayCtx.stroke();
+          }
+        }
+
         if (isUnderlinePath(path)) {
           // Handle underline - capture text above the line
           const bounds = getPathBounds(path);
@@ -223,7 +265,7 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
             height: 60
           });
 
-          // Capture the screen area
+          // Capture including the overlay
           const canvas = await html2canvas(document.body, {
             x: bounds.left,
             y: bounds.top - 50,
@@ -233,7 +275,7 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
             allowTaint: true,
             backgroundColor: '#ffffff',
             scale: 2,
-            logging: true
+            logging: false
           });
 
           const dataUrl = canvas.toDataURL("image/png");
@@ -251,7 +293,7 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
             height: bounds.bottom - bounds.top
           });
 
-          // Capture the entire area within the lasso bounds
+          // Capture including the overlay
           const canvas = await html2canvas(document.body, {
             x: bounds.left,
             y: bounds.top,
@@ -261,7 +303,7 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
             allowTaint: true,
             backgroundColor: '#ffffff',
             scale: 2,
-            logging: true
+            logging: false
           });
 
           const dataUrl = canvas.toDataURL("image/png");
@@ -270,6 +312,9 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
         } else {
           console.log("Path is neither closed nor underline, skipping");
         }
+
+        // Clear the overlay for next path
+        overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
       } catch (error) {
         console.error("Error capturing area:", error);
         toast({
@@ -280,7 +325,8 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
       }
     }
 
-    // Show the canvas again
+    // Remove overlay and show original canvas
+    document.body.removeChild(overlayCanvas);
     if (canvasRef.current) {
       canvasRef.current.style.display = 'block';
     }

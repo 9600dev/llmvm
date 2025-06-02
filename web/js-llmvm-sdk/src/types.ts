@@ -119,6 +119,7 @@ export interface ContentModel {
 
 export interface SessionThreadModel {
   id: number;
+  title?: string;
   executor: string;
   model: string;
   compression: string;
