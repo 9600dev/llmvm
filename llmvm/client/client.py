@@ -42,7 +42,7 @@ def llm(
     messages: list[Message] | list[str] | str,
     executor: Optional[Executor] = None,
     model: Optional[str] = None,
-    output_token_len: int = 4096,
+    output_token_len: int = 8192,
     temperature: float = 0.0,
     stop_tokens: list[str] = [],
     thinking: int = 0,
@@ -86,7 +86,7 @@ def llmvm(
     executor_name: Optional[str] = None,
     model_name: Optional[str] = None,
     temperature: float = 0.0,
-    output_token_len: int = 4096,
+    output_token_len: int = 8192,
     stop_tokens: list[str] = [],
     cookies: list[dict[str, Any]] = [],
     compression: str = 'auto',
@@ -145,11 +145,11 @@ def get_client(
     api_key: Optional[str] = None
 ) -> 'LLMVMClient':
     if executor_name == 'anthropic' and not model_name:
-        model_name = 'claude-3-7-sonnet-latest'
+        model_name = 'claude-sonnet-4-20250514'
     elif executor_name == 'openai' and not model_name:
-        model_name = 'gpt-4o'
+        model_name = 'gpt-4.1'
     elif executor_name == 'gemini' and not model_name:
-        model_name = 'gemini-2.5'
+        model_name = 'gemini-2.5-pro-preview-05-06'
     elif executor_name == 'deepseek' and not model_name:
         model_name = 'deepseek-chat'
     elif executor_name == 'bedrock' and not model_name:
@@ -241,7 +241,7 @@ class LLMVMClient():
             if Container.get_config_variable('ANTHROPIC_API_KEY') or api_key:
                 return AnthropicExecutor(
                     api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'claude-3-7-sonnet-latest'
+                    default_model=cast(str, model_name) if model_name else 'claude-sonnet-4-20250514'
                 )
             else:
                 raise ValueError('anthropic executor requested, but unable to find Anthropic API key.')
@@ -250,7 +250,7 @@ class LLMVMClient():
             if Container.get_config_variable('OPENAI_API_KEY') or api_key:
                 return OpenAIExecutor(
                     api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'gpt-4o'
+                    default_model=cast(str, model_name) if model_name else 'gpt-4.1'
                 )
             else:
                 raise ValueError('openai executor requested, but unable to find OpenAI API key.')
@@ -259,7 +259,7 @@ class LLMVMClient():
             if Container.get_config_variable('GEMINI_API_KEY') or api_key:
                 return GeminiExecutor(
                     api_key=api_key or Container.get_config_variable('GEMINI_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'gemini-1.5-pro'
+                    default_model=cast(str, model_name) if model_name else 'gemini-2.5-pro-preview-05-06'
                 )
             else:
                 raise ValueError('GeminiExecutor requires a model name and API key.')
@@ -284,17 +284,17 @@ class LLMVMClient():
             if Container.get_config_variable('ANTHROPIC_API_KEY'):
                 return AnthropicExecutor(
                     api_key=Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    default_model='claude-3-7-sonnet-latest'
+                    default_model='claude-sonnet-4-20250514'
                 )
             elif Container.get_config_variable('OPENAI_API_KEY'):
                 return OpenAIExecutor(
                     api_key=Container.get_config_variable('OPENAI_API_KEY'),
-                    default_model='gpt-4o'
+                    default_model='gpt-4.1'
                 )
             elif Container.get_config_variable('GEMINI_API_KEY'):
                 return GeminiExecutor(
                     api_key=Container.get_config_variable('GEMINI_API_KEY'),
-                    default_model='gemini-1.5-pro'
+                    default_model='gemini-2.5-pro-preview-05-06'
                 )
             elif Container.get_config_variable('DEEPSEEK_API_KEY'):
                 return DeepSeekExecutor(
@@ -308,7 +308,7 @@ class LLMVMClient():
         messages: list[Message],
         executor: Optional[Executor] = None,
         model: Optional[str] = None,
-        output_token_len: int = 4096,
+        output_token_len: int = 8192,
         temperature: float = 0.0,
         stop_tokens: list[str] = [],
         thinking: int = 0,
@@ -406,7 +406,7 @@ class LLMVMClient():
         executor_name: Optional[str] = None,
         model_name: Optional[str] = None,
         temperature: float = 0.0,
-        output_token_len: int = 4096,
+        output_token_len: int = 8192,
         stop_tokens: list[str] = [],
         cookies: list[dict[str, Any]] = [],
         compression: str = '',

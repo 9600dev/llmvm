@@ -37,6 +37,7 @@ from llmvm.common.objects import (
     System,
     TextContent,
     TokenCompressionMethod,
+    TokenNode,
     User,
     awaitable_none,
 )
@@ -835,6 +836,9 @@ class ExecutionController(Controller):
         # we're making a copy because we return the state at the end
         runtime_state = runtime_state.copy()
 
+        if max_output_tokens == 0:
+            max_output_tokens = None
+
         def parse_code_block_result(result) -> list[AstNode]:
             from matplotlib.pyplot import Figure  # type: ignore
 
@@ -1138,7 +1142,8 @@ class ExecutionController(Controller):
                     self.get_executor().name() == "openai"
                     and cast(OpenAIExecutor, self.get_executor()).does_not_stop(model)
                 ):
-                    write_client_stream(TextContent("</helpers>\n"))
+                    write_client_stream(TokenNode("</helpers>\n"))
+
                 write_client_stream(
                     TextContent("Executing helpers code block locally.\n")
                 )
@@ -1272,13 +1277,13 @@ class ExecutionController(Controller):
                 if len(code_execution_result_str) > 300:
                     # grab the first and last 150 characters
                     write_client_stream(
-                        TextContent(
+                        TokenNode(
                             f"<helpers_result>{code_execution_result_str[:150]}\n\n ...excluded for brevity...\n\n{code_execution_result_str[-150:]}</helpers_result>\n\n"
                         )
                     )
                 else:
                     write_client_stream(
-                        TextContent(
+                        TokenNode(
                             f"<helpers_result>{code_execution_result_str}</helpers_result>\n\n"
                         )
                     )

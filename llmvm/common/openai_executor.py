@@ -41,10 +41,10 @@ class OpenAIExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get("OPENAI_API_KEY")),
-        default_model: str = "gpt-4o",
+        default_model: str = "gpt-4.1",
         api_endpoint: str = "https://api.openai.com/v1",
-        default_max_input_len: int = 128000,
-        default_max_output_len: int = 16384,
+        default_max_input_len: int = 1047576,
+        default_max_output_len: int = 32768,
         max_images: int = 20,
     ):
         super().__init__(

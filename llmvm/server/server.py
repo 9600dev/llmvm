@@ -576,8 +576,8 @@ async def chat_completions(request: Request):
             tools=request['tools'],
             executor=controller.get_executor(),
             model=controller.get_executor().default_model,
-            temperature=float(request['temperature']) if request.get('temperature') else 0.0,
-            output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 4096,
+            temperature=float(request['temperature']) if request.get('temperature') else 1.0,
+            output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 8192,
         )
 
         if request.get('stream') and request['stream'] == True and result.get('choices')[0].get('message').get('tool_calls'):  # type: ignore
@@ -595,8 +595,8 @@ async def chat_completions(request: Request):
                     messages=llmvm_messages,
                     executor=controller.get_executor(),
                     model=controller.get_executor().default_model,
-                    temperature=float(request['temperature']) if request.get('temperature') else 0.0,
-                    output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 4096,
+                    temperature=float(request['temperature']) if request.get('temperature') else 1.0,
+                    output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 8192,
                     stream_handler=stream_handler,
                 )
             finally:
@@ -614,8 +614,8 @@ async def chat_completions(request: Request):
             messages=llmvm_messages,
             executor=controller.get_executor(),
             model=controller.get_executor().default_model,
-            temperature=float(request['temperature']) if request.get('temperature') else 0.0,
-            output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 4096,
+            temperature=float(request['temperature']) if request.get('temperature') else 1.0,
+            output_token_len=int(request['max_tokens']) if request.get('max_tokens') else 8192,
         )
 
         assistant_content = assistant.get_str().strip()

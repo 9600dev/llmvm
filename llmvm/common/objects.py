@@ -1241,7 +1241,10 @@ class TokenCompressionMethod(Enum):
     SUMMARY = 4
 
 
-def compression_enum(input_str):
+def compression_enum(input_str) -> TokenCompressionMethod:
+    if not input_str:
+        return TokenCompressionMethod.AUTO
+
     normalized_str = input_str.upper().replace('MAPREDUCE', 'MAP_REDUCE')
     try:
         return TokenCompressionMethod[normalized_str]

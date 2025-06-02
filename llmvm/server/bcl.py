@@ -16,7 +16,7 @@ from contextlib import contextmanager
 
 from llmvm.common.helpers import Helpers, write_client_stream
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import FunctionCallMeta, ImageContent, TextContent
+from llmvm.common.objects import FunctionCallMeta, ImageContent, StreamNode, TextContent
 from llmvm.server.base_library.source import Source
 
 logging = setup_logging()
@@ -354,7 +354,7 @@ class BCL():
         # Close the buffer
         buffer.close()
 
-        write_client_stream(image_bytes)
+        write_client_stream(StreamNode(image_bytes, type='bytes'))
         return ImageContent(image_bytes)
 
     @staticmethod

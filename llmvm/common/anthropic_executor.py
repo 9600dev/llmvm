@@ -30,10 +30,10 @@ class AnthropicExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, os.environ.get('ANTHROPIC_API_KEY')),
-        default_model: str = 'claude-3-7-sonnet-latest',
+        default_model: str = 'claude-sonnet-4-20250514',
         api_endpoint: str = 'https://api.anthropic.com',
         default_max_input_len: int = 200000,
-        default_max_output_len: int = 4096,
+        default_max_output_len: int = 64000,
         max_images: int = 20,
     ):
         super().__init__(

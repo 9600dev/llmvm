@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLMVM SDK - Advanced Content Rendering</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f0f2f5;
+        }
+        
+        h1, h2 {
+            color: #1a1a1a;
+        }
+        
+        .demo-section {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+        
+        .demo-controls {
+            margin-bottom: 20px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .demo-controls button {
+            margin-right: 10px;
+            margin-bottom: 10px;
+            padding: 8px 16px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        .demo-controls button:hover {
+            background: #0056b3;
+        }
+        
+        #content-display {
+            min-height: 200px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .content-type-label {
+            display: inline-block;
+            padding: 4px 8px;
+            background: #e3f2fd;
+            color: #1976d2;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        pre {
+            background: #282c34;
+            color: #abb2bf;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        
+        .grid-demo {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .grid-item {
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        #raw-output {
+            margin-top: 20px;
+            padding: 16px;
+            background: #282c34;
+            color: #abb2bf;
+            border-radius: 8px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>LLMVM SDK - Advanced Content Rendering</h1>
+    
+    <div class="demo-section">
+        <h2>Content Type Demonstrations</h2>
+        <div class="demo-controls">
+            <button onclick="demoTextContent()">Text Content</button>
+            <button onclick="demoImageContent()">Image Content</button>
+            <button onclick="demoPdfContent()">PDF Content</button>
+            <button onclick="demoMarkdownContent()">Markdown Content</button>
+            <button onclick="demoBrowserContent()">Browser Content</button>
+            <button onclick="demoSearchResults()">Search Results</button>
+            <button onclick="demoComplexMessage()">Complex Message</button>
+        </div>
+        
+        <div id="content-display"></div>
+        
+        <details>
+            <summary>View Raw Data</summary>
+            <pre id="raw-output"></pre>
+        </details>
+    </div>
+    
+    <div class="demo-section">
+        <h2>Message Rendering Examples</h2>
+        <div class="demo-controls">
+            <button onclick="demoConversation()">Full Conversation</button>
+            <button onclick="demoStreamingMessage()">Streaming Simulation</button>
+            <button onclick="demoPinnedMessages()">Pinned Messages</button>
+            <button onclick="demoErrorMessage()">Error Handling</button>
+        </div>
+        
+        <div id="message-display"></div>
+    </div>
+    
+    <div class="demo-section">
+        <h2>Custom Styling Demo</h2>
+        <div class="grid-demo" id="style-demo"></div>
+    </div>
+
+    <!-- Include the LLMVM SDK -->
+    <script src="../dist/index.umd.js"></script>
+    
+    <script>
+        const contentDisplay = document.getElementById('content-display');
+        const messageDisplay = document.getElementById('message-display');
+        const rawOutput = document.getElementById('raw-output');
+        
+        function showContent(content, label) {
+            contentDisplay.innerHTML = '';
+            
+            // Add label
+            const labelEl = document.createElement('div');
+            labelEl.className = 'content-type-label';
+            labelEl.textContent = label;
+            contentDisplay.appendChild(labelEl);
+            
+            // Render content
+            const rendered = content.render();
+            contentDisplay.appendChild(rendered);
+            
+            // Show raw data
+            rawOutput.textContent = JSON.stringify({
+                type: content.type,
+                content_type: content.content_type,
+                text: content.getText(),
+                data: content
+            }, null, 2);
+        }
+        
+        function demoTextContent() {
+            const content = new LLMVM.TextContent({
+                sequence: 'This is a simple text content example.\n\nIt supports multiple paragraphs and preserves formatting.',
+                url: 'https://example.com/text'
+            });
+            showContent(content, 'TextContent');
+        }
+        
+        function demoImageContent() {
+            // Create a simple base64 image (1x1 red pixel)
+            const redPixel = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+            
+            const content = new LLMVM.ImageContent({
+                sequence: redPixel,
+                image_type: 'image/png',
+                url: 'https://example.com/image.png'
+            });
+            showContent(content, 'ImageContent');
+        }
+        
+        function demoPdfContent() {
+            const content = new LLMVM.PdfContent({
+                sequence: '', // In real use, this would be base64 PDF data
+                url: 'https://example.com/document.pdf'
+            });
+            showContent(content, 'PdfContent');
+        }
+        
+        function demoMarkdownContent() {
+            const content = new LLMVM.MarkdownContent({
+                sequence: [
+                    new LLMVM.TextContent({
+                        sequence: '# Markdown Example\n\nThis is **bold** and this is *italic*.\n\n## Features\n\n- Bullet point 1\n- Bullet point 2\n\n```javascript\nconst hello = "world";\nconsole.log(hello);\n```\n\n[Link to LLMVM](https://github.com/llmvm)'
+                    })
+                ],
+                url: 'https://example.com/readme.md'
+            });
+            showContent(content, 'MarkdownContent');
+        }
+        
+        function demoBrowserContent() {
+            const content = new LLMVM.BrowserContent({
+                url: 'https://example.com',
+                sequence: [
+                    new LLMVM.TextContent({ sequence: 'Example Website - Homepage' }),
+                    new LLMVM.MarkdownContent({
+                        sequence: [
+                            new LLMVM.TextContent({
+                                sequence: '## Welcome to Example.com\n\nThis is a demonstration of browser content rendering.'
+                            })
+                        ]
+                    })
+                ]
+            });
+            showContent(content, 'BrowserContent');
+        }
+        
+        function demoSearchResults() {
+            const results = document.createElement('div');
+            
+            const searchResult = new LLMVM.SearchResult({
+                url: 'https://example.com/result1',
+                title: 'Understanding JavaScript Promises',
+                snippet: 'A comprehensive guide to JavaScript Promises, including async/await patterns and error handling strategies.',
+                engine: 'Google'
+            });
+            
+            const yelpResult = new LLMVM.YelpResult({
+                title: 'The Best Coffee Shop',
+                link: 'https://yelp.com/biz/best-coffee',
+                neighborhood: 'Downtown District',
+                snippet: 'Artisanal coffee roasted daily, cozy atmosphere, and friendly baristas.',
+                reviews: 'Amazing coffee! The pour-over is exceptional and the ambiance is perfect for working or catching up with friends.'
+            });
+            
+            const hnResult = new LLMVM.HackerNewsResult({
+                title: 'Show HN: Building a JavaScript SDK',
+                url: 'https://news.ycombinator.com/item?id=123456',
+                author: 'developer123',
+                comment_text: 'I built this SDK to make it easier to integrate with our API. It includes TypeScript support and comprehensive documentation.',
+                created_at: new Date().toISOString()
+            });
+            
+            results.appendChild(searchResult.render());
+            results.appendChild(yelpResult.render());
+            results.appendChild(hnResult.render());
+            
+            contentDisplay.innerHTML = '';
+            const labelEl = document.createElement('div');
+            labelEl.className = 'content-type-label';
+            labelEl.textContent = 'Search Results';
+            contentDisplay.appendChild(labelEl);
+            contentDisplay.appendChild(results);
+            
+            rawOutput.textContent = 'Multiple search result types demonstrated';
+        }
+        
+        function demoComplexMessage() {
+            const content = new LLMVM.BrowserContent({
+                url: 'https://complex-example.com',
+                sequence: [
+                    new LLMVM.TextContent({ sequence: 'Complex Content Example' }),
+                    new LLMVM.MarkdownContent({
+                        sequence: [
+                            new LLMVM.TextContent({
+                                sequence: '### Analysis Results\n\nHere are the findings from the web page:'
+                            })
+                        ]
+                    }),
+                    new LLMVM.HTMLContent({
+                        sequence: '<table><tr><th>Metric</th><th>Value</th></tr><tr><td>Performance</td><td>95%</td></tr><tr><td>Accessibility</td><td>88%</td></tr></table>'
+                    })
+                ]
+            });
+            showContent(content, 'Complex BrowserContent');
+        }
+        
+        function demoConversation() {
+            const messages = [
+                LLMVM.system('You are a helpful AI assistant with expertise in web development.'),
+                LLMVM.user('Can you explain what a JavaScript Promise is?'),
+                LLMVM.assistant('A JavaScript Promise is an object that represents the eventual completion or failure of an asynchronous operation. It\'s a way to handle asynchronous code more elegantly than traditional callbacks.\n\nA Promise can be in one of three states:\n- **Pending**: Initial state, neither fulfilled nor rejected\n- **Fulfilled**: The operation completed successfully\n- **Rejected**: The operation failed\n\nHere\'s a simple example:\n\n```javascript\nconst myPromise = new Promise((resolve, reject) => {\n  setTimeout(() => {\n    resolve("Success!");\n  }, 1000);\n});\n```'),
+                LLMVM.user('How do I handle errors with Promises?')
+            ];
+            
+            LLMVM.renderMessages(messages, messageDisplay);
+        }
+        
+        async function demoStreamingMessage() {
+            messageDisplay.innerHTML = '';
+            
+            const userMsg = LLMVM.user('Tell me a story...');
+            const assistantMsg = LLMVM.assistant('');
+            
+            const messages = [userMsg, assistantMsg];
+            LLMVM.renderMessages(messages, messageDisplay);
+            
+            // Simulate streaming
+            const story = 'Once upon a time, in a land of code and algorithms, there lived a brave developer who embarked on a quest to build the perfect SDK...';
+            let accumulated = '';
+            
+            for (let i = 0; i < story.length; i += 5) {
+                accumulated += story.substring(i, i + 5);
+                messages[1] = LLMVM.assistant(accumulated);
+                LLMVM.renderMessages(messages, messageDisplay);
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+        }
+        
+        function demoPinnedMessages() {
+            const messages = [
+                LLMVM.system('Important: Always be helpful and respectful.'),
+                LLMVM.user('This is a regular message'),
+                LLMVM.assistant('This is a pinned response that should stand out'),
+                LLMVM.user('Another regular message')
+            ];
+            
+            // Pin the system message and assistant message
+            messages[0].pinned = 1;
+            messages[2].pinned = 2;
+            
+            LLMVM.renderMessages(messages, messageDisplay);
+        }
+        
+        function demoErrorMessage() {
+            const messages = [
+                LLMVM.user('Please divide by zero'),
+                new LLMVM.AssistantMessage({
+                    message: [new LLMVM.TextContent({ sequence: 'I cannot perform that operation as it would result in an error.' })],
+                    error: true,
+                    stop_reason: 'error',
+                    total_tokens: 42
+                })
+            ];
+            
+            LLMVM.renderMessages(messages, messageDisplay);
+        }
+        
+        // Style demo
+        function createStyleDemo() {
+            const styleDemo = document.getElementById('style-demo');
+            
+            const themes = [
+                { name: 'Default', class: '' },
+                { name: 'Dark', class: 'dark-theme' },
+                { name: 'Compact', class: 'compact-theme' }
+            ];
+            
+            themes.forEach(theme => {
+                const container = document.createElement('div');
+                container.className = `grid-item ${theme.class}`;
+                
+                const title = document.createElement('h3');
+                title.textContent = theme.name + ' Theme';
+                container.appendChild(title);
+                
+                const messages = [
+                    LLMVM.user('Hello!'),
+                    LLMVM.assistant('Hi there! How can I help you today?')
+                ];
+                
+                const messageContainer = document.createElement('div');
+                LLMVM.renderMessages(messages, messageContainer);
+                container.appendChild(messageContainer);
+                
+                styleDemo.appendChild(container);
+            });
+        }
+        
+        // Initialize demos
+        createStyleDemo();
+        demoTextContent();
+        
+        // Add custom styles for themes
+        const customStyles = document.createElement('style');
+        customStyles.textContent = `
+            .dark-theme .message {
+                background: #2d2d2d;
+                color: #e0e0e0;
+            }
+            
+            .dark-theme .user-message {
+                background: #1e3a5f;
+            }
+            
+            .dark-theme .assistant-message {
+                background: #3d2d4d;
+            }
+            
+            .compact-theme .message {
+                margin: 0.5em 0;
+                padding: 0.5em;
+            }
+            
+            .compact-theme .message-header {
+                font-size: 0.9em;
+                margin-bottom: 0.25em;
+            }
+            
+            .compact-theme .message-content {
+                font-size: 0.9em;
+            }
+        `;
+        document.head.appendChild(customStyles);
+    </script>
+</body>
+</html>

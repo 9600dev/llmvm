@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLMVM SDK - Basic Usage Example</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        #chat-container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        #input-area {
+            margin-top: 20px;
+        }
+
+        #user-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        #send-button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            background: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        #send-button:hover {
+            background: #1976d2;
+        }
+
+        #send-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 10px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .controls {
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .control-group {
+            margin-bottom: 10px;
+        }
+
+        label {
+            display: inline-block;
+            width: 120px;
+            font-weight: bold;
+        }
+
+        select, input[type="number"] {
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>LLMVM SDK - Basic Usage Example</h1>
+
+    <div id="chat-container"></div>
+
+    <div id="input-area">
+        <input type="text" id="user-input" placeholder="Type your message here..." />
+        <button id="send-button">Send</button>
+        <div id="status"></div>
+    </div>
+
+    <div class="controls">
+        <h3>Settings</h3>
+        <div class="control-group">
+            <label for="model-select">Model:</label>
+            <select id="model-select">
+                <option value="gpt-4.1">GPT-4.1</option>
+                <option value="claude-opus-4-20250514">Claude 4 Opus</option>
+                <option value="claude-sonnet-4-20250514">Claude 4 Sonnet</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label for="temperature">Temperature:</label>
+            <input type="number" id="temperature" min="0" max="2" step="0.1" value="1.0" />
+        </div>
+        <div class="control-group">
+            <label for="max-tokens">Max Tokens:</label>
+            <input type="number" id="max-tokens" min="1" max="128000" value="8192" />
+        </div>
+    </div>
+
+    <!-- Include the LLMVM SDK -->
+    <script src="../dist/index.umd.js"></script>
+
+    <script>
+        // Initialize the client
+        const client = new LLMVM.LLMVMClient({
+            baseUrl: 'http://localhost:8011',
+            timeout: 30000
+        });
+
+        // Store conversation messages
+        let messages = [
+            LLMVM.system('You are a helpful assistant. Respond concisely and clearly.')
+        ];
+
+        // Get DOM elements
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const status = document.getElementById('status');
+        const modelSelect = document.getElementById('model-select');
+        const temperatureInput = document.getElementById('temperature');
+        const maxTokensInput = document.getElementById('max-tokens');
+
+        // Render all messages
+        function renderAllMessages() {
+            LLMVM.renderMessages(messages, chatContainer);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Send message function
+        async function sendMessage() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            // Disable input
+            userInput.disabled = true;
+            sendButton.disabled = true;
+            status.textContent = 'Sending...';
+
+            // Add user message
+            const userMessage = LLMVM.user(text);
+            messages.push(userMessage);
+            renderAllMessages();
+
+            // Clear input
+            userInput.value = '';
+
+            try {
+                // Create a placeholder for streaming response
+                const assistantMessage = LLMVM.assistant('');
+                messages.push(assistantMessage);
+                renderAllMessages();
+
+                let fullResponse = '';
+                status.textContent = 'Receiving response...';
+
+                // Get completion with streaming
+                await client.complete(messages.slice(0, -1), {
+                    model: modelSelect.value,
+                    temperature: parseFloat(temperatureInput.value),
+                    maxTokens: parseInt(maxTokensInput.value),
+                    onChunk: (chunk) => {
+                        // Update the assistant message with accumulated response
+                        const content = LLMVM.parseStreamChunk(chunk);
+                        if (content) {
+                            fullResponse += content;
+                            messages[messages.length - 1] = LLMVM.assistant(fullResponse);
+                            renderAllMessages();
+                        }
+                    }
+                });
+
+                status.textContent = 'Ready';
+            } catch (error) {
+                console.error('Error:', error);
+                status.textContent = `Error: ${error.message}`;
+
+                // Add error message
+                messages.push(LLMVM.assistant(`Error: ${error.message}`));
+                renderAllMessages();
+            } finally {
+                // Re-enable input
+                userInput.disabled = false;
+                sendButton.disabled = false;
+                userInput.focus();
+            }
+        }
+
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // Initial render
+        renderAllMessages();
+        status.textContent = 'Ready';
+
+        // Test the connection
+        client.health().then(() => {
+            status.textContent = 'Connected to LLMVM server';
+        }).catch((error) => {
+            status.textContent = `Failed to connect: ${error.message}`;
+            sendButton.disabled = true;
+        });
+    </script>
+</body>
+</html>

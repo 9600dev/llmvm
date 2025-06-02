@@ -5,7 +5,7 @@ conda activate llmvm
 
 # Model selection
 echo "Select a model:"
-echo "1) claude-3-7-sonnet-latest (default)"
+echo "1) claude-sonnet-4-20250514 (default)"
 echo "2) gpt-4.1"
 echo "3) o4-mini"
 echo "4) o3"
@@ -21,7 +21,7 @@ fi
 # Map selection to model name
 case "$selection" in
 1)
-  model="claude-3-7-sonnet-latest"
+  model="claude-sonnet-4-20250514"
   executor="anthropic"
   ;;
 2)
