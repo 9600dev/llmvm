@@ -1,15 +1,19 @@
 import asyncio
 import base64
+import html
 import json
 import marshal
 import os
+from pathlib import Path
 import shutil
 import sys
 import time
 import types
+import datetime as dt
 from importlib import resources
-from typing import Any, Callable, Optional, cast
+from typing import Any, AsyncIterator, Awaitable, Callable, Optional, cast
 
+from fastapi.staticfiles import StaticFiles
 import jsonpickle
 import nest_asyncio
 import rich
@@ -17,7 +21,7 @@ import uvicorn
 from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request, Response,
                      UploadFile)
 from fastapi.param_functions import File
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from llmvm.client.client import LLMVMClient, get_client
 from llmvm.common.anthropic_executor import AnthropicExecutor
@@ -28,11 +32,11 @@ from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, AstNode, Content,
-                                  DownloadItemModel, Executor, Message,
+                                  DownloadItemModel, Executor, LLMCall, Message,
                                   MessageModel, QueueBreakNode,
                                   SessionThreadModel, Statement,
-                                  StreamingStopNode, System, TextContent,
-                                  TokenPriceCalculator, User, compression_enum)
+                                  StreamingStopNode, System, TextContent, TokenCompressionMethod,
+                                  TokenPriceCalculator, User)
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.common.openai_tool_translator import OpenAIFunctionTranslator
@@ -56,6 +60,7 @@ except ValueError:
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/download'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/logs'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/memory'), exist_ok=True)
+    os.makedirs(os.path.expanduser('~/.local/share/llmvm/traces'), exist_ok=True)
 
     config_file = resources.files('llmvm') / 'config.yaml'
     shutil.copy(str(config_file), os.path.expanduser('~/.config/llmvm/config.yaml'))
@@ -91,7 +96,6 @@ if (
 
 
 
-
 def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
     unserializable_locals = {}
     for key, value in locals_dict.items():
@@ -124,49 +128,47 @@ class PrettyJSONResponse(JSONResponse):
             separators=(", ", ": "),
         ).encode("utf-8") + b"\n"
 
+def get_executor(
+    executor: Optional[str] = None,
+    max_input_tokens: Optional[int] = None,
+    max_output_tokens: Optional[int] = None,
+ ) -> Executor:
+    if not executor:
+        executor = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
 
-def get_controller(
-        thread_id: int = 0,
-        controller: Optional[str] = None,
-        max_input_tokens: Optional[int] = None,
-        max_output_tokens: Optional[int] = None
-    ) -> ExecutionController:
-    if not controller:
-        controller = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
-
-    if not controller:
+    if not executor:
         raise EnvironmentError('No executor specified in environment or config file')
 
-    default_model_config = Container().get_config_variable(f'default_{controller}_model', 'LLMVM_MODEL')
+    default_model_config = Container().get_config_variable(f'default_{executor}_model', 'LLMVM_MODEL')
     override_max_input_len = Container().get_config_variable(f'override_max_input_tokens', 'LLMVM_OVERRIDE_MAX_INPUT_TOKENS', default=None)
     override_max_output_len = Container().get_config_variable(f'override_max_output_tokens', 'LLMVM_OVERRIDE_MAX_OUTPUT_TOKENS', default=None)
 
-    executor: Executor
+    executor_instance: Executor
 
-    if controller == 'anthropic':
-        executor = AnthropicExecutor(
+    if executor == 'anthropic':
+        executor_instance = AnthropicExecutor(
             api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=8192),
         )
-    elif controller == 'gemini':
-        executor = GeminiExecutor(
+    elif executor == 'gemini':
+        executor_instance = GeminiExecutor(
             api_key=os.environ.get('GEMINI_API_KEY', ''),
             default_model=default_model_config,
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
         )
-    elif controller == 'deepseek':
-        executor = DeepSeekExecutor(
+    elif executor == 'deepseek':
+        executor_instance = DeepSeekExecutor(
             api_key=os.environ.get('DEEPSEEK_API_KEY', ''),
             default_model=default_model_config,
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
         )
-    elif controller == 'bedrock':
-        executor = BedrockExecutor(
+    elif executor == 'bedrock':
+        executor_instance = BedrockExecutor(
             api_key='',
             default_model=default_model_config,
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='bedrock', default=300000),
@@ -174,20 +176,27 @@ def get_controller(
             region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
         )
     else:
-        executor = OpenAIExecutor(
+        executor_instance = OpenAIExecutor(
             api_key=os.environ.get('OPENAI_API_KEY', ''),
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
         )
+    return executor_instance
 
+def get_controller(
+        thread_id: int = 0,
+        executor: Optional[str] = None,
+        max_input_tokens: Optional[int] = None,
+        max_output_tokens: Optional[int] = None
+    ) -> ExecutionController:
+    executor_instance = get_executor(executor, max_input_tokens, max_output_tokens)
     return ExecutionController(
-        executor=executor,
+        executor=executor_instance,
         tools=helpers,
         thread_id=thread_id
     )
-
 
 def __get_thread(id: int) -> SessionThreadModel:
     if not cache_session.has_key(id) or id <= 0:
@@ -212,6 +221,43 @@ async def stream_response(response):
         content += str(chunk)
         yield f"data: {jsonpickle.encode(chunk)}\n\n"
 
+
+@app.get("/files/{id}/", response_class=HTMLResponse)
+async def list_memory_files(id: int, request: Request):
+    folder = (Path(Container().get('memory_directory')) / str(id)).resolve()
+
+    if folder.is_dir() is False or Path(Container().get('memory_directory')) not in folder.parents:
+        raise HTTPException(status_code=404)
+
+    rows = []
+    for entry in sorted(folder.iterdir()):
+        if entry.is_file():
+            size = entry.stat().st_size
+            mtime = dt.datetime.fromtimestamp(entry.stat().st_mtime)
+            rows.append(
+                f"<tr>"
+                f"<td><a href='{html.escape(request.url.path + entry.name)}'>{html.escape(entry.name)}</a></td>"
+                f"<td>{size:,} bytes</td>"
+                f"<td>{mtime:%Y-%m-%d %H:%M:%S}</td>"
+                f"</tr>"
+            )
+
+    body = (
+        "<html><head><title>Memory files</title>"
+        "<style>table{border-collapse:collapse}td,th{padding:4px 8px;border:1px solid #ccc}</style></head><body>"
+        f"<h1>Files for ID {id}</h1>"
+        "<table><tr><th>Name</th><th>Size</th><th>Last modified</th></tr>"
+        + "\n".join(rows)
+        + "</table></body></html>"
+    )
+    return HTMLResponse(body)
+
+# must be after the list_memory_files endpoint
+app.mount(
+    "/files",
+    StaticFiles(directory=Container().get('memory_directory')),
+    name="memory-files",
+)
 
 @app.post('/download')
 async def download(
@@ -314,7 +360,6 @@ async def get_threads():
                 thread_dict['locals_dict'] = {}
 
             threads.append(thread_dict)
-
     return threads
 
 @app.get('v1/chat/clear_threads')
@@ -326,6 +371,30 @@ async def clear_threads() -> None:
 async def health():
     logging.debug('/health')
     return {'status': 'ok'}
+
+@app.post('/v1/tools/compile')
+async def compile(request: SessionThreadModel) -> StreamingResponse:
+    thread = request
+
+    if not cache_session.has_key(thread.id) or thread.id == 0:
+        raise HTTPException(status_code=400, detail='Thread id must be in cache and greater than 0.')
+
+    thread_model_base = cache_session.get(thread.id)
+    thread = SessionThreadModel(**thread_model_base)
+    thread.id = -1
+    thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore
+    controller = get_controller(thread_id=thread.id, executor=thread.executor)
+
+    compile_prompt=Helpers.prompt_user(
+        prompt_name='thread_to_program.prompt',
+        template={},
+        user_token=controller.get_executor().user_token(),
+        assistant_token=controller.get_executor().assistant_token(),
+        scratchpad_token=controller.get_executor().scratchpad_token(),
+        append_token=controller.get_executor().append_token(),
+    )
+    thread.messages.append(MessageModel.from_message(compile_prompt))
+    return await tools_completions(thread)
 
 @app.get('/python')
 async def execute_python_in_thread(thread_id: int, python_str: str):
@@ -403,7 +472,6 @@ async def chat_completions(request: Request):
         Given a JSON dict that represents the final completion with a tool call,
         yield multiple SSE-like chunks that represent partial tokens of the function call.
         """
-
         base_id = full_response_json["id"]
         base_created = full_response_json["created"]
         base_model = full_response_json["model"]
@@ -667,13 +735,13 @@ async def tools_completions(request: SessionThreadModel):
 
     messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
     mode = thread.current_mode
-    compression = compression_enum(thread.compression)
+    compression = TokenCompressionMethod.from_str(thread.compression)
     queue = asyncio.Queue()
     cookies = thread.cookies if thread.cookies else []
 
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:
-        controller = get_controller(thread_id=thread.id, controller=thread.executor)
+        controller = get_controller(thread_id=thread.id, executor=thread.executor)
         model = thread.model if thread.model else controller.get_executor().default_model
     # either the executor or the model is not set, so use the defaults
     # and update the thread

@@ -1240,17 +1240,19 @@ class TokenCompressionMethod(Enum):
     MAP_REDUCE = 3
     SUMMARY = 4
 
+    @staticmethod
+    def from_str(input_str: str) -> 'TokenCompressionMethod':
+        if not input_str:
+            return TokenCompressionMethod.AUTO
+        normalized_str = input_str.upper().replace('MAPREDUCE', 'MAP_REDUCE')
+        try:
+            return TokenCompressionMethod[normalized_str]
+        except KeyError:
+            raise ValueError(f"Unknown token compression method: {input_str}")
 
-def compression_enum(input_str) -> TokenCompressionMethod:
-    if not input_str:
-        return TokenCompressionMethod.AUTO
-
-    normalized_str = input_str.upper().replace('MAPREDUCE', 'MAP_REDUCE')
-    try:
-        return TokenCompressionMethod[normalized_str]
-    except KeyError:
-        raise ValueError(f"Unknown compression method: {input_str}")
-
+    @staticmethod
+    def get_str(method: 'TokenCompressionMethod') -> str:
+        return method.name.lower().replace('_', ' ')
 
 class LLMCall():
     def __init__(

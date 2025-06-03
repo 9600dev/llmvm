@@ -2765,6 +2765,8 @@ class Helpers():
 
             # deal with exec() statements to inject things like datetime
             import datetime
+            import tzlocal
+
             for message_key in ['system_message', 'user_message']:
                 message = prompt[message_key]
                 while '{{' in message and '}}' in message:

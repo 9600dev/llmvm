@@ -49,7 +49,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import serialize_messages, setup_logging
 from llmvm.common.objects import (Assistant, DownloadItemModel, ImageContent,
                                   MarkdownContent, Message, MessageModel,
-                                  PdfContent, SessionThreadModel, TextContent, HTMLContent, TokenPriceCalculator,
+                                  PdfContent, SessionThreadModel, TextContent, HTMLContent, TokenCompressionMethod, TokenPriceCalculator,
                                   User)
 
 invoke_context = None
@@ -1445,7 +1445,46 @@ def url(
     thread_id = thread.id
     return thread
 
+@cli.command('compile', help='Compile a thread into a program.')
+@click.argument('thread_id', type=str, required=True)
+@click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
+              help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
+@click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
+              help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
+@click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
+              default='lifo', help='context window compression method if the message is too large. Default is "lifo" last in first out.')
+@click.option('--thinking', '-z', type=THINKING, required=False, default=0, help='enable thinking mode. Token count int for Anthropic, "low", "medium", or "high" for OpenAI.')
+@click.option('--endpoint', '-e', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
+def compile(
+    thread_id: str,
+    executor: str,
+    model: str,
+    compression: str,
+    thinking: int,
+    endpoint: str,
+):
+    if thread_id.startswith('"') and thread_id.endswith('"'):
+        int_id = int(thread_id[1:-1])
+    else:
+        int_id = int(thread_id)
 
+    llmvm_client = LLMVMClient(
+        api_endpoint=endpoint,
+        default_executor_name=executor,
+        default_model_name=model,
+        api_key='',
+    )
+    session_thread: SessionThreadModel = asyncio.run(llmvm_client.compile(
+        thread=int_id,
+        executor_name=executor,
+        model_name=model,
+        compression=TokenCompressionMethod.from_str(compression),
+        thinking=thinking,
+    ))
+    rich.print(f'Compiled thread {int_id} into a program.')
+    rich.print(session_thread.messages[-1].to_message().get_str())
 
 
 @cli.command('threads', help='List all message threads and set to last.')
@@ -1805,7 +1844,7 @@ def message(
         output_token_len=output_token_len,
         stop_tokens=stop_tokens,
         mode='direct' if direct else 'tools',
-        compression=compression,
+        compression=TokenCompressionMethod.from_str(compression),
         cookies=cookies_list,
         thinking=thinking,
         stream_handler=stream_printer.write,

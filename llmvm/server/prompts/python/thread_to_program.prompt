@@ -1,0 +1,63 @@
+[user_message]
+Your job is to take the previous {{user_colon_token}} and {{assistant_colon_token}} messages that the User initiated, and "compile them" into Python code that uses the helpers and special helpers defined in the first message and system prompt.
+
+Your workflow looks like this:
+
+1) Figure out from the {{user_colon_token}} and {{assistant_colon_token}} thread what can be "genericized" and "optimized".
+
+2) Then generate just Python code that can basically replicate the actions and workflow that was done throughout the {{user_colon_token}} and {{assistant_colon_token}} message exchange. The Python code can use all the special helpers and added helpers defined and presented in the first prompt.
+
+Let's walk through an example of this, starting with looking at a {{user_colon_token}}/{{assistant_colon_token}} message exchange:
+
+{{user_colon_token}} what is the current price of NVDA in AUD?
+
+{{assistant_colon_token}}
+
+Let me get that for you:
+
+<helpers>
+now = BCL.datetime("now", "America/Vancouver")
+nvda_price_usd = MarketHelpers.get_stock_price("NVDA", now)
+
+# 2. Get USD to AUD exchange rates
+usd_rates = BCL.get_currency_rates("USD")
+result([nvda_price_usd, usd_rates])
+</helpers>
+
+<helpers_result>
+137.3800048828125
+Currency rates for USD:\n{'USD': 1, 'AED': 3.6725, 'AFN': 69.435971, 'ALL': 86.413054, 'AMD': 384.571385, 'ANG': 1.79, 'AUD': 1.540697, 'XCD': 2.7, 'XCG': 1.79, 'XDR': 0.729147, 'XOF': 573.747391, 'XPF': 104.37639, 'YER': 243.635852, 'ZAR': 17.863842, 'ZMW': 26.681136, 'ZWL': 6.9213}
+</helpers_result>
+
+The current price of NVIDIA (NVDA) is $137.38 USD and the current exchange rate is 1 USD = 1.540697.
+
+<helpers>
+usd_to_aud = 1.540697
+nvda_price_aud = coerce(nvda_price_usd,float) * usd_to_aud
+result(f"""The price of NVDA in AUD is ${nvda_price_aud:.2f}""")
+</helpers_result>
+
+The current price of NVIDIA (NVDA) is $137.38 USD, which is approximately $211.66 AUD at the current exchange rate (1 USD = 1.54 AUD).
+
+
+Okay, for (1) it seems that genericizing this would mean that it should work for any stock symbol, not just NVDA. It's also clear that we don't need to go back and forward to the LLM to have the LLM parse out the Python dictionary that came back from BCL.get_currency_rates("USD") because we could just write python to pull out the correct AUD conversion rate and use that directly in code.
+
+So, this might be what (2) might look like, and what you should return as "compiled code" in a <workflow> xml tag:
+
+<workflow>
+stock_ticker = llm_var_bind('stock_ticker', 'str', 'the ticker of the stock to get the price of')
+now = BCL.datetime("now", "America/Vancouver")
+stock_price_usd = MarketHelpers.get_stock_price(stock_ticker, now)
+currency_rates_text = BCL.get_currency_rates("USD")
+json_text = currency_rates_text[currency_rates_text.find('{'):].replace("'", '"')
+rates = json.loads(json_text)
+usd_to_aud = int(rates['AUD'])
+stock_price_aud = stock_price_usd * usd_to_aud
+result(f"""The price of {stock_ticker} in AUD is ${stock_price_aud:.2f})""")
+</workflow>
+
+Your goal with (1) and (2) is to take as input User or Assistant messages (you can either get the last message using the last_user() or last_assistant() helpers, or extract data and bind to a Python variable from all messages passed in using llm_var_bind()) and then process them using Python you've written, producing one result() at the end.
+
+Do your best effort at producing the optimized code in <workflow></workflow> tags. You can also perform pre-optimization analysis by generating code in <helpers> blocks to figure out how to best optimize the code you emit in <workflow> blocks (i.e. if you need to understand the shape of data from a helper call or something, just have a look at it by calling it in <helpers> block, I'll do that processing like usual, and then after I show it to you, you generate code that uses or relies on that shape into the resulting <workflow> block).
+
+Go!

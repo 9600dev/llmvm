@@ -3,6 +3,8 @@ import asyncio
 import copy
 import datetime
 import math
+# required for the prompt
+import tzlocal
 import random
 from typing import Any, Awaitable, Callable, Optional, Tuple, cast
 
@@ -27,7 +29,6 @@ from llmvm.common.objects import (
     FileContent,
     FunctionCall,
     FunctionCallMeta,
-    ImageContent,
     LLMCall,
     MarkdownContent,
     Message,

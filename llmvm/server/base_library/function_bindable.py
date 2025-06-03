@@ -9,6 +9,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Assistant, FunctionCall, LLMCall,
                                   Message, System, TextContent, User)
+from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.runtime import Runtime
 from llmvm.server.python_runtime_host import PythonRuntimeHost
@@ -25,7 +26,7 @@ class FunctionBindable():
         messages: list[Message],
         lineno: int,
         expr_instantiation,
-        scope_dict: Dict[Any, Any],
+        runtime_state: AutoGlobalDict,
         original_code: str,
         original_query: str,
         controller: ExecutionController,
@@ -36,7 +37,7 @@ class FunctionBindable():
         self.func = func.replace('"', '')
         self.tools = helpers
         self.lineno = lineno
-        self.scope_dict = scope_dict
+        self.runtime_state = runtime_state
         self.original_code = original_code
         self.original_query = original_query
         self.controller = controller
@@ -280,7 +281,7 @@ class FunctionBindable():
                     helpers=self.tools,
                     error=str(ex),
                     task_query=self.original_query,
-                    locals_dict=self.scope_dict,
+                    runtime_state=self.runtime_state,
                 )
 
         # we should probably return uncertain_or_error here.

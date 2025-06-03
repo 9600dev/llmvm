@@ -18,7 +18,7 @@ from llmvm.common.deepseek_executor import DeepSeekExecutor
 from llmvm.common.gemini_executor import GeminiExecutor
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import setup_logging
-from llmvm.common.objects import (Assistant, AstNode, Content, Executor,
+from llmvm.common.objects import (Assistant, AstNode, Content, Executor, TokenCompressionMethod,
                                   Message, MessageModel, SessionThreadModel,
                                   TextContent, User)
 from llmvm.common.openai_executor import OpenAIExecutor
@@ -89,7 +89,7 @@ def llmvm(
     output_token_len: int = 8192,
     stop_tokens: list[str] = [],
     cookies: list[dict[str, Any]] = [],
-    compression: str = 'auto',
+    compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
     mode: str = 'auto',
     thinking: int = 0,
     stream_handler: Callable[[AstNode], Awaitable[None]] = default_stream_handler,
@@ -317,7 +317,6 @@ class LLMVMClient():
     ) -> Assistant:
         async def null_handler(node: AstNode):
             pass
-
         # todo: deal with template_args
 
         if not stream_handler:
@@ -409,17 +408,58 @@ class LLMVMClient():
         result = await executor.count_tokens(messages)
         return result
 
+    async def compile(
+        self,
+        thread: int,
+        executor_name: Optional[str] = None,
+        model_name: Optional[str] = None,
+        cookies: list[dict[str, Any]] = [],
+        compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
+        thinking: int = 0,
+        stream_handler: Callable[[AstNode], Awaitable[None]] = default_stream_handler,
+    ) -> SessionThreadModel:
+        thread_model: SessionThreadModel = await self.get_thread(thread)
+        # user might want to override the executor, model, compression, thinking, or cookies
+        # we're just compiling, so this matters less.
+        thread_model.executor = executor_name or thread_model.executor
+        thread_model.model = model_name or thread_model.model
+        thread_model.compression = TokenCompressionMethod.get_str(compression)
+        thread_model.thinking = thinking
+        thread_model.cookies = cookies or thread_model.cookies
+
+        try:
+            async with httpx.AsyncClient(timeout=400.0) as client:
+                async with client.stream(
+                    'POST',
+                    f'{self.api_endpoint}/v1/tools/compile',
+                    json=thread_model.model_dump(),
+                ) as response:
+                    objs = await stream_response(response, stream_handler)
+
+            await response.aclose()
+
+            if objs:
+                session_thread = SessionThreadModel.model_validate(objs[-1])
+                return session_thread
+            else:
+                raise ValueError('compile() no result from server')
+
+        except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
+            logging.debug('compile() LLMVM server is down, cannot compile thread')
+            raise ex
+
+
     async def call(
         self,
         thread: int | SessionThreadModel,
         messages: Union[list[Message], None] = None,
         executor_name: Optional[str] = None,
         model_name: Optional[str] = None,
-        temperature: float = 0.0,
+        temperature: float = 1.0,
         output_token_len: int = 8192,
         stop_tokens: list[str] = [],
         cookies: list[dict[str, Any]] = [],
-        compression: str = '',
+        compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         mode: str = '',
         thinking: int = 0,
         stream_handler: Callable[[AstNode], Awaitable[None]] = default_stream_handler,
@@ -467,7 +507,7 @@ class LLMVMClient():
             if stop_tokens:
                 thread.stop_tokens = stop_tokens
             if compression:
-                thread.compression = compression
+                thread.compression = TokenCompressionMethod.get_str(compression)
             if mode:
                 thread.current_mode = mode
             thread.thinking = thinking
@@ -523,14 +563,13 @@ class LLMVMClient():
             model=model_name if model_name else self.model,
         )
 
-
     async def openai_tool_call(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]] | list[Callable],
         executor: Optional[Executor] = None,
         model: Optional[str] = None,
-        temperature: float = 0.0,
+        temperature: float = 1.0,
         stream_handler: Callable[[AstNode], Awaitable[None]] = default_stream_handler,
         output_token_len: int = 4096,
         thinking: bool = False,

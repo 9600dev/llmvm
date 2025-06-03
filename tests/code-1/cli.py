@@ -46,7 +46,7 @@ from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import serialize_messages, setup_logging
 from llmvm.common.objects import (DownloadItemModel, ImageContent,
                                   MarkdownContent, Message, MessageModel,
-                                  PdfContent, SessionThreadModel, TextContent,
+                                  PdfContent, SessionThreadModel, TextContent, TokenCompressionMethod,
                                   User)
 
 invoke_context = None
@@ -1439,7 +1439,7 @@ def message(
         output_token_len=output_token_len,
         stop_tokens=stop_tokens,
         mode='direct' if direct else 'tools',
-        compression=compression,
+        compression=TokenCompressionMethod.from_str(compression),
         cookies=cookies_list,
         stream_handler=StreamPrinter().write,
     ))

@@ -8,7 +8,7 @@ import click
 sys.path.append('..')
 
 from llmvm.common.anthropic_executor import AnthropicExecutor
-from llmvm.common.objects import Content, ImageContent, Message, User, Executor
+from llmvm.common.objects import Content, ImageContent, Message, TextContent, User, Executor
 from llmvm.common.openai_executor import OpenAIExecutor
 from llmvm.common.pdf import Pdf
 from llmvm.client.client import llm, llmvm
@@ -73,7 +73,7 @@ def main(
         if type(message) is Content and title_as_dir and not generated_title_path:
             result = message.get_str()
             title_response = llm(
-                messages=[User(Content(result)), User(Content(TITLE_PROMPT))],
+                messages=[User(TextContent(result)), User(TextContent(TITLE_PROMPT))],
                 executor=e,
                 model=model,
             )
@@ -103,8 +103,8 @@ def main(
     Do not emit any preamble or metadata, just the converted Markdown content.
     """
 
-    pdf_content = User(Content(pdf_content))
-    prompt = User(Content(PROMPT))
+    pdf_content = User(TextContent(pdf_content))
+    prompt = User(TextContent(PROMPT))
 
     response = llm(
         messages=[pdf_content, prompt],
@@ -134,7 +134,7 @@ def main(
     # go through each response and append the content
     markdown_content = ''
     for r in responses:
-        markdown_content += r.message.get_str()
+        markdown_content += r.get_str()
 
     with open(os.path.join(output_path, 'index.md'), 'w') as f:
         f.write(markdown_content)

@@ -2,7 +2,9 @@ import ast
 import asyncio
 import builtins
 from dataclasses import asdict, dataclass
+import linecache
 import math
+import textwrap
 import matplotlib
 from matplotlib import pyplot as plt
 import numpy as np
@@ -23,7 +25,7 @@ from llmvm.common.helpers import Helpers, write_client_stream, get_stream_handle
 from llmvm.common.logging_helpers import setup_logging
 from llmvm.common.objects import (Answer, Assistant, AstNode, BrowserContent, Content, ContentEncoder, DownloadParams, FileContent,
                                   FunctionCallMeta, ImageContent, LLMCall, MarkdownContent, HTMLContent,
-                                  Message, MessageModel, PandasMeta, PdfContent, SearchResult, Statement, TextContent,
+                                  Message, MessageModel, PandasMeta, PdfContent, SearchResult, Statement, TextContent, TokenCompressionMethod,
                                   User, coerce_to, awaitable_none, SessionThreadModel)
 from llmvm.server.auto_global_dict import AutoGlobalDict
 from llmvm.server.python_execution_controller import ExecutionController
@@ -243,6 +245,7 @@ class Runtime:
         self.runtime_state['llm_bind'] = self.llm_bind
         self.runtime_state['llm_call'] = self.llm_call
         self.runtime_state['llm_list_bind'] = self.llm_list_bind
+        self.runtime_state['llm_var_bind'] = self.llm_var_bind
         self.runtime_state['coerce'] = self.coerce
         self.runtime_state['read_memory'] = self.read_memory
         self.runtime_state['write_memory'] = self.write_memory
@@ -594,13 +597,71 @@ class Runtime:
             messages=[],
             lineno=inspect.currentframe().f_back.f_lineno,  # type: ignore
             expr_instantiation=inspect.currentframe().f_back.f_locals,  # type: ignore
-            scope_dict=self.runtime_state,
+            runtime_state=self.runtime_state,
             original_code=self.original_code,
             original_query=self.original_query,
             controller=self.controller,
         )
         bindable.bind(expr, func)
         return bindable
+
+    def llm_var_bind(self, expr, type_name: str, description: str) -> Optional[Any]:
+        caller_frame   = inspect.currentframe().f_back  # type: ignore
+        filename       = caller_frame.f_code.co_filename  # type: ignore
+        call_lineno    = caller_frame.f_lineno  # type: ignore
+
+        lines = [
+            linecache.getline(filename, call_lineno + i)
+            for i in range(1, 10 + 1)
+        ]
+
+        messages = self.messages_list
+        caller_code = textwrap.dedent("".join(lines))
+
+        PROMPT = f"""
+        You are a helpful assistant that finds and returns the most likely value
+        of a piece of data I'm using to bind to a local Python variable.
+
+        I will give you the name of the varialbe, the type of the variable,
+        and a description of the data I'm looking for, and 10 lines of future code
+        that may use the variable to give you a hint as to what kind of data I'm looking for.
+
+        The previous messages contain the data you will use to find the value.
+
+        Variable name: {expr}
+        Type: {type_name}
+        Description: {description}
+        Code: {caller_code}
+
+        The previous messages contain the data you will use to find the value.
+
+        Just return the value of the variable as something that can be eval'd directly.
+        Do not return any other text. Return "None" if you cannot find a value.
+        """
+
+        assistant = asyncio.run(self.controller.aexecute_llm_call(
+            llm_call=LLMCall(
+                user_message=User(TextContent(PROMPT)),
+                context_messages=messages,
+                executor=self.controller.executor,
+                model=self.controller.executor.default_model,
+                temperature=1.0,
+                max_prompt_len=self.controller.executor.max_input_tokens(),
+                completion_tokens_len=self.controller.executor.max_output_tokens(),
+                prompt_name='find_selector_or_mouse_x_y',
+            ),
+            query='',
+            original_query='',
+            compression=TokenCompressionMethod.AUTO,
+        ))
+
+        result = assistant.get_str()
+        try:
+            result = eval(result)
+            return result
+        except Exception as ex:
+            logging.error(f'PythonRuntime.llm_bind_var() exception: {ex}')
+            raise ex
 
     def download(self, expr: list[str] | list[SearchResult]) -> list[Content]:
         logging.debug(f'PythonRuntime.download({expr})')
@@ -784,7 +845,7 @@ class Runtime:
         return '\n'.join([f'{key} = {Helpers.str_get_str(value)[:128]}' for key, value in self.runtime_state.items()])
 
     def result(self, expr, check_answer: bool = True) -> Content:
-        def __result(expr):
+        def __result(expr) -> Content:
             if m_isinstance(expr, Content):
                 return expr
             else:
@@ -847,6 +908,10 @@ def llm_bind(expr, func: str):
 def llm_call(expr_list: list, instruction: str) -> Content:
     global _runtime
     return cast(Runtime, _runtime).llm_call(expr_list, instruction)
+
+def llm_var_bind(expr, type_name: str, description: str) -> Any:
+    global _runtime
+    return cast(Runtime, _runtime).llm_var_bind(expr, type_name, description)
 
 def llm_list_bind(expr, llm_instruction: str, count: int = sys.maxsize) -> list:
     global _runtime

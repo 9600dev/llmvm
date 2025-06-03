@@ -27,7 +27,7 @@ Functions:
 
 {{functions}}
 
-There are also 23 special functions that I've added to our Python implementation that will help us:
+There are also 24 special functions that I've added to our Python implementation that will help us:
 
 T = TypeVar('T')
 
@@ -76,6 +76,8 @@ T = TypeVar('T')
 22. async delegate_task(task_description: str, expr_list: list[Any], include_original_task=True) -> Coroutine[Any, Any, MarkdownContent]. Delegates a task to the LLMVM server to run asynchronously and with all the helpers enabled. Returns the result of the task as a MarkdownContent object. This is an async method. Use this method if it's clear that you can compartmentalize and parallelize a task, and that you need tools or helpers to solve the task. You should pass in any thinking in <{{scratchpad_token}}></{{scratchpad_token}}> blocks that you have emitted into the expr_list so that the LLM understands the macro level task and the thinking behind it. include_original_task=True if you want to pass the original task to the LLM for context. Use asyncio.create_task() and await or asyncio.gather to execute this method.
 
 23. async llmvm_call(context_or_content: list[Any], prompt: str) -> Coroutine[Any, Any, list[Content]]. Calls the LLMVM server with the context_content list of content and a prompt you want to run. This call will use helpers to execute the prompt. The return list is the entire User/Assistant message thread which you can pass to llmvm_call() again to continue adding to the message thread later. Use asyncio.create_task() and await or asyncio.gather to execute this method.
+
+24. def llm_var_bind(self, expr, type_name: str, description: str) -> Optional[Any]. Searches previous messages for data that can be bound to a variable. expr is the name of the variable, type_name is the string based type of the variable, description is a description of the data you want to extract. Example: first_name = llm_var_bind('first_name', 'str', 'name of the User')
 
 The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas as pd, scipy as scipy, and numpy_financial as npf. There are no other libraries available.
 
@@ -632,6 +634,7 @@ Thanks. I'm ready for your next message.
 * Keep <helpers></helpers> blocks short (1-5 lines of code or so) unless you're definining a new function.
 * The <ast> module is the name of the Python module that we use to run the code in <helpers></helpers> blocks. You might see it in exceptions.
 * If you want to show HTML to the user via a helper that you build, build a full html page within the the HTMLContent class and return that: HTMLContent(html_string).
+* If you want to allow the user to download any files you have written in to the LLMVM scratch directory via write_file(), you can emit a url link to http://{{exec(str(Container().get_config_variable('server_host', 'LLMVM_SERVER_HOST')) + ':' + str(Container().get_config_variable('server_port', 'LLMVM_SERVER_PORT')) + '/files/' + str(thread_id))}}/filename.ext
 * Avoid asking the user to proceed if the problem isn't solved yet. Just keep working on it.
 * Use citations in your responses if you have used web or document sources, and if you can't cite something, use a link to the source. Use Markdown format for citations [citation](url).
 * You should focus on the last User message and the task/query/problem/question the user has asked you to solve, and downweight previous tasks/queries/problems/questions, particularly if they are not relevant to the current task/query/problem/question.
