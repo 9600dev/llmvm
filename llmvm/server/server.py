@@ -11,11 +11,12 @@ import time
 import types
 import datetime as dt
 from importlib import resources
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional, cast
+from typing import Any, AsyncIterator, Awaitable, Callable, Iterable, Optional, cast
 
 from fastapi.staticfiles import StaticFiles
 import jsonpickle
 import nest_asyncio
+from pydantic import BaseModel
 import rich
 import uvicorn
 from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request, Response,
@@ -341,6 +342,51 @@ async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
 
 @app.get('/v1/chat/get_threads')
 async def get_threads():
+    def dump_one(obj: BaseModel, only: Iterable[str] | None = None):
+        """
+        Try to dump `obj`.  If `only` is given we dump those fields in isolation;
+        otherwise we dump the whole object.
+        """
+        try:
+            obj.model_dump(include=set(only) if only else None)
+            return None            # <- success, serializer is fine
+        except Exception as exc:    # catches MockValSer and everything else
+            return exc
+
+    def walk_messages(messages: list[BaseModel]) -> None:
+        """
+        Prints a mini-report that looks like
+
+            messages[3]  -> 'MockValSer' object ...
+                .content -> 'MockValSer' object ...
+                .author  -> ok
+        """
+        for idx, m in enumerate(messages):
+            err = dump_one(m)
+            if err is None:
+                continue           # this element serialises fine
+            print(f"messages[{idx}] -> {err}")
+
+            # now drill into the message’s own fields
+            for fname in m.model_fields:
+                ferr = dump_one(m, only=[fname])
+                status = ferr or "ok"
+                print(f"    .{fname:<10} -> {status}")
+            print()
+
+    def find_bad_field(model: BaseModel) -> None:
+        bad = []
+        for name in model.model_fields:
+            try:
+                model.model_dump(include={name})   # serialise field in isolation
+            except Exception as e:
+                bad.append((name, e))
+        if bad:
+            for name, err in bad:
+                print(f"[{name}] -> {err}")
+        else:
+            print("all fields serialise OK")
+
     threads = []
 
     for id in cache_session.keys():
@@ -350,7 +396,6 @@ async def get_threads():
             raw = SessionThreadModel(**raw)
 
         if isinstance(raw, SessionThreadModel):
-            # Convert to dict excluding locals_dict, then add serialized locals_dict
             thread_dict = raw.model_dump(exclude={'locals_dict'})
 
             # Add properly serialized locals_dict if client needs it
@@ -380,9 +425,10 @@ async def compile(request: SessionThreadModel) -> StreamingResponse:
         raise HTTPException(status_code=400, detail='Thread id must be in cache and greater than 0.')
 
     thread_model_base = cache_session.get(thread.id)
-    thread = SessionThreadModel(**thread_model_base)
+    thread = thread_model_base.copy()
+
     thread.id = -1
-    thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore
+    thread.locals_dict = thread_model_base.locals_dict  # type: ignore
     controller = get_controller(thread_id=thread.id, executor=thread.executor)
 
     compile_prompt=Helpers.prompt_user(

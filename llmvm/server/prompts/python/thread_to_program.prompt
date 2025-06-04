@@ -1,11 +1,18 @@
+[system_message]
+You are a helpful compiler.
+
 [user_message]
 Your job is to take the previous {{user_colon_token}} and {{assistant_colon_token}} messages that the User initiated, and "compile them" into Python code that uses the helpers and special helpers defined in the first message and system prompt.
 
 Your workflow looks like this:
 
-1) Figure out from the {{user_colon_token}} and {{assistant_colon_token}} thread what can be "genericized" and "optimized".
+1) Figure out from the {{user_colon_token}} and {{assistant_colon_token}} thread what can be "genericized" and "optimized". Given there are many ways to genericize, particularly on parameters to the program, consider making the defaults aligned to the data in the previous message thread, but parameterized so that a caller can specialize or change the data if needed.
 
-2) Then generate just Python code that can basically replicate the actions and workflow that was done throughout the {{user_colon_token}} and {{assistant_colon_token}} message exchange. The Python code can use all the special helpers and added helpers defined and presented in the first prompt.
+2) Then generate just Python code that can basically replicate the actions and workflow that was done throughout the {{user_colon_token}} and {{assistant_colon_token}} message exchange. The Python code can use all the special helpers and added helpers defined and presented in the first prompt. Given an LLM can deal with a lot of ambiguity and probabilistic interpretations of data, and code is usually more "specialized", you should consider adding "gaurds" in the code that will raise an Exception if a specialization or assumption you're making fails as a result of the data being different. An example of this would be specializing for the extraction of data from a web page knowing that the structure of the web page may occasionally change if they redeploy it. Use these "gaurds" liberally, because if they are hit, I will reinvoke you to "recompile" with the new data.
+
+Because gaurd's are special, we have added a special helper for them:
+
+def gaurd(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> Any. assertion is the test condition of the data, error_message is for the exception that will be raised if the gaurd fails, and bind_prompt is a prompt that might be given to an LLM to try and reshape the expr data to satisfy the condition.
 
 Let's walk through an example of this, starting with looking at a {{user_colon_token}}/{{assistant_colon_token}} message exchange:
 
@@ -42,22 +49,39 @@ The current price of NVIDIA (NVDA) is $137.38 USD, which is approximately $211.6
 
 Okay, for (1) it seems that genericizing this would mean that it should work for any stock symbol, not just NVDA. It's also clear that we don't need to go back and forward to the LLM to have the LLM parse out the Python dictionary that came back from BCL.get_currency_rates("USD") because we could just write python to pull out the correct AUD conversion rate and use that directly in code.
 
-So, this might be what (2) might look like, and what you should return as "compiled code" in a <workflow> xml tag:
+So, this might be what (2) might look like, and what you should return as "compiled code" in a <program> xml tag:
 
-<workflow>
-stock_ticker = llm_var_bind('stock_ticker', 'str', 'the ticker of the stock to get the price of')
-now = BCL.datetime("now", "America/Vancouver")
-stock_price_usd = MarketHelpers.get_stock_price(stock_ticker, now)
-currency_rates_text = BCL.get_currency_rates("USD")
-json_text = currency_rates_text[currency_rates_text.find('{'):].replace("'", '"')
-rates = json.loads(json_text)
-usd_to_aud = int(rates['AUD'])
-stock_price_aud = stock_price_usd * usd_to_aud
-result(f"""The price of {stock_ticker} in AUD is ${stock_price_aud:.2f})""")
-</workflow>
+<program>
+def stock_to_currency(
+    stock_ticker: str = llm_var_bind('stock_ticker', 'str', 'stock ticker for nasdaq/nyse', 'NVDA'),
+    currency_code: str = llm_var_bind('currency_code', 'str', 'currency code for conversion from USD', 'AUD')
+):
+    now = BCL.datetime("now", "America/Vancouver")
+    stock_price_usd = MarketHelpers.get_stock_price(stock_ticker, now)
+    currency_rates_text = BCL.get_currency_rates("USD")
 
-Your goal with (1) and (2) is to take as input User or Assistant messages (you can either get the last message using the last_user() or last_assistant() helpers, or extract data and bind to a Python variable from all messages passed in using llm_var_bind()) and then process them using Python you've written, producing one result() at the end.
+    # gaurd
+    currency_rates_text = gaurd(lambda: not currency_rates_text.strip().startswith("Currency rates for USD:"), "Gaurd failed: Unexpected currency rates format", None)
 
-Do your best effort at producing the optimized code in <workflow></workflow> tags. You can also perform pre-optimization analysis by generating code in <helpers> blocks to figure out how to best optimize the code you emit in <workflow> blocks (i.e. if you need to understand the shape of data from a helper call or something, just have a look at it by calling it in <helpers> block, I'll do that processing like usual, and then after I show it to you, you generate code that uses or relies on that shape into the resulting <workflow> block).
+    json_text = currency_rates_text[currency_rates_text.find('{'):].replace("'", '"')
+    rates = json.loads(json_text)
+
+    gaurd(lambda: not currency_code in rates, f"""{currency_code} not in rates dictionary""")
+    gaurd(lambda: not isinstance(rates[currency_code], float), f"""expecting {currency_code} rate to be float""")
+
+    usd_to_currency = float(rates[currency_code])
+    stock_price_currency = stock_price_usd * usd_to_currency
+    result(f"""The price of {stock_ticker} in {currency_code} is ${stock_price_currency:.2f})""")
+</program>
+
+The <program> blocks that you define here to achieve goals for (1) and (2) can only have function definitions. You may create as many function definitions as you like to help componentize the code and make it more composable.
+
+You can liberally use llm_var_bind() as a way to set method parameter defaults as it will search the locals(), globals() and previous messages for data to bind to if it is not supplied at the function call site.
+
+Do your best effort at producing the optimized code in <program></program> tags. You can also perform pre-optimization analysis by generating code in <helpers> blocks to figure out how to best optimize the code you emit in <program> blocks (i.e. if you need to understand the shape of data from a helper call or something, just have a look at it by calling the helper in a <helpers> block, I'll do that processing like usual, and then after I show it to you, you generate code that uses or relies on that shape into the resulting <program> block).
+
+If Python functions were defined in <helpers> blocks in the {{user_colon_token}} {{assistant_colon_token}} message trace, you should hoist them out and put them into the <program> block as those helpers are scope limited to the message thread itself and need to be included in the actual program to work properly.
+
+Do not over genericize, or generate code that does more than the message thread asks.
 
 Go!

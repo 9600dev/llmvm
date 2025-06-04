@@ -13,6 +13,7 @@ import marshal
 import math
 import os
 import pty
+import pydoc
 import re
 import selectors
 import signal
@@ -35,7 +36,7 @@ from functools import reduce
 from importlib import resources
 from itertools import cycle, islice
 from logging import Logger
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Generator, Iterator, List, Optional, Tuple, Union, Tuple, get_args, get_origin, Union
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Generator, Iterator, List, Optional, Tuple, Union, Tuple, cast, get_args, get_origin, Union
 
 from urllib.parse import urljoin, urlparse
 from markdownify import markdownify as md
@@ -100,6 +101,10 @@ def _set_winsize(fd, rows, cols):
 
 
 class Helpers():
+    @staticmethod
+    def str_to_type(type_name: str) -> type:
+        return cast(type, pydoc.locate(type_name))
+
     @staticmethod
     def all(iterable, func):
         for x in iterable:

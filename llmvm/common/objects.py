@@ -1948,7 +1948,7 @@ class MessageModel(BaseModel):
     pinned: int = 0
     prompt_cached: bool = False
     total_tokens: int = 0  # only used on Assistant messages
-    underlying: Optional[object] = None  # only used on Assistant messages to keep track of id's on thinking tokens
+    underlying: Optional[object] = Field(default_factory=object, exclude=True, repr=False)
 
     def to_message(self) -> Message:
         content_objects = [c.to_content() for c in self.content]
@@ -1994,5 +1994,3 @@ class SessionThreadModel(BaseModel):
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     messages: list[MessageModel] = Field(default_factory=list)
     locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
-
-SessionThreadModel.model_rebuild()

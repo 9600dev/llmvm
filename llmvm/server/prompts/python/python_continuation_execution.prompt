@@ -77,9 +77,9 @@ T = TypeVar('T')
 
 23. async llmvm_call(context_or_content: list[Any], prompt: str) -> Coroutine[Any, Any, list[Content]]. Calls the LLMVM server with the context_content list of content and a prompt you want to run. This call will use helpers to execute the prompt. The return list is the entire User/Assistant message thread which you can pass to llmvm_call() again to continue adding to the message thread later. Use asyncio.create_task() and await or asyncio.gather to execute this method.
 
-24. def llm_var_bind(self, expr, type_name: str, description: str) -> Optional[Any]. Searches previous messages for data that can be bound to a variable. expr is the name of the variable, type_name is the string based type of the variable, description is a description of the data you want to extract. Example: first_name = llm_var_bind('first_name', 'str', 'name of the User')
+24. def llm_var_bind(self, expr, type_name: str, description: str, default_value: Optional[object] = None) -> Optional[Any]. Searches previous messages for data that can be bound to a variable. expr is the name of the variable, type_name is the string based type of the variable, description is a description of the data you want to extract. Example: first_name = llm_var_bind('first_name', 'str', 'name of the User', '')
 
-The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, numpy (as np), pandas as pd, scipy as scipy, and numpy_financial as npf. There are no other libraries available.
+The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, bs4, numpy (as np), pandas as pd, scipy as scipy, and numpy_financial as npf. There are no other libraries available.
 
 There is a Todo dataclass which is used to track the todo state. Call todos() to get a list of all the todos on the stack as Todo dataclass dictionaries. Call create_todo() to push a todo on the stack. Call done_todo() to mark a todo as done. The Todo dataclass looks like:
 

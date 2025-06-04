@@ -17,6 +17,7 @@ import os
 import re
 import sys
 import scipy
+import bs4
 from typing import Any, Callable, Optional, Tuple, Union, cast, Any, Type
 from urllib.parse import urlparse
 
@@ -232,6 +233,7 @@ class Runtime:
         self.runtime_state['math'] = math
         self.runtime_state['matplotlib'] = matplotlib
         self.runtime_state['plt'] = plt
+        self.runtime_state['bs4'] = bs4
 
         # llmvm runtime
         self.runtime_state['todo_list'] = []
@@ -242,6 +244,7 @@ class Runtime:
         self.runtime_state['llmvm_call'] = self.llmvm_call
         self.runtime_state['delegate_task'] = self.delegate_task
         self.runtime_state['count_tokens'] = self.count_tokens
+        self.runtime_state['gaurd'] = self.gaurd
         self.runtime_state['llm_bind'] = self.llm_bind
         self.runtime_state['llm_call'] = self.llm_call
         self.runtime_state['llm_list_bind'] = self.llm_list_bind
@@ -605,7 +608,31 @@ class Runtime:
         bindable.bind(expr, func)
         return bindable
 
-    def llm_var_bind(self, expr, type_name: str, description: str) -> Optional[Any]:
+    def gaurd(
+        self,
+        assertion: Callable[[], bool],
+        error_message: str,
+        bind_prompt: Optional[str] = None
+    ) -> None:
+        if assertion():
+            return
+        raise ValueError(error_message)
+
+    def llm_var_bind(
+        self,
+        expr,
+        type_name: str,
+        description: str,
+        default_value: Optional[object] = None
+    ) -> Optional[Any]:
+        if (
+            expr in self.runtime_state
+            and self.runtime_state[expr] is not None
+            and isinstance(self.runtime_state[expr], Helpers.str_to_type(type_name))
+        ):
+            logging.debug(f'llm_var_bind({expr}) found in runtime_state, shortcircuiting')
+            return self.runtime_state[expr]
+
         caller_frame   = inspect.currentframe().f_back  # type: ignore
         filename       = caller_frame.f_code.co_filename  # type: ignore
         call_lineno    = caller_frame.f_lineno  # type: ignore
@@ -623,7 +650,7 @@ class Runtime:
         of a piece of data I'm using to bind to a local Python variable.
 
         I will give you the name of the varialbe, the type of the variable,
-        and a description of the data I'm looking for, and 10 lines of future code
+        a description of the data I'm looking for, a default value, and 10 lines of future code
         that may use the variable to give you a hint as to what kind of data I'm looking for.
 
         The previous messages contain the data you will use to find the value.
@@ -631,12 +658,13 @@ class Runtime:
         Variable name: {expr}
         Type: {type_name}
         Description: {description}
+        Default value: {default_value}
         Code: {caller_code}
 
         The previous messages contain the data you will use to find the value.
 
         Just return the value of the variable as something that can be eval'd directly.
-        Do not return any other text. Return "None" if you cannot find a value.
+        Do not return any other text. Return the "Default value" if you cannot find a value.
         """
 
         assistant = asyncio.run(self.controller.aexecute_llm_call(
@@ -901,6 +929,10 @@ def install(runtime: Runtime):
     global _runtime
     _runtime = runtime
 
+def gaurd(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> None:
+    global _runtime
+    return cast(Runtime, _runtime).gaurd(assertion, error_message, bind_prompt)
+
 def llm_bind(expr, func: str):
     global _runtime
     return cast(Runtime, _runtime).llm_bind(expr, func)
@@ -909,9 +941,9 @@ def llm_call(expr_list: list, instruction: str) -> Content:
     global _runtime
     return cast(Runtime, _runtime).llm_call(expr_list, instruction)
 
-def llm_var_bind(expr, type_name: str, description: str) -> Any:
+def llm_var_bind(expr, default: object, type_name: str, description: str, default_value: Optional[object] = None) -> Any:
     global _runtime
-    return cast(Runtime, _runtime).llm_var_bind(expr, type_name, description)
+    return cast(Runtime, _runtime).llm_var_bind(expr, type_name, description, default)
 
 def llm_list_bind(expr, llm_instruction: str, count: int = sys.maxsize) -> list:
     global _runtime
