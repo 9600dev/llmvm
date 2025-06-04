@@ -125,7 +125,7 @@ class Helpers():
                                 close_fds=True, preexec_fn=os.setsid, text=False)
         os.close(slave)
 
-        sel       = selectors.DefaultSelector()
+        sel = selectors.DefaultSelector()
         sel.register(master, selectors.EVENT_READ)
         captured  = bytearray()
 

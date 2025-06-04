@@ -56,6 +56,15 @@ def stock_to_currency(
     stock_ticker: str = llm_var_bind('stock_ticker', 'str', 'stock ticker for nasdaq/nyse', 'NVDA'),
     currency_code: str = llm_var_bind('currency_code', 'str', 'currency code for conversion from USD', 'AUD')
 ):
+    """
+    Convert a stock price into a specified currency.
+
+    :param stock_ticker: The stock ticker to convert (default: "NVDA")
+    :type stock_ticker: str
+    :param currency_code: The currency code to convert to (default: "AUD")
+    :type currency_code: str
+    :return: str
+    """
     now = BCL.datetime("now", "America/Vancouver")
     stock_price_usd = MarketHelpers.get_stock_price(stock_ticker, now)
     currency_rates_text = BCL.get_currency_rates("USD")
@@ -71,7 +80,7 @@ def stock_to_currency(
 
     usd_to_currency = float(rates[currency_code])
     stock_price_currency = stock_price_usd * usd_to_currency
-    result(f"""The price of {stock_ticker} in {currency_code} is ${stock_price_currency:.2f})""")
+    return f"""The price of {stock_ticker} in {currency_code} is ${stock_price_currency:.2f})"""
 </program>
 
 The <program> blocks that you define here to achieve goals for (1) and (2) can only have function definitions. You may create as many function definitions as you like to help componentize the code and make it more composable.

@@ -12,6 +12,7 @@ import types
 import datetime as dt
 from importlib import resources
 from typing import Any, AsyncIterator, Awaitable, Callable, Iterable, Optional, cast
+import uuid
 
 from fastapi.staticfiles import StaticFiles
 import jsonpickle
@@ -420,6 +421,7 @@ async def health():
 @app.post('/v1/tools/compile')
 async def compile(request: SessionThreadModel) -> StreamingResponse:
     thread = request
+    program_name = request.title or f"{thread.id}_{uuid.uuid4()}"
 
     if not cache_session.has_key(thread.id) or thread.id == 0:
         raise HTTPException(status_code=400, detail='Thread id must be in cache and greater than 0.')

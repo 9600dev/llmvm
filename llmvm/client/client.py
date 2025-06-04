@@ -411,6 +411,7 @@ class LLMVMClient():
     async def compile(
         self,
         thread: int,
+        program_name: str,
         executor_name: Optional[str] = None,
         model_name: Optional[str] = None,
         cookies: list[dict[str, Any]] = [],
@@ -426,6 +427,7 @@ class LLMVMClient():
         thread_model.compression = TokenCompressionMethod.get_str(compression)
         thread_model.thinking = thinking
         thread_model.cookies = cookies or thread_model.cookies
+        thread_model.title = program_name
 
         try:
             async with httpx.AsyncClient(timeout=400.0) as client:

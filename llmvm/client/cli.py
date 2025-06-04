@@ -1447,6 +1447,8 @@ def url(
 
 @cli.command('compile', help='Compile a thread into a program.')
 @click.argument('thread_id', type=str, required=True)
+@click.option('--program_name', '-p', type=str, required=False, default='',
+              help='name of the program to compile. Default is the thread id.')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
@@ -1459,6 +1461,7 @@ def url(
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def compile(
     thread_id: str,
+    program_name: str,
     executor: str,
     model: str,
     compression: str,
@@ -1470,6 +1473,9 @@ def compile(
     else:
         int_id = int(thread_id)
 
+    if not program_name:
+        program_name = f'{int_id}'
+
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
         default_executor_name=executor,
@@ -1478,12 +1484,13 @@ def compile(
     )
     session_thread: SessionThreadModel = asyncio.run(llmvm_client.compile(
         thread=int_id,
+        program_name=program_name,
         executor_name=executor,
         model_name=model,
         compression=TokenCompressionMethod.from_str(compression),
         thinking=thinking,
     ))
-    rich.print(f'Compiled thread {int_id} into a program.')
+    rich.print(f'Compiled thread {int_id} into a program {program_name}.')
     rich.print(session_thread.messages[-1].to_message().get_str())
 
 
