@@ -358,6 +358,10 @@ async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     if not cache_session.has_key(thread.id) or thread.id <= 0:
         temp = __get_thread(0)
         thread.id = temp.id
+    else:
+        # set the locals_dict from the cached thread
+        l_cached_thread = cache_session.get(thread.id)
+        thread.locals_dict = l_cached_thread.locals_dict
 
     cache_session.set(thread.id, thread)
     return cast(SessionThreadModel, cache_session.get(thread.id))
