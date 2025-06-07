@@ -1,8 +1,10 @@
 import ast
 import asyncio
 import base64
+import contextlib
 from dataclasses import is_dataclass, asdict
 import datetime as dt
+import dis
 import fcntl
 import glob
 import gzip
@@ -14,6 +16,7 @@ import json
 import marshal
 import math
 import os
+import pprint
 import pty
 import pydoc
 import re
@@ -139,6 +142,33 @@ class LateBindDefaults(ast.NodeTransformer):
 
 
 class Helpers():
+    @staticmethod
+    def dump_assertion(assertion: Callable[[], bool]) -> str:
+        result = ''
+        try:
+            src = textwrap.dedent(inspect.getsource(assertion)).strip()
+            header = "assertion source"
+            body = src
+        except (OSError, TypeError):
+            header = "assertion disassembly (source unavailable)"
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                dis.dis(assertion)
+            body = buf.getvalue().rstrip()
+
+        result += f"── {header} ──\n"
+        result += body + "\n"
+
+        result += "\n── captured variables ──"
+        cvars = inspect.getclosurevars(assertion)
+        captured = {
+            "globals"   : cvars.globals,
+            "nonlocals" : cvars.nonlocals,
+            "builtins"  : {k: v for k, v in cvars.builtins.items() if k in cvars.unbound},
+        }
+        result += pprint.pformat(captured, compact=True, sort_dicts=False)
+        return result
+
     @staticmethod
     def rewrite_late_binding(code: str) -> types.CodeType:
         src = textwrap.dedent(code)

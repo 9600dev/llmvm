@@ -1275,7 +1275,7 @@ class ExecutionController(Controller):
                 )
 
                 # we have a <helpers_result></helpers_result> block, push it to the cli client
-                if len(code_execution_result_str) > 300:
+                if len(code_execution_result_str) > 300 and not 'An exception occured' in code_execution_result_str and not '<ast>' in code_execution_result_str:
                     # grab the first and last 150 characters
                     write_client_stream(
                         TokenNode(

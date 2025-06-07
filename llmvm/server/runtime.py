@@ -659,7 +659,10 @@ class Runtime:
     ) -> bool:
         if assertion():
             return True
-        raise ValueError(f"A guard() test was executed and it returned False or threw an exception. The error message is: {error_message}")
+
+        dumped_assertion = Helpers.dump_assertion(assertion)
+        logging.error(f'PythonRuntime.guard() assertion failed: {dumped_assertion}')
+        raise ValueError(f"A guard() test was executed and it returned False or threw an exception. The error message is: {error_message}. The assertion code and values is:\n{dumped_assertion}")
 
     def llm_var_bind(
         self,
@@ -976,7 +979,7 @@ def add_thread(thread_id: int, program_name: str, last_message: bool = False) ->
     global _runtime
     return cast(Runtime, _runtime).add_thread(thread_id, program_name, last_message)
 
-def guard(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> None:
+def guard(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> bool:
     global _runtime
     return cast(Runtime, _runtime).guard(assertion, error_message, bind_prompt)
 
