@@ -121,7 +121,7 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
 
     // Add to existing files
     setFiles(prev => [...prev, ...imageFiles]);
-    
+
     // Focus the textarea
     setTimeout(() => {
       textareaRef.current?.focus();
@@ -169,8 +169,8 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
           onChange={(e) => setMessage(e.target.value)}
           onKeyPress={handleKeyPress}
           onPaste={handlePaste}
-          placeholder={isPythonMode 
-            ? "Enter Python code... (Press Enter to execute, Shift+Enter for new line)" 
+          placeholder={isPythonMode
+            ? "Enter Python code... (Press Enter to execute, Shift+Enter for new line)"
             : "Message LLMVM... (Press Enter to send, Shift+Enter for new line, Ctrl+V to paste images)"
           }
           className="bg-transparent border-0 resize-none min-h-[100px] max-h-[200px] text-gray-900 placeholder-gray-500 focus:ring-0 pr-24"
@@ -210,8 +210,8 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
               }
             }}
             className={`h-8 w-8 p-0 ${
-              isDrawingMode 
-                ? "text-blue-600 hover:text-blue-700 bg-blue-100" 
+              isDrawingMode
+                ? "text-blue-600 hover:text-blue-700 bg-blue-100"
                 : "text-gray-500 hover:text-gray-700"
             }`}
           >
@@ -230,8 +230,8 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
                 });
               }}
               className={`h-8 w-8 p-0 ${
-                isPythonMode 
-                  ? "text-blue-600 hover:text-blue-700 bg-blue-100" 
+                isPythonMode
+                  ? "text-blue-600 hover:text-blue-700 bg-blue-100"
                   : "text-gray-500 hover:text-gray-700"
               }`}
             >
@@ -267,7 +267,7 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
 
       {/* Quick commands hint */}
       <div className="mt-2 text-xs text-gray-500">
-        Try commands: <code className="bg-gray-100 px-1 rounded">/search</code>, <code className="bg-gray-100 px-1 rounded">:mode tools</code>, <code className="bg-gray-100 px-1 rounded">:model gpt-4.1</code>
+        Try commands: <code className="bg-gray-100 px-1 rounded">/compile</code>, <code className="bg-gray-100 px-1 rounded">/search</code>
       </div>
     </div>
 

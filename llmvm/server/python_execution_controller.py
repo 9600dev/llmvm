@@ -1256,6 +1256,11 @@ class ExecutionController(Controller):
                         code_execution_result = parse_code_block_result(
                             last_assignment[1]
                         )
+                    else:
+                        last_statement = PythonRuntimeHost.get_last_statement(code_block, runtime_state)
+                        if last_statement:
+                            name, value = last_statement[0], parse_code_block_result(last_statement[1])
+                            code_execution_result = parse_code_block_result(value)
 
                 if not code_execution_result:
                     # no result() block, or last assignment was None

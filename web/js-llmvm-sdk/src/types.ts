@@ -131,6 +131,7 @@ export interface SessionThreadModel {
   cookies: Array<{[key: string]: any}>;
   messages: MessageModel[];
   locals_dict?: {[key: string]: any};
+  compile_prompt?: string;
 }
 
 export interface DownloadItemModel {

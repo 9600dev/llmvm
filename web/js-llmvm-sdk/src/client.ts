@@ -121,6 +121,42 @@ export class LLMVMClient {
   }
 
   /**
+   * Get all programs (threads with current_mode === 'program')
+   */
+  async getPrograms(): Promise<SessionThreadModel[]> {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/v1/chat/get_programs`, {
+      method: 'GET',
+      headers: this.headers
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get programs: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Get a specific program by ID or name
+   */
+  async getProgram(idOrName: number | string): Promise<SessionThreadModel> {
+    const params = typeof idOrName === 'number' 
+      ? `id=${idOrName}` 
+      : `program_name=${encodeURIComponent(idOrName)}`;
+    
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/v1/chat/get_program?${params}`, {
+      method: 'GET',
+      headers: this.headers
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get program: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
    * Clear all threads
    */
   async clearThreads(): Promise<void> {
@@ -443,5 +479,34 @@ export class LLMVMClient {
     }
 
     throw new Error('No assistant response received');
+  }
+
+  /**
+   * Compile a thread into a standalone program
+   */
+  async compile(
+    threadId: number,
+    compilePrompt?: string,
+    onChunk?: (chunk: any) => void
+  ): Promise<SessionThreadModel> {
+    const thread = await this.getThread(threadId);
+    
+    // Add compile_prompt to the thread
+    const requestBody = {
+      ...thread,
+      compile_prompt: compilePrompt || ''
+    };
+
+    const response = await fetch(`${this.baseUrl}/v1/tools/compile`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Compile failed: ${response.statusText}`);
+    }
+
+    return this.handleStreamingResponse(response, onChunk);
   }
 }

@@ -25,7 +25,7 @@ export interface Thread {
   messages: Message[];
   lastActivity: Date;
   model: string;
-  mode: "tools" | "direct" | "code";
+  mode: "tools" | "direct" | "code" | "program";
   settings: ThreadSettings;
   llmvmThreadId?: string;
 }
@@ -42,7 +42,11 @@ const defaultSettings: ThreadSettings = {
 };
 
 const ChatInterface = () => {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Load sidebar state from localStorage or default to true
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    const saved = localStorage.getItem('sidebarOpen');
+    return saved !== null ? JSON.parse(saved) : true;
+  });
   const [llmvmService] = useState(() => getLLMVMService());
   const [isConnected, setIsConnected] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -67,9 +71,15 @@ const ChatInterface = () => {
       settings: defaultSettings
     }
   ]);
+  const [programs, setPrograms] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState("1");
 
-  const activeThread = threads.find(t => t.id === activeThreadId);
+  const activeThread = threads.find(t => t.id === activeThreadId) || programs.find(p => p.id === activeThreadId);
+
+  // Save sidebar state to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('sidebarOpen', JSON.stringify(sidebarOpen));
+  }, [sidebarOpen]);
 
   // Check LLMVM connection and load threads on mount
   useEffect(() => {
@@ -81,13 +91,16 @@ const ChatInterface = () => {
           console.warn('LLMVM service is not reachable at localhost:8011');
         }
         
-        // Load existing threads from LLMVM if connected
+        // Load existing threads and programs from LLMVM if connected
         if (healthy) {
           try {
+            // Load threads
             const llmvmThreads = await llmvmService.getAllThreads();
             if (llmvmThreads && llmvmThreads.length > 0) {
+              // Filter out programs from threads
+              const regularThreads = llmvmThreads.filter(t => t.current_mode !== 'program');
               // Sort threads by ID in reverse order (newest first)
-              const sortedThreads = [...llmvmThreads].sort((a, b) => b.id - a.id);
+              const sortedThreads = [...regularThreads].sort((a, b) => b.id - a.id);
               
               // Convert LLMVM threads to UI threads
               const uiThreads: Thread[] = sortedThreads.map(llmvmThread => {
@@ -138,7 +151,7 @@ const ChatInterface = () => {
                   })),
                 lastActivity: new Date(),
                 model: llmvmThread.model,
-                mode: llmvmThread.current_mode as "tools" | "direct" | "code",
+                mode: llmvmThread.current_mode as "tools" | "direct" | "code" | "program",
                 settings: {
                   executor: llmvmThread.executor as "anthropic" | "openai" | "gemini",
                   model: llmvmThread.model,
@@ -159,8 +172,49 @@ const ChatInterface = () => {
                 setActiveThreadId(uiThreads[0].id);
               }
             }
+
+            // Load programs
+            const llmvmPrograms = await llmvmService.getAllPrograms();
+            if (llmvmPrograms && llmvmPrograms.length > 0) {
+              // Sort programs by ID in reverse order (newest first)
+              const sortedPrograms = [...llmvmPrograms].sort((a, b) => b.id - a.id);
+              
+              // Convert LLMVM programs to UI threads
+              const uiPrograms: Thread[] = sortedPrograms.map(llmvmProgram => {
+                const title = llmvmProgram.title || `Program ${llmvmProgram.id}`;
+                
+                return {
+                  id: String(llmvmProgram.id),
+                  title,
+                  messages: llmvmProgram.messages.map((msg, index) => ({
+                    id: `${llmvmProgram.id}-${index}`,
+                    content: msg.content || '',
+                    role: msg.role as "user" | "assistant",
+                    timestamp: new Date(),
+                    type: "text",
+                    status: "success"
+                  })),
+                  lastActivity: new Date(),
+                  model: llmvmProgram.model,
+                  mode: "program" as any, // Programs are always in program mode
+                  settings: {
+                    executor: llmvmProgram.executor as "anthropic" | "openai" | "gemini",
+                    model: llmvmProgram.model,
+                    temperature: llmvmProgram.temperature,
+                    endpoint: "",
+                    compression: llmvmProgram.compression,
+                    outputTokenLen: llmvmProgram.output_token_len,
+                    thinking: llmvmProgram.thinking > 0,
+                    fullProcessing: true
+                  },
+                  llmvmThreadId: String(llmvmProgram.id)
+                };
+              });
+              
+              setPrograms(uiPrograms);
+            }
           } catch (error) {
-            console.error('Failed to load threads from LLMVM:', error);
+            console.error('Failed to load threads/programs from LLMVM:', error);
           }
         }
       } catch (error) {
@@ -173,6 +227,42 @@ const ChatInterface = () => {
 
   const sendMessage = async (content: string, files?: File[]) => {
     if (!activeThread) return;
+
+    // Check for /compile command
+    if (content.trim().startsWith('/compile')) {
+      // Extract optional compile prompt after /compile
+      const compilePrompt = content.trim().substring('/compile'.length).trim();
+      
+      // Run compile command
+      if (activeThread.llmvmThreadId) {
+        await runCompileCommand(activeThread.llmvmThreadId, compilePrompt);
+      } else {
+        // Create a new thread first if needed
+        const llmvmThread = await llmvmService.createNewThread(
+          [],
+          {
+            model: activeThread.settings.model,
+            temperature: activeThread.settings.temperature,
+            output_token_len: activeThread.settings.outputTokenLen || 0,
+            current_mode: activeThread.mode,
+            thinking: activeThread.settings.thinking ? 1 : 0,
+            executor: activeThread.settings.executor,
+            compression: activeThread.settings.compression
+          }
+        );
+        const llmvmThreadId = String(llmvmThread.id);
+        
+        // Update thread with LLMVM ID
+        setThreads(prev => prev.map(thread =>
+          thread.id === activeThreadId
+            ? { ...thread, llmvmThreadId }
+            : thread
+        ));
+        
+        await runCompileCommand(llmvmThreadId, compilePrompt);
+      }
+      return;
+    }
 
     // Process files and prepare content
     let messageContent: any = content;
@@ -470,6 +560,118 @@ const ChatInterface = () => {
     ));
   };
 
+  const runCompileCommand = async (llmvmThreadId: string, compilePrompt: string) => {
+    // Add user message showing the compile command
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: `/compile ${compilePrompt}`,
+      role: "user",
+      timestamp: new Date(),
+      type: "text",
+      status: "sending"
+    };
+
+    setThreads(prev => prev.map(thread =>
+      thread.id === activeThreadId
+        ? { ...thread, messages: [...thread.messages, userMessage], lastActivity: new Date() }
+        : thread
+    ));
+
+    // Create assistant message placeholder
+    const assistantMessageId = (Date.now() + 1).toString();
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      content: "Compiling thread into a standalone program...",
+      role: "assistant",
+      timestamp: new Date(),
+      type: "text",
+      status: "sending"
+    };
+
+    setThreads(prev => prev.map(thread =>
+      thread.id === activeThreadId
+        ? { ...thread, messages: [...thread.messages, assistantMessage], lastActivity: new Date() }
+        : thread
+    ));
+
+    try {
+      let streamedContent = "";
+      const result = await llmvmService.compileThread(
+        llmvmThreadId,
+        compilePrompt,
+        {
+          onChunk: (chunk: any) => {
+            if (typeof chunk === 'string') {
+              streamedContent += chunk;
+            } else {
+              streamedContent += JSON.stringify(chunk);
+            }
+            
+            // Update assistant message with streamed content
+            setThreads(prev => prev.map(thread =>
+              thread.id === activeThreadId
+                ? {
+                    ...thread,
+                    messages: thread.messages.map(msg =>
+                      msg.id === assistantMessageId
+                        ? { 
+                            ...msg, 
+                            content: streamedContent, 
+                            status: "sending"
+                          }
+                        : msg.id === userMessage.id
+                        ? { ...msg, status: "success" }
+                        : msg
+                    )
+                  }
+                : thread
+            ));
+          }
+        }
+      );
+
+      // Update status to success
+      setThreads(prev => prev.map(thread =>
+        thread.id === activeThreadId
+          ? {
+              ...thread,
+              messages: thread.messages.map(msg =>
+                msg.id === assistantMessageId
+                  ? {
+                      ...msg,
+                      content: streamedContent || "Thread compiled successfully!",
+                      status: "success"
+                    }
+                  : msg
+              )
+            }
+          : thread
+      ));
+
+    } catch (error) {
+      console.error('Failed to compile thread:', error);
+      // Update message status to error
+      setThreads(prev => prev.map(thread =>
+        thread.id === activeThreadId
+          ? {
+              ...thread,
+              messages: thread.messages.map(msg =>
+                msg.id === assistantMessageId
+                  ? {
+                      ...msg,
+                      content: `Error compiling thread: ${error}`,
+                      status: "error"
+                    }
+                  : msg.id === userMessage.id
+                  ? { ...msg, status: "error" }
+                  : msg
+              )
+            }
+          : thread
+      ));
+    }
+  };
+
   const executePython = async (code: string) => {
     if (!activeThread) return;
 
@@ -626,13 +828,24 @@ const ChatInterface = () => {
   return (
     <div className="flex h-full w-full bg-white">
       {/* Sidebar */}
-      <div className={`transition-all duration-300 ${sidebarOpen ? 'w-80' : 'w-0'} overflow-hidden`}>
-        <ThreadSidebar
-          threads={threads}
-          activeThreadId={activeThreadId}
-          onThreadSelect={setActiveThreadId}
-          onNewThread={createNewThread}
-        />
+      <div 
+        className={`transition-all duration-300 ease-in-out flex-shrink-0 ${
+          sidebarOpen ? 'w-80' : 'w-0'
+        }`}
+        style={{ 
+          overflow: sidebarOpen ? 'visible' : 'hidden',
+          minWidth: sidebarOpen ? '20rem' : '0'
+        }}
+      >
+        {sidebarOpen && (
+          <ThreadSidebar
+            threads={threads}
+            programs={programs}
+            activeThreadId={activeThreadId}
+            onThreadSelect={setActiveThreadId}
+            onNewThread={createNewThread}
+          />
+        )}
       </div>
 
       {/* Main Chat Area */}

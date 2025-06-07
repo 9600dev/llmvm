@@ -680,6 +680,7 @@ async def execute_python_in_thread(thread_id: int, python_str: str):
             runtime_state=runtime_state,
         )
         state_result = python_runtime_host.get_last_statement(python_str, runtime_state=runtime_state)
+
     except Exception as ex:
         logging.error(f'PythonRuntime.compile_and_execute() threw an exception while executing:\n{python_str}\n')
         return Response(jsonpickle.encode({'var_name': '', 'var_value': '', 'results': [], 'error': str(ex)}, unpicklable=False), media_type='application/json')

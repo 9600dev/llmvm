@@ -14,7 +14,7 @@ Given an LLM can deal with a lot of ambiguity and probabilistic interpretations 
 
 Because guard's are special, we have added a special helper for them:
 
-def guard(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> Any. assertion is the test condition of the data that must be true in order to proceed, error_message is for the exception that will be raised if the guard returns false or fails, and bind_prompt is a prompt that might be given to an LLM to try and reshape the expr data to satisfy the condition.
+def guard(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> None. assertion is the test condition of the data that must be true in order to proceed, error_message is for the exception that will be raised if the guard returns false or fails, and bind_prompt is a prompt that might be given to an LLM to try and reshape the expr data to satisfy the condition. guard() returns None if successful, otherwise it throws.
 
 Let's walk through an example of this, starting with looking at a {{user_colon_token}}/{{assistant_colon_token}} message exchange:
 
@@ -72,7 +72,7 @@ def stock_to_currency(
     currency_rates_text = BCL.get_currency_rates("USD")
 
     # guard
-    currency_rates_text = guard(lambda: currency_rates_text.strip().startswith("Currency rates for USD:"), "guard failed: Unexpected currency rates format", None)
+    guard(lambda: currency_rates_text.strip().startswith("Currency rates for USD:"), "guard failed: Unexpected currency rates format", None)
 
     json_text = currency_rates_text[currency_rates_text.find('{'):].replace("'", '"')
     rates = json.loads(json_text)

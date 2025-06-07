@@ -656,9 +656,9 @@ class Runtime:
         assertion: Callable[[], bool],
         error_message: str,
         bind_prompt: Optional[str] = None
-    ) -> bool:
+    ) -> None:
         if assertion():
-            return True
+            return
 
         dumped_assertion = Helpers.dump_assertion(assertion)
         logging.error(f'PythonRuntime.guard() assertion failed: {dumped_assertion}')
@@ -979,7 +979,7 @@ def add_thread(thread_id: int, program_name: str, last_message: bool = False) ->
     global _runtime
     return cast(Runtime, _runtime).add_thread(thread_id, program_name, last_message)
 
-def guard(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> bool:
+def guard(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> None:
     global _runtime
     return cast(Runtime, _runtime).guard(assertion, error_message, bind_prompt)
 

@@ -114,7 +114,6 @@ class PythonRuntimeHost:
             runtime_state["_"] = value
             return ("_", value)
 
-        # 3b ── Otherwise look backwards for the last global assignment/def
         for node in reversed(body):
             if isinstance(node, ast.Assign):
                 target = node.targets[0]
@@ -145,7 +144,6 @@ class PythonRuntimeHost:
                     if h.name:
                         return (h.name, runtime_state.get(h.name))
 
-        # Nothing suitable found
         return None
 
     @staticmethod

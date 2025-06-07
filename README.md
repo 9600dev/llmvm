@@ -599,6 +599,24 @@ This prototype shows that LLM's are capable of taking a user task, reasoning abo
 
 ## Other cute stuff
 
+#### LLMVM web frontend
+
+There is now a web front end for LLMVM for those that hate life and want to avoid the terminal.
+
+```python
+cd llmvm/web/js-llmvm-sdk
+npm run build
+npm link
+cd llmvm-chat-studio
+npm link
+npm link llmvm-sdk
+npm run dev
+```
+
+
+
+![](docs/2025-06-07-16-25-29.png)
+
 #### Run arbitrary python code inside a message thread
 
 ```python

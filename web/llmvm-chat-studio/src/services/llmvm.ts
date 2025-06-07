@@ -88,6 +88,26 @@ export class LLMVMService {
     }
   }
 
+  async getAllPrograms(): Promise<LLMVMThread[]> {
+    try {
+      const programs = await this.client.getPrograms();
+      return programs;
+    } catch (error) {
+      console.error('Failed to get programs:', error);
+      return [];
+    }
+  }
+
+  async getProgram(idOrName: number | string): Promise<LLMVMThread | null> {
+    try {
+      const program = await this.client.getProgram(idOrName);
+      return program;
+    } catch (error) {
+      console.error('Failed to get program:', error);
+      return null;
+    }
+  }
+
   async deleteThread(threadId: string): Promise<boolean> {
     try {
       // LLMVM SDK doesn't have a direct delete method, so we'll clear all threads
@@ -241,6 +261,35 @@ export class LLMVMService {
       return result;
     } catch (error) {
       console.error('Failed to execute Python:', error);
+      throw error;
+    }
+  }
+
+  async compileThread(
+    threadId: string,
+    compilePrompt?: string,
+    options: {
+      onChunk?: (chunk: any) => void;
+    } = {}
+  ): Promise<LLMVMThread> {
+    try {
+      const result = await this.client.compile(
+        Number(threadId),
+        compilePrompt,
+        options.onChunk ? (chunk: any) => {
+          // Skip thread model chunks
+          if (chunk.id !== undefined && chunk.messages !== undefined) {
+            return;
+          }
+          const content = parseStreamChunk(chunk);
+          if (content) {
+            options.onChunk!(content);
+          }
+        } : undefined
+      );
+      return result;
+    } catch (error) {
+      console.error('Failed to compile thread:', error);
       throw error;
     }
   }

@@ -67,7 +67,7 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
     return () => {
       window.removeEventListener("keydown", handleKeyPress);
     };
-  }, [isActive, paths]);
+  }, [isActive]);
 
   useEffect(() => {
     drawPaths();
