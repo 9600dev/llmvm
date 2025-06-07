@@ -1,10 +1,14 @@
 import ast
 import asyncio
+import base64
 import builtins
 from dataclasses import asdict, dataclass
 import linecache
+import marshal
 import math
+import random
 import textwrap
+import types
 import matplotlib
 from matplotlib import pyplot as plt
 import numpy as np
@@ -234,8 +238,15 @@ class Runtime:
         self.runtime_state['matplotlib'] = matplotlib
         self.runtime_state['plt'] = plt
         self.runtime_state['bs4'] = bs4
+        self.runtime_state['json'] = json
+        self.runtime_state['marshal'] = marshal
+        self.runtime_state['base64'] = base64
+        self.runtime_state['inspect'] = inspect
+        self.runtime_state['types'] = types
+        self.runtime_state['random'] = random
 
         # llmvm runtime
+        self.runtime_state['add_thread'] = self.add_thread
         self.runtime_state['todo_list'] = []
         self.runtime_state['todos'] = self.todos
         self.runtime_state['create_todo'] = self.create_todo
@@ -244,7 +255,7 @@ class Runtime:
         self.runtime_state['llmvm_call'] = self.llmvm_call
         self.runtime_state['delegate_task'] = self.delegate_task
         self.runtime_state['count_tokens'] = self.count_tokens
-        self.runtime_state['gaurd'] = self.gaurd
+        self.runtime_state['guard'] = self.guard
         self.runtime_state['llm_bind'] = self.llm_bind
         self.runtime_state['llm_call'] = self.llm_call
         self.runtime_state['llm_list_bind'] = self.llm_list_bind
@@ -608,15 +619,47 @@ class Runtime:
         bindable.bind(expr, func)
         return bindable
 
-    def gaurd(
+    def add_thread(
+        self,
+        thread_id: Optional[int] = None,
+        program_name: Optional[str] = None,
+        last_message: bool = False,
+    ) -> list[Content]:
+        if thread_id is None and program_name is None:
+            raise ValueError('add_thread() must be called with either thread_id or program_name')
+
+        client: LLMVMClient = get_client(
+            executor_name=self.controller.get_executor().name(),
+            model_name=self.controller.get_executor().default_model
+        )
+
+        if thread_id:
+            thread: SessionThreadModel = asyncio.run(client.get_thread(thread_id))
+            if last_message:
+                return MessageModel.to_message(thread.messages[-1]).message
+            else:
+                return Helpers.flatten([MessageModel.to_message(message).message for message in thread.messages])
+        else:
+            thread: SessionThreadModel = asyncio.run(client.get_program(thread_id, program_name))
+            program_thread = '\n'.join([MessageModel.to_message(message).get_str() for message in thread.messages])
+            program_code = Helpers.extract_program_code_block(program_thread)
+            program_ast = Helpers.rewrite_late_binding(program_code)
+            try:
+                exec(program_ast, self.runtime_state)
+            except Exception as ex:
+                logging.error(f'PythonRuntime.add_thread() exception: {ex}')
+                raise ex
+            return [TextContent(f"{program_code}")]
+
+    def guard(
         self,
         assertion: Callable[[], bool],
         error_message: str,
         bind_prompt: Optional[str] = None
-    ) -> None:
+    ) -> bool:
         if assertion():
-            return
-        raise ValueError(error_message)
+            return True
+        raise ValueError(f"A guard() test was executed and it returned False or threw an exception. The error message is: {error_message}")
 
     def llm_var_bind(
         self,
@@ -929,9 +972,13 @@ def install(runtime: Runtime):
     global _runtime
     _runtime = runtime
 
-def gaurd(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> None:
+def add_thread(thread_id: int, program_name: str, last_message: bool = False) -> list[Content]:
     global _runtime
-    return cast(Runtime, _runtime).gaurd(assertion, error_message, bind_prompt)
+    return cast(Runtime, _runtime).add_thread(thread_id, program_name, last_message)
+
+def guard(assertion: Callable[[], bool], error_message: str, bind_prompt: Optional[str] = None) -> None:
+    global _runtime
+    return cast(Runtime, _runtime).guard(assertion, error_message, bind_prompt)
 
 def llm_bind(expr, func: str):
     global _runtime

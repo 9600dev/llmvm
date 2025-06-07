@@ -14,7 +14,7 @@ from typing import (Any, Awaitable, Callable, Optional, OrderedDict, TextIO, Typ
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
@@ -1942,13 +1942,25 @@ class ContentModel(BaseModel):
         return cls.model_validate(content.to_json())
 
 
+def _bytes_to_b64(b: bytes) -> str:          # NEW
+    result = base64.b64encode(b).decode('ascii')
+    return result
+
+
 class MessageModel(BaseModel):
     role: str
     content: list[ContentModel]
     pinned: int = 0
     prompt_cached: bool = False
     total_tokens: int = 0  # only used on Assistant messages
-    underlying: Optional[object] = Field(default_factory=object, exclude=True, repr=False)
+    underlying: Any = Field(default=None)
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        json_encoders={
+            bytes: _bytes_to_b64,
+        },
+    )
 
     def to_message(self) -> Message:
         content_objects = [c.to_content() for c in self.content]
@@ -1991,6 +2003,7 @@ class SessionThreadModel(BaseModel):
     output_token_len: int = 0
     current_mode: str = 'tools'
     thinking: int = 0
+    compile_prompt: str = ''
     cookies: list[dict[str, Any]] = Field(default_factory=list)
     messages: list[MessageModel] = Field(default_factory=list)
     locals_dict: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)

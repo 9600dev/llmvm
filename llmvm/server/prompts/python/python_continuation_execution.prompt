@@ -79,6 +79,8 @@ T = TypeVar('T')
 
 24. def llm_var_bind(self, expr: str, type_name: str, description: str, default_value: Optional[object] = None) -> Optional[Any]. Searches previous messages for data that can be bound to a variable. expr is the name of the variable, type_name is the string based type of the variable, description is a description of the data you want to extract. Example: first_name = llm_var_bind('first_name', 'str', 'name of the User', '')
 
+25. def add_thread(self, thread_id: Optional[int] = None, program_name: Optional[str] = None, last_message: bool = False) -> list[Content]. This helper adds the {{user_colon_token}} and {{assistant_colon_token}} message content to the current thread. This includes programs and helpers that have been defined in the thread. If the user task/query/problem includes a @threadid or @program_name using the @ symbol then you can insert the thread content using this helper.
+
 The imports you have available to you are: os, sys, asyncio, base64, inspect, json, marshal, math, random, re, json, types, bs4, numpy (as np), pandas as pd, scipy as scipy, and numpy_financial as npf. There are no other libraries available.
 
 There is a Todo dataclass which is used to track the todo state. Call todos() to get a list of all the todos on the stack as Todo dataclass dictionaries. Call create_todo() to push a todo on the stack. Call done_todo() to mark a todo as done. The Todo dataclass looks like:
@@ -485,6 +487,52 @@ result(headlines)
 {{assistant_colon_token}}
 Here are the headlines:
 ...
+</complete>
+
+Example: An example of the user wanting to chain together multiple message threads to perform some action.
+
+{{user_colon_token}} Add scrapers for bbc and cnn from @scrapers and show the overlapping headlines:
+{{assistant_colon_token}}
+<{{scratchpad_token}}>
+* get the @bbc_scrape and @cnn_scrape threads/programs and put them into context
+* execute the code
+* show the overlapping headlines
+</{{scratchpad_token}}>
+<helpers>
+result(add_thread(program_name="scrapers))
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+def bbc_scrape():
+    ....
+
+def cnn_scrape():
+    ...
+</helpers_result>
+
+{{assistant_colon_token}}
+Okay, the bbc_scrape and cnn_scrape helpers are in scope. Running them:
+
+<helpers>
+bbc_content = bbc_scrape()
+cnn_content = cnn_scrape()
+overlapping_headlines = llm_call([bbc_content, cnn_content], "Find the overlapping headlines between these two websites")
+result(overlapping_headlines)
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+The overlapping headlines are as follows:
+ * ...
+ * ...
+</helpers_result>
+
+
+{{assistant_colon_token}}
+The overlapping headlines between the programs @bbc_scrape and @cnn_scrape are as follows:
+ * ...
+ * ...
 </complete>
 
 Example: An example of getting information from a url, seeing a useful image that can help with explaining the content and then showing that image to the user.

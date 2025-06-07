@@ -5,13 +5,14 @@ import json
 import marshal
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import time
 import types
 import datetime as dt
 from importlib import resources
-from typing import Any, AsyncIterator, Awaitable, Callable, Iterable, Optional, cast
+from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Iterable, Optional, cast
 import uuid
 
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +21,7 @@ import nest_asyncio
 from pydantic import BaseModel
 import rich
 import uvicorn
-from fastapi import (BackgroundTasks, FastAPI, HTTPException, Request, Response,
+from fastapi import (BackgroundTasks, FastAPI, HTTPException, Query, Request, Response,
                      UploadFile)
 from fastapi.param_functions import File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
@@ -46,6 +47,9 @@ from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime_host import PythonRuntimeHost
 from llmvm.server.runtime import Runtime
+# needed for pydantic late binding serialization
+from anthropic.types import Completion as AnthropicCompletion, Message as AnthropicMessage, ContentBlock
+from anthropic import BaseModel
 
 nest_asyncio.apply()
 
@@ -62,6 +66,7 @@ except ValueError:
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/download'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/logs'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/memory'), exist_ok=True)
+    os.makedirs(os.path.expanduser('~/.local/share/llmvm/memory/programs'), exist_ok=True)
     os.makedirs(os.path.expanduser('~/.local/share/llmvm/traces'), exist_ok=True)
 
     config_file = resources.files('llmvm') / 'config.yaml'
@@ -95,7 +100,6 @@ if (
     rich.print('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, BEDROCK_API_KEY, or DEEPSEEK_API_KEY are set.')
     rich.print('One of these API keys needs to be set in your terminal environment[/red]')
     sys.exit(1)
-
 
 
 def __get_unserializable_locals(locals_dict: dict[str, Any]) -> dict[str, Any]:
@@ -187,6 +191,7 @@ def get_executor(
         )
     return executor_instance
 
+
 def get_controller(
         thread_id: int = 0,
         executor: Optional[str] = None,
@@ -199,6 +204,20 @@ def get_controller(
         tools=helpers,
         thread_id=thread_id
     )
+
+
+def __get_threads() -> list[SessionThreadModel]:
+    threads = []
+
+    for id in cache_session.keys():
+        raw = cache_session.get(id)
+
+        if isinstance(raw, dict):
+            raw = SessionThreadModel(**raw)
+
+        threads.append(cast(SessionThreadModel, raw))
+    return threads
+
 
 def __get_thread(id: int) -> SessionThreadModel:
     if not cache_session.has_key(id) or id <= 0:
@@ -254,12 +273,14 @@ async def list_memory_files(id: int, request: Request):
     )
     return HTMLResponse(body)
 
+
 # must be after the list_memory_files endpoint
 app.mount(
     "/files",
     StaticFiles(directory=Container().get('memory_directory')),
     name="memory-files",
 )
+
 
 @app.post('/download')
 async def download(
@@ -341,53 +362,8 @@ async def set_thread(request: SessionThreadModel) -> SessionThreadModel:
     cache_session.set(thread.id, thread)
     return cast(SessionThreadModel, cache_session.get(thread.id))
 
-@app.get('/v1/chat/get_threads')
-async def get_threads():
-    def dump_one(obj: BaseModel, only: Iterable[str] | None = None):
-        """
-        Try to dump `obj`.  If `only` is given we dump those fields in isolation;
-        otherwise we dump the whole object.
-        """
-        try:
-            obj.model_dump(include=set(only) if only else None)
-            return None            # <- success, serializer is fine
-        except Exception as exc:    # catches MockValSer and everything else
-            return exc
-
-    def walk_messages(messages: list[BaseModel]) -> None:
-        """
-        Prints a mini-report that looks like
-
-            messages[3]  -> 'MockValSer' object ...
-                .content -> 'MockValSer' object ...
-                .author  -> ok
-        """
-        for idx, m in enumerate(messages):
-            err = dump_one(m)
-            if err is None:
-                continue           # this element serialises fine
-            print(f"messages[{idx}] -> {err}")
-
-            # now drill into the message’s own fields
-            for fname in m.model_fields:
-                ferr = dump_one(m, only=[fname])
-                status = ferr or "ok"
-                print(f"    .{fname:<10} -> {status}")
-            print()
-
-    def find_bad_field(model: BaseModel) -> None:
-        bad = []
-        for name in model.model_fields:
-            try:
-                model.model_dump(include={name})   # serialise field in isolation
-            except Exception as e:
-                bad.append((name, e))
-        if bad:
-            for name, err in bad:
-                print(f"[{name}] -> {err}")
-        else:
-            print("all fields serialise OK")
-
+@app.get('/v1/chat/get_threads', response_model=list[SessionThreadModel])
+async def get_threads() -> list[SessionThreadModel]:
     threads = []
 
     for id in cache_session.keys():
@@ -408,6 +384,32 @@ async def get_threads():
             threads.append(thread_dict)
     return threads
 
+@app.get('/v1/chat/get_programs', response_model=list[SessionThreadModel])
+async def get_programs() -> list[SessionThreadModel]:
+    threads = __get_threads()
+    programs = []
+    for thread in threads:
+        if thread.current_mode == 'program':
+            programs.append(thread)
+    return programs
+
+@app.get("/v1/chat/get_program", response_model=SessionThreadModel)
+async def get_program(
+    id: Optional[int] = None,
+    program_name: Optional[str] = None,
+) -> SessionThreadModel:
+    if id:
+        thread = __get_thread(id)
+        if thread.current_mode != 'program':
+            raise HTTPException(status_code=400, detail='Thread not found or is not in program mode')
+        return thread
+
+    if program_name:
+        for thread in __get_threads():
+            if thread.title.lower() == program_name.lower():
+                return thread
+    raise HTTPException(status_code=400, detail='Program not found')
+
 @app.get('v1/chat/clear_threads')
 async def clear_threads() -> None:
     for id in cache_session.keys():
@@ -418,10 +420,144 @@ async def health():
     logging.debug('/health')
     return {'status': 'ok'}
 
+async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncIterator[Any]:
+    """
+    Core logic of tools_completions, returning an async generator instead of StreamingResponse.
+    This allows other endpoints to use this logic and intercept the stream.
+    """
+    if not cache_session.has_key(thread.id) or thread.id == 0:
+        temp = __get_thread(0)
+        thread.id = temp.id
+
+    # locals_dict needs to be set, grab it from the cache
+    elif cache_session.has_key(thread.id) and not thread.locals_dict:
+        thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore
+
+    messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
+    mode = thread.current_mode
+    compression = TokenCompressionMethod.from_str(thread.compression)
+    queue = asyncio.Queue()
+    cookies = thread.cookies if thread.cookies else []
+
+    # set the defaults, or use what the SessionThread thread asks
+    if thread.executor and thread.model:
+        controller = get_controller(thread_id=thread.id, executor=thread.executor)
+        model = thread.model if thread.model else controller.get_executor().default_model
+    # either the executor or the model is not set, so use the defaults
+    # and update the thread
+    else:
+        logging.debug('Either the executor or the model is not set. Updating thread.')
+        controller = get_controller(thread_id=thread.id)
+        model = controller.get_executor().default_model
+        thread.executor = controller.get_executor().name()
+        thread.model = model
+
+    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&thinking={thread.thinking}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}&temperature={thread.temperature}')  # NOQA: E501
+
+    if len(messages) == 0:
+        raise HTTPException(status_code=400, detail='No messages provided')
+
+    async def callback(token: AstNode):
+        queue.put_nowait(token)
+
+    async def stream():
+        def handle_exception(task):
+            if not task.cancelled() and task.exception() is not None:
+                Helpers.log_exception(logging, task.exception())
+                queue.put_nowait(QueueBreakNode())
+
+        async def execute_and_signal() -> list[Message]:
+            # don't touch, required for walking up the stack
+            stream_handler = callback
+
+            if thread.current_mode == 'direct':
+                result = await controller.aexecute(
+                    messages=messages,
+                    temperature=thread.temperature,
+                    model=model,
+                    compression=compression,
+                    thinking=thread.thinking,
+                    stream_handler=callback,
+                )
+                queue.put_nowait(QueueBreakNode())
+                return result
+            else:
+                # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
+                runtime_dict = Helpers.deserialize_locals_dict(thread.locals_dict)
+                runtime_dict.update(runtime_dict_cache.get(thread.id) or {})
+
+                # add the runtime defined tools to the list of tools
+                for key, value in runtime_dict.items():
+                    if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
+                        helpers.append(value)
+
+                # todo: this is a hack
+                result, runtime_state = await controller.aexecute_continuation(
+                    messages=messages,
+                    temperature=thread.temperature,
+                    stream_handler=callback,
+                    model=model,
+                    max_output_tokens=thread.output_token_len,
+                    compression=compression,
+                    cookies=cookies,
+                    helpers=cast(list[Callable], helpers),
+                    runtime_state=AutoGlobalDict(runtime_dict),
+                    thinking=thread.thinking,
+                )
+                queue.put_nowait(QueueBreakNode())
+
+                # update the in-memory locals_dict with unserializable locals
+                runtime_dict_cache.set(thread.id, __get_unserializable_locals(runtime_state))
+                thread.locals_dict = Helpers.serialize_locals_dict(runtime_state)
+                return result
+
+        task = asyncio.create_task(execute_and_signal())
+        task.add_done_callback(handle_exception)
+
+        while True:
+            data = await queue.get()
+
+            # this controls the end of the stream
+            if isinstance(data, QueueBreakNode):
+                # this tells the client to deal with carriage returns etc for pretty printing
+                yield StreamingStopNode('\n\n' if thread.executor == 'openai' else '\n')
+                break
+
+            yield data
+
+        try:
+            await task
+        except Exception as e:
+            pass
+
+        # error handling
+        if task.exception() is not None:
+            thread.messages.append(MessageModel.from_message(Assistant(TextContent(f'Error: {str(task.exception())}'))))
+            yield thread.model_dump()
+            return
+
+        messages_result: list[Message] = task.result()
+        thread.messages = [MessageModel.from_message(m) for m in messages_result]
+        cache_session.set(thread.id, thread)
+        yield thread.model_dump()
+
+    async for item in stream():
+        yield item
+
+@app.post('/v1/tools/completions', response_model=None)
+async def tools_completions(request: SessionThreadModel):
+    """
+    Main endpoint for tools completions. Uses the extracted generator function.
+    """
+    return StreamingResponse(
+        stream_response(_tools_completions_generator(request)),
+        media_type='text/event-stream'
+    )
+
 @app.post('/v1/tools/compile')
 async def compile(request: SessionThreadModel) -> StreamingResponse:
     thread = request
-    program_name = request.title or f"{thread.id}_{uuid.uuid4()}"
+    compile_instructions = request.compile_prompt
 
     if not cache_session.has_key(thread.id) or thread.id == 0:
         raise HTTPException(status_code=400, detail='Thread id must be in cache and greater than 0.')
@@ -435,14 +571,76 @@ async def compile(request: SessionThreadModel) -> StreamingResponse:
 
     compile_prompt=Helpers.prompt_user(
         prompt_name='thread_to_program.prompt',
-        template={},
+        template={'compile_instructions': compile_instructions},
         user_token=controller.get_executor().user_token(),
         assistant_token=controller.get_executor().assistant_token(),
         scratchpad_token=controller.get_executor().scratchpad_token(),
         append_token=controller.get_executor().append_token(),
     )
     thread.messages.append(MessageModel.from_message(compile_prompt))
-    return await tools_completions(thread)
+
+    # Create a variable to capture the final thread
+    captured_thread = None
+
+    async def intercepting_stream():
+        """Stream that intercepts the final SessionThreadModel while passing everything through"""
+        nonlocal captured_thread
+
+        async for item in _tools_completions_generator(thread):
+            # Check if this is the final SessionThreadModel dump
+            if isinstance(item, dict) and 'id' in item and 'messages' in item:
+                try:
+                    captured_thread = SessionThreadModel(**item)
+                except Exception:
+                    pass  # Not a valid SessionThreadModel
+
+            yield item
+
+        if captured_thread:
+            # add the compiled code to the "program" thread so the user can interact with it
+            logging.debug(f'compile() compiled thread: {captured_thread.id}')
+            captured_thread.current_mode = 'program'
+            await set_thread(captured_thread)
+
+            from llmvm.server.python_runtime_host import PythonRuntimeHost
+
+            code_block: str = Helpers.extract_program_code_block(MessageModel.to_message(captured_thread.messages[-1]).get_str())
+
+            # deal with the program title
+            _TITLE_RE = re.compile(
+                r'(?is)<program_title\s*>(.*?)</program_title\s*>'
+            )
+            matches = _TITLE_RE.findall(MessageModel.to_message(captured_thread.messages[-1]).get_str())
+            title = matches[-1].strip() if matches else None
+
+            if title and not captured_thread.title:
+                captured_thread.title = title
+            elif not captured_thread.title:
+                captured_thread.title = str(captured_thread.id)
+
+            # execute the code block in the thread
+            python_runtime_host = PythonRuntimeHost(
+                controller=get_controller(),
+                answer_error_correcting=False,
+                thread_id=thread.id
+            )
+            runtime_state = AutoGlobalDict(captured_thread.locals_dict)
+            try:
+                python_runtime_host.compile_and_execute_code_block(
+                    python_code=code_block,
+                    messages_list=[MessageModel.to_message(m) for m in captured_thread.messages],
+                    helpers=helpers,
+                    runtime_state=runtime_state,
+                )
+            except Exception as ex:
+                logging.error(f'PythonRuntime.compile() threw an exception while executing:\n{code_block}\n')
+
+            # update the caches
+            runtime_dict_cache.set(captured_thread.id, runtime_state)
+            await set_thread(captured_thread)
+            yield captured_thread.model_dump()
+
+    return StreamingResponse(stream_response(intercepting_stream()), media_type='text/event-stream')
 
 @app.get('/python')
 async def execute_python_in_thread(thread_id: int, python_str: str):
@@ -768,132 +966,6 @@ async def chat_completions(request: Request):
                 "total_tokens": len(' '.join(str(msg['content']) for msg in request['messages']).split()) + len(str(assistant_content).split())
             }
         }
-
-@app.post('/v1/tools/completions', response_model=None)
-async def tools_completions(request: SessionThreadModel):
-    thread = request
-
-    if not cache_session.has_key(thread.id) or thread.id == 0:
-        temp = __get_thread(0)
-        thread.id = temp.id
-
-    # locals_dict needs to be set, grab it from the cache
-    elif cache_session.has_key(thread.id) and not thread.locals_dict:
-        thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore
-
-    messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
-    mode = thread.current_mode
-    compression = TokenCompressionMethod.from_str(thread.compression)
-    queue = asyncio.Queue()
-    cookies = thread.cookies if thread.cookies else []
-
-    # set the defaults, or use what the SessionThread thread asks
-    if thread.executor and thread.model:
-        controller = get_controller(thread_id=thread.id, executor=thread.executor)
-        model = thread.model if thread.model else controller.get_executor().default_model
-    # either the executor or the model is not set, so use the defaults
-    # and update the thread
-    else:
-        logging.debug('Either the executor or the model is not set. Updating thread.')
-        controller = get_controller(thread_id=thread.id)
-        model = controller.get_executor().default_model
-        thread.executor = controller.get_executor().name()
-        thread.model = model
-
-    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&thinking={thread.thinking}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}&temperature={thread.temperature}')  # NOQA: E501
-
-    if len(messages) == 0:
-        raise HTTPException(status_code=400, detail='No messages provided')
-
-    # todo perform some merge logic of the messages here
-    # I don't think we want to have the client always grab the full thread
-    # before posting
-
-    async def callback(token: AstNode):
-        queue.put_nowait(token)
-
-    async def stream():
-        def handle_exception(task):
-            if not task.cancelled() and task.exception() is not None:
-                Helpers.log_exception(logging, task.exception())
-                queue.put_nowait(QueueBreakNode())
-
-        async def execute_and_signal() -> list[Message]:
-            # don't touch, required for walking up the stack
-            stream_handler = callback
-
-            if thread.current_mode == 'direct':
-                result = await controller.aexecute(
-                    messages=messages,
-                    temperature=thread.temperature,
-                    model=model,
-                    compression=compression,
-                    thinking=thread.thinking,
-                    stream_handler=callback,
-                )
-                queue.put_nowait(QueueBreakNode())
-                return result
-            else:
-                # deserialize the locals_dict, then merge it with the in-memory locals_dict we have in MemoryCache
-                runtime_dict = Helpers.deserialize_locals_dict(thread.locals_dict)
-                runtime_dict.update(runtime_dict_cache.get(thread.id) or {})
-
-                # add the runtime defined tools to the list of tools
-                for key, value in runtime_dict.items():
-                    if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
-                        helpers.append(value)
-
-                # todo: this is a hack
-                result, runtime_state = await controller.aexecute_continuation(
-                    messages=messages,
-                    temperature=thread.temperature,
-                    stream_handler=callback,
-                    model=model,
-                    max_output_tokens=thread.output_token_len,
-                    compression=compression,
-                    cookies=cookies,
-                    helpers=cast(list[Callable], helpers),
-                    runtime_state=AutoGlobalDict(runtime_dict),
-                    thinking=thread.thinking,
-                )
-                queue.put_nowait(QueueBreakNode())
-
-                # update the in-memory locals_dict with unserializable locals
-                runtime_dict_cache.set(thread.id, __get_unserializable_locals(runtime_state))
-                thread.locals_dict = Helpers.serialize_locals_dict(runtime_state)
-                return result
-
-        task = asyncio.create_task(execute_and_signal())
-        task.add_done_callback(handle_exception)
-
-        while True:
-            data = await queue.get()
-
-            # this controls the end of the stream
-            if isinstance(data, QueueBreakNode):
-                # this tells the client to deal with carriage returns etc for pretty printing
-                yield StreamingStopNode('\n\n' if thread.executor == 'openai' else '\n')
-                break
-
-            yield data
-
-        try:
-            await task
-        except Exception as e:
-            pass
-
-        # error handling
-        if task.exception() is not None:
-            thread.messages.append(MessageModel.from_message(Assistant(TextContent(f'Error: {str(task.exception())}'))))
-            yield thread.model_dump()
-            return
-
-        messages_result: list[Message] = task.result()
-        thread.messages = [MessageModel.from_message(m) for m in messages_result]
-        cache_session.set(thread.id, thread)
-        yield thread.model_dump()
-
-    return StreamingResponse(stream_response(stream()), media_type='text/event-stream')  # media_type="application/json")
 
 
 @app.exception_handler(Exception)

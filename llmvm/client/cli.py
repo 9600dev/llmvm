@@ -1446,9 +1446,11 @@ def url(
     return thread
 
 @cli.command('compile', help='Compile a thread into a program.')
-@click.argument('thread_id', type=str, required=True)
+@click.option('--id', '-i', type=str, required=False, help='thread id to compile. Default is last thread.')
 @click.option('--program_name', '-p', type=str, required=False, default='',
               help='name of the program to compile. Default is the thread id.')
+@click.option('--compile_instructions', '-s', type=str, required=False, default='',
+              help='instructions for the compiler to use. Default is empty.')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
@@ -1460,21 +1462,25 @@ def url(
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def compile(
-    thread_id: str,
+    id: str,
     program_name: str,
+    compile_instructions: str,
     executor: str,
     model: str,
     compression: str,
     thinking: int,
     endpoint: str,
 ):
-    if thread_id.startswith('"') and thread_id.endswith('"'):
-        int_id = int(thread_id[1:-1])
-    else:
-        int_id = int(thread_id)
+    global thread_id
+    global last_thread
 
-    if not program_name:
-        program_name = f'{int_id}'
+    if not id:
+        id = str(thread_id)
+
+    if id.startswith('"') and id.endswith('"'):
+        int_id = int(id[1:-1])
+    else:
+        int_id = int(id)
 
     llmvm_client = LLMVMClient(
         api_endpoint=endpoint,
@@ -1485,6 +1491,7 @@ def compile(
     session_thread: SessionThreadModel = asyncio.run(llmvm_client.compile(
         thread=int_id,
         program_name=program_name,
+        compile_instructions=compile_instructions,
         executor_name=executor,
         model_name=model,
         compression=TokenCompressionMethod.from_str(compression),
@@ -1492,6 +1499,32 @@ def compile(
     ))
     rich.print(f'Compiled thread {int_id} into a program {program_name}.')
     rich.print(session_thread.messages[-1].to_message().get_str())
+
+
+@cli.command('programs', help='List all the compiled threads that can be used as helpers.')
+@click.option('--endpoint', '-e', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
+def programs(
+    endpoint: str,
+):
+    global thread_id
+    global last_thread
+
+    llmvm_client = LLMVMClient(
+        api_endpoint=endpoint,
+        default_executor_name='anthropic',
+        default_model_name='',
+        api_key='',
+    )
+
+    threads = asyncio.run(llmvm_client.get_threads())
+
+    for thread in [t for t in threads if t.current_mode == 'program']:
+        if len(thread.messages) > 0:
+            message_content = thread.messages[-1].to_message().get_str().replace('\n', ' ')[0:75]
+            title = thread.title if thread.title else ''
+            rich.print(f'[{thread.id}]: {title} - {message_content}')
 
 
 @cli.command('threads', help='List all message threads and set to last.')

@@ -1,9 +1,11 @@
 import ast
 import asyncio
 import base64
+from dataclasses import is_dataclass, asdict
 import datetime as dt
 import fcntl
 import glob
+import gzip
 import importlib
 import inspect
 import io
@@ -24,6 +26,7 @@ import sys
 import tempfile
 import termios
 import threading
+import dill
 import traceback
 import types
 from bs4 import BeautifulSoup
@@ -100,7 +103,102 @@ def _set_winsize(fd, rows, cols):
                 struct.pack("HHHH", rows, cols, 0, 0))
 
 
+_SENTINEL = ast.Constant(value=None)
+
+class LateBindDefaults(ast.NodeTransformer):
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.FunctionDef:
+        new_body = list(node.body)  # copy so we can prepend
+
+        for idx, (arg, default) in enumerate(
+                zip(node.args.args[-len(node.args.defaults):], node.args.defaults)):
+
+            if (isinstance(default, ast.Call)
+                and isinstance(default.func, ast.Name)
+                and default.func.id == "llm_var_bind"):
+
+                # 1. replace the eager default with None
+                node.args.defaults[idx] = _SENTINEL
+
+                # 2. inject:   if <param> is None: <param> = llm_var_bind(...)
+                assign = ast.If(
+                    test=ast.Compare(
+                        left=ast.Name(id=arg.arg, ctx=ast.Load()),
+                        ops=[ast.Is()],
+                        comparators=[ast.Constant(value=None)],
+                    ),
+                    body=[ast.Assign(
+                        targets=[ast.Name(id=arg.arg, ctx=ast.Store())],
+                        value=default
+                    )],
+                    orelse=[]
+                )
+                new_body.insert(0, assign)
+
+        node.body = new_body
+        return node
+
+
 class Helpers():
+    @staticmethod
+    def rewrite_late_binding(code: str) -> types.CodeType:
+        src = textwrap.dedent(code)
+        tree = ast.parse(src, mode="exec")
+        tree = LateBindDefaults().visit(tree)
+        ast.fix_missing_locations(tree)
+        return compile(tree, "<exec>", "exec")
+
+    @staticmethod
+    def extract_program_code_block(string: str) -> str:
+        blocks: list[str] = []
+        lines = string.splitlines(keepends=True)
+        inside_block = False
+        block_text = ""
+
+        for line in lines:
+            stripped_line = line.strip()
+
+            if not inside_block and stripped_line == "<program>":
+                inside_block = True
+                continue
+
+            if inside_block and stripped_line == "</program>":
+                inside_block = False
+                blocks.append(block_text)
+                block_text = ""
+
+            if inside_block:
+                block_text += line
+        return blocks[-1]
+
+    @staticmethod
+    def to_dict(obj) -> dict:
+        if isinstance(obj, (int, float, str, bool, type(None))):
+            raise ValueError(f"Cannot convert {obj} to dict")
+
+        if is_dataclass(obj):
+            return Helpers.to_dict(asdict(obj))
+
+        if isinstance(obj, dict):
+            return {k: Helpers.to_dict(v) for k, v in obj.items()}
+
+        if hasattr(obj, "__dict__"):
+            return {k: Helpers.to_dict(v) for k, v in vars(obj).items()}
+        return obj
+
+    @staticmethod
+    def dill_to_b64(obj, *, compress=False, protocol=None) -> str:
+        raw = dill.dumps(obj, protocol=protocol)           # bytes
+        if compress:
+            raw = gzip.compress(raw)
+        return base64.b64encode(raw).decode("ascii")       # ASCII
+
+    @staticmethod
+    def b64_to_dill(b64_string: str, *, compressed=False):
+        raw = base64.b64decode(b64_string.encode("ascii"))
+        if compressed:
+            raw = gzip.decompress(raw)
+        return dill.loads(raw)
+
     @staticmethod
     def str_to_type(type_name: str) -> type:
         return cast(type, pydoc.locate(type_name))

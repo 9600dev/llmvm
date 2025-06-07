@@ -6,7 +6,7 @@ import os
 from typing import Any, Awaitable, Callable, Optional, cast
 
 from anthropic import AI_PROMPT, HUMAN_PROMPT, AsyncAnthropic
-from anthropic.types import ThinkingConfigParam
+from anthropic.types import ThinkingConfigParam, Message as AntMessage
 from pydantic import BaseModel
 
 from llmvm.common.container import Container
@@ -64,21 +64,36 @@ class AnthropicExecutor(Executor):
     def to_dict(self, message: 'Message', model: Optional[str], server_serialization: bool = False) -> dict[str, Any]:
         content_list = []
 
-        # maintain thinking blocks as they have hashes.
+        # maintain Assistant thinking blocks as they have hashes.
         if isinstance(message, Assistant) and message.underlying:
-            if isinstance(message.underlying, BaseModel):
-                result = cast(dict[str, Any], message.underlying.model_dump())
-                return {
-                    'role': message.role(),
-                    'content': [{'type': 'text', 'text': c['text'].strip()} for c in result['content']]
-                }
-            else:
-                result = json.loads(jsonpickle.encode(message.underlying, unpicklable=False, make_refs=False))  # type: ignore
-                return {
-                    'role': message.role(),
-                    'content': [{'type': 'text', 'text': c['text'].strip()} for c in result['content']]
-                }
+            cached_assistant_message: AntMessage = cast(AntMessage, Helpers.b64_to_dill(message.underlying))  # type: ignore
+            return_message = {
+                'role': message.role(),
+                'content': []
+            }
 
+            for content in cached_assistant_message.content:
+                if content.type == 'text':
+                    return_message['content'].append(
+                        {
+                            'type': 'text',
+                            'text': content.text.strip(),
+                            **({'citations': content.citations} if content.citations else {})
+                        }
+                    )
+                elif content.type == 'thinking':
+                    return_message['content'].append(
+                        {
+                            'type': 'thinking',
+                            'thinking': content.thinking,
+                            'signature': content.signature
+                        }
+                    )
+                else:
+                    raise ValueError(f"Unknown content type: {content.type}")
+            return return_message
+
+        # otherwise, serialize the message as normal
         for content in message.message:
             if isinstance(content, ImageContent) and content.sequence:
                 if 'image/unknown' not in Helpers.classify_image(content.get_bytes()):
@@ -389,7 +404,7 @@ class AnthropicExecutor(Executor):
             stop_token=perf.stop_token,
             perf_trace=perf,
             total_tokens=perf.total_tokens,
-            underlying=perf.object
+            underlying=Helpers.dill_to_b64(perf.object)
         )
 
         if assistant.get_str() == '': logging.warning(f'Assistant message is empty. Returning empty message. {perf.request_id or ""}')

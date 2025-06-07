@@ -480,6 +480,55 @@ Here are the headlines:
 ...
 </complete>
 
+Example: An example of the user wanting to chain together multiple message threads to perform some action.
+
+{{user_colon_token}} Add scrapers for bbc and cnn from @scrapers and show the overlapping headlines:
+{{assistant_colon_token}}
+<{{scratchpad_token}}>
+* get the @bbc_scrape and @cnn_scrape threads/programs and put them into context
+* execute the code
+* show the overlapping headlines
+</{{scratchpad_token}}>
+<helpers>
+add_thread(program_name="scrapers)
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+def bbc_scrape():
+    ....
+
+def cnn_scrape():
+    ...
+</helpers_result>
+
+{{assistant_colon_token}}
+Okay, the bbc_scrape and cnn_scrape helpers are in scope. Running them:
+
+<helpers>
+bbc_content = bbc_scrape()
+cnn_content = cnn_scrape()
+overlapping_headlines = llm_call([bbc_content, cnn_content], "Find the overlapping headlines between these two websites")
+result(overlapping_headlines)
+</helpers>
+
+{{user_colon_token}}
+<helpers_result>
+The overlapping headlines are as follows:
+ * ...
+ * ...
+</helpers_result>
+
+
+{{assistant_colon_token}}
+The overlapping headlines between the programs @bbc_scrape and @cnn_scrape are as follows:
+ * ...
+ * ...
+</complete>
+
+
+
+
 Example: An example of getting information from a url, seeing a useful image that can help with explaining the content and then showing that image to the user.
 
 {{user_colon_token}} I'd like you to generate a small report about how gravity works in the universe.

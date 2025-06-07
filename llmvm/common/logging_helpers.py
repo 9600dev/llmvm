@@ -7,6 +7,7 @@ import time
 from logging import Logger
 from typing import Dict, List, Any
 
+import rich
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.traceback import install
@@ -15,9 +16,12 @@ from llmvm.common.container import Container
 
 
 def __trace(content):
-    if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
-        with open(os.path.expanduser(Container.get_config_variable('LLMVM_EXECUTOR_TRACE')), 'a+') as f:
-            f.write(content)
+    try:
+        if Container.get_config_variable('LLMVM_EXECUTOR_TRACE', default=''):
+            with open(os.path.expanduser(Container.get_config_variable('LLMVM_EXECUTOR_TRACE')), 'a+') as f:
+                f.write(content)
+    except Exception as e:
+        rich.print(f"Error tracing: {e}")
 
 
 def messages_trace(messages: List[Dict[str, Any]]):
@@ -32,6 +36,7 @@ def messages_trace(messages: List[Dict[str, Any]]):
                 content = ' '.join(m['parts'])
                 __trace(f"<{m['role'].capitalize()}:>{content}</{m['role'].capitalize()}>\n\n")
 
+
 def serialize_messages(messages):
     if Container.get_config_variable('LLMVM_SERIALIZE', default=''):
         result = json.dumps([m.to_json() for m in messages], indent=2)
@@ -39,6 +44,7 @@ def serialize_messages(messages):
         with open(file_path, 'a+') as f:
             f.write(result + '\n\n')
             f.flush()
+
 
 class TimedLogger(logging.Logger):
     def __init__(self, name='timing', level=logging.NOTSET):
@@ -85,10 +91,12 @@ handler = RichHandler()
 if not os.path.exists(Container.get_config_variable('log_directory', default='~/.local/share/llmvm/logs')):
     os.makedirs(Container.get_config_variable('log_directory', default='~/.local/share/llmvm/logs'))
 
+
 def no_indent_debug(logger, message) -> None:
     if logger.level <= logging.DEBUG:
         console = Console(file=sys.stderr)
         console.print(message)
+
 
 def role_debug(logger, callee, role, message) -> None:
     def split_string_by_width(input_string, width=20):
@@ -222,6 +230,7 @@ def suppress_logging():
     logging.getLogger('grpc').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
     logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+
 
 def get_timer():
     return timing

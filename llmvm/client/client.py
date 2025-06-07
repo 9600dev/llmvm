@@ -349,9 +349,25 @@ class LLMVMClient():
         params = {
             'id': id,
         }
-        response: httpx.Response = httpx.get(f'{self.api_endpoint}/v1/chat/get_thread', params=params)
-        thread = SessionThreadModel.model_validate(response.json())
-        return thread
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{self.api_endpoint}/v1/chat/get_thread", params=params)
+            return SessionThreadModel.model_validate(response.json())
+
+    async def get_program(
+        self,
+        id: Optional[int],
+        program_name: Optional[str],
+    ) -> SessionThreadModel:
+        params = {
+            **({'id': id} if id else {}),
+            **({'program_name': program_name} if program_name else {}),
+        }
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{self.api_endpoint}/v1/chat/get_program", params=params)
+            result = SessionThreadModel.model_validate(response.json())
+            return result
 
     async def set_thread(
         self,
@@ -412,6 +428,7 @@ class LLMVMClient():
         self,
         thread: int,
         program_name: str,
+        compile_instructions: str = '',
         executor_name: Optional[str] = None,
         model_name: Optional[str] = None,
         cookies: list[dict[str, Any]] = [],
@@ -428,6 +445,7 @@ class LLMVMClient():
         thread_model.thinking = thinking
         thread_model.cookies = cookies or thread_model.cookies
         thread_model.title = program_name
+        thread_model.compile_prompt = compile_instructions
 
         try:
             async with httpx.AsyncClient(timeout=400.0) as client:

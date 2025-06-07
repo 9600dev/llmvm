@@ -56,6 +56,22 @@ class PythonRuntimeHost:
         self.executed_code_blocks: list[PythonRuntimeBlockState] = []
 
     @staticmethod
+    def program_code_block_to_locals_callables(code: str) -> Tuple[dict[str, Any], list[Callable]]:
+        locals_dict = {}
+        try:
+            exec(code, locals_dict)
+
+            functions: Dict[str, Callable[..., Any]] = {
+                name: obj
+                for name, obj in locals_dict.items()
+                if isinstance(obj, types.FunctionType) and not name.startswith("_")
+            }
+        except Exception as ex:
+            logging.error(f'PythonRuntimeHost.program_code_block_to_locals() threw an exception while executing:\n{code}\n')
+            raise ex
+        return locals_dict, list(functions.values())
+
+    @staticmethod
     def get_helpers_code_blocks(code: str) -> List[str]:
         lines = code.splitlines(keepends=True)
         blocks = []
