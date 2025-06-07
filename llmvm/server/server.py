@@ -431,7 +431,8 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
 
     # locals_dict needs to be set, grab it from the cache
     elif cache_session.has_key(thread.id) and not thread.locals_dict:
-        thread.locals_dict = cache_session.get(thread.id).locals_dict  # type: ignore
+        l_cached_thread = cache_session.get(thread.id)
+        thread.locals_dict = l_cached_thread.locals_dict
 
     messages = [MessageModel.to_message(m) for m in thread.messages]  # type: ignore
     mode = thread.current_mode

@@ -47,7 +47,7 @@ T = TypeVar('T')
 
 8. helpers() -> str. Returns a string of all the helper tools/python functions that are available to you to call in the Python environment, including new ones that you've built and added yourself within the <helpers></helpers> blocks.
 
-9. locals() -> str. Returns a string of all the variables that are currently available to you to access in the Python environment, including new ones that you've added within <helpers></helpers> blocks. Defining local variables in <helpers></helpers> blocks is useful if you want to stash results from a previous <helpers></helpers> block for later use, or you want a runtime working "memory" that you can access later.
+9. locals() -> str. Returns a string of all the variables that are currently available to you to access in the Python environment, including new ones that you've added within <helpers></helpers> blocks. Defining local variables in <helpers></helpers> blocks is useful if you want to stash results from a previous <helpers></helpers> block for later use, or you want a runtime working "memory" that you can access later. Use via result(locals()) to give the locals back to the user.
 
 10. write_memory(key: str, summary: str, value: list[Content] | str) -> None. Writes a value to memory that you can retrieve later. This is useful for writing content and context to memory, and thus not having to keep the content in your context window. E.g. crawling a website, you could write out the results of the crawl to memory, using the url as the key. The summary string should be a short summary of the content that you're writing to memory, so that you can easily recall it later.
 
