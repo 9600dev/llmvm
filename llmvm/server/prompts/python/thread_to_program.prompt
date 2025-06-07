@@ -50,7 +50,7 @@ The current price of NVIDIA (NVDA) is $137.38 USD, which is approximately $211.6
 
 Okay, for (1) it seems that genericizing this would mean that it should work for any stock symbol, not just NVDA. It's also clear that we don't need to go back and forward to the LLM to have the LLM parse out the Python dictionary that came back from BCL.get_currency_rates("USD") because we could just write python to pull out the correct AUD conversion rate and use that directly in code.
 
-So, this might be what (2) might look like, and what you should return as "compiled code" in a <program> xml tag. Optionally, you can add a <program_title>program name</program_title> XML tag to describe the generic title of what all the functions inside <program> actually do. If you can't figure out a generic title for the program, you can skip generating it.
+So, this might be what (2) might look like, and what you should return as "compiled code" in a <program> xml tag. Optionally, you can add a <program_title>program name</program_title> XML tag to describe the generic title of what all the functions inside <program> actually do. If you can't figure out a generic title for the program, you can skip generating it. The user might have also added a program title between the following [], here [ {{program_title}} ], and if so, use that.
 
 <program_title>stock_currency</program_title>
 <program>

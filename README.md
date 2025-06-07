@@ -6,6 +6,9 @@ It does not use traditional tool calling API's, instead, it allows the LLM to in
 
 LLMVM supports [Anthropic's](https://www.anthropic.com) Claude 4 (Opus Sonnet), Claude 3 (Opus, Sonnet and Haiku) models, and [OpenAI](https://openai.com/blog/openai-api) GPT 4o/4.1/o3/o4 models from OpenAI. [Gemini](https://deepmind.google/technologies/gemini/), [DeepSeek v3](https://www.deepseek.com/) and [Amazon Nova](https://docs.aws.amazon.com/nova/) are currently experimental. LLMVM is best used with either the [kitty](https://github.com/kovidgoyal/kitty) or [WezTerm](https://wezfurlong.org/wezterm/index.html) terminals as LLMVM will screenshot and render images as vision based tasks progress.
 
+
+> **Update June 7th 2025**: Added the ability to "compile" a user/assistant message thread into a genericized and parameterized program. It will try and lift out repeated LLM calls by specializing code based on the "shape" of data it sees at runtime, and guard against that shape, bailing out to recompile if different shapes are seen. Basically a LLM JIT compiler... Try it, using "compile"
+
 > **Update May 26th 2025**: Claude 4 models work out of the box, no changes. Made auto-rendering of Markdown for streaming tokens the default. Turn on and off via client_markdown_inline in config.yaml.
 
 > **Update April 19th 2025**: Got o3 o4mini and gpt4.1 working. All reasoning models work now. -z "low" "medium" "high" for OpenAI, or -z num_of_tokens for Anthropic.
@@ -618,6 +621,41 @@ You can execute arbitrary python that the LLM has created inside <helpers> block
 ```python
 query>> $ calculate_compound_interest(100000, 0.05, 10)
 {'final_amount': 162889.4626777442, 'interest_earned': 62889.46267774419}
+```
+
+#### Compiling threads into reusable code
+
+This is "beta" at the moment. You can take any arbitrary message thread, and ask LLMVM to "compile" it into a reusable program. It will do the following:
+
+* Try and parameterize the thread. i.e. if you're asking to get the stock price of 'NVDA' it might try and write a program to "get_stock_code()" instead of "get_NVDA_stock()"
+* Try and componenterize and generalize the thread by breaking it up into multiple functions.
+* Lift out any calls to the LLM if they're not required. This is an optimization technique to try and avoid token spend unnecessarily.
+
+The compilation technique will "guard" against data and type shape changes by emitting `guard()` calls. These calls mean that the compiled code can be specialized against the shape seen at compile time, and bail out and build another shape specialization if a new shape is seen. This is very similar to JIT compiling, where method-at-a-time JIT compilation will emit specialized code for particular method signatures, and "type-guard" to enforce them.
+
+```python
+query>> compile
+<program_title>random_program</program_title>
+<program>
+def program_part(...)
+    ...
+</program>
+```
+
+Then you can reference arbitrary programs in your queries using the @program_name symbol:
+
+```python
+query>> using @random_program go and build something something
+<helpers>
+result(add_thread(program_name='random_program'))
+</helpers>
+...
+```
+
+You can combine many of these programs and LLMVM will arbitrarily wire them up for you:
+
+```python
+query>> using @web_scrapers go and scrape the latest headlines from bbc and cnn, then push them through @pretty_printing to make them look good
 ```
 
 #### Capturing the output of arbitrary TUI or CLI programs with $(command)

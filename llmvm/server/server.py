@@ -576,7 +576,10 @@ async def compile(request: SessionThreadModel) -> StreamingResponse:
 
     compile_prompt=Helpers.prompt_user(
         prompt_name='thread_to_program.prompt',
-        template={'compile_instructions': compile_instructions},
+        template={
+            'compile_instructions': compile_instructions,
+            'program_title': thread.title
+        },
         user_token=controller.get_executor().user_token(),
         assistant_token=controller.get_executor().assistant_token(),
         scratchpad_token=controller.get_executor().scratchpad_token(),
