@@ -1,5 +1,5 @@
 
-import { useRef, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Copy, User, Bot, CheckCircle, XCircle, Clock } from "lucide-react";
@@ -21,12 +21,31 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
   const lastScrollPositionRef = useRef(0);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isStreamingRef = useRef(false);
+
+  // Scroll function with optional debouncing
+  const performScroll = useCallback((behavior: ScrollBehavior = 'smooth', immediate: boolean = false) => {
+    if (immediate) {
+      // Immediate scroll for streaming
+      bottomRef.current?.scrollIntoView({ behavior });
+    } else {
+      // Debounced scroll for other cases
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      
+      scrollTimeoutRef.current = setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior });
+      }, 50);
+    }
+  }, []);
 
   // Expose scrollToBottom method
   useImperativeHandle(ref, () => ({
     scrollToBottom: () => {
       userScrolledRef.current = false;
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      performScroll('smooth');
     }
   }));
 
@@ -35,21 +54,65 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
     const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
     if (!scrollContainer) return;
 
-    // Check if we're at the bottom (within 100px threshold)
-    const isAtBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 100;
-    
-    // Only auto-scroll if:
-    // 1. We're already at the bottom
-    // 2. The last message is from the assistant and is being sent (streaming)
-    // 3. User hasn't manually scrolled away
-    const lastMessage = messages[messages.length - 1];
-    const shouldAutoScroll = isAtBottom || 
-      (lastMessage?.role === 'assistant' && lastMessage?.status === 'sending' && !userScrolledRef.current);
+    const checkAndScroll = () => {
+      // Check if we're at the bottom (within 100px threshold)
+      const isAtBottom = scrollContainer.scrollHeight - scrollContainer.scrollTop - scrollContainer.clientHeight < 100;
+      
+      // Only auto-scroll if:
+      // 1. We're already at the bottom
+      // 2. The last message is from the assistant and is being sent (streaming)
+      // 3. User hasn't manually scrolled away
+      const lastMessage = messages[messages.length - 1];
+      const isCurrentlyStreaming = lastMessage?.role === 'assistant' && lastMessage?.status === 'sending';
+      
+      // Determine if we should auto-scroll
+      const shouldAutoScroll = isAtBottom || (isCurrentlyStreaming && !userScrolledRef.current);
 
-    if (shouldAutoScroll) {
-      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+      if (shouldAutoScroll) {
+        if (isCurrentlyStreaming) {
+          // Use instant scrolling immediately during streaming
+          performScroll('instant' as ScrollBehavior, true);
+        } else {
+          // Use smooth scrolling for non-streaming updates
+          performScroll('smooth', false);
+        }
+      }
+      
+      // Update streaming state
+      isStreamingRef.current = isCurrentlyStreaming;
+    };
+
+    // Initial check
+    checkAndScroll();
+
+    // Set up MutationObserver for streaming content changes
+    let observer: MutationObserver | null = null;
+    const lastMessage = messages[messages.length - 1];
+    const isStreaming = lastMessage?.role === 'assistant' && lastMessage?.status === 'sending';
+    
+    if (isStreaming) {
+      observer = new MutationObserver(() => {
+        checkAndScroll();
+      });
+      
+      // Observe changes in the scroll container
+      observer.observe(scrollContainer, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
     }
-  }, [messages]);
+    
+    // Cleanup on unmount
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+      if (observer) {
+        observer.disconnect();
+      }
+    };
+  }, [messages, messages[messages.length - 1]?.content, messages[messages.length - 1]?.llmvmContent, performScroll]);
 
   // Track user scroll behavior
   useEffect(() => {

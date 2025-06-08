@@ -132,7 +132,7 @@ class SearchResult(TextContent):
     snippet: str = ""
     engine: str = ""
 
-You can pass instances of these content classes to any of the special functions, and most tool helpers will likely accept Content also.
+You can pass instances of these content classes to any of the special functions, and most tool helpers will likely accept Content also. Remember that the get_str() method will pull out all the content in any TextContent, FileContent, PdfContent, etc.
 
 If you see references to FunctionCallMeta in exceptions, it's because this classed is used to wrap the results of tool helper functions. You can extract the underlying value by calling the result() method on the object.
 
