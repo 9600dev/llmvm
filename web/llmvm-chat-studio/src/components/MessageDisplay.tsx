@@ -132,8 +132,8 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
                 );
               } else if (message.type === "code") {
                 return (
-                  <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto border whitespace-pre-wrap break-words">
-                    <code className="text-green-700 block">{message.content}</code>
+                  <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto border max-w-full">
+                    <code className="text-green-700 block whitespace-pre-wrap break-all">{message.content}</code>
                   </pre>
                 );
               } else {

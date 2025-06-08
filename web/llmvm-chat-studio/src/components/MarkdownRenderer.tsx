@@ -52,7 +52,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
   }
 
   return (
-    <div className={`prose max-w-none prose-gray dark:prose-invert overflow-hidden ${className}`}>
+    <div className={`prose prose-gray dark:prose-invert break-words ${className}`}>
       <ReactMarkdown 
         remarkPlugins={[remarkGfm]}
         components={{
@@ -66,8 +66,32 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
               const codeString = String(children).replace(/\n$/, '');
               const isCopied = copiedCode === codeString;
               
+              // For markdown, render as regular formatted text instead of code block
+              if (language === 'markdown') {
+                return (
+                  <div className="relative group my-3">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(codeString)}
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 h-8 px-2"
+                    >
+                      {isCopied ? <Check size={14} /> : <Copy size={14} />}
+                    </Button>
+                    <div className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 pr-12 overflow-hidden">
+                      <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>*]:!whitespace-normal [&_*]:!break-words [&_*]:!overflow-wrap-anywhere">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {codeString}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              
+              // For other code languages, use SyntaxHighlighter
               return (
-                <div className="relative group my-3">
+                <div className="relative group my-3 overflow-x-auto">
                   <Button
                     variant="ghost"
                     size="sm"
@@ -95,7 +119,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
             
             // For inline code
             return (
-              <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+              <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono break-all" {...props}>
                 {children}
               </code>
             );
@@ -109,7 +133,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
             }
             
             return (
-              <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 overflow-x-auto my-3" {...props}>
+              <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 overflow-x-auto my-3 max-w-full" {...props}>
                 {children}
               </pre>
             );
@@ -117,8 +141,8 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
           // Handle tables to prevent overflow
           table({ children, ...props }: any) {
             return (
-              <div className="overflow-x-auto my-4">
-                <table className="min-w-full" {...props}>
+              <div className="overflow-x-auto my-4 w-full">
+                <table className="w-full" {...props}>
                   {children}
                 </table>
               </div>
@@ -127,16 +151,44 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
           // Handle long links and code
           a({ children, ...props }: any) {
             return (
-              <a className="break-words" {...props}>
+              <a className="break-all hover:break-words" {...props}>
                 {children}
               </a>
             );
           },
           p({ children, ...props }: any) {
             return (
-              <p className="break-words" {...props}>
+              <p className="break-words overflow-wrap-anywhere" {...props}>
                 {children}
               </p>
+            );
+          },
+          li({ children, ...props }: any) {
+            return (
+              <li className="break-words overflow-wrap-anywhere" {...props}>
+                {children}
+              </li>
+            );
+          },
+          h1({ children, ...props }: any) {
+            return (
+              <h1 className="break-words" {...props}>
+                {children}
+              </h1>
+            );
+          },
+          h2({ children, ...props }: any) {
+            return (
+              <h2 className="break-words" {...props}>
+                {children}
+              </h2>
+            );
+          },
+          h3({ children, ...props }: any) {
+            return (
+              <h3 className="break-words" {...props}>
+                {children}
+              </h3>
             );
           }
         }}

@@ -34,12 +34,14 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
           const style = document.createElement('style');
           style.setAttribute('data-llmvm-styles', 'true');
           style.textContent = `
+            .llmvm-content { max-width: 100%; overflow-wrap: break-word; word-break: break-word; }
             .llmvm-content img { max-width: 100%; height: auto; }
-            .llmvm-content pre { background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; }
-            .llmvm-content code { background: #e5e7eb; padding: 0.125rem 0.25rem; border-radius: 0.25rem; }
-            .llmvm-browser-content { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; margin: 0.5rem 0; }
-            .llmvm-pdf-content { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; }
-            .llmvm-search-result { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; margin: 0.5rem 0; }
+            .llmvm-content pre { background: #f3f4f6; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; max-width: 100%; }
+            .llmvm-content code { background: #e5e7eb; padding: 0.125rem 0.25rem; border-radius: 0.25rem; word-break: break-all; }
+            .llmvm-browser-content { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; margin: 0.5rem 0; max-width: 100%; }
+            .llmvm-pdf-content { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; max-width: 100%; }
+            .llmvm-search-result { border: 1px solid #e5e7eb; border-radius: 0.5rem; padding: 1rem; margin: 0.5rem 0; max-width: 100%; }
+            .llmvm-content p, .llmvm-content li { overflow-wrap: anywhere; }
           `;
           containerRef.current.appendChild(style);
         }
@@ -72,6 +74,7 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
             <MarkdownRenderer 
               key={`text-${lastIndex}`} 
               content={content.substring(lastIndex, match.index)} 
+              className="max-w-full"
             />
           );
         }
@@ -105,22 +108,23 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
           <MarkdownRenderer 
             key={`text-${lastIndex}`} 
             content={content.substring(lastIndex)} 
+            className="max-w-full"
           />
         );
       }
       
       if (parts.length > 0) {
-        return <div className="space-y-2">{parts}</div>;
+        return <div className="space-y-2 max-w-full">{parts}</div>;
       }
     }
     
-    return <MarkdownRenderer content={content} />;
+    return <MarkdownRenderer content={content} className="max-w-full" />;
   }
 
   // If content is an array (multiple content items)
   if (Array.isArray(content)) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 max-w-full">
         {content.map((item, index) => (
           <ContentRenderer key={index} content={item} isStreaming={isStreaming} images={images} />
         ))}
@@ -130,7 +134,7 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
 
   // If content has LLMVM render method BUT it's not TextContent (which we want to render as markdown)
   if (content && typeof content.render === 'function' && content.type !== 'TextContent' && content.content_type !== 'text') {
-    return <div ref={containerRef} className="llmvm-content" />;
+    return <div ref={containerRef} className="llmvm-content max-w-full" />;
   }
 
   // Handle specific content types based on structure
@@ -148,7 +152,7 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
       if (hasHelperTags(textContent)) {
         return <HelperContentRenderer content={textContent} isStreaming={isStreaming} />;
       }
-      return <MarkdownRenderer content={textContent} />;
+      return <MarkdownRenderer content={textContent} className="max-w-full" />;
     }
 
     // Image content
@@ -173,7 +177,7 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
             <img
               src={imageData.startsWith('data:') ? imageData : `data:image/png;base64,${imageData}`}
               alt="Generated content"
-              className="max-w-full h-auto rounded"
+              className="w-full max-w-full h-auto rounded object-contain"
             />
           </Card>
         );
@@ -202,12 +206,12 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
             <span>Web Content: {content.url || 'Browser'}</span>
           </div>
           {content.text && (
-            <div className="text-gray-700 whitespace-pre-wrap">
+            <div className="text-gray-700 whitespace-pre-wrap break-words overflow-wrap-anywhere">
               {content.text}
             </div>
           )}
           {content.sequence && typeof content.sequence === 'string' && content.type !== 'FileContent' && (
-            <div className="mt-4 space-y-2">
+            <div className="mt-4 space-y-2 max-w-full">
               <ContentRenderer content={content.sequence} isStreaming={isStreaming} />
             </div>
           )}
@@ -224,8 +228,8 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
             <span>PDF Document</span>
           </div>
           {content.text && (
-            <ScrollArea className="h-96">
-              <div className="text-gray-700 whitespace-pre-wrap">
+            <ScrollArea className="h-96 max-w-full">
+              <div className="text-gray-700 whitespace-pre-wrap break-words overflow-wrap-anywhere">
                 {content.text}
               </div>
             </ScrollArea>
@@ -243,8 +247,8 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
             <span>File: {content.path || 'Unknown'}</span>
           </div>
           {content.text && (
-            <pre className="bg-gray-100 p-4 rounded overflow-x-auto">
-              <code>{content.text}</code>
+            <pre className="bg-gray-100 p-4 rounded overflow-x-auto max-w-full">
+              <code className="break-all">{content.text}</code>
             </pre>
           )}
         </Card>
@@ -262,15 +266,15 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
           <div className="space-y-2">
             {(content.results || [content]).map((result: any, index: number) => (
               <div key={index} className="border-l-2 border-blue-500 pl-4">
-                <h4 className="font-medium text-blue-600">{result.title}</h4>
+                <h4 className="font-medium text-blue-600 break-words">{result.title}</h4>
                 {result.url && (
                   <a href={result.url} target="_blank" rel="noopener noreferrer"
-                     className="text-xs text-gray-500 hover:underline">
+                     className="text-xs text-gray-500 hover:underline break-all">
                     {result.url}
                   </a>
                 )}
                 {result.snippet && (
-                  <p className="text-sm text-gray-700 mt-1">{result.snippet}</p>
+                  <p className="text-sm text-gray-700 mt-1 break-words">{result.snippet}</p>
                 )}
               </div>
             ))}
@@ -282,8 +286,8 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
     // Code/JSON content
     if (content.code || content.json) {
       return (
-        <pre className="bg-gray-100 p-4 rounded overflow-x-auto">
-          <code>{content.code || JSON.stringify(content.json, null, 2)}</code>
+        <pre className="bg-gray-100 p-4 rounded overflow-x-auto max-w-full">
+          <code className="break-all">{content.code || JSON.stringify(content.json, null, 2)}</code>
         </pre>
       );
     }
@@ -295,8 +299,8 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
           <AlertCircle size={16} />
           <span>Data Object</span>
         </div>
-        <pre className="bg-gray-100 p-4 rounded overflow-x-auto text-sm">
-          <code>{JSON.stringify(content, null, 2)}</code>
+        <pre className="bg-gray-100 p-4 rounded overflow-x-auto text-sm max-w-full">
+          <code className="break-all">{JSON.stringify(content, null, 2)}</code>
         </pre>
       </Card>
     );

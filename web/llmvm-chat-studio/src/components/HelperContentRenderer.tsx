@@ -54,7 +54,7 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
   // Function to render content with image placeholders
   const renderContentWithImages = (text: string) => {
     if (!images || images.length === 0) {
-      return <MarkdownRenderer content={text} />;
+      return <MarkdownRenderer content={text} className="max-w-full" />;
     }
 
     const parts: React.ReactNode[] = [];
@@ -71,6 +71,7 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
           <MarkdownRenderer 
             key={`text-${lastIndex}`} 
             content={text.substring(lastIndex, match.index)} 
+            className="max-w-full"
           />
         );
       }
@@ -104,11 +105,12 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         <MarkdownRenderer 
           key={`text-${lastIndex}`} 
           content={text.substring(lastIndex)} 
+          className="max-w-full"
         />
       );
     }
     
-    return parts.length > 0 ? <>{parts}</> : <MarkdownRenderer content={text} />;
+    return parts.length > 0 ? <>{parts}</> : <MarkdownRenderer content={text} className="max-w-full" />;
   };
 
   const renderSegment = (segment: ParsedSegment, index: number) => {
@@ -120,9 +122,9 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         const isCopied = copiedCode === codeContent;
 
         return (
-          <div key={index} className="my-3">
+          <div key={index} className="my-3 max-w-full">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Helper Code:</div>
-            <div className="relative group">
+            <div className="relative group max-w-full">
               <code className="absolute top-2 left-2 text-xs bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded z-10">
                 {'<helpers>'}
               </code>
@@ -179,13 +181,13 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         const resultContent = resultMatch ? resultMatch[1] : segment.content.replace('<helpers_result>', '');
 
         return (
-          <div key={index} className="my-3 overflow-hidden">
+          <div key={index} className="my-3 max-w-full">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Helper Result:</div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 relative overflow-hidden">
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 relative max-w-full">
               <code className="absolute top-2 left-2 text-xs bg-blue-100 dark:bg-blue-800 px-1 py-0.5 rounded z-10">
                 {'<helpers_result>'}
               </code>
-              <div className="pt-6 pb-6 overflow-x-auto">
+              <div className="pt-6 pb-6 max-w-full overflow-x-auto">
                 {renderContentWithImages(resultContent)}
               </div>
               {segment.isComplete && (
@@ -209,9 +211,9 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         const isProgramCopied = copiedCode === programContent;
 
         return (
-          <div key={index} className="my-3">
+          <div key={index} className="my-3 max-w-full">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Program Code:</div>
-            <div className="relative group">
+            <div className="relative group max-w-full">
               <code className="absolute top-2 left-2 text-xs bg-purple-200 dark:bg-purple-700 px-1 py-0.5 rounded z-10">
                 {'<program>'}
               </code>
@@ -266,7 +268,7 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         // For text segments, render as markdown with image support
         if (segment.content.trim().length > 0) {
           return (
-            <div key={index}>
+            <div key={index} className="max-w-full break-words">
               {renderContentWithImages(segment.content)}
             </div>
           );
@@ -279,7 +281,7 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
   };
 
   return (
-    <div className="helper-content">
+    <div className="helper-content max-w-full">
       {segments.map((segment, index) => renderSegment(segment, index))}
     </div>
   );
