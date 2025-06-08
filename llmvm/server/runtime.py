@@ -335,13 +335,14 @@ class Runtime:
         context_or_content = Helpers.flatten(context_or_content)
         messages = Helpers.flatten([self.controller.statement_to_message(context_or_content), User(TextContent(prompt))])
 
+        default_model = self.controller.get_executor().default_model
         session_thread = await client.call(
             thread=SessionThreadModel(
                 messages=[MessageModel.from_message(message) for message in messages],
                 executor=self.controller.get_executor().name(),
-                model=self.controller.get_executor().default_model,
+                model=default_model,
                 compression='auto',
-                output_token_len=self.controller.get_executor().max_output_tokens(),
+                output_token_len=self.controller.get_executor().max_output_tokens(default_model),
                 temperature=0.0,
                 stop_tokens=[]
             ),
@@ -381,6 +382,7 @@ class Runtime:
         logging.debug(f'PythonRuntime.pandas_bind({expr})')
 
         def pandas_bind_with_llm(expr_str: str) -> PandasMeta:
+            default_model = self.controller.get_executor().default_model
             assistant: Assistant = self.controller.execute_llm_call(
                 llm_call=LLMCall(
                     user_message=Helpers.prompt_user(
@@ -393,10 +395,10 @@ class Runtime:
                     ),
                     context_messages=self.controller.statement_to_message(expr),
                     executor=self.controller.get_executor(),
-                    model=self.controller.get_executor().default_model,
+                    model=default_model,
                     temperature=0.0,
-                    max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                    completion_tokens_len=self.controller.get_executor().max_output_tokens(),
+                    max_prompt_len=self.controller.get_executor().max_input_tokens(default_model),
+                    completion_tokens_len=self.controller.get_executor().max_output_tokens(default_model),
                     prompt_name='pandas_bind.prompt',
                 ),
                 query=self.original_query,
@@ -713,15 +715,16 @@ class Runtime:
         Do not return any other text. Return the "Default value" if you cannot find a value.
         """
 
+        default_model = self.controller.get_executor().default_model
         assistant = asyncio.run(self.controller.aexecute_llm_call(
             llm_call=LLMCall(
                 user_message=User(TextContent(PROMPT)),
                 context_messages=messages,
-                executor=self.controller.executor,
-                model=self.controller.executor.default_model,
+                executor=self.controller.get_executor(),
+                model=default_model,
                 temperature=1.0,
-                max_prompt_len=self.controller.executor.max_input_tokens(),
-                completion_tokens_len=self.controller.executor.max_output_tokens(),
+                max_prompt_len=self.controller.get_executor().max_input_tokens(default_model),
+                completion_tokens_len=self.controller.get_executor().max_output_tokens(default_model),
                 prompt_name='find_selector_or_mouse_x_y',
             ),
             query='',
@@ -776,6 +779,7 @@ class Runtime:
         if m_isinstance(type_name, type):
             type_name = type_name.__name__  # type: ignore
 
+        default_model = self.controller.get_executor().default_model
         logging.debug(f'coerce({str(expr)[:50]}, {str(type_name)}) length of expr: {len(str(expr))}')
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
@@ -792,10 +796,10 @@ class Runtime:
                 ),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
+                model=default_model,
                 temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
+                max_prompt_len=self.controller.get_executor().max_input_tokens(default_model),
+                completion_tokens_len=self.controller.get_executor().max_output_tokens(default_model),
                 prompt_name='coerce.prompt',
             ),
             query='',
@@ -824,6 +828,7 @@ class Runtime:
 
         write_client_stream(TextContent(f'llm_call() calling {self.controller.get_executor().default_model} with instruction: "{llm_instruction}"\n'))
 
+        default_model = self.controller.get_executor().default_model
         assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_user(
@@ -838,10 +843,10 @@ class Runtime:
                 ),
                 context_messages=self.controller.statement_to_message(expr_list),
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
-                temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
+                model=default_model,
+                temperature=1.0,
+                max_prompt_len=self.controller.get_executor().max_input_tokens(default_model),
+                completion_tokens_len=self.controller.get_executor().max_output_tokens(default_model),
                 prompt_name='llm_call.prompt',
                 stream_handler=get_stream_handler() or awaitable_none,
             ),
@@ -855,6 +860,7 @@ class Runtime:
         logging.debug(f'llm_list_bind({str(expr)[:20]}, {repr(llm_instruction)}, {count}, {list_type})')
         context = Helpers.str_get_str(expr)
 
+        default_model = self.controller.get_executor().default_model
         assistant: Assistant = self.controller.execute_llm_call(
             llm_call=LLMCall(
                 user_message=Helpers.prompt_user(
@@ -871,10 +877,10 @@ class Runtime:
                 ),
                 context_messages=[],
                 executor=self.controller.get_executor(),
-                model=self.controller.get_executor().default_model,
+                model=default_model,
                 temperature=0.0,
-                max_prompt_len=self.controller.get_executor().max_input_tokens(),
-                completion_tokens_len=self.controller.get_executor().max_output_tokens(),
+                max_prompt_len=self.controller.get_executor().max_input_tokens(default_model),
+                completion_tokens_len=self.controller.get_executor().max_output_tokens(default_model),
                 prompt_name='llm_list_bind.prompt',
             ),
             query=llm_instruction,

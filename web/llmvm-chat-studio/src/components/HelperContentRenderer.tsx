@@ -81,7 +81,7 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
       
       if (imageData) {
         parts.push(
-          <Card key={imageId} className="my-4 p-4">
+          <Card key={imageId} className="my-4 p-4 overflow-hidden">
             <div className="flex items-center gap-2 mb-2 text-sm text-gray-600">
               <ImageIcon size={16} />
               <span>Image</span>
@@ -89,7 +89,7 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
             <img
               src={`data:image/png;base64,${imageData.data}`}
               alt="Generated content"
-              className="max-w-full h-auto rounded"
+              className="w-full max-w-full h-auto rounded object-contain"
             />
           </Card>
         );
@@ -122,7 +122,7 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         return (
           <div key={index} className="my-3">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Helper Code:</div>
-            <div className="relative overflow-visible group">
+            <div className="relative group">
               <code className="absolute top-2 left-2 text-xs bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded z-10">
                 {'<helpers>'}
               </code>
@@ -134,29 +134,31 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
               >
                 {isCopied ? <Check size={14} /> : <Copy size={14} />}
               </Button>
-              <SyntaxHighlighter
-                language="python"
-                style={isDark ? oneDark : oneLight}
-                customStyle={{
-                  margin: 0,
-                  borderRadius: '0.5rem',
-                  fontSize: '0.9375rem',
-                  paddingTop: '1rem',
-                  paddingBottom: '2.5rem',
-                  paddingRight: '3rem', // Make room for copy button
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                  overflowWrap: 'break-word',
-                }}
-                codeTagProps={{
-                  style: {
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }
-                }}
-              >
-                {codeContent}
-              </SyntaxHighlighter>
+              <div className="overflow-x-auto rounded-lg">
+                <SyntaxHighlighter
+                  language="python"
+                  style={isDark ? oneDark : oneLight}
+                  customStyle={{
+                    margin: 0,
+                    borderRadius: '0.5rem',
+                    fontSize: '0.9375rem',
+                    paddingTop: '2.5rem',
+                    paddingBottom: '2.5rem',
+                    paddingRight: '3rem',
+                    overflowX: 'visible',
+                    minWidth: 'fit-content',
+                  }}
+                  codeTagProps={{
+                    style: {
+                      whiteSpace: 'pre',
+                      wordBreak: 'normal',
+                      display: 'block',
+                    }
+                  }}
+                >
+                  {codeContent}
+                </SyntaxHighlighter>
+              </div>
               {segment.isComplete && (
                 <code className="absolute bottom-2 left-2 text-xs bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded z-10">
                   {'</helpers>'}
@@ -177,18 +179,78 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         const resultContent = resultMatch ? resultMatch[1] : segment.content.replace('<helpers_result>', '');
 
         return (
-          <div key={index} className="my-3">
+          <div key={index} className="my-3 overflow-hidden">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Helper Result:</div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 relative overflow-visible">
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 relative overflow-hidden">
               <code className="absolute top-2 left-2 text-xs bg-blue-100 dark:bg-blue-800 px-1 py-0.5 rounded z-10">
                 {'<helpers_result>'}
               </code>
-              <div className="pt-6 pb-6">
+              <div className="pt-6 pb-6 overflow-x-auto">
                 {renderContentWithImages(resultContent)}
               </div>
               {segment.isComplete && (
                 <code className="absolute bottom-2 left-2 text-xs bg-blue-100 dark:bg-blue-800 px-1 py-0.5 rounded z-10">
                   {'</helpers_result>'}
+                </code>
+              )}
+            </div>
+            {!segment.isComplete && isStreaming && (
+              <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                ⚡ Streaming...
+              </div>
+            )}
+          </div>
+        );
+
+      case 'program_block':
+        // Extract content without tags for syntax highlighting
+        const programMatch = segment.content.match(/<program>([\s\S]*?)(?:<\/program>)?$/);
+        const programContent = programMatch ? programMatch[1] : segment.content.replace('<program>', '');
+        const isProgramCopied = copiedCode === programContent;
+
+        return (
+          <div key={index} className="my-3">
+            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Program Code:</div>
+            <div className="relative group">
+              <code className="absolute top-2 left-2 text-xs bg-purple-200 dark:bg-purple-700 px-1 py-0.5 rounded z-10">
+                {'<program>'}
+              </code>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyToClipboard(programContent)}
+                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-20 h-8 px-2"
+              >
+                {isProgramCopied ? <Check size={14} /> : <Copy size={14} />}
+              </Button>
+              <div className="overflow-x-auto rounded-lg">
+                <SyntaxHighlighter
+                  language="python"
+                  style={isDark ? oneDark : oneLight}
+                  customStyle={{
+                    margin: 0,
+                    borderRadius: '0.5rem',
+                    fontSize: '0.9375rem',
+                    paddingTop: '2.5rem',
+                    paddingBottom: '2.5rem',
+                    paddingRight: '3rem',
+                    overflowX: 'visible',
+                    minWidth: 'fit-content',
+                  }}
+                  codeTagProps={{
+                    style: {
+                      whiteSpace: 'pre',
+                      wordBreak: 'normal',
+                      display: 'block',
+                    }
+                  }}
+                >
+                  {programContent}
+                </SyntaxHighlighter>
+              </div>
+              {segment.isComplete && (
+                <code className="absolute bottom-2 left-2 text-xs bg-purple-200 dark:bg-purple-700 px-1 py-0.5 rounded z-10">
+                  {'</program>'}
                 </code>
               )}
             </div>

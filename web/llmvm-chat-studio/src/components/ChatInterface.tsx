@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import ThreadSidebar from "./ThreadSidebar";
-import MessageDisplay from "./MessageDisplay";
+import MessageDisplay, { MessageDisplayHandle } from "./MessageDisplay";
 import MessageInput from "./MessageInput";
 import ThreadSettingsDialog, { ThreadSettings } from "./ThreadSettingsDialog";
 import { Button } from "@/components/ui/button";
@@ -31,8 +31,8 @@ export interface Thread {
 }
 
 const defaultSettings: ThreadSettings = {
-  executor: "openai",
-  model: "gpt-4.1",
+  executor: "anthropic",
+  model: "claude-sonnet-4-20250514",
   temperature: 1.0,
   endpoint: "",
   compression: "auto",
@@ -66,13 +66,14 @@ const ChatInterface = () => {
         }
       ],
       lastActivity: new Date(),
-      model: "gpt-4.1",
+      model: "claude-3-5-sonnet-20241022",
       mode: "tools",
       settings: defaultSettings
     }
   ]);
   const [programs, setPrograms] = useState<Thread[]>([]);
   const [activeThreadId, setActiveThreadId] = useState("1");
+  const messageDisplayRef = useRef<MessageDisplayHandle>(null);
 
   const activeThread = threads.find(t => t.id === activeThreadId) || programs.find(p => p.id === activeThreadId);
 
@@ -90,7 +91,7 @@ const ChatInterface = () => {
         if (!healthy) {
           console.warn('LLMVM service is not reachable at localhost:8011');
         }
-        
+
         // Load existing threads and programs from LLMVM if connected
         if (healthy) {
           try {
@@ -101,18 +102,18 @@ const ChatInterface = () => {
               const regularThreads = llmvmThreads.filter(t => t.current_mode !== 'program');
               // Sort threads by ID in reverse order (newest first)
               const sortedThreads = [...regularThreads].sort((a, b) => b.id - a.id);
-              
+
               // Convert LLMVM threads to UI threads
               const uiThreads: Thread[] = sortedThreads.map(llmvmThread => {
                 let title = `Thread ${llmvmThread.id}`;
-                
+
                 // Use explicit title if available
                 if (llmvmThread.title) {
                   title = llmvmThread.title;
                 } else {
                   // Otherwise, get the first user message for the title
                   const firstUserMessage = llmvmThread.messages.find(msg => msg.role === 'user');
-                  
+
                   if (firstUserMessage && firstUserMessage.content) {
                     // Extract text content from the message
                     let textContent = '';
@@ -120,14 +121,14 @@ const ChatInterface = () => {
                       textContent = firstUserMessage.content;
                     } else if (Array.isArray(firstUserMessage.content)) {
                       // Find first text content in the array
-                      const textItem = firstUserMessage.content.find((item: any) => 
+                      const textItem = firstUserMessage.content.find((item: any) =>
                         typeof item === 'string' || item.content_type === 'text' || item.type === 'text'
                       );
                       if (textItem) {
                         textContent = typeof textItem === 'string' ? textItem : (textItem.text || textItem.sequence || '');
                       }
                     }
-                    
+
                     // Take first 30 characters and clean up
                     if (textContent) {
                       title = textContent.substring(0, 30).trim();
@@ -137,7 +138,7 @@ const ChatInterface = () => {
                     }
                   }
                 }
-                
+
                 return {
                   id: String(llmvmThread.id),
                   title,
@@ -165,7 +166,7 @@ const ChatInterface = () => {
                 llmvmThreadId: String(llmvmThread.id)
                 };
               });
-              
+
               setThreads(uiThreads);
               // Set the first (newest) thread as active
               if (uiThreads.length > 0) {
@@ -178,11 +179,11 @@ const ChatInterface = () => {
             if (llmvmPrograms && llmvmPrograms.length > 0) {
               // Sort programs by ID in reverse order (newest first)
               const sortedPrograms = [...llmvmPrograms].sort((a, b) => b.id - a.id);
-              
+
               // Convert LLMVM programs to UI threads
               const uiPrograms: Thread[] = sortedPrograms.map(llmvmProgram => {
                 const title = llmvmProgram.title || `Program ${llmvmProgram.id}`;
-                
+
                 return {
                   id: String(llmvmProgram.id),
                   title,
@@ -210,7 +211,7 @@ const ChatInterface = () => {
                   llmvmThreadId: String(llmvmProgram.id)
                 };
               });
-              
+
               setPrograms(uiPrograms);
             }
           } catch (error) {
@@ -232,7 +233,7 @@ const ChatInterface = () => {
     if (content.trim().startsWith('/compile')) {
       // Extract optional compile prompt after /compile
       const compilePrompt = content.trim().substring('/compile'.length).trim();
-      
+
       // Run compile command
       if (activeThread.llmvmThreadId) {
         await runCompileCommand(activeThread.llmvmThreadId, compilePrompt);
@@ -251,14 +252,14 @@ const ChatInterface = () => {
           }
         );
         const llmvmThreadId = String(llmvmThread.id);
-        
+
         // Update thread with LLMVM ID
         setThreads(prev => prev.map(thread =>
           thread.id === activeThreadId
             ? { ...thread, llmvmThreadId }
             : thread
         ));
-        
+
         await runCompileCommand(llmvmThreadId, compilePrompt);
       }
       return;
@@ -345,12 +346,12 @@ const ChatInterface = () => {
     // Add user message and update thread title if needed
     setThreads(prev => prev.map(thread => {
       if (thread.id === activeThreadId) {
-        const updatedThread = { 
-          ...thread, 
-          messages: [...thread.messages, userMessage], 
-          lastActivity: new Date() 
+        const updatedThread = {
+          ...thread,
+          messages: [...thread.messages, userMessage],
+          lastActivity: new Date()
         };
-        
+
         // Update title if this is the first user message or if title is still default
         if (thread.title.startsWith('Thread ') || thread.title === 'New Conversation' || thread.title === 'Welcome to LLMVM') {
           let newTitle = content.substring(0, 30).trim();
@@ -359,7 +360,7 @@ const ChatInterface = () => {
           }
           updatedThread.title = newTitle;
         }
-        
+
         return updatedThread;
       }
       return thread;
@@ -447,7 +448,7 @@ const ChatInterface = () => {
                 streamedContent += String(chunk);
               }
             }
-            
+
             // Update assistant message with streamed content and images
             setThreads(prev => prev.map(thread =>
               thread.id === activeThreadId
@@ -455,9 +456,9 @@ const ChatInterface = () => {
                     ...thread,
                     messages: thread.messages.map(msg =>
                       msg.id === assistantMessageId
-                        ? { 
-                            ...msg, 
-                            content: streamedContent, 
+                        ? {
+                            ...msg,
+                            content: streamedContent,
                             status: "sending",
                             images: streamedImages // Store images separately
                           }
@@ -606,7 +607,7 @@ const ChatInterface = () => {
             } else {
               streamedContent += JSON.stringify(chunk);
             }
-            
+
             // Update assistant message with streamed content
             setThreads(prev => prev.map(thread =>
               thread.id === activeThreadId
@@ -614,9 +615,9 @@ const ChatInterface = () => {
                     ...thread,
                     messages: thread.messages.map(msg =>
                       msg.id === assistantMessageId
-                        ? { 
-                            ...msg, 
-                            content: streamedContent, 
+                        ? {
+                            ...msg,
+                            content: streamedContent,
                             status: "sending"
                           }
                         : msg.id === userMessage.id
@@ -795,7 +796,7 @@ const ChatInterface = () => {
     }
 
     const newTitle = editedTitle.trim();
-    
+
     // Update local state
     setThreads(prev => prev.map(thread =>
       thread.id === activeThreadId
@@ -828,11 +829,11 @@ const ChatInterface = () => {
   return (
     <div className="flex h-full w-full bg-white">
       {/* Sidebar */}
-      <div 
+      <div
         className={`transition-all duration-300 ease-in-out flex-shrink-0 ${
           sidebarOpen ? 'w-80' : 'w-0'
         }`}
-        style={{ 
+        style={{
           overflow: sidebarOpen ? 'visible' : 'hidden',
           minWidth: sidebarOpen ? '20rem' : '0'
         }}
@@ -842,7 +843,13 @@ const ChatInterface = () => {
             threads={threads}
             programs={programs}
             activeThreadId={activeThreadId}
-            onThreadSelect={setActiveThreadId}
+            onThreadSelect={(id: string) => {
+              setActiveThreadId(id);
+              // Scroll to bottom after a short delay to ensure content is rendered
+              setTimeout(() => {
+                messageDisplayRef.current?.scrollToBottom();
+              }, 100);
+            }}
             onNewThread={createNewThread}
           />
         )}
@@ -873,7 +880,7 @@ const ChatInterface = () => {
                   autoFocus
                 />
               ) : (
-                <h1 
+                <h1
                   className="text-lg font-semibold text-gray-900 cursor-pointer hover:text-blue-600"
                   onClick={handleTitleClick}
                   title="Click to edit title"
@@ -906,7 +913,7 @@ const ChatInterface = () => {
 
         {/* Messages */}
         <div className="flex-1 overflow-hidden">
-          <MessageDisplay messages={activeThread?.messages || []} />
+          <MessageDisplay ref={messageDisplayRef} messages={activeThread?.messages || []} />
         </div>
 
         {/* Input */}

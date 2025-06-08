@@ -1,5 +1,5 @@
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Copy, User, Bot, CheckCircle, XCircle, Clock } from "lucide-react";
@@ -11,12 +11,24 @@ interface MessageDisplayProps {
   messages: Message[];
 }
 
-const MessageDisplay = ({ messages }: MessageDisplayProps) => {
+export interface MessageDisplayHandle {
+  scrollToBottom: () => void;
+}
+
+const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ messages }, ref) => {
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
   const lastScrollPositionRef = useRef(0);
+
+  // Expose scrollToBottom method
+  useImperativeHandle(ref, () => ({
+    scrollToBottom: () => {
+      userScrolledRef.current = false;
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }));
 
   // Auto-scroll to bottom when new messages arrive or streaming content updates
   useEffect(() => {
@@ -90,7 +102,7 @@ const MessageDisplay = ({ messages }: MessageDisplayProps) => {
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 overflow-hidden">
           <div className="flex items-center gap-2 mb-2">
             <span className="font-medium text-gray-900">
               {isUser ? "You" : "LLMVM"}
@@ -107,7 +119,7 @@ const MessageDisplay = ({ messages }: MessageDisplayProps) => {
             )}
           </div>
           
-          <div className="max-w-none">
+          <div className="max-w-none overflow-x-auto">
             {(() => {
               if (message.llmvmContent) {
                 return (
@@ -120,8 +132,8 @@ const MessageDisplay = ({ messages }: MessageDisplayProps) => {
                 );
               } else if (message.type === "code") {
                 return (
-                  <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto border">
-                    <code className="text-green-700">{message.content}</code>
+                  <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto border whitespace-pre-wrap break-words">
+                    <code className="text-green-700 block">{message.content}</code>
                   </pre>
                 );
               } else {
@@ -177,6 +189,8 @@ const MessageDisplay = ({ messages }: MessageDisplayProps) => {
       </div>
     </ScrollArea>
   );
-};
+});
+
+MessageDisplay.displayName = 'MessageDisplay';
 
 export default MessageDisplay;

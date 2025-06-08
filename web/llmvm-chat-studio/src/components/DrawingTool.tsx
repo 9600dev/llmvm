@@ -274,7 +274,7 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
             useCORS: true,
             allowTaint: true,
             backgroundColor: '#ffffff',
-            scale: 2,
+            scale: 1,
             logging: false
           });
 
@@ -302,7 +302,7 @@ const DrawingTool = ({ isActive, onCapture, onDeactivate }: DrawingToolProps) =>
             useCORS: true,
             allowTaint: true,
             backgroundColor: '#ffffff',
-            scale: 2,
+            scale: 1,
             logging: false
           });
 

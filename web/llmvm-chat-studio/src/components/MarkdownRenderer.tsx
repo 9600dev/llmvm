@@ -52,7 +52,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
   }
 
   return (
-    <div className={`prose max-w-none prose-gray dark:prose-invert ${className}`}>
+    <div className={`prose max-w-none prose-gray dark:prose-invert overflow-hidden ${className}`}>
       <ReactMarkdown 
         remarkPlugins={[remarkGfm]}
         components={{
@@ -112,6 +112,31 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
               <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 overflow-x-auto my-3" {...props}>
                 {children}
               </pre>
+            );
+          },
+          // Handle tables to prevent overflow
+          table({ children, ...props }: any) {
+            return (
+              <div className="overflow-x-auto my-4">
+                <table className="min-w-full" {...props}>
+                  {children}
+                </table>
+              </div>
+            );
+          },
+          // Handle long links and code
+          a({ children, ...props }: any) {
+            return (
+              <a className="break-words" {...props}>
+                {children}
+              </a>
+            );
+          },
+          p({ children, ...props }: any) {
+            return (
+              <p className="break-words" {...props}>
+                {children}
+              </p>
             );
           }
         }}

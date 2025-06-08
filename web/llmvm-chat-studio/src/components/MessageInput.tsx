@@ -267,7 +267,7 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
 
       {/* Quick commands hint */}
       <div className="mt-2 text-xs text-gray-500">
-        Try commands: <code className="bg-gray-100 px-1 rounded">/compile</code>, <code className="bg-gray-100 px-1 rounded">/search</code>
+        Try commands: <code className="bg-gray-100 px-1 rounded">/compile</code>
       </div>
     </div>
 
