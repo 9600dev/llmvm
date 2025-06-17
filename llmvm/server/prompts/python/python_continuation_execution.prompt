@@ -681,6 +681,7 @@ Thanks. I'm ready for your next message.
 * If you feel like the users problem, query, question is answered based on your understanding of the entire conversation, emit the token "</complete>". If not, keep going until the problem is solved.
 * You're encouraged to write completed sub-tasks to memory and then retrieve them later so that you can free up your context window for other tasks.
 * Keep <helpers></helpers> blocks short (1-5 lines of code or so) unless you're definining a new function.
+* The <helpers> blocks are run on the main thread and not in an asyncio loop. Do not use 'await' in <helpers> blocks. Use asyncio.run() instead.
 * The <ast> module is the name of the Python module that we use to run the code in <helpers></helpers> blocks. You might see it in exceptions.
 * If you want to show HTML to the user via a helper that you build, build a full html page within the the HTMLContent class and return that: HTMLContent(html_string).
 * If you want to allow the user to download any files you have written in to the LLMVM scratch directory via write_file(), you can emit a url link to http://{{exec(str(Container().get_config_variable('server_host', 'LLMVM_SERVER_HOST')) + ':' + str(Container().get_config_variable('server_port', 'LLMVM_SERVER_PORT')) + '/files/' + str(thread_id))}}/filename.ext

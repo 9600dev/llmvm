@@ -508,6 +508,10 @@ class Helpers():
          - The class name (`class_name`)
          - The docstring (`description`)
         """
+        # Special handling for MCPToolWrapper
+        if hasattr(function, 'get_function_description'):
+            return function.get_function_description()
+            
         docstring = inspect.getdoc(function) or ""
         signature = inspect.signature(function)
 
@@ -526,6 +530,9 @@ class Helpers():
         return_annotation = type_hints.get('return', signature.return_annotation)
         return_type = return_annotation if return_annotation != inspect.Signature.empty else None
 
+        # Check if the function is async
+        is_async = inspect.iscoroutinefunction(function)
+        
         return {
             "parameters": parameters,
             "types": types,
@@ -533,6 +540,7 @@ class Helpers():
             "invoked_by": function.__name__,
             "class_name": Helpers.get_class_name_of_method(function),
             "description": docstring,
+            "is_async": is_async,
         }
 
     @staticmethod
@@ -544,6 +552,11 @@ class Helpers():
 
         Returns a tuple: (is_static_method: bool, owning_class_or_None)
         """
+        # Special handling for MCPToolWrapper
+        if hasattr(func, 'get_function_description'):
+            # MCP tools are standalone functions, not methods
+            return (True, None)
+            
         # Attempt to discover the class (if bound method)
         cls_candidate = getattr(func, '__self__', None)
         if cls_candidate is not None:
@@ -551,11 +564,16 @@ class Helpers():
             if not inspect.isclass(cls_candidate):
                 cls_candidate = type(cls_candidate)
 
-        sig = inspect.signature(func)
-        params = list(sig.parameters.keys())
-        if params and params[0] == "self":
-            # Probably an instance method
-            return (False, cls_candidate)
+        try:
+            sig = inspect.signature(func)
+            params = list(sig.parameters.keys())
+            if params and params[0] == "self":
+                # Probably an instance method
+                return (False, cls_candidate)
+        except (ValueError, TypeError):
+            # If we can't get a signature, treat as static
+            pass
+            
         # In more thorough code, you might also check `params[0] == "cls"` for a class method.
         # For simplicity, we treat everything else as static
         return (True, cls_candidate)
@@ -610,18 +628,29 @@ class Helpers():
         if not is_static and cls:
             # Instance method
             # e.g.: def my_method(a: int, b: str) -> int  # Instantiate with MyClass(). Doc here
+            async_prefix = "async " if description.get("is_async", False) else ""
             return (
-                f'def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}  # Instantiate with {cls.__name__}().\n'
+                f'{async_prefix}def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}  # Instantiate with {cls.__name__}().\n'
+                f'    """\n'
+                f'{textwrap.indent(doc, " " * 4)}\n'
+                f'    """\n'
+            )
+        elif description.get("class_name") is None:
+            # Standalone function (like MCP tools)
+            async_prefix = "async " if description.get("is_async", False) else ""
+            return (
+                f'{async_prefix}def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}\n'
                 f'    """\n'
                 f'{textwrap.indent(doc, " " * 4)}\n'
                 f'    """\n'
             )
         else:
-            # Static method or function
+            # Static method or function with a class
+            async_prefix = "async " if description.get("is_async", False) else ""
             return (
                 f'class {description["class_name"]}:\n'
                 f'    @staticmethod\n'
-                f'    def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}\n'
+                f'    {async_prefix}def {description["invoked_by"]}({", ".join(parameter_type_list)}) -> {return_type_str}\n'
                 f'        """\n'
                 f'{textwrap.indent(doc, " " * 8)}\n'
                 f'        """\n'

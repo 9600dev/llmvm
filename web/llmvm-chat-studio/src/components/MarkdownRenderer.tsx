@@ -52,7 +52,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
   }
 
   return (
-    <div className={`prose prose-gray dark:prose-invert break-words ${className}`}>
+    <div className={`prose prose-gray dark:prose-invert max-w-none overflow-hidden ${className}`}>
       <ReactMarkdown 
         remarkPlugins={[remarkGfm]}
         components={{
@@ -91,7 +91,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
               
               // For other code languages, use SyntaxHighlighter
               return (
-                <div className="relative group my-3 overflow-x-auto">
+                <div className="relative group my-3 w-full">
                   <Button
                     variant="ghost"
                     size="sm"
@@ -100,26 +100,38 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
                   >
                     {isCopied ? <Check size={14} /> : <Copy size={14} />}
                   </Button>
-                  <SyntaxHighlighter
-                    language={language || 'text'}
-                    style={isDark ? oneDark : oneLight}
-                    customStyle={{
-                      margin: 0,
-                      borderRadius: '0.5rem',
-                      fontSize: '0.9375rem',
-                      paddingRight: '3rem', // Make room for copy button
-                    }}
-                    {...props}
-                  >
-                    {codeString}
-                  </SyntaxHighlighter>
+                  <div className="overflow-x-auto w-full">
+                    <SyntaxHighlighter
+                      language={language || 'text'}
+                      style={isDark ? oneDark : oneLight}
+                      customStyle={{
+                        margin: 0,
+                        borderRadius: '0.5rem',
+                        fontSize: '0.9375rem',
+                        paddingRight: '3rem', // Make room for copy button
+                        overflowX: 'auto',
+                        width: '100%',
+                        display: 'block'
+                      }}
+                      codeTagProps={{
+                        style: {
+                          whiteSpace: 'pre',
+                          display: 'block',
+                          overflowX: 'auto'
+                        }
+                      }}
+                      {...props}
+                    >
+                      {codeString}
+                    </SyntaxHighlighter>
+                  </div>
                 </div>
               );
             }
             
             // For inline code
             return (
-              <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono break-all" {...props}>
+              <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono break-words" {...props}>
                 {children}
               </code>
             );
@@ -133,7 +145,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
             }
             
             return (
-              <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 overflow-x-auto my-3 max-w-full" {...props}>
+              <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 overflow-x-auto my-3 w-full" {...props}>
                 {children}
               </pre>
             );
@@ -151,7 +163,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
           // Handle long links and code
           a({ children, ...props }: any) {
             return (
-              <a className="break-all hover:break-words" {...props}>
+              <a className="break-words overflow-wrap-anywhere" {...props}>
                 {children}
               </a>
             );

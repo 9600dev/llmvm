@@ -52,13 +52,13 @@ class ExecutionController(Controller):
     def __init__(
         self,
         executor: Executor,
-        tools: list[Callable],
+        helpers: Callable[[], list[Callable]],
         exception_limit: int = 3,
         thread_id: int = 0,
     ):
         super().__init__()
         self.executor = executor
-        self.tools = tools
+        self.helpers = helpers
         self.exception_limit = exception_limit
         self.thread_id = thread_id
 

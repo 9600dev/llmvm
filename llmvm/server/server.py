@@ -12,10 +12,11 @@ import time
 import types
 import datetime as dt
 from importlib import resources
-from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Iterable, Optional, cast
-import uuid
+from typing import Annotated, Any, AsyncIterator, Awaitable, Callable, Dict, Iterable, Optional, cast
 
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
+
 import jsonpickle
 import nest_asyncio
 from pydantic import BaseModel
@@ -47,6 +48,7 @@ from llmvm.server.persistent_cache import MemoryCache, PersistentCache
 from llmvm.server.python_execution_controller import ExecutionController
 from llmvm.server.python_runtime_host import PythonRuntimeHost
 from llmvm.server.runtime import Runtime
+from llmvm.server.mcp_monitor import MCPMonitor
 # needed for pydantic late binding serialization
 from anthropic.types import Completion as AnthropicCompletion, Message as AnthropicMessage, ContentBlock
 from anthropic import BaseModel
@@ -74,12 +76,31 @@ except ValueError:
 
 
 app = FastAPI()
+global helpers, mcp_helpers
 
-helpers = Helpers.flatten(list(
+# Initialize helpers as a list that can be updated
+base_helpers = Helpers.flatten(list(
     filter(
         lambda x: x is not None, [Helpers.get_callables(logging, helper) for helper in Container().get('helper_functions')]
     )
 ))
+
+
+helpers = list(base_helpers)  # Make it mutable
+mcp_helpers: Dict[str, Callable] = {}  # Track MCP-specific helpers
+
+
+# MCP helpers will be discovered dynamically on each request
+
+# Initialize MCP monitor with configurable patterns
+mcp_server_patterns = Container().get_config_variable('mcp_server_patterns', default=None)
+mcp_exclude_patterns = Container().get_config_variable('mcp_exclude_patterns', default=None)
+
+# Create a global MCP monitor instance (no callback needed for sync approach)
+mcp_monitor = MCPMonitor(
+    server_patterns=mcp_server_patterns,
+    exclude_patterns=mcp_exclude_patterns
+)
 
 
 os.makedirs(Container().get('cache_directory'), exist_ok=True)
@@ -192,6 +213,42 @@ def get_executor(
     return executor_instance
 
 
+async def __get_helpers_async() -> list[Callable]:
+    """Get all helpers including dynamically discovered MCP tools (async version)"""
+    global helpers, mcp_helpers, mcp_monitor
+
+    # Get current MCP tools
+    try:
+        current_mcp_tools = await mcp_monitor.get_current_tools_async()
+
+        # Update our tracking of MCP helpers
+        mcp_helpers = current_mcp_tools
+
+        # Combine base helpers with current MCP tools
+        all_helpers = list(helpers)  # Start with base helpers
+
+        # Add MCP tools
+        for name, tool in current_mcp_tools.items():
+            # Check if already in list by name
+            if not any(h.__name__ == name for h in all_helpers):
+                all_helpers.append(tool)
+
+        logging.debug(f"Returning {len(all_helpers)} helpers ({len(current_mcp_tools)} MCP tools)")
+        return all_helpers
+
+    except Exception as e:
+        logging.error(f"Error getting MCP tools: {e}")
+        # Return just base helpers if MCP detection fails
+        return list(helpers)
+
+def __get_helpers() -> list[Callable]:
+    """Get all helpers - sync wrapper that returns base helpers only"""
+    # This is used in places where we can't easily make things async
+    # It returns only the base helpers without MCP tools
+    global helpers
+    return list(helpers)
+
+
 def get_controller(
         thread_id: int = 0,
         executor: Optional[str] = None,
@@ -201,7 +258,7 @@ def get_controller(
     executor_instance = get_executor(executor, max_input_tokens, max_output_tokens)
     return ExecutionController(
         executor=executor_instance,
-        tools=helpers,
+        helpers=__get_helpers(),  # Pass the list, not the function
         thread_id=thread_id
     )
 
@@ -424,7 +481,20 @@ async def health():
     logging.debug('/health')
     return {'status': 'ok'}
 
+@app.get('/helpers')
+async def list_helpers():
+    """Debug endpoint to list current helpers"""
+    helpers = await __get_helpers_async()
+    return {
+        'total_helpers': len(helpers),
+        'helper_names': [h.__name__ for h in helpers],
+        'mcp_helpers': list(mcp_helpers.keys()) if mcp_helpers else []
+    }
+
 async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncIterator[Any]:
+    # Get helpers with MCP tools asynchronously
+    helpers = await __get_helpers_async()
+
     """
     Core logic of tools_completions, returning an async generator instead of StreamingResponse.
     This allows other endpoints to use this logic and intercept the stream.
@@ -491,10 +561,14 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
                 runtime_dict = Helpers.deserialize_locals_dict(thread.locals_dict)
                 runtime_dict.update(runtime_dict_cache.get(thread.id) or {})
 
+                # Create a local copy of helpers for this request
+                # Note: We use the already-fetched helpers from above which includes MCP tools
+                local_helpers = list(helpers)
+
                 # add the runtime defined tools to the list of tools
                 for key, value in runtime_dict.items():
                     if isinstance(value, types.FunctionType) and value.__code__.co_filename == '<ast>':
-                        helpers.append(value)
+                        local_helpers.append(value)
 
                 # todo: this is a hack
                 result, runtime_state = await controller.aexecute_continuation(
@@ -505,7 +579,7 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
                     max_output_tokens=thread.output_token_len,
                     compression=compression,
                     cookies=cookies,
-                    helpers=cast(list[Callable], helpers),
+                    helpers=cast(list[Callable], local_helpers),
                     runtime_state=AutoGlobalDict(runtime_dict),
                     thinking=thread.thinking,
                 )
@@ -637,7 +711,7 @@ async def compile(request: SessionThreadModel) -> StreamingResponse:
                 python_runtime_host.compile_and_execute_code_block(
                     python_code=code_block,
                     messages_list=[MessageModel.to_message(m) for m in captured_thread.messages],
-                    helpers=helpers,
+                    helpers=__get_helpers(),
                     runtime_state=runtime_state,
                 )
             except Exception as ex:
@@ -676,7 +750,7 @@ async def execute_python_in_thread(thread_id: int, python_str: str):
         list_answers = python_runtime_host.compile_and_execute_code_block(
             python_code=python_str,
             messages_list=messages,
-            helpers=helpers,
+            helpers=__get_helpers(),
             runtime_state=runtime_state,
         )
         state_result = python_runtime_host.get_last_statement(python_str, runtime_state=runtime_state)
@@ -998,8 +1072,10 @@ if __name__ == '__main__':
     rich.print(f'[{role_color}]Make sure to `playwright install`.[/{role_color}]')
     rich.print(f'[{role_color}]If you have pip upgraded, delete ~/.config/llmvm/config.yaml to get latest config and helpers.[/{role_color}]')
 
-    for helper in helpers:
+    for helper in base_helpers:
         rich.print(f'[{helper_color}]Loaded helper: {helper.__name__}[/{helper_color}]')  # type: ignore
+
+    rich.print(f'\n[{role_color}]MCP support enabled - servers will be detected on request[/{role_color}]')
 
     # you can run this using uvicorn to get better asynchronousy, but don't count on it yet.
     # uvicorn server:app --loop asyncio --workers 4 --log-level debug --host 0.0.0.0 --port 8011
