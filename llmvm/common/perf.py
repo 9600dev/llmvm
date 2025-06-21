@@ -16,7 +16,8 @@ from openai.types.chat.chat_completion_chunk import \
 from openai.types.chat.chat_completion import ChatCompletion as OAICompletion
 from openai.types.responses import Response, ResponseReasoningItem, ResponseContentPartAddedEvent, \
     ResponseTextDeltaEvent, ResponseTextDoneEvent, ResponseContentPartDoneEvent, ResponseAudioDeltaEvent, ResponseAudioDoneEvent, \
-    ResponseCreatedEvent, ResponseCompletedEvent, ResponseInProgressEvent, ResponseOutputItemAddedEvent, ResponseOutputItemDoneEvent
+    ResponseCreatedEvent, ResponseCompletedEvent, ResponseInProgressEvent, ResponseOutputItemAddedEvent, ResponseOutputItemDoneEvent, \
+    ResponseReasoningSummaryTextDeltaEvent, ResponseReasoningSummaryTextDoneEvent, ResponseReasoningSummaryPartDoneEvent
 
 from llmvm.common.container import Container
 from llmvm.common.logging_helpers import setup_logging
@@ -169,11 +170,18 @@ class LoggingAsyncIterator:
                 return StreamingToken(result.part.text, underlying=result, thinking=False)  # type: ignore
             elif isinstance(result, ResponseTextDeltaEvent):
                 return StreamingToken(result.delta if result.delta else '', underlying=result, thinking=False)
-            elif isinstance(result, ResponseAudioDeltaEvent) or (hasattr(result, 'type') and result.type == 'response.reasoning_summary_part.added'):  # type: ignore
+            elif isinstance(result, ResponseAudioDeltaEvent):
                 return StreamingToken(result.delta if result.delta else '', underlying=result, thinking=True)  # type: ignore
+            elif isinstance(result, ResponseReasoningSummaryTextDeltaEvent):
+                return StreamingToken(result.delta if result.delta else '', underlying=result, thinking=True)
+            elif hasattr(result, 'type') and result.type == 'response.reasoning_summary_part.added':  # type: ignore
+                # ResponseReasoningSummaryPartAddedEvent doesn't have a delta attribute, skip it
+                return StreamingToken('', underlying=result, thinking=True)  # type: ignore
             elif isinstance(result, ResponseTextDoneEvent):
                 return StreamingToken('\n', underlying=result, thinking=False)
             elif isinstance(result, ResponseAudioDoneEvent):
+                return StreamingToken('\n', underlying=result, thinking=True)
+            elif isinstance(result, ResponseReasoningSummaryTextDoneEvent):
                 return StreamingToken('\n', underlying=result, thinking=True)
             # we've finished streaming, emit a newline
             elif isinstance(result, ResponseOutputItemDoneEvent):
@@ -186,6 +194,7 @@ class LoggingAsyncIterator:
             elif (
                 isinstance(result, ResponseContentPartDoneEvent)
                 or isinstance(result, ResponseInProgressEvent)
+                or isinstance(result, ResponseReasoningSummaryPartDoneEvent)
             ):
                 return StreamingToken('', underlying=result, thinking=False)
             else:

@@ -328,7 +328,7 @@ class ThinkingParamType(click.ParamType):
                 return 1
             else:
                 return 2
-        self.fail(f'{value} is not a valid thinking value. Must be an integer or one of "low", "medium", "high".', param, ctx)
+        self.fail(f'{value} is not a valid thinking value. Must be an integer (Anthropic) or one of "low", "medium", "high" (OpenAI).', param, ctx)
 
 
 def execute_python_in_thread(python_str: str, id: int, endpoint: str) -> None:
