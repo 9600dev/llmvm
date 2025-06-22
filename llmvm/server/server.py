@@ -26,6 +26,7 @@ from fastapi import (BackgroundTasks, FastAPI, HTTPException, Query, Request, Re
                      UploadFile)
 from fastapi.param_functions import File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from llmvm.client.client import LLMVMClient, get_client
 from llmvm.common.anthropic_executor import AnthropicExecutor
@@ -76,6 +77,16 @@ except ValueError:
 
 
 app = FastAPI()
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with specific origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 global helpers, mcp_helpers
 
 # Initialize helpers as a list that can be updated

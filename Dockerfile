@@ -56,14 +56,21 @@ RUN apt-get install -y libssl-dev
 RUN apt-get install -y libffi-dev
 RUN apt-get install -y liblzma-dev
 
+# Install Node.js and nginx for the web application
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+RUN apt-get install -y nodejs
+RUN apt-get install -y nginx
+
 RUN echo 'llmvm:llmvm' | chpasswd
 RUN service ssh start
 
 # ssh
 EXPOSE 22
 EXPOSE 2222
-# server.py
-EXPOSE 8000
+# llmvm.server
+EXPOSE 8011
+# website
+EXPOSE 8080
 
 # copy over the source and data
 COPY ./ /home/llmvm/llmvm/
@@ -80,6 +87,7 @@ RUN mkdir /home/llmvm/.local/share/llmvm
 RUN mkdir /home/llmvm/.local/share/llmvm/cache
 RUN mkdir /home/llmvm/.local/share/llmvm/download
 RUN mkdir /home/llmvm/.local/share/llmvm/logs
+RUN mkdir /home/llmvm/.local/share/llmvm/memory
 RUN mkdir /home/llmvm/.ssh
 
 RUN chown -R llmvm:llmvm /home/llmvm
@@ -146,11 +154,29 @@ RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /home/llmvm/.ssh/environment
 
 RUN conda run -n llmvm bash -c "playwright install"
 
+# Build the SDK first
+WORKDIR /home/llmvm/llmvm/web/js-llmvm-sdk
+RUN npm install
+RUN npm run build
+
+# Build the website
+WORKDIR /home/llmvm/llmvm/web/llmvm-chat-studio
+# Add the SDK as a local dependency and install
+RUN npm install ../js-llmvm-sdk
+RUN npm install
+RUN npm run build
+
 # Copy the wrapper script from the scripts directory and make it executable
+WORKDIR /home/llmvm/llmvm
 COPY --chmod=755 ./scripts/llmvm-client-wrapper.sh /home/llmvm/llmvm-client-wrapper.sh
 
 # spin back to root, to start sshd
 USER root
+
+# Configure nginx
+COPY ./docker/nginx.conf /etc/nginx/sites-available/llmvm-web
+RUN ln -s /etc/nginx/sites-available/llmvm-web /etc/nginx/sites-enabled/
+RUN rm -f /etc/nginx/sites-enabled/default
 
 RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config
 RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config_standard
@@ -161,4 +187,8 @@ RUN echo 'Match User llmvm' >> /etc/ssh/sshd_config_standard && \
 
 WORKDIR /home/llmvm/llmvm
 
-ENTRYPOINT service ssh restart && /usr/sbin/sshd -f /etc/ssh/sshd_config && /usr/sbin/sshd -f /etc/ssh/sshd_config_standard && sudo -E -u llmvm bash -c 'source ~/.bashrc; cd /home/llmvm/llmvm; conda activate llmvm;LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_PROFILING="true" python -m llmvm.server.server' && tail -f /dev/null
+ENTRYPOINT service ssh restart; \
+    service nginx start; \
+    /usr/sbin/sshd -f /etc/ssh/sshd_config; \
+    /usr/sbin/sshd -f /etc/ssh/sshd_config_standard; \
+    sudo -E -u llmvm bash -c 'source ~/.bashrc; cd /home/llmvm/llmvm; conda activate llmvm; LLMVM_FULL_PROCESSING="true" LLMVM_EXECUTOR_TRACE="~/.local/share/llmvm/executor.trace" LLMVM_PROFILING="true" python -m llmvm.server.server'

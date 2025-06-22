@@ -132,6 +132,7 @@ numpy-financial = "^1.0.0"
 pyte = "^0.8.2"
 markdown2 = "^2.5.3"
 transformers = "^4.51.3"
+mcp = "^1.9.4"
 
 [build-system]
 requires = ["poetry-core"]

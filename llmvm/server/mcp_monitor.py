@@ -10,7 +10,8 @@ import json
 import logging
 import os
 import anyio
-import psutil
+import subprocess
+import signal
 from contextlib import AsyncExitStack
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
@@ -156,17 +157,84 @@ class MCPServerConnection:
         self.port: Optional[int] = None
 
     def _get_process_listening_port(self, pid: int) -> Optional[int]:
+        """Get listening port for a process using lsof or netstat."""
         try:
-            proc = psutil.Process(pid)
-            connections = proc.connections(kind='tcp')  # type: ignore
-
-            for conn in connections:
-                if (conn.status == psutil.CONN_LISTEN and
-                    conn.laddr and
-                    conn.laddr.ip in ('127.0.0.1', '::1', '0.0.0.0')):
-                    return conn.laddr.port
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
+            # Try lsof first (more common on Unix-like systems)
+            try:
+                result = subprocess.run(
+                    ['lsof', '-iTCP', '-sTCP:LISTEN', '-P', '-n', f'-p{pid}'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines[1:]:  # Skip header
+                        parts = line.split()
+                        if len(parts) >= 9:
+                            # Extract port from the NAME column (e.g., "*:8080" or "127.0.0.1:8080")
+                            name = parts[8]
+                            if ':' in name:
+                                port_str = name.split(':')[-1]
+                                try:
+                                    return int(port_str)
+                                except ValueError:
+                                    continue
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+            
+            # Try netstat as fallback
+            try:
+                result = subprocess.run(
+                    ['netstat', '-anp', '2>/dev/null'],
+                    capture_output=True,
+                    text=True,
+                    shell=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if f'{pid}/' in line and 'LISTEN' in line:
+                            parts = line.split()
+                            if len(parts) >= 4:
+                                # Extract port from local address
+                                local_addr = parts[3]
+                                if ':' in local_addr:
+                                    port_str = local_addr.split(':')[-1]
+                                    try:
+                                        return int(port_str)
+                                    except ValueError:
+                                        continue
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+            
+            # Try ss as another fallback (modern Linux)
+            try:
+                result = subprocess.run(
+                    ['ss', '-tlnp'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if f'pid={pid}' in line:
+                            parts = line.split()
+                            if len(parts) >= 4:
+                                # Extract port from local address
+                                local_addr = parts[3]
+                                if ':' in local_addr:
+                                    port_str = local_addr.split(':')[-1]
+                                    try:
+                                        return int(port_str)
+                                    except ValueError:
+                                        continue
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass
+                
+        except Exception as e:
+            logging.debug(f"Error getting listening port for PID {pid}: {e}")
+        
         return None
 
     async def connect(self) -> bool:
@@ -286,46 +354,90 @@ class MCPMonitor:
         ]
 
     def find_mcp_processes(self) -> Dict[int, dict]:
+        """Find MCP server processes using ps command."""
         mcp_processes = {}
 
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
-            try:
-                cmdline_list = proc.info.get('cmdline', [])
-                if cmdline_list:
-                    cmdline = ' '.join(cmdline_list)
-                else:
-                    cmdline = proc.info.get('name', 'Unknown')
-
-                cmdline_lower = cmdline.lower()
-
-                if any(exclude in cmdline_lower for exclude in self.exclude_patterns):
-                    continue
-
-                is_mcp = False
-
-                if 'fastmcp' in cmdline_lower:
-                    is_mcp = True
-
-                elif any(pattern in cmdline_lower for pattern in self.server_patterns):
-                    is_mcp = True
-
-                elif 'mcp.run' in cmdline_lower or 'mcp run' in cmdline_lower:
-                    is_mcp = True
-
-                elif 'mcp' in cmdline_lower and cmdline_lower.endswith('.py'):
-                    if 'server' in cmdline_lower:
+        try:
+            # Use ps to get process information
+            # -e: all processes, -o: output format
+            result = subprocess.run(
+                ['ps', '-eo', 'pid,comm,args,lstart'],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0:
+                logging.error(f"ps command failed: {result.stderr}")
+                return mcp_processes
+            
+            lines = result.stdout.strip().split('\n')
+            if not lines:
+                return mcp_processes
+                
+            # Skip header line
+            for line in lines[1:]:
+                try:
+                    # Parse ps output
+                    parts = line.strip().split(None, 3)  # Split into max 4 parts
+                    if len(parts) < 3:
+                        continue
+                        
+                    pid_str = parts[0]
+                    name = parts[1]
+                    
+                    # Handle case where there's no args column
+                    if len(parts) >= 3:
+                        cmdline = parts[2]
+                        if len(parts) > 3:
+                            # Append any additional args
+                            cmdline = parts[2] + ' ' + parts[3]
+                    else:
+                        cmdline = name
+                    
+                    # Convert PID to int
+                    try:
+                        pid = int(pid_str)
+                    except ValueError:
+                        continue
+                    
+                    cmdline_lower = cmdline.lower()
+                    
+                    # Check exclusion patterns
+                    if any(exclude in cmdline_lower for exclude in self.exclude_patterns):
+                        continue
+                    
+                    is_mcp = False
+                    
+                    # Check for MCP patterns
+                    if 'fastmcp' in cmdline_lower:
                         is_mcp = True
-
-                if is_mcp:
-                    mcp_processes[proc.info['pid']] = {
-                        'pid': proc.info['pid'],
-                        'name': proc.info['name'],
-                        'cmdline': cmdline,
-                        'started': datetime.fromtimestamp(proc.info['create_time']).strftime('%Y-%m-%d %H:%M:%S')
-                    }
-            except (psutil.NoSuchProcess, psutil.AccessDenied, TypeError):
-                continue
-
+                    elif any(pattern in cmdline_lower for pattern in self.server_patterns):
+                        is_mcp = True
+                    elif 'mcp.run' in cmdline_lower or 'mcp run' in cmdline_lower:
+                        is_mcp = True
+                    elif 'mcp' in cmdline_lower and cmdline_lower.endswith('.py'):
+                        if 'server' in cmdline_lower:
+                            is_mcp = True
+                    
+                    if is_mcp:
+                        # Get start time (approximation using ps)
+                        mcp_processes[pid] = {
+                            'pid': pid,
+                            'name': name,
+                            'cmdline': cmdline,
+                            'started': 'Unknown'  # ps doesn't provide exact start time in standard format
+                        }
+                        
+                except Exception as e:
+                    logging.debug(f"Error parsing ps line: {line}, error: {e}")
+                    continue
+                    
+        except subprocess.TimeoutExpired:
+            logging.error("ps command timed out")
+        except Exception as e:
+            logging.error(f"Error finding MCP processes: {e}")
+            
         return mcp_processes
 
     async def handle_new_server(self, pid: int, server_info: dict):
