@@ -128,7 +128,7 @@ force_clean() {
 run() {
   echo "running container $CONTNAME with this command:"
   echo ""
-  echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GEMINI_API_KEY=$GEMINI_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME -ti -p 2222:22 -p 8011:8011 -p 8080:8080 --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
+  echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GEMINI_API_KEY=$GEMINI_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME --network=\"host\" -ti --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
   echo ""
 
   if [ ! "$(docker image ls -a | grep $IMGNAME)" ]; then
@@ -143,20 +143,17 @@ run() {
     -e SEC_API_KEY=$SEC_API_KEY \
     -e SERPAPI_API_KEY=$SERPAPI_API_KEY \
     --name $CONTNAME \
+    --network="host" \
     -ti \
-    -p 2222:22 \
-    -p 8011:8011 \
-    -p 8080:8080 \
     --tmpfs /run \
     --tmpfs /run/lock \
     -v /lib/modules:/lib/modules:ro \
     -d $IMGNAME
 
   echo ""
-  # echo ssh into container via ssh llmvm:llmvm@$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTNAME)
   echo "container: $CONTNAME"
-  echo "ip address: $(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CONTNAME)"
-  echo "you can ssh into a container bash shell via ssh llmvm@localhost. password is 'llmvm'"
+  echo "network mode: host (container shares host network)"
+  echo "you can ssh into a container bash shell via ssh llmvm@localhost -p 2222. password is 'llmvm'"
   echo "ssh'ing into llmvm.client via ssh llmvm@localhost -p 2222, password is 'llmvm'"
   echo ""
   ssh llmvm@localhost -p 2222

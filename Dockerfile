@@ -65,7 +65,6 @@ RUN echo 'llmvm:llmvm' | chpasswd
 RUN service ssh start
 
 # ssh
-EXPOSE 22
 EXPOSE 2222
 # llmvm.server
 EXPOSE 8011
@@ -178,6 +177,7 @@ COPY ./docker/nginx.conf /etc/nginx/sites-available/llmvm-web
 RUN ln -s /etc/nginx/sites-available/llmvm-web /etc/nginx/sites-enabled/
 RUN rm -f /etc/nginx/sites-enabled/default
 
+RUN sed -i 's/^#Port 22/Port 2222/' /etc/ssh/sshd_config
 RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config
 RUN echo 'PermitUserEnvironment yes' >> /etc/ssh/sshd_config_standard
 
