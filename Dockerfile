@@ -143,6 +143,11 @@ SHELL ["conda", "run", "-n", "llmvm", "/bin/bash", "-c"]
 RUN conda run -n llmvm pip install -r requirements.txt
 RUN conda run -n llmvm pip install playwright
 
+# Switch to root to install playwright system dependencies
+USER root
+RUN playwright install-deps
+USER llmvm
+
 COPY ./llmvm/config.yaml /home/llmvm/.config/llmvm/config.yaml
 
 RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /home/llmvm/.ssh/environment

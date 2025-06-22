@@ -148,6 +148,8 @@ run() {
     --tmpfs /run \
     --tmpfs /run/lock \
     -v /lib/modules:/lib/modules:ro \
+    -v ~/.config/gspread/credentials.json:/home/llmvm/.config/gspread/credentials.json \
+    -v ~/.config/gspread/authorized_user.json:/home/llmvm/.config/gspread/authorized_user.json \
     -d $IMGNAME
 
   echo ""
