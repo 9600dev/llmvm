@@ -33,16 +33,16 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
     const checkDarkMode = () => {
       setIsDark(document.documentElement.classList.contains('dark'));
     };
-    
+
     checkDarkMode();
-    
+
     // Watch for theme changes
     const observer = new MutationObserver(checkDarkMode);
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ['class']
     });
-    
+
     return () => observer.disconnect();
   }, []);
 
@@ -53,19 +53,19 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
 
   return (
     <div className={`prose prose-gray dark:prose-invert max-w-none overflow-hidden ${className}`}>
-      <ReactMarkdown 
+      <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           // Override code blocks for syntax highlighting
           code({ node, inline, className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             const language = match ? match[1] : '';
-            
+
             // For code blocks (not inline)
             if (!inline && (match || node?.position)) {
               const codeString = String(children).replace(/\n$/, '');
               const isCopied = copiedCode === codeString;
-              
+
               // For markdown, render as regular formatted text instead of code block
               if (language === 'markdown') {
                 return (
@@ -88,7 +88,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
                   </div>
                 );
               }
-              
+
               // For other code languages, use SyntaxHighlighter
               return (
                 <div className="relative group my-3 w-full">
@@ -104,20 +104,23 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
                     <SyntaxHighlighter
                       language={language || 'text'}
                       style={isDark ? oneDark : oneLight}
+                      wrapLongLines={true}
                       customStyle={{
                         margin: 0,
                         borderRadius: '0.5rem',
                         fontSize: '0.9375rem',
                         paddingRight: '3rem', // Make room for copy button
-                        overflowX: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        overflowX: 'visible',
                         width: '100%',
                         display: 'block'
                       }}
                       codeTagProps={{
                         style: {
-                          whiteSpace: 'pre',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
                           display: 'block',
-                          overflowX: 'auto'
                         }
                       }}
                       {...props}
@@ -128,7 +131,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
                 </div>
               );
             }
-            
+
             // For inline code
             return (
               <code className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 px-1.5 py-0.5 rounded text-sm font-mono break-words" {...props}>
@@ -143,7 +146,7 @@ export const MarkdownRenderer = ({ content, className = "" }: MarkdownRendererPr
             if (children?.props?.className?.includes('language-')) {
               return <>{children}</>;
             }
-            
+
             return (
               <pre className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 overflow-x-auto my-3 w-full" {...props}>
                 {children}

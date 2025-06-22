@@ -142,14 +142,42 @@ const ChatInterface = () => {
                 return {
                   id: String(llmvmThread.id),
                   title,
-                  messages: llmvmThread.messages.map((msg, index) => ({
-                    id: `${llmvmThread.id}-${index}`,
-                    content: msg.content || '',
-                    role: msg.role as "user" | "assistant",
-                    timestamp: new Date(),
-                    type: "text",
-                    status: "success"
-                  })),
+                  messages: llmvmThread.messages.map((msg, index) => {
+                    // Extract text content from the message
+                    let content = '';
+                    let llmvmContent = null;
+                    
+                    if (msg.content) {
+                      if (typeof msg.content === 'string') {
+                        content = msg.content;
+                      } else if (Array.isArray(msg.content)) {
+                        // Extract text from content array
+                        const textParts = msg.content.map((item: any) => {
+                          if (typeof item === 'string') {
+                            return item;
+                          } else if (item.sequence && (item.content_type === 'text' || item.type === 'text')) {
+                            return item.sequence;
+                          } else if (item.text) {
+                            return item.text;
+                          }
+                          return '';
+                        }).filter(Boolean);
+                        
+                        content = textParts.join('\n');
+                        llmvmContent = msg.content; // Store the full content for proper rendering
+                      }
+                    }
+                    
+                    return {
+                      id: `${llmvmThread.id}-${index}`,
+                      content: content,
+                      role: msg.role as "user" | "assistant",
+                      timestamp: new Date(),
+                      type: "text",
+                      status: "success",
+                      llmvmContent: llmvmContent // Store LLMVM content if available
+                    };
+                  }),
                 lastActivity: new Date(),
                 model: llmvmThread.model,
                 mode: llmvmThread.current_mode as "tools" | "direct" | "code" | "program",
@@ -187,14 +215,42 @@ const ChatInterface = () => {
                 return {
                   id: String(llmvmProgram.id),
                   title,
-                  messages: llmvmProgram.messages.map((msg, index) => ({
-                    id: `${llmvmProgram.id}-${index}`,
-                    content: msg.content || '',
-                    role: msg.role as "user" | "assistant",
-                    timestamp: new Date(),
-                    type: "text",
-                    status: "success"
-                  })),
+                  messages: llmvmProgram.messages.map((msg, index) => {
+                    // Extract text content from the message
+                    let content = '';
+                    let llmvmContent = null;
+                    
+                    if (msg.content) {
+                      if (typeof msg.content === 'string') {
+                        content = msg.content;
+                      } else if (Array.isArray(msg.content)) {
+                        // Extract text from content array
+                        const textParts = msg.content.map((item: any) => {
+                          if (typeof item === 'string') {
+                            return item;
+                          } else if (item.sequence && (item.content_type === 'text' || item.type === 'text')) {
+                            return item.sequence;
+                          } else if (item.text) {
+                            return item.text;
+                          }
+                          return '';
+                        }).filter(Boolean);
+                        
+                        content = textParts.join('\n');
+                        llmvmContent = msg.content; // Store the full content for proper rendering
+                      }
+                    }
+                    
+                    return {
+                      id: `${llmvmProgram.id}-${index}`,
+                      content: content,
+                      role: msg.role as "user" | "assistant",
+                      timestamp: new Date(),
+                      type: "text",
+                      status: "success",
+                      llmvmContent: llmvmContent // Store LLMVM content if available
+                    };
+                  }),
                   lastActivity: new Date(),
                   model: llmvmProgram.model,
                   mode: "program" as any, // Programs are always in program mode

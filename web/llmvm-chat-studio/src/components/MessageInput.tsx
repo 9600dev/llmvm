@@ -173,7 +173,7 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
             ? "Enter Python code... (Press Enter to execute, Shift+Enter for new line)"
             : "Message LLMVM... (Press Enter to send, Shift+Enter for new line, Ctrl+V to paste images)"
           }
-          className="bg-transparent border-0 resize-none min-h-[100px] max-h-[200px] text-gray-900 placeholder-gray-500 focus:ring-0 pr-24"
+          className="bg-transparent border-0 resize-none min-h-[140px] max-h-[240px] text-gray-900 placeholder-gray-500 focus:ring-0 pr-24 text-[15px]"
           style={{ scrollbarWidth: 'thin' }}
         />
 

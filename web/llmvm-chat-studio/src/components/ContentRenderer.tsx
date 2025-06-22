@@ -123,6 +123,23 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
 
   // If content is an array (multiple content items)
   if (Array.isArray(content)) {
+    // First, check if the array contains helper tags when concatenated
+    const concatenatedText = content.map(item => {
+      if (typeof item === 'string') return item;
+      if (item && typeof item === 'object') {
+        if (item.text) return item.text;
+        if (item.sequence) return item.sequence;
+        if (item.content) return item.content;
+      }
+      return '';
+    }).join('');
+    
+    // If the concatenated content has helper tags, render it as a single block
+    if (hasHelperTags(concatenatedText)) {
+      return <HelperContentRenderer content={concatenatedText} isStreaming={isStreaming} images={images} />;
+    }
+    
+    // Otherwise, render each item separately
     return (
       <div className="space-y-4 max-w-full">
         {content.map((item, index) => (
@@ -140,17 +157,19 @@ export const ContentRenderer = ({ content, type, isStreaming = false, images }: 
   // Handle specific content types based on structure
   if (content && typeof content === 'object') {
     // Handle TextContent objects or any text-like content
-    if (content.type === 'TextContent' || content.type === 'text' || content.content_type === 'text' || content.text) {
+    if (content.type === 'TextContent' || content.type === 'text' || content.content_type === 'text' || content.text || content.sequence) {
       let textContent = '';
       if (typeof content.getText === 'function') {
         textContent = content.getText();
+      } else if (typeof content === 'string') {
+        textContent = content;
       } else {
-        textContent = content.text || content.sequence || '';
+        textContent = content.text || content.sequence || content.content || '';
       }
       
       // Check for helper tags
       if (hasHelperTags(textContent)) {
-        return <HelperContentRenderer content={textContent} isStreaming={isStreaming} />;
+        return <HelperContentRenderer content={textContent} isStreaming={isStreaming} images={images} />;
       }
       return <MarkdownRenderer content={textContent} className="max-w-full" />;
     }

@@ -51,84 +51,46 @@ const ThreadSidebar = ({
         </p>
       </div>
 
-      {/* Threads and Programs */}
-      <ScrollArea className="flex-1">
-        <div className="p-2 space-y-1">
-          {/* Threads Section */}
-          <div className="mb-4">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase px-3 mb-2">Threads</h3>
-            {threads.map((thread) => (
-              <div
-                key={thread.id}
-                className={`p-3 rounded-lg cursor-pointer transition-all group ${
-                  activeThreadId === thread.id
-                    ? "bg-blue-100 text-gray-900 border border-blue-200"
-                    : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-100"
-                }`}
-                onClick={() => onThreadSelect(thread.id)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-medium truncate text-sm">
-                      {thread.title}
-                    </h3>
-                    <p className={`text-xs mt-1 ${
-                      activeThreadId === thread.id ? "text-gray-600" : "text-gray-500"
-                    }`}>
-                      ID: {thread.llmvmThreadId || thread.id} • {thread.messages.length} messages • {formatDate(thread.lastActivity)}
-                    </p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        activeThreadId === thread.id 
-                          ? "bg-blue-200 text-blue-800" 
-                          : "bg-gray-200 text-gray-700"
-                      }`}>
-                        {thread.model}
-                      </span>
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        thread.mode === "tools" ? "bg-green-100 text-green-800" :
-                        thread.mode === "code" ? "bg-purple-100 text-purple-800" : "bg-orange-100 text-orange-800"
-                      }`}>
-                        {thread.mode}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Programs Section - Only show if there are programs */}
-          {programs.length > 0 && (
-            <div className="border-t border-gray-200 pt-4">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase px-3 mb-2">Programs</h3>
-              {programs.map((program) => (
+      {/* Threads and Programs in separate scrollable sections */}
+      <div className="flex-1 flex flex-col min-h-0">
+        {/* Threads Section */}
+        <div className="h-1/2 flex flex-col border-b border-gray-200 min-h-0">
+          <h3 className="text-xs font-semibold text-gray-900 uppercase px-5 py-2 bg-gray-50 flex-shrink-0">Threads</h3>
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-2 space-y-1">
+              {threads.map((thread) => (
                 <div
-                  key={program.id}
+                  key={thread.id}
                   className={`p-3 rounded-lg cursor-pointer transition-all group ${
-                    activeThreadId === program.id
-                      ? "bg-purple-100 text-gray-900 border border-purple-200"
+                    activeThreadId === thread.id
+                      ? "bg-blue-100 text-gray-900 border border-blue-200"
                       : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-100"
                   }`}
-                  onClick={() => onThreadSelect(program.id)}
+                  onClick={() => onThreadSelect(thread.id)}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <h3 className="font-medium truncate text-sm">
-                        {program.title}
+                        {thread.title}
                       </h3>
                       <p className={`text-xs mt-1 ${
-                        activeThreadId === program.id ? "text-gray-600" : "text-gray-500"
+                        activeThreadId === thread.id ? "text-gray-600" : "text-gray-500"
                       }`}>
-                        ID: {program.llmvmThreadId || program.id} • {formatDate(program.lastActivity)}
+                        ID: {thread.llmvmThreadId || thread.id} • {thread.messages.length} messages • {formatDate(thread.lastActivity)}
                       </p>
                       <div className="flex items-center gap-2 mt-2">
                         <span className={`text-xs px-2 py-0.5 rounded ${
-                          activeThreadId === program.id 
-                            ? "bg-purple-200 text-purple-800" 
-                            : "bg-purple-100 text-purple-700"
+                          activeThreadId === thread.id 
+                            ? "bg-blue-200 text-blue-800" 
+                            : "bg-gray-200 text-gray-700"
                         }`}>
-                          Program
+                          {thread.model}
+                        </span>
+                        <span className={`text-xs px-2 py-0.5 rounded ${
+                          thread.mode === "tools" ? "bg-green-100 text-green-800" :
+                          thread.mode === "code" ? "bg-purple-100 text-purple-800" : "bg-orange-100 text-orange-800"
+                        }`}>
+                          {thread.mode}
                         </span>
                       </div>
                     </div>
@@ -136,9 +98,55 @@ const ThreadSidebar = ({
                 </div>
               ))}
             </div>
-          )}
+          </ScrollArea>
         </div>
-      </ScrollArea>
+
+        {/* Programs Section */}
+        <div className="h-1/2 flex flex-col min-h-0">
+          <h3 className="text-xs font-semibold text-gray-900 uppercase px-5 py-2 bg-gray-50 flex-shrink-0">Programs</h3>
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-2 space-y-1">
+              {programs.length > 0 ? (
+                programs.map((program) => (
+                  <div
+                    key={program.id}
+                    className={`p-3 rounded-lg cursor-pointer transition-all group ${
+                      activeThreadId === program.id
+                        ? "bg-purple-100 text-gray-900 border border-purple-200"
+                        : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-100"
+                    }`}
+                    onClick={() => onThreadSelect(program.id)}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-medium truncate text-sm">
+                          {program.title}
+                        </h3>
+                        <p className={`text-xs mt-1 ${
+                          activeThreadId === program.id ? "text-gray-600" : "text-gray-500"
+                        }`}>
+                          ID: {program.llmvmThreadId || program.id} • {formatDate(program.lastActivity)}
+                        </p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <span className={`text-xs px-2 py-0.5 rounded ${
+                            activeThreadId === program.id 
+                              ? "bg-purple-200 text-purple-800" 
+                              : "bg-purple-100 text-purple-700"
+                          }`}>
+                            Program
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-xs text-gray-500 px-3 py-2 text-center">No programs yet</p>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
+      </div>
 
       {/* Footer */}
       <div className="p-4 border-t border-gray-200">

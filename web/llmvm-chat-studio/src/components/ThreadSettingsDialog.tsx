@@ -45,12 +45,14 @@ const modelOptions = {
   ],
   openai: [
     "gpt-4.1",
-    "gpt-o3",
-    "gpt-o1",
+    "o3",
+    "o3-pro",
+    "o3-mini",
+    "o4-mini"
   ],
   gemini: [
-    "gemini-2.5-pro-preview-05-06",
-    "gemini-2.5-flash-preview-05-20"
+    "gemini-2.5-pro",
+    "gemini-2.5-flash"
   ]
 };
 
