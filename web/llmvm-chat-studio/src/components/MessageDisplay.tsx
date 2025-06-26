@@ -138,15 +138,111 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
     return () => scrollContainer.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const copyToClipboard = (content: any) => {
-    const text = typeof content === 'string' 
-      ? content 
-      : content?.text || JSON.stringify(content);
-    navigator.clipboard.writeText(text);
-    toast({
-      title: "Copied to clipboard",
-      description: "Message content has been copied.",
-    });
+  const copyToClipboard = async (message: Message) => {
+    let textToCopy = '';
+    
+    // Extract text based on message structure
+    if (message.llmvmContent) {
+      // Check if llmvmContent has a getText method (LLMVM SDK objects)
+      if (typeof message.llmvmContent.getText === 'function') {
+        textToCopy = message.llmvmContent.getText();
+      } else if (typeof message.llmvmContent === 'string') {
+        textToCopy = message.llmvmContent;
+      } else if (Array.isArray(message.llmvmContent)) {
+        // Extract text from array of content items
+        textToCopy = message.llmvmContent
+          .map(item => {
+            // Check for getText method first
+            if (typeof item?.getText === 'function') return item.getText();
+            if (typeof item === 'string') return item;
+            if (item?.type === 'text' && item?.text) return item.text;
+            if (item?.type === 'text' && typeof item?.content === 'string') return item.content;
+            if (item?.type === 'text' && item?.sequence) return item.sequence;
+            return '';
+          })
+          .filter(Boolean)
+          .join('');
+      } else if (message.llmvmContent?.text) {
+        textToCopy = message.llmvmContent.text;
+      } else if (message.llmvmContent?.content) {
+        textToCopy = message.llmvmContent.content;
+      } else if (message.llmvmContent?.sequence) {
+        textToCopy = message.llmvmContent.sequence;
+      }
+    } 
+    
+    if (!textToCopy && typeof message.content === 'string') {
+      textToCopy = message.content;
+    } else if (!textToCopy && Array.isArray(message.content)) {
+      // Handle array content (similar to llmvmContent)
+      textToCopy = message.content
+        .map(item => {
+          if (typeof item?.getText === 'function') return item.getText();
+          if (typeof item === 'string') return item;
+          if (item?.type === 'text' && item?.text) return item.text;
+          if (item?.type === 'text' && typeof item?.content === 'string') return item.content;
+          if (item?.type === 'text' && item?.sequence) return item.sequence;
+          return '';
+        })
+        .filter(Boolean)
+        .join('');
+    } else if (!textToCopy && message.content && typeof message.content.getText === 'function') {
+      // Check if content itself has getText method
+      textToCopy = message.content.getText();
+    }
+    
+    if (!textToCopy) {
+      toast({
+        title: "Copy failed",
+        description: "No text content found to copy.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    try {
+      // Try using the modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(textToCopy);
+        toast({
+          title: "Copied to clipboard",
+          description: "Message content has been copied.",
+        });
+      } else {
+        // Fallback for older browsers or non-secure contexts
+        const textArea = document.createElement("textarea");
+        textArea.value = textToCopy;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        textArea.style.top = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        try {
+          document.execCommand('copy');
+          toast({
+            title: "Copied to clipboard",
+            description: "Message content has been copied.",
+          });
+        } catch (err) {
+          toast({
+            title: "Copy failed",
+            description: "Unable to copy to clipboard. Please try selecting and copying manually.",
+            variant: "destructive",
+          });
+        } finally {
+          textArea.remove();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to copy:', err);
+      toast({
+        title: "Copy failed", 
+        description: "Unable to copy to clipboard. Please try selecting and copying manually.",
+        variant: "destructive",
+      });
+    }
   };
 
   const renderMessage = (message: Message) => {
@@ -216,7 +312,7 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => copyToClipboard(message.content)}
+              onClick={() => copyToClipboard(message)}
               className="text-gray-500 hover:text-gray-900 h-8 px-2"
             >
               <Copy size={14} />
