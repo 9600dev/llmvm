@@ -1,4 +1,5 @@
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Plus } from "lucide-react";
@@ -9,6 +10,7 @@ interface ThreadSidebarProps {
   programs: Thread[];
   activeThreadId: string;
   onThreadSelect: (id: string) => void;
+  onThreadDoubleClick?: (id: string) => void;
   onNewThread: () => void;
 }
 
@@ -17,8 +19,27 @@ const ThreadSidebar = ({
   programs,
   activeThreadId,
   onThreadSelect,
+  onThreadDoubleClick,
   onNewThread
 }: ThreadSidebarProps) => {
+  const [clickTimeout, setClickTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  const handleThreadClick = (threadId: string) => {
+    if (clickTimeout) {
+      // Double click detected
+      clearTimeout(clickTimeout);
+      setClickTimeout(null);
+      onThreadDoubleClick?.(threadId);
+    } else {
+      // Single click - wait to see if it's a double click
+      const timeout = setTimeout(() => {
+        onThreadSelect(threadId);
+        setClickTimeout(null);
+      }, 250);
+      setClickTimeout(timeout);
+    }
+  };
+
   const formatDate = (date: Date) => {
     const now = new Date();
     const diff = now.getTime() - date.getTime();
@@ -66,7 +87,7 @@ const ThreadSidebar = ({
                       ? "bg-blue-100 text-gray-900 border border-blue-200"
                       : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-100"
                   }`}
-                  onClick={() => onThreadSelect(thread.id)}
+                  onClick={() => handleThreadClick(thread.id)}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
@@ -115,7 +136,7 @@ const ThreadSidebar = ({
                         ? "bg-purple-100 text-gray-900 border border-purple-200"
                         : "bg-white hover:bg-gray-50 text-gray-700 border border-gray-100"
                     }`}
-                    onClick={() => onThreadSelect(program.id)}
+                    onClick={() => handleThreadClick(program.id)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">

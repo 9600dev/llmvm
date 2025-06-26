@@ -3,6 +3,7 @@ import ThreadSidebar from "./ThreadSidebar";
 import MessageDisplay, { MessageDisplayHandle } from "./MessageDisplay";
 import MessageInput from "./MessageInput";
 import ThreadSettingsDialog, { ThreadSettings } from "./ThreadSettingsDialog";
+import TabManager, { Tab } from "./TabManager";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { getLLMVMService } from "@/services/llmvm";
@@ -72,10 +73,25 @@ const ChatInterface = () => {
     }
   ]);
   const [programs, setPrograms] = useState<Thread[]>([]);
-  const [activeThreadId, setActiveThreadId] = useState("1");
+  const [tabs, setTabs] = useState<Tab[]>([
+    { id: "tab-1", threadId: "1", title: "Welcome to LLMVM" }
+  ]);
+  const [activeTabId, setActiveTabId] = useState("tab-1");
   const messageDisplayRef = useRef<MessageDisplayHandle>(null);
 
+  const activeTab = tabs.find(t => t.id === activeTabId);
+  const activeThreadId = activeTab?.threadId || "1";
   const activeThread = threads.find(t => t.id === activeThreadId) || programs.find(p => p.id === activeThreadId);
+
+  // Scroll to bottom when active tab/thread changes
+  useEffect(() => {
+    if (activeThreadId) {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        messageDisplayRef.current?.scrollToBottom();
+      });
+    }
+  }, [activeTabId, activeThreadId]);
 
   // Save sidebar state to localStorage when it changes
   useEffect(() => {
@@ -196,9 +212,13 @@ const ChatInterface = () => {
               });
 
               setThreads(uiThreads);
-              // Set the first (newest) thread as active
-              if (uiThreads.length > 0) {
-                setActiveThreadId(uiThreads[0].id);
+              // Update the first tab with the newest thread if tabs only has the default
+              if (uiThreads.length > 0 && tabs.length === 1 && tabs[0].threadId === "1") {
+                setTabs([{ 
+                  id: "tab-1", 
+                  threadId: uiThreads[0].id, 
+                  title: uiThreads[0].title 
+                }]);
               }
             }
 
@@ -882,6 +902,81 @@ const ChatInterface = () => {
     }
   };
 
+  // Tab management functions
+  const openThreadInNewTab = (threadId: string) => {
+    const thread = threads.find(t => t.id === threadId) || programs.find(p => p.id === threadId);
+    if (!thread) return;
+
+    // Check if thread is already open in a tab
+    const existingTab = tabs.find(t => t.threadId === threadId);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      return;
+    }
+
+    // Create new tab
+    const newTab: Tab = {
+      id: `tab-${Date.now()}`,
+      threadId: threadId,
+      title: thread.title
+    };
+
+    // Find the index of the current active tab
+    const activeIndex = tabs.findIndex(t => t.id === activeTabId);
+    const newTabs = [...tabs];
+    newTabs.splice(activeIndex + 1, 0, newTab); // Insert after current tab
+    
+    setTabs(newTabs);
+    setActiveTabId(newTab.id);
+  };
+
+  const openThreadInCurrentTab = (threadId: string) => {
+    const thread = threads.find(t => t.id === threadId) || programs.find(p => p.id === threadId);
+    if (!thread) return;
+
+    // Check if thread is already open in a tab
+    const existingTab = tabs.find(t => t.threadId === threadId);
+    if (existingTab) {
+      // Switch to existing tab instead of opening in current tab
+      setActiveTabId(existingTab.id);
+      return;
+    }
+
+    // If not already open, update current tab
+    if (!activeTab) return;
+    setTabs(tabs.map(tab => 
+      tab.id === activeTabId 
+        ? { ...tab, threadId: threadId, title: thread.title }
+        : tab
+    ));
+  };
+
+  const closeTab = (tabId: string) => {
+    const tabIndex = tabs.findIndex(t => t.id === tabId);
+    if (tabs.length === 1) return; // Don't close last tab
+
+    const newTabs = tabs.filter(t => t.id !== tabId);
+    
+    // If closing the active tab, switch to adjacent tab
+    if (tabId === activeTabId) {
+      const newActiveIndex = tabIndex > 0 ? tabIndex - 1 : 0;
+      setActiveTabId(newTabs[newActiveIndex].id);
+    }
+    
+    setTabs(newTabs);
+  };
+
+  // Update tab title when thread title changes
+  useEffect(() => {
+    if (activeThread && activeTab) {
+      setTabs(tabs.map(tab => 
+        tab.threadId === activeThread.id 
+          ? { ...tab, title: activeThread.title }
+          : tab
+      ));
+    }
+  }, [activeThread?.title]);
+
   return (
     <div className="flex h-full w-full bg-white">
       {/* Sidebar */}
@@ -900,11 +995,10 @@ const ChatInterface = () => {
             programs={programs}
             activeThreadId={activeThreadId}
             onThreadSelect={(id: string) => {
-              setActiveThreadId(id);
-              // Scroll to bottom after a short delay to ensure content is rendered
-              setTimeout(() => {
-                messageDisplayRef.current?.scrollToBottom();
-              }, 100);
+              openThreadInCurrentTab(id);
+            }}
+            onThreadDoubleClick={(id: string) => {
+              openThreadInNewTab(id);
             }}
             onNewThread={createNewThread}
           />
@@ -913,6 +1007,14 @@ const ChatInterface = () => {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col bg-white">
+        {/* Tabs */}
+        <TabManager
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onTabSelect={setActiveTabId}
+          onTabClose={closeTab}
+        />
+        
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white">
           <div className="flex items-center gap-3">

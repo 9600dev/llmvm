@@ -45,7 +45,7 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
   useImperativeHandle(ref, () => ({
     scrollToBottom: () => {
       userScrolledRef.current = false;
-      performScroll('smooth');
+      performScroll('instant' as ScrollBehavior, true);
     }
   }));
 
@@ -82,8 +82,10 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
       isStreamingRef.current = isCurrentlyStreaming;
     };
 
-    // Initial check
-    checkAndScroll();
+    // Initial check - instant scroll on first render
+    if (messages.length > 0) {
+      performScroll('instant' as ScrollBehavior, true);
+    }
 
     // Set up MutationObserver for streaming content changes
     let observer: MutationObserver | null = null;
