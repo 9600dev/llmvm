@@ -7,6 +7,7 @@ import TabManager, { Tab } from "./TabManager";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { getLLMVMService } from "@/services/llmvm";
+import { useToast } from "@/hooks/use-toast";
 import type { Thread as LLMVMThread, Message as LLMVMMessage } from "llmvm-sdk";
 
 export interface Message {
@@ -43,6 +44,8 @@ const defaultSettings: ThreadSettings = {
 };
 
 const ChatInterface = () => {
+  const { toast } = useToast();
+  
   // Load sidebar state from localStorage or default to true
   const [sidebarOpen, setSidebarOpen] = useState(() => {
     const saved = localStorage.getItem('sidebarOpen');
@@ -77,7 +80,8 @@ const ChatInterface = () => {
     { id: "tab-1", threadId: "1", title: "Welcome to LLMVM" }
   ]);
   const [activeTabId, setActiveTabId] = useState("tab-1");
-  const messageDisplayRef = useRef<MessageDisplayHandle>(null);
+  const [visibleTabIds, setVisibleTabIds] = useState<string[]>(["tab-1"]); // Track which tabs are visible in split view
+  const messageDisplayRefs = useRef<{ [key: string]: MessageDisplayHandle | null }>({});
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const activeThreadId = activeTab?.threadId || "1";
@@ -85,10 +89,10 @@ const ChatInterface = () => {
 
   // Scroll to bottom when active tab/thread changes
   useEffect(() => {
-    if (activeThreadId) {
+    if (activeThreadId && messageDisplayRefs.current[activeTabId]) {
       // Use requestAnimationFrame to ensure DOM has updated
       requestAnimationFrame(() => {
-        messageDisplayRef.current?.scrollToBottom();
+        messageDisplayRefs.current[activeTabId]?.scrollToBottom();
       });
     }
   }, [activeTabId, activeThreadId]);
@@ -214,11 +218,16 @@ const ChatInterface = () => {
               setThreads(uiThreads);
               // Update the first tab with the newest thread if tabs only has the default
               if (uiThreads.length > 0 && tabs.length === 1 && tabs[0].threadId === "1") {
-                setTabs([{ 
+                const newTabs = [{ 
                   id: "tab-1", 
                   threadId: uiThreads[0].id, 
                   title: uiThreads[0].title 
-                }]);
+                }];
+                setTabs(newTabs);
+                // Ensure it's visible
+                if (!visibleTabIds.includes("tab-1")) {
+                  setVisibleTabIds(["tab-1"]);
+                }
               }
             }
 
@@ -629,6 +638,94 @@ const ChatInterface = () => {
     setActiveThreadId(newThread.id);
   };
 
+  const forkThreadAtMessage = async (messageIndex: number) => {
+    if (!activeThread) return;
+
+    // Get messages up to and including the fork point
+    const messagesToCopy = activeThread.messages.slice(0, messageIndex + 1);
+    
+    // Create a new thread with the copied messages
+    const forkedThread: Thread = {
+      id: Date.now().toString(),
+      title: `${activeThread.title} (Fork)`,
+      messages: messagesToCopy.map(msg => ({
+        ...msg,
+        id: `${Date.now()}-${msg.id}` // New IDs for forked messages
+      })),
+      lastActivity: new Date(),
+      model: activeThread.model,
+      mode: activeThread.mode,
+      settings: { ...activeThread.settings }
+    };
+
+    // Create LLMVM thread if connected
+    if (isConnected) {
+      try {
+        // Don't create a new LLMVM thread - we'll handle this differently
+        // The issue is that createNewThread expects messages in a specific format
+        // and our messages might have complex content that needs to be preserved
+        console.log('Forking thread with messages:', messagesToCopy);
+        
+        // For now, just create a local thread without LLMVM backend
+        // TODO: Implement proper message format conversion
+        const llmvmMessages = [];
+
+        // Create an empty thread first
+        const llmvmThread = await llmvmService.createNewThread(
+          [], // Start with empty messages
+          {
+            model: activeThread.settings.model,
+            temperature: activeThread.settings.temperature,
+            output_token_len: activeThread.settings.outputTokenLen || 0,
+            current_mode: activeThread.mode,
+            thinking: activeThread.settings.thinking ? 1 : 0,
+            executor: activeThread.settings.executor,
+            compression: activeThread.settings.compression
+          }
+        );
+        forkedThread.llmvmThreadId = String(llmvmThread.id);
+        
+        // Update the title on the server
+        await llmvmService.setThreadTitle(String(llmvmThread.id), forkedThread.title);
+        
+        // Note: The messages in the forked thread will be local only
+        // When the user sends a new message in the forked thread,
+        // it will include the context naturally
+      } catch (error) {
+        console.error('Failed to create LLMVM thread for fork:', error);
+      }
+    }
+
+    // Add the forked thread
+    setThreads(prev => [forkedThread, ...prev]);
+    
+    // Create and open new tab directly (don't rely on thread existing in state yet)
+    const newTab: Tab = {
+      id: `tab-${Date.now()}`,
+      threadId: forkedThread.id,
+      title: forkedThread.title
+    };
+
+    // Find the index of the current active tab
+    const activeIndex = tabs.findIndex(t => t.id === activeTabId);
+    const newTabs = [...tabs];
+    newTabs.splice(activeIndex + 1, 0, newTab); // Insert after current tab
+    
+    setTabs(newTabs);
+    setActiveTabId(newTab.id);
+    
+    // Also add to visible tabs if not already visible
+    if (!visibleTabIds.includes(newTab.id)) {
+      setVisibleTabIds([...visibleTabIds, newTab.id]);
+    }
+    
+    // Show success toast
+    toast({
+      title: "Thread forked",
+      description: `Created new thread with ${messagesToCopy.length} messages`,
+    });
+  };
+
   const updateThreadSettings = (settings: ThreadSettings) => {
     setThreads(prev => prev.map(thread =>
       thread.id === activeThreadId
@@ -928,6 +1025,11 @@ const ChatInterface = () => {
     
     setTabs(newTabs);
     setActiveTabId(newTab.id);
+    
+    // Also add to visible tabs if not already visible
+    if (!visibleTabIds.includes(newTab.id)) {
+      setVisibleTabIds([...visibleTabIds, newTab.id]);
+    }
   };
 
   const openThreadInCurrentTab = (threadId: string) => {
@@ -957,6 +1059,9 @@ const ChatInterface = () => {
 
     const newTabs = tabs.filter(t => t.id !== tabId);
     
+    // Remove from visible tabs if present
+    setVisibleTabIds(prev => prev.filter(id => id !== tabId));
+    
     // If closing the active tab, switch to adjacent tab
     if (tabId === activeTabId) {
       const newActiveIndex = tabIndex > 0 ? tabIndex - 1 : 0;
@@ -964,6 +1069,21 @@ const ChatInterface = () => {
     }
     
     setTabs(newTabs);
+  };
+
+  const toggleTabVisibility = (tabId: string) => {
+    setVisibleTabIds(prev => {
+      if (prev.includes(tabId)) {
+        // Remove from visible tabs (but keep at least one)
+        if (prev.length > 1) {
+          return prev.filter(id => id !== tabId);
+        }
+        return prev;
+      } else {
+        // Add to visible tabs
+        return [...prev, tabId];
+      }
+    });
   };
 
   // Update tab title when thread title changes
@@ -1011,45 +1131,26 @@ const ChatInterface = () => {
         <TabManager
           tabs={tabs}
           activeTabId={activeTabId}
+          visibleTabIds={visibleTabIds}
           onTabSelect={setActiveTabId}
           onTabClose={closeTab}
+          onTabDoubleClick={toggleTabVisibility}
         />
         
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-white">
-          <div className="flex items-center gap-3">
+        {/* Compact Header */}
+        <div className="flex items-center justify-between p-2 border-b border-gray-200 bg-white">
+          <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="text-gray-600 hover:text-gray-900"
+              className="text-gray-600 hover:text-gray-900 h-8 w-8 p-0"
             >
-              {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+              {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
             </Button>
-            <div>
-              {editingTitle ? (
-                <input
-                  type="text"
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  onKeyPress={handleTitleKeyPress}
-                  onBlur={handleTitleSave}
-                  className="text-lg font-semibold text-gray-900 bg-transparent border-b-2 border-blue-500 outline-none"
-                  autoFocus
-                />
-              ) : (
-                <h1
-                  className="text-lg font-semibold text-gray-900 cursor-pointer hover:text-blue-600"
-                  onClick={handleTitleClick}
-                  title="Click to edit title"
-                >
-                  {activeThread?.title || "LLMVM Chat"}
-                </h1>
-              )}
-              <p className="text-sm text-gray-600">
-                Model: {activeThread?.settings.model} • Mode: {activeThread?.mode}
-              </p>
-            </div>
+            <span className="text-sm text-gray-600">
+              {visibleTabIds.length} {visibleTabIds.length === 1 ? 'pane' : 'panes'} open
+            </span>
           </div>
           <div className="flex items-center gap-2">
             {!isConnected && (
@@ -1057,31 +1158,102 @@ const ChatInterface = () => {
                 Disconnected
               </span>
             )}
-            <span className="text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">
-              {activeThread?.settings.executor}
-            </span>
-            {activeThread && (
-              <ThreadSettingsDialog
-                settings={activeThread.settings}
-                onSettingsChange={updateThreadSettings}
-              />
-            )}
           </div>
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-hidden">
-          <MessageDisplay ref={messageDisplayRef} messages={activeThread?.messages || []} />
-        </div>
-
-        {/* Input */}
-        <div className="border-t border-gray-200 bg-white">
-          <MessageInput
-            onSend={sendMessage}
-            settings={activeThread?.settings}
-            onSettingsChange={updateThreadSettings}
-            onPythonExecute={executePython}
-          />
+        {/* Split View Messages */}
+        <div className="flex-1 flex overflow-hidden">
+          {visibleTabIds.map((tabId, index) => {
+            const tab = tabs.find(t => t.id === tabId);
+            if (!tab) return null;
+            
+            const thread = threads.find(t => t.id === tab.threadId) || programs.find(p => p.id === tab.threadId);
+            if (!thread) return null;
+            
+            const isActive = tabId === activeTabId;
+            
+            return (
+              <div 
+                key={tabId} 
+                className={`flex-1 flex flex-col border-r border-gray-200 ${
+                  index === visibleTabIds.length - 1 ? 'border-r-0' : ''
+                }`}
+                style={{ width: `${100 / visibleTabIds.length}%` }}
+                onClick={() => {
+                  // Set as active when clicking anywhere in the pane
+                  if (tabId !== activeTabId) {
+                    setActiveTabId(tabId);
+                  }
+                }}
+              >
+                {/* Pane Header */}
+                <div className={`flex items-center justify-between p-2 border-b border-gray-200 ${
+                  isActive ? 'bg-blue-50' : 'bg-gray-50'
+                }`}>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-medium text-gray-700 truncate cursor-pointer"
+                        onClick={() => setActiveTabId(tabId)}>
+                      {thread.title}
+                    </h3>
+                    <p className="text-xs text-gray-500">
+                      {thread.model} • {thread.mode}
+                    </p>
+                  </div>
+                  {isActive && (
+                    <ThreadSettingsDialog
+                      settings={thread.settings}
+                      onSettingsChange={updateThreadSettings}
+                    />
+                  )}
+                </div>
+                
+                {/* Messages */}
+                <div className="flex-1 overflow-hidden">
+                  <MessageDisplay 
+                    ref={(el) => {
+                      if (el) messageDisplayRefs.current[tabId] = el;
+                    }}
+                    messages={thread.messages || []} 
+                    onForkMessage={(messageIndex) => {
+                      // Set active tab before forking
+                      setActiveTabId(tabId);
+                      forkThreadAtMessage(messageIndex);
+                    }}
+                  />
+                </div>
+                
+                {/* Input for each pane */}
+                <div className="border-t border-gray-200 bg-white"
+                     onClick={(e) => {
+                       // Stop propagation to prevent double-setting
+                       e.stopPropagation();
+                       // Set as active when clicking on input area
+                       if (tabId !== activeTabId) {
+                         setActiveTabId(tabId);
+                       }
+                     }}>
+                  <MessageInput
+                    onSend={(content, files) => {
+                      // Set this tab as active when sending a message
+                      setActiveTabId(tabId);
+                      sendMessage(content, files);
+                    }}
+                    settings={thread.settings}
+                    onSettingsChange={(settings) => {
+                      // Set this tab as active when changing settings
+                      setActiveTabId(tabId);
+                      updateThreadSettings(settings);
+                    }}
+                    onPythonExecute={(code) => {
+                      // Set this tab as active when executing Python
+                      setActiveTabId(tabId);
+                      executePython(code);
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

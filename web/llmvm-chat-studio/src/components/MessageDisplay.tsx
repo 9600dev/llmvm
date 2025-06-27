@@ -2,20 +2,21 @@
 import { useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { Copy, User, Bot, CheckCircle, XCircle, Clock } from "lucide-react";
+import { Copy, User, Bot, CheckCircle, XCircle, Clock, GitBranch } from "lucide-react";
 import { Message } from "./ChatInterface";
 import { useToast } from "@/hooks/use-toast";
 import { ContentRenderer } from "./ContentRenderer";
 
 interface MessageDisplayProps {
   messages: Message[];
+  onForkMessage?: (messageIndex: number) => void;
 }
 
 export interface MessageDisplayHandle {
   scrollToBottom: () => void;
 }
 
-const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ messages }, ref) => {
+const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ messages, onForkMessage }, ref) => {
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -247,7 +248,7 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
     }
   };
 
-  const renderMessage = (message: Message) => {
+  const renderMessage = (message: Message, index: number) => {
     const isUser = message.role === "user";
     
     return (
@@ -316,9 +317,21 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
               size="sm"
               onClick={() => copyToClipboard(message)}
               className="text-gray-500 hover:text-gray-900 h-8 px-2"
+              title="Copy message"
             >
               <Copy size={14} />
             </Button>
+            {onForkMessage && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onForkMessage(index)}
+                className="text-gray-500 hover:text-gray-900 h-8 px-2"
+                title="Fork conversation from here"
+              >
+                <GitBranch size={14} />
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -342,7 +355,7 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
           </div>
         ) : (
           <div>
-            {messages.map(renderMessage)}
+            {messages.map((message, index) => renderMessage(message, index))}
             {/* Invisible element at the bottom for scrolling */}
             <div ref={bottomRef} style={{ height: 1 }} />
           </div>

@@ -11,11 +11,13 @@ export interface Tab {
 interface TabManagerProps {
   tabs: Tab[];
   activeTabId: string;
+  visibleTabIds: string[];
   onTabSelect: (tabId: string) => void;
   onTabClose: (tabId: string) => void;
+  onTabDoubleClick: (tabId: string) => void;
 }
 
-const TabManager: React.FC<TabManagerProps> = ({ tabs, activeTabId, onTabSelect, onTabClose }) => {
+const TabManager: React.FC<TabManagerProps> = ({ tabs, activeTabId, visibleTabIds, onTabSelect, onTabClose, onTabDoubleClick }) => {
   const handleTabClose = (e: React.MouseEvent, tabId: string) => {
     e.stopPropagation();
     onTabClose(tabId);
@@ -34,8 +36,10 @@ const TabManager: React.FC<TabManagerProps> = ({ tabs, activeTabId, onTabSelect,
                 ? 'bg-white border-b-white' 
                 : 'bg-gray-100 hover:bg-gray-200'
               }
+              ${visibleTabIds.includes(tab.id) ? 'ring-2 ring-blue-400' : ''}
             `}
             onClick={() => onTabSelect(tab.id)}
+            onDoubleClick={() => onTabDoubleClick(tab.id)}
           >
             <span className="flex-1 truncate text-sm">
               {tab.title}
