@@ -1101,6 +1101,13 @@ class Executor(ABC):
     def unpack_and_wrap_messages(self, messages: list[Message], model: Optional[str] = None) -> list[dict[str, str]]:
         pass
 
+    def does_not_stop(self, model: Optional[str]) -> bool:
+        if not model: model = self.default_model
+        if 'o1' in model or 'o3' in model or 'o4' in model or 'Llama' in model:
+            return True
+        else:
+            return False
+
 def coerce_types(a, b):
     # Function to check if a string can be converted to an integer or a float
     def is_number(s):

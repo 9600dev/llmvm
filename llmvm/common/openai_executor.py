@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from openai.types.chat.completion_create_params import Function
 
+from llmvm.common.container import Container
 from llmvm.common.helpers import Helpers
 from llmvm.common.logging_helpers import messages_trace, setup_logging
 from llmvm.common.object_transformers import ObjectTransformers
@@ -40,9 +41,9 @@ logging = setup_logging()
 class OpenAIExecutor(Executor):
     def __init__(
         self,
-        api_key: str = cast(str, os.environ.get("OPENAI_API_KEY")),
+        api_key: str = cast(str, Container().get_config_variable("OPENAI_API_KEY")),
         default_model: str = "gpt-4.1",
-        api_endpoint: str = "https://api.openai.com/v1",
+        api_endpoint: str = Container().get_config_variable("OPENAI_API_BASE", "OPENAI_API_BASE", "https://api.openai.com/v1"),
         default_max_input_len: int = 1047576,
         default_max_output_len: int = 32768,
         max_images: int = 20,
@@ -57,14 +58,10 @@ class OpenAIExecutor(Executor):
         self.max_images = max_images
         self.api_key = api_key
 
-    def does_not_stop(self, model: Optional[str]) -> bool:
-        if not model: model = self.default_model
-        if 'o1' in model or 'o3' in model or 'o4' in model:
-            return True
-        else:
+    def responses(self, model: Optional[str]) -> bool:
+        if model and 'Llama' in model:
             return False
 
-    def responses(self, model: Optional[str]) -> bool:
         return self.does_not_stop(model)
 
     def user_token(self) -> str:

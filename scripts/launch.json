@@ -15,7 +15,6 @@
                 "LLMVM_FULL_PROCESSING": "true",
                 "LLMVM_PROFILING": "true",
                 "LLMVM_EXECUTOR_TRACE": "~/.local/share/llmvm/executor.trace",
-                "LLMVM_API_BASE": "https://api.anthropic.com"
             }
         },
         {
@@ -32,7 +31,6 @@
                 "LLMVM_FULL_PROCESSING": "true",
                 "LLMVM_PROFILING": "true",
                 "LLMVM_EXECUTOR_TRACE": "~/.local/share/llmvm/executor.trace",
-                "LLMVM_API_BASE": "https://api.anthropic.com"
             }
         }
     ],

@@ -250,6 +250,7 @@ class LLMVMClient():
             if Container.get_config_variable('OPENAI_API_KEY') or api_key:
                 return OpenAIExecutor(
                     api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
+                    api_endpoint=Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
                     default_model=cast(str, model_name) if model_name else 'gpt-4.1'
                 )
             else:
@@ -289,6 +290,7 @@ class LLMVMClient():
             elif Container.get_config_variable('OPENAI_API_KEY'):
                 return OpenAIExecutor(
                     api_key=Container.get_config_variable('OPENAI_API_KEY'),
+                    api_endpoint=Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
                     default_model='gpt-4.1'
                 )
             elif Container.get_config_variable('GEMINI_API_KEY'):

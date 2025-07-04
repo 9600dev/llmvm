@@ -48,9 +48,12 @@ export class LLMVMService {
       total_tokens: 0
     }));
 
+    // Map 'llama' executor to 'openai' for the API
+    const executorForAPI = options?.executor === 'llama' ? 'openai' : (options?.executor || 'openai');
+    
     const thread: Partial<LLMVMThread> = {
       id: Date.now(),
-      executor: options?.executor || 'openai',
+      executor: executorForAPI,
       model: options?.model || 'gpt-4.1',
       compression: options?.compression || 'auto',
       temperature: options?.temperature || 1.0,
@@ -60,7 +63,8 @@ export class LLMVMService {
       thinking: options?.thinking || 0,
       cookies: [],
       messages: messageModels,
-      ...options
+      ...options,
+      executor: executorForAPI // Ensure executor is properly mapped
     };
 
     const createdThread = await this.client.setThread(thread as LLMVMThread);
@@ -166,7 +170,10 @@ export class LLMVMService {
       if (options.temperature !== undefined) thread.temperature = options.temperature;
       if (options.maxTokens) thread.output_token_len = options.maxTokens;
       if (options.thinking !== undefined) thread.thinking = options.thinking ? 1 : 0;
-      if (options.executor) thread.executor = options.executor;
+      if (options.executor) {
+        // Map 'llama' to 'openai' for the API
+        thread.executor = options.executor === 'llama' ? 'openai' : options.executor;
+      }
       if (options.compression) thread.compression = options.compression;
 
       // Save the updated thread

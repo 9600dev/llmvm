@@ -21,7 +21,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Settings } from "lucide-react";
 
 export interface ThreadSettings {
-  executor: "anthropic" | "openai" | "gemini";
+  executor: "anthropic" | "openai" | "gemini" | "llama";
   model: string;
   temperature: number;
   endpoint: string;
@@ -53,6 +53,10 @@ const modelOptions = {
   gemini: [
     "gemini-2.5-pro",
     "gemini-2.5-flash"
+  ],
+  llama: [
+    "Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "Llama-4-Scout-17B-16E-Instruct-FP8"
   ]
 };
 
@@ -79,6 +83,11 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
     // If executor changes, reset model to first available option
     if (key === 'executor') {
       updatedSettings.model = modelOptions[value as keyof typeof modelOptions][0];
+      
+      // Set endpoint URL for Llama
+      if (value === 'llama') {
+        updatedSettings.endpoint = 'https://api.llama.com/compat/v1';
+      }
     }
 
     setLocalSettings(updatedSettings);
@@ -106,7 +115,7 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
             <Label htmlFor="executor">Executor</Label>
             <Select
               value={localSettings.executor}
-              onValueChange={(value: "anthropic" | "openai" | "gemini") => updateSetting('executor', value)}
+              onValueChange={(value: "anthropic" | "openai" | "gemini" | "llama") => updateSetting('executor', value)}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select executor" />
@@ -115,6 +124,7 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
                 <SelectItem value="anthropic">Anthropic</SelectItem>
                 <SelectItem value="openai">OpenAI</SelectItem>
                 <SelectItem value="gemini">Gemini</SelectItem>
+                <SelectItem value="llama">Llama</SelectItem>
               </SelectContent>
             </Select>
           </div>
