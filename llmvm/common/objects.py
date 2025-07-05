@@ -2003,6 +2003,8 @@ class SessionThreadModel(BaseModel):
     id: int = -1
     title: str = ''
     executor: str = ''
+    api_endpoint: str = ''
+    api_key: str = ''
     model: str = ''
     compression: str = ''
     temperature: float = 0.0

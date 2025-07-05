@@ -114,9 +114,7 @@ export class LLMVMService {
 
   async deleteThread(threadId: string): Promise<boolean> {
     try {
-      // LLMVM SDK doesn't have a direct delete method, so we'll clear all threads
-      // This is a limitation we'll need to work around
-      await this.client.clearThreads();
+      await this.client.deleteThread(Number(threadId));
       return true;
     } catch (error) {
       console.error('Failed to delete thread:', error);
@@ -145,6 +143,8 @@ export class LLMVMService {
       thinking?: boolean;
       executor?: string;
       compression?: string;
+      api_endpoint?: string;
+      api_key?: string;
     } = {}
   ): Promise<LLMVMMessage> {
     try {
@@ -175,6 +175,8 @@ export class LLMVMService {
         thread.executor = options.executor === 'llama' ? 'openai' : options.executor;
       }
       if (options.compression) thread.compression = options.compression;
+      if (options.api_endpoint) thread.api_endpoint = options.api_endpoint;
+      if (options.api_key) thread.api_key = options.api_key;
 
       // Save the updated thread
       await this.client.setThread(thread);

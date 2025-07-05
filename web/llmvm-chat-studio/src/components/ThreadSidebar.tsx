@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Thread } from "./ChatInterface";
 
 interface ThreadSidebarProps {
@@ -12,6 +12,7 @@ interface ThreadSidebarProps {
   onThreadSelect: (id: string) => void;
   onThreadDoubleClick?: (id: string) => void;
   onNewThread: () => void;
+  onDeleteThread?: (id: string) => void;
 }
 
 const ThreadSidebar = ({
@@ -20,7 +21,8 @@ const ThreadSidebar = ({
   activeThreadId,
   onThreadSelect,
   onThreadDoubleClick,
-  onNewThread
+  onNewThread,
+  onDeleteThread
 }: ThreadSidebarProps) => {
   const [clickTimeout, setClickTimeout] = useState<NodeJS.Timeout | null>(null);
 
@@ -35,7 +37,7 @@ const ThreadSidebar = ({
       const timeout = setTimeout(() => {
         onThreadSelect(threadId);
         setClickTimeout(null);
-      }, 250);
+      }, 140);
       setClickTimeout(timeout);
     }
   };
@@ -115,6 +117,19 @@ const ThreadSidebar = ({
                         </span>
                       </div>
                     </div>
+                    {onDeleteThread && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity ml-2 h-8 w-8"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteThread(thread.id);
+                        }}
+                      >
+                        <Trash2 size={14} className="text-gray-500 hover:text-red-600" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}

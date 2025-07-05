@@ -195,8 +195,10 @@ export const HelperContentRenderer = ({ content, isStreaming = false, images }: 
         return (
           <div key={index} className="my-3 max-w-full">
             <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-medium">Helper Result:</div>
-            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 relative max-w-full overflow-x-auto">
-              {renderContentWithImages(resultContent)}
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 relative max-w-full overflow-hidden">
+              <div className="break-all whitespace-pre-wrap">
+                {renderContentWithImages(resultContent)}
+              </div>
             </div>
             {!segment.isComplete && isStreaming && (
               <div className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">

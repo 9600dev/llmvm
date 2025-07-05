@@ -55,7 +55,7 @@ class OpenAIExecutor(Executor):
             default_max_output_len=default_max_output_len,
         )
         self.aclient = AsyncOpenAI(api_key=api_key, base_url=self.api_endpoint)
-        self.max_images = max_images
+        self.max_images = max_images if 'Llama' not in default_model else 8
         self.api_key = api_key
 
     def responses(self, model: Optional[str]) -> bool:

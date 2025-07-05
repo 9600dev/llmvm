@@ -170,6 +170,8 @@ def get_executor(
     executor: Optional[str] = None,
     max_input_tokens: Optional[int] = None,
     max_output_tokens: Optional[int] = None,
+    api_key: Optional[str] = None,
+    api_endpoint: Optional[str] = None,
  ) -> Executor:
     if not executor:
         executor = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
@@ -185,7 +187,7 @@ def get_executor(
 
     if executor == 'anthropic':
         executor_instance = AnthropicExecutor(
-            api_key=os.environ.get('ANTHROPIC_API_KEY', ''),
+            api_key=api_key or os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=default_model_config,
             api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
@@ -193,14 +195,14 @@ def get_executor(
         )
     elif executor == 'gemini':
         executor_instance = GeminiExecutor(
-            api_key=os.environ.get('GEMINI_API_KEY', ''),
+            api_key=api_key or os.environ.get('GEMINI_API_KEY', ''),
             default_model=default_model_config,
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
         )
     elif executor == 'deepseek':
         executor_instance = DeepSeekExecutor(
-            api_key=os.environ.get('DEEPSEEK_API_KEY', ''),
+            api_key=api_key or os.environ.get('DEEPSEEK_API_KEY', ''),
             default_model=default_model_config,
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
@@ -214,10 +216,12 @@ def get_executor(
             region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
         )
     else:
+        # openai is the only one we'd change the api_endpoint for, given everyone provides
+        # openai API compatibility endpoints these days.
         executor_instance = OpenAIExecutor(
-            api_key=os.environ.get('OPENAI_API_KEY', ''),
+            api_key=api_key or os.environ.get('OPENAI_API_KEY', ''),
             default_model=default_model_config,
-            api_endpoint=Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
+            api_endpoint=api_endpoint or Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
         )
@@ -264,12 +268,14 @@ def get_controller(
         thread_id: int = 0,
         executor: Optional[str] = None,
         max_input_tokens: Optional[int] = None,
-        max_output_tokens: Optional[int] = None
+        max_output_tokens: Optional[int] = None,
+        api_key: Optional[str] = None,
+        api_endpoint: Optional[str] = None
     ) -> ExecutionController:
-    executor_instance = get_executor(executor, max_input_tokens, max_output_tokens)
+    executor_instance = get_executor(executor, max_input_tokens, max_output_tokens, api_key, api_endpoint)
+
     return ExecutionController(
         executor=executor_instance,
-        helpers=__get_helpers(),  # Pass the list, not the function
         thread_id=thread_id
     )
 
@@ -294,6 +300,10 @@ def __get_thread(id: int) -> SessionThreadModel:
         cache_session.set(thread.id, thread)
     return cast(SessionThreadModel, cache_session.get(id))
 
+def __delete_thread(id: int) -> None:
+    if not cache_session.has_key(id) or id <= 0:
+        return
+    cache_session.delete(id)
 
 async def stream_response(response):
     # this was changed mar 6, to support idle timeout so there's streaming issues, this will be the root cause
@@ -362,7 +372,6 @@ async def download(
         thread.id = temp.id
 
     queue = asyncio.Queue()
-    controller = get_controller()
 
     async def callback(token: AstNode):
         queue.put_nowait(token)
@@ -407,6 +416,12 @@ async def get_thread(id: int) -> SessionThreadModel:
     logging.debug(f'/v1/chat/get_thread?id={id}')
     thread = __get_thread(id)
     return thread
+
+@app.get('/v1/chat/delete_thread')
+async def delete_thread(id: int) -> bool:
+    logging.debug(f'/v1/chat/delete_thread?id={id}')
+    __delete_thread(id)
+    return True
 
 @app.post('/v1/chat/set_thread_title')
 async def set_thread_title(request: Request):
@@ -525,15 +540,23 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
     queue = asyncio.Queue()
     cookies = thread.cookies if thread.cookies else []
 
+    api_key = thread.api_key or None
+    api_endpoint = thread.api_endpoint or None
+
     # set the defaults, or use what the SessionThread thread asks
     if thread.executor and thread.model:
-        controller = get_controller(thread_id=thread.id, executor=thread.executor)
+        controller = get_controller(
+            thread_id=thread.id,
+            executor=thread.executor,
+            api_key=api_key,
+            api_endpoint=api_endpoint
+        )
         model = thread.model if thread.model else controller.get_executor().default_model
     # either the executor or the model is not set, so use the defaults
     # and update the thread
     else:
         logging.debug('Either the executor or the model is not set. Updating thread.')
-        controller = get_controller(thread_id=thread.id)
+        controller = get_controller(thread_id=thread.id, api_key=api_key, api_endpoint=api_endpoint)
         model = controller.get_executor().default_model
         thread.executor = controller.get_executor().name()
         thread.model = model
@@ -657,7 +680,12 @@ async def compile(request: SessionThreadModel) -> StreamingResponse:
 
     thread.id = -1
     thread.locals_dict = thread_model_base.locals_dict  # type: ignore
-    controller = get_controller(thread_id=thread.id, executor=thread.executor)
+    controller = get_controller(
+        thread_id=thread.id,
+        executor=thread.executor,
+        api_key=thread.api_key or None,
+        api_endpoint=thread.api_endpoint or None
+    )
 
     compile_prompt=Helpers.prompt_user(
         prompt_name='thread_to_program.prompt',

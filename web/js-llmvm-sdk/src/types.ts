@@ -132,6 +132,8 @@ export interface SessionThreadModel {
   messages: MessageModel[];
   locals_dict?: {[key: string]: any};
   compile_prompt?: string;
+  api_endpoint?: string;
+  api_key?: string;
 }
 
 export interface DownloadItemModel {

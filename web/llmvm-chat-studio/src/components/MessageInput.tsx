@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Send, Paperclip, Image, Code, Settings, Lasso } from "lucide-react";
+import { Send, Paperclip, Image, Code, Settings, Lasso, Link } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ThreadSettingsDialog, { ThreadSettings } from "./ThreadSettingsDialog";
 import DrawingTool from "./DrawingTool";
@@ -11,9 +11,22 @@ interface MessageInputProps {
   settings?: ThreadSettings;
   onSettingsChange?: (settings: ThreadSettings) => void;
   onPythonExecute?: (code: string) => void;
+  isLinkedMode?: boolean;
+  onToggleLinkedMode?: () => void;
+  linkedMessage?: string;
+  onLinkedMessageChange?: (message: string) => void;
 }
 
-const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: MessageInputProps) => {
+const MessageInput = ({ 
+  onSend, 
+  settings, 
+  onSettingsChange, 
+  onPythonExecute,
+  isLinkedMode,
+  onToggleLinkedMode,
+  linkedMessage,
+  onLinkedMessageChange
+}: MessageInputProps) => {
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isPythonMode, setIsPythonMode] = useState(false);
@@ -23,14 +36,21 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
   const { toast } = useToast();
 
   const handleSend = () => {
-    if (!message.trim() && files.length === 0) return;
+    const messageToSend = isLinkedMode && linkedMessage !== undefined ? linkedMessage : message;
+    if (!messageToSend.trim() && files.length === 0) return;
 
     if (isPythonMode && onPythonExecute) {
-      onPythonExecute(message);
+      onPythonExecute(messageToSend);
     } else {
-      onSend(message, files);
+      onSend(messageToSend, files);
     }
-    setMessage("");
+    
+    // Clear the message
+    if (isLinkedMode && onLinkedMessageChange) {
+      onLinkedMessageChange("");
+    } else {
+      setMessage("");
+    }
     setFiles([]);
   };
 
@@ -165,8 +185,14 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
       >
         <Textarea
           ref={textareaRef}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          value={isLinkedMode && linkedMessage !== undefined ? linkedMessage : message}
+          onChange={(e) => {
+            if (isLinkedMode && onLinkedMessageChange) {
+              onLinkedMessageChange(e.target.value);
+            } else {
+              setMessage(e.target.value);
+            }
+          }}
           onKeyPress={handleKeyPress}
           onPaste={handlePaste}
           placeholder={isPythonMode
@@ -187,6 +213,22 @@ const MessageInput = ({ onSend, settings, onSettingsChange, onPythonExecute }: M
             onChange={handleFileSelect}
             accept="image/*,.pdf,.txt,.md,.csv,.zip,.js,.py,.html,.css,.json"
           />
+
+          {onToggleLinkedMode && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onToggleLinkedMode}
+              className={`h-8 w-8 p-0 ${
+                isLinkedMode
+                  ? "text-blue-600 hover:text-blue-700 bg-blue-100"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+              title="Link input across all visible tabs"
+            >
+              <Link size={16} />
+            </Button>
+          )}
 
           <Button
             variant="ghost"

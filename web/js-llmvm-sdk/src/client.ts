@@ -171,6 +171,20 @@ export class LLMVMClient {
   }
 
   /**
+   * Delete a specific thread
+   */
+  async deleteThread(id: number): Promise<void> {
+    const response = await this.fetchWithTimeout(`${this.baseUrl}/v1/chat/delete_thread?id=${id}`, {
+      method: 'GET',
+      headers: this.headers
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to delete thread: ${response.statusText}`);
+    }
+  }
+
+  /**
    * Set thread title
    */
   async setThreadTitle(id: number, title: string): Promise<void> {

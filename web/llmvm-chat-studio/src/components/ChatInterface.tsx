@@ -37,6 +37,7 @@ const defaultSettings: ThreadSettings = {
   model: "claude-sonnet-4-20250514",
   temperature: 1.0,
   endpoint: "",
+  apiKey: "",
   compression: "auto",
   outputTokenLen: 8192,
   thinking: false,
@@ -81,6 +82,8 @@ const ChatInterface = () => {
   ]);
   const [activeTabId, setActiveTabId] = useState("tab-1");
   const [visibleTabIds, setVisibleTabIds] = useState<string[]>(["tab-1"]); // Track which tabs are visible in split view
+  const [isLinkedInputMode, setIsLinkedInputMode] = useState(false);
+  const [linkedInputMessage, setLinkedInputMessage] = useState("");
   const messageDisplayRefs = useRef<{ [key: string]: MessageDisplayHandle | null }>({});
 
   const activeTab = tabs.find(t => t.id === activeTabId);
@@ -333,7 +336,9 @@ const ChatInterface = () => {
             current_mode: activeThread.mode,
             thinking: activeThread.settings.thinking ? 1 : 0,
             executor: activeThread.settings.executor,
-            compression: activeThread.settings.compression
+            compression: activeThread.settings.compression,
+            api_endpoint: activeThread.settings.endpoint,
+            api_key: activeThread.settings.apiKey
           }
         );
         const llmvmThreadId = String(llmvmThread.id);
@@ -481,7 +486,9 @@ const ChatInterface = () => {
             current_mode: activeThread.mode,
             thinking: activeThread.settings.thinking ? 1 : 0,
             executor: activeThread.settings.executor,
-            compression: activeThread.settings.compression
+            compression: activeThread.settings.compression,
+            api_endpoint: activeThread.settings.endpoint,
+            api_key: activeThread.settings.apiKey
           }
         );
         llmvmThreadId = String(llmvmThread.id);
@@ -508,6 +515,8 @@ const ChatInterface = () => {
           thinking: activeThread.settings.thinking,
           executor: activeThread.settings.executor,
           compression: activeThread.settings.compression,
+          api_endpoint: activeThread.settings.endpoint,
+          api_key: activeThread.settings.apiKey,
           onChunk: (chunk: any) => {
             // Handle different types of chunks
             if (typeof chunk === 'object' && chunk.type === 'image' && chunk.data) {
@@ -602,6 +611,354 @@ const ChatInterface = () => {
     }
   };
 
+  const sendMessageToAllVisibleTabs = async (content: string, files?: File[]) => {
+    if (isLinkedInputMode && visibleTabIds.length > 1) {
+      // Create an array of promises to send messages to all visible tabs concurrently
+      const sendPromises = visibleTabIds.map(async (tabId) => {
+        const tab = tabs.find(t => t.id === tabId);
+        if (!tab) return;
+        
+        const thread = threads.find(t => t.id === tab.threadId) || programs.find(p => p.id === tab.threadId);
+        if (!thread) return;
+
+        // For each thread, perform the full send message logic
+        const threadId = thread.id;
+        
+        // Check for /compile command
+        if (content.trim().startsWith('/compile')) {
+          // For compile command, we need to handle it differently
+          // since runCompileCommand uses activeThreadId
+          console.log('Compile command not supported in linked mode for thread:', thread.title);
+          return;
+        }
+
+        // Process files and prepare content
+        let messageContent: any = content;
+        let messageType = "text";
+
+        if (files && files.length > 0) {
+          // Process files (same logic as in sendMessage)
+          const processedContent: any[] = [];
+          if (content.trim()) {
+            processedContent.push({
+              type: "text",
+              content_type: "text",
+              sequence: content,
+              url: ""
+            });
+          }
+
+          for (const file of files) {
+            const base64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const result = reader.result as string;
+                const base64Data = result.split(',')[1];
+                resolve(base64Data);
+              };
+              reader.readAsDataURL(file);
+            });
+
+            if (file.type.startsWith('image/')) {
+              processedContent.push({
+                type: "image",
+                content_type: "image",
+                sequence: base64,
+                image_type: file.type.split('/')[1],
+                url: ""
+              });
+              messageType = "image";
+            } else {
+              processedContent.push({
+                type: "FileContent",
+                content_type: "file",
+                sequence: base64,
+                url: file.name
+              });
+              messageType = "file";
+            }
+          }
+          messageContent = processedContent.length > 1 ? processedContent : processedContent[0] || content;
+        }
+
+        // Create display text for UI
+        let displayContent = content;
+        if (!content && files && files.length > 0) {
+          const imageCount = files.filter(f => f.type.startsWith('image/')).length;
+          const fileCount = files.filter(f => !f.type.startsWith('image/')).length;
+          const parts = [];
+          if (imageCount > 0) parts.push(`${imageCount} image${imageCount > 1 ? 's' : ''}`);
+          if (fileCount > 0) parts.push(`${fileCount} file${fileCount > 1 ? 's' : ''}`);
+          displayContent = `[${parts.join(' and ')}]`;
+        }
+
+        const userMessage: Message = {
+          id: Date.now().toString() + '-' + tabId,
+          content: displayContent,
+          role: "user",
+          timestamp: new Date(),
+          type: messageType,
+          status: "sending",
+          llmvmContent: messageContent
+        };
+
+        // Add user message
+        setThreads(prev => prev.map(t => {
+          if (t.id === threadId) {
+            const updatedThread = {
+              ...t,
+              messages: [...t.messages, userMessage],
+              lastActivity: new Date()
+            };
+
+            // Update title if needed
+            if (t.title.startsWith('Thread ') || t.title === 'New Conversation' || t.title === 'Welcome to LLMVM') {
+              let newTitle = content.substring(0, 30).trim();
+              if (content.length > 30) {
+                newTitle += '...';
+              }
+              updatedThread.title = newTitle;
+            }
+
+            return updatedThread;
+          }
+          return t;
+        }));
+
+        // Create assistant message placeholder
+        const assistantMessageId = (Date.now() + 1).toString() + '-' + tabId;
+        const assistantMessage: Message = {
+          id: assistantMessageId,
+          content: "",
+          role: "assistant",
+          timestamp: new Date(),
+          type: "text",
+          status: "sending"
+        };
+
+        setThreads(prev => prev.map(t =>
+          t.id === threadId
+            ? { ...t, messages: [...t.messages, assistantMessage], lastActivity: new Date() }
+            : t
+        ));
+
+        try {
+          // Ensure we have an LLMVM thread
+          let llmvmThreadId = thread.llmvmThreadId;
+          if (!llmvmThreadId) {
+            const llmvmThread = await llmvmService.createNewThread(
+              [],
+              {
+                model: thread.settings.model,
+                temperature: thread.settings.temperature,
+                output_token_len: thread.settings.outputTokenLen || 0,
+                current_mode: thread.mode,
+                thinking: thread.settings.thinking ? 1 : 0,
+                executor: thread.settings.executor,
+                compression: thread.settings.compression,
+                api_endpoint: thread.settings.endpoint,
+                api_key: thread.settings.apiKey
+              }
+            );
+            llmvmThreadId = String(llmvmThread.id);
+
+            setThreads(prev => prev.map(t =>
+              t.id === threadId
+                ? { ...t, llmvmThreadId }
+                : t
+            ));
+          }
+
+          // Send message with streaming
+          let streamedContent = "";
+          let streamedImages: Array<{id: string, data: string}> = [];
+
+          await llmvmService.sendMessage(
+            llmvmThreadId,
+            messageContent,
+            {
+              model: thread.settings.model,
+              temperature: thread.settings.temperature,
+              maxTokens: thread.settings.outputTokenLen || undefined,
+              mode: thread.mode,
+              thinking: thread.settings.thinking,
+              executor: thread.settings.executor,
+              compression: thread.settings.compression,
+              api_endpoint: thread.settings.endpoint,
+              api_key: thread.settings.apiKey,
+              onChunk: (chunk: any) => {
+                // Handle different types of chunks
+                if (typeof chunk === 'object' && chunk.type === 'image' && chunk.data) {
+                  // This is an image chunk
+                  const imageId = `img-${Date.now()}-${streamedImages.length}`;
+                  streamedImages.push({ id: imageId, data: chunk.data });
+                  streamedContent += `[IMAGE:${imageId}]\n`;
+                } else if (typeof chunk === 'string') {
+                  streamedContent += chunk;
+                } else {
+                  // For any other object type, try to extract meaningful content
+                  if (chunk && typeof chunk === 'object') {
+                    // Check if it has a text property or similar
+                    const text = chunk.text || chunk.content || chunk.message;
+                    if (text) {
+                      streamedContent += text;
+                    } else {
+                      // Last resort - stringify it but this shouldn't happen
+                      console.warn('Unknown chunk type:', chunk);
+                      streamedContent += JSON.stringify(chunk);
+                    }
+                  } else {
+                    streamedContent += String(chunk);
+                  }
+                }
+
+                // Update assistant message with streamed content and images
+                setThreads(prev => prev.map(t =>
+                  t.id === threadId
+                    ? {
+                        ...t,
+                        messages: t.messages.map(msg =>
+                          msg.id === assistantMessageId
+                            ? {
+                                ...msg,
+                                content: streamedContent,
+                                status: "sending",
+                                images: streamedImages // Store images separately
+                              }
+                            : msg.id === userMessage.id
+                            ? { ...msg, status: "success" }
+                            : msg
+                        )
+                      }
+                    : t
+                ));
+              }
+            }
+          );
+
+          // Update status to success
+          setThreads(prev => prev.map(t =>
+            t.id === threadId
+              ? {
+                  ...t,
+                  messages: t.messages.map(msg =>
+                    msg.id === assistantMessageId
+                      ? {
+                          ...msg,
+                          content: streamedContent,
+                          status: "success",
+                          images: streamedImages
+                        }
+                      : msg
+                  )
+                }
+              : t
+          ));
+
+        } catch (error) {
+          console.error('Failed to send message:', error);
+          setThreads(prev => prev.map(t =>
+            t.id === threadId
+              ? {
+                  ...t,
+                  messages: t.messages.map(msg =>
+                    msg.id === assistantMessageId
+                      ? {
+                          ...msg,
+                          content: "Sorry, I encountered an error processing your message.",
+                          status: "error"
+                        }
+                      : msg.id === userMessage.id
+                      ? { ...msg, status: "error" }
+                      : msg
+                  )
+                }
+              : t
+          ));
+        }
+      });
+
+      // Execute all sends in parallel
+      await Promise.all(sendPromises);
+    } else {
+      // Normal send to just active tab
+      await sendMessage(content, files);
+    }
+  };
+
+  const deleteThread = async (threadId: string) => {
+    // Don't delete if it's the only thread
+    if (threads.length === 1) {
+      toast({
+        title: "Cannot delete last thread",
+        description: "You must have at least one thread open.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Confirm deletion
+    if (!window.confirm("Are you sure you want to delete this thread?")) {
+      return;
+    }
+
+    const threadToDelete = threads.find(t => t.id === threadId);
+    if (!threadToDelete) return;
+
+    // Delete from LLMVM if it has an ID
+    if (threadToDelete.llmvmThreadId && isConnected) {
+      try {
+        await llmvmService.deleteThread(threadToDelete.llmvmThreadId);
+      } catch (error) {
+        console.error('Failed to delete thread from LLMVM:', error);
+        toast({
+          title: "Error deleting thread",
+          description: "Failed to delete thread from server. It will be removed locally.",
+          variant: "destructive"
+        });
+      }
+    }
+
+    // Remove from local state
+    setThreads(prev => prev.filter(t => t.id !== threadId));
+
+    // If we're deleting the active thread, switch to another one
+    if (activeThreadId === threadId) {
+      const remainingThreads = threads.filter(t => t.id !== threadId);
+      if (remainingThreads.length > 0) {
+        // Find the active tab and update it to use a different thread
+        const activeTabIndex = tabs.findIndex(t => t.id === activeTabId);
+        if (activeTabIndex >= 0) {
+          setTabs(prev => prev.map((tab, idx) => 
+            idx === activeTabIndex 
+              ? { ...tab, threadId: remainingThreads[0].id, title: remainingThreads[0].title }
+              : tab
+          ));
+        }
+      }
+    }
+
+    // Remove any tabs that reference this thread
+    const tabsToRemove = tabs.filter(t => t.threadId === threadId);
+    if (tabsToRemove.length > 0) {
+      const newTabs = tabs.filter(t => t.threadId !== threadId);
+      setTabs(newTabs);
+      
+      // Update visible tabs
+      setVisibleTabIds(prev => prev.filter(id => !tabsToRemove.some(t => t.id === id)));
+      
+      // If we removed the active tab, switch to another one
+      if (tabsToRemove.some(t => t.id === activeTabId) && newTabs.length > 0) {
+        setActiveTabId(newTabs[0].id);
+      }
+    }
+
+    toast({
+      title: "Thread deleted",
+      description: "The thread has been removed.",
+    });
+  };
+
   const createNewThread = async () => {
     const newThread: Thread = {
       id: Date.now().toString(),
@@ -624,7 +981,9 @@ const ChatInterface = () => {
             current_mode: "tools",
             thinking: defaultSettings.thinking ? 1 : 0,
             executor: defaultSettings.executor,
-            compression: defaultSettings.compression
+            compression: defaultSettings.compression,
+            api_endpoint: defaultSettings.endpoint,
+            api_key: defaultSettings.apiKey
           }
         );
         newThread.llmvmThreadId = String(llmvmThread.id);
@@ -680,7 +1039,9 @@ const ChatInterface = () => {
             current_mode: activeThread.mode,
             thinking: activeThread.settings.thinking ? 1 : 0,
             executor: activeThread.settings.executor,
-            compression: activeThread.settings.compression
+            compression: activeThread.settings.compression,
+            api_endpoint: activeThread.settings.endpoint,
+            api_key: activeThread.settings.apiKey
           }
         );
         forkedThread.llmvmThreadId = String(llmvmThread.id);
@@ -895,7 +1256,9 @@ const ChatInterface = () => {
             current_mode: activeThread.mode,
             thinking: activeThread.settings.thinking ? 1 : 0,
             executor: activeThread.settings.executor,
-            compression: activeThread.settings.compression
+            compression: activeThread.settings.compression,
+            api_endpoint: activeThread.settings.endpoint,
+            api_key: activeThread.settings.apiKey
           }
         );
         llmvmThreadId = String(llmvmThread.id);
@@ -1121,6 +1484,7 @@ const ChatInterface = () => {
               openThreadInNewTab(id);
             }}
             onNewThread={createNewThread}
+            onDeleteThread={deleteThread}
           />
         )}
       </div>
@@ -1150,6 +1514,9 @@ const ChatInterface = () => {
             </Button>
             <span className="text-sm text-gray-600">
               {visibleTabIds.length} {visibleTabIds.length === 1 ? 'pane' : 'panes'} open
+              {isLinkedInputMode && visibleTabIds.length > 1 && (
+                <span className="ml-2 text-blue-600">• Linked input active</span>
+              )}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -1236,7 +1603,11 @@ const ChatInterface = () => {
                     onSend={(content, files) => {
                       // Set this tab as active when sending a message
                       setActiveTabId(tabId);
-                      sendMessage(content, files);
+                      if (isLinkedInputMode) {
+                        sendMessageToAllVisibleTabs(content, files);
+                      } else {
+                        sendMessage(content, files);
+                      }
                     }}
                     settings={thread.settings}
                     onSettingsChange={(settings) => {
@@ -1249,6 +1620,10 @@ const ChatInterface = () => {
                       setActiveTabId(tabId);
                       executePython(code);
                     }}
+                    isLinkedMode={isLinkedInputMode}
+                    onToggleLinkedMode={() => setIsLinkedInputMode(!isLinkedInputMode)}
+                    linkedMessage={linkedInputMessage}
+                    onLinkedMessageChange={setLinkedInputMessage}
                   />
                 </div>
               </div>

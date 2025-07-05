@@ -25,6 +25,7 @@ export interface ThreadSettings {
   model: string;
   temperature: number;
   endpoint: string;
+  apiKey?: string;
   compression: string;
   outputTokenLen: number;
   thinking: boolean;
@@ -170,6 +171,18 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
               value={localSettings.endpoint}
               onChange={(e) => updateSetting('endpoint', e.target.value)}
               placeholder="Enter endpoint URL"
+            />
+          </div>
+
+          {/* API Key */}
+          <div className="space-y-2">
+            <Label htmlFor="apiKey">API Key</Label>
+            <Input
+              id="apiKey"
+              type="password"
+              value={localSettings.apiKey || ''}
+              onChange={(e) => updateSetting('apiKey', e.target.value)}
+              placeholder="Enter API key (optional)"
             />
           </div>
 
