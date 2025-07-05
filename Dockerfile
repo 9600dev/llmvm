@@ -6,14 +6,19 @@ WORKDIR /home/llmvm/llmvm
 ARG OPENAI_API_KEY
 ARG ANTHROPIC_API_KEY
 ARG GEMINI_API_KEY
+ARG LLAMA_API_KEY
 ARG SEC_API_KEY
 ARG SERPAPI_API_KEY
+ARG LLMVM_SERVER_PORT=8011
+ARG NGINX_PORT=8080
 
 ENV container docker
 ENV PATH "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 ENV DEBIAN_FRONTEND=noninteractive
+ENV LLMVM_SERVER_PORT=${LLMVM_SERVER_PORT}
+ENV NGINX_PORT=${NGINX_PORT}
 
 RUN useradd -m -d /home/llmvm -s /bin/bash -G sudo llmvm
 RUN mkdir -p /var/run/sshd
@@ -66,9 +71,9 @@ RUN service ssh start
 
 # ssh
 EXPOSE 2222
-# llmvm.server
+# llmvm.server (uses LLMVM_SERVER_PORT env var, default 8011)
 EXPOSE 8011
-# website
+# website (uses NGINX_PORT env var, default 8080)
 EXPOSE 8080
 
 # copy over the source and data
@@ -153,6 +158,7 @@ COPY ./llmvm/config.yaml /home/llmvm/.config/llmvm/config.yaml
 RUN echo "OPENAI_API_KEY=$OPENAI_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "GEMINI_API_KEY=$GEMINI_API_KEY" >> /home/llmvm/.ssh/environment
+RUN echo "LLAMA_API_KEY=$LLAMA_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SEC_API_KEY=$SEC_API_KEY" >> /home/llmvm/.ssh/environment
 RUN echo "SERPAPI_API_KEY=$SERPAPI_API_KEY" >> /home/llmvm/.ssh/environment
 
@@ -169,6 +175,8 @@ WORKDIR /home/llmvm/llmvm/web/llmvm-chat-studio
 RUN npm install ../js-llmvm-sdk
 RUN npm install
 RUN npm run build
+# Copy the config template to dist
+RUN cp public/config.js.template dist/config.js.template
 
 # Copy the wrapper script from the scripts directory and make it executable
 WORKDIR /home/llmvm/llmvm
@@ -178,7 +186,8 @@ COPY --chmod=755 ./scripts/llmvm-client-wrapper.sh /home/llmvm/llmvm-client-wrap
 USER root
 
 # Configure nginx
-COPY ./docker/nginx.conf /etc/nginx/sites-available/llmvm-web
+COPY ./docker/nginx.conf.template /etc/nginx/sites-available/llmvm-web.template
+RUN apt-get install -y gettext-base
 RUN ln -s /etc/nginx/sites-available/llmvm-web /etc/nginx/sites-enabled/
 RUN rm -f /etc/nginx/sites-enabled/default
 
@@ -193,6 +202,8 @@ RUN echo 'Match User llmvm' >> /etc/ssh/sshd_config_standard && \
 WORKDIR /home/llmvm/llmvm
 
 ENTRYPOINT service ssh restart; \
+    envsubst '${NGINX_PORT}' < /etc/nginx/sites-available/llmvm-web.template > /etc/nginx/sites-available/llmvm-web; \
+    envsubst '${LLMVM_SERVER_PORT}' < /home/llmvm/llmvm/web/llmvm-chat-studio/dist/config.js.template > /home/llmvm/llmvm/web/llmvm-chat-studio/dist/config.js; \
     service nginx start; \
     /usr/sbin/sshd -f /etc/ssh/sshd_config; \
     /usr/sbin/sshd -f /etc/ssh/sshd_config_standard; \

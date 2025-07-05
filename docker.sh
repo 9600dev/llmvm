@@ -1,7 +1,7 @@
 #!/bin/bash
 
-if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GEMINI_API_KEY" ]]; then
-  echo "Error: Either OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY or must be set in your environment."
+if [[ -z "$OPENAI_API_KEY" && -z "$ANTHROPIC_API_KEY" && -z "$GEMINI_API_KEY" && -z "$LLAMA_API_KEY" ]]; then
+  echo "Error: Either OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or LLAMA_API_KEY must be set in your environment."
   exit 1
 fi
 
@@ -14,11 +14,14 @@ set -o errexit -o pipefail -o noclobber -o nounset
 OPENAI_API_KEY="${OPENAI_API_KEY:-""}"
 ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-""}"
 GEMINI_API_KEY="${GEMINI_API_KEY:-""}"
+LLAMA_API_KEY="${LLAMA_API_KEY:-""}"
 SEC_API_KEY="${SEC_API_KEY:-""}"
 SERPAPI_API_KEY="${SERPAPI_API_KEY:-""}"
 
 CONTNAME=llmvm-container
 IMGNAME=llmvm-image
+LLMVM_PORT=8011
+NGINX_PORT=8080
 
 # usually /home/llmvm/llmvm
 BUILDDIR=$(
@@ -39,6 +42,8 @@ echo_usage() {
   echo "  -g (go: clean, build, run and ssh into container)"
   echo "  -n|--container_name <name> (default: llmvm-container)"
   echo "  -i|--image_name <name> (default: llmvm-image)"
+  echo "  -p|--port <port> (default: 8011)"
+  echo "  -w|--web-port <port> (default: 8080)"
   echo ""
 }
 
@@ -81,6 +86,16 @@ while [[ $# -gt 0 ]]; do
     ;;
   -n | --container_name)
     CONTNAME="$2"
+    shift
+    shift
+    ;;
+  -p | --port)
+    LLMVM_PORT="$2"
+    shift
+    shift
+    ;;
+  -w | --web-port)
+    NGINX_PORT="$2"
     shift
     shift
     ;;
@@ -128,7 +143,7 @@ force_clean() {
 run() {
   echo "running container $CONTNAME with this command:"
   echo ""
-  echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GEMINI_API_KEY=$GEMINI_API_KEY -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY --name $CONTNAME --network=\"host\" -ti --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
+  echo " $ docker run -e OPENAI_API_KEY=$OPENAI_API_KEY -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY -e GEMINI_API_KEY=$GEMINI_API_KEY -e LLAMA_API_KEY="$LLAMA_API_KEY" -e SEC_API_KEY=$SEC_API_KEY -e SERPAPI_API_KEY=$SERPAPI_API_KEY -e LLMVM_SERVER_PORT=$LLMVM_PORT -e NGINX_PORT=$NGINX_PORT --name $CONTNAME --network=\"host\" -ti --tmpfs /run --tmpfs /run/lock -v /lib/modules:/lib/modules:ro -d $IMGNAME"
   echo ""
 
   if [ ! "$(docker image ls -a | grep $IMGNAME)" ]; then
@@ -140,8 +155,11 @@ run() {
     -e OPENAI_API_KEY=$OPENAI_API_KEY \
     -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
     -e GEMINI_API_KEY=$GEMINI_API_KEY \
+    -e LLAMA_API_KEY="$LLAMA_API_KEY" \
     -e SEC_API_KEY=$SEC_API_KEY \
     -e SERPAPI_API_KEY=$SERPAPI_API_KEY \
+    -e LLMVM_SERVER_PORT=$LLMVM_PORT \
+    -e NGINX_PORT=$NGINX_PORT \
     --name $CONTNAME \
     --network="host" \
     -ti \
@@ -155,6 +173,8 @@ run() {
   echo ""
   echo "container: $CONTNAME"
   echo "network mode: host (container shares host network)"
+  echo "LLMVM server running on port: $LLMVM_PORT"
+  echo "Web interface running on port: $NGINX_PORT"
   echo "you can ssh into a container bash shell via ssh llmvm@localhost -p 2222. password is 'llmvm'"
   echo "ssh'ing into llmvm.client via ssh llmvm@localhost -p 2222, password is 'llmvm'"
   echo ""
@@ -181,8 +201,11 @@ build() {
         --build-arg OPENAI_API_KEY=$OPENAI_API_KEY \
         --build-arg ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
         --build-arg GEMINI_API_KEY=$GEMINI_API_KEY \
+        --build-arg LLAMA_API_KEY='$LLAMA_API_KEY' \
         --build-arg SEC_API_KEY=$SEC_API_KEY \
         --build-arg SERPAPI_API_KEY=$SERPAPI_API_KEY \
+        --build-arg LLMVM_SERVER_PORT=$LLMVM_PORT \
+        --build-arg NGINX_PORT=$NGINX_PORT \
         -f $BUILDDIR/Dockerfile \
         --platform $PLATFORM \
         -t $IMGNAME \
@@ -225,7 +248,7 @@ sync_all() {
   rsync -e 'docker exec -i' -av --delete $BUILDDIR/ $CONTID:/home/llmvm/llmvm/ --exclude='.git'
 }
 
-echo "build: $b, clean: $c, run: $r, force: $f, sync: $s, sync_all: $a, go: $g, image_name: $IMGNAME, container_name: $CONTNAME"
+echo "build: $b, clean: $c, run: $r, force: $f, sync: $s, sync_all: $a, go: $g, image_name: $IMGNAME, container_name: $CONTNAME, port: $LLMVM_PORT, web_port: $NGINX_PORT"
 
 if [[ $b == "y" ]]; then
   build

@@ -1,0 +1,16 @@
+server {
+    listen ${NGINX_PORT};
+    server_name localhost;
+    
+    root /home/llmvm/llmvm/web/llmvm-chat-studio/dist;
+    index index.html;
+    
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}

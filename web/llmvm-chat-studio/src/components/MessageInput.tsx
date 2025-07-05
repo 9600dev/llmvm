@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Send, Paperclip, Image, Code, Settings, Lasso, Link } from "lucide-react";
@@ -17,7 +17,11 @@ interface MessageInputProps {
   onLinkedMessageChange?: (message: string) => void;
 }
 
-const MessageInput = ({ 
+export interface MessageInputHandle {
+  focus: () => void;
+}
+
+const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({ 
   onSend, 
   settings, 
   onSettingsChange, 
@@ -26,7 +30,7 @@ const MessageInput = ({
   onToggleLinkedMode,
   linkedMessage,
   onLinkedMessageChange
-}: MessageInputProps) => {
+}, ref) => {
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [isPythonMode, setIsPythonMode] = useState(false);
@@ -34,6 +38,12 @@ const MessageInput = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { toast } = useToast();
+
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      textareaRef.current?.focus();
+    }
+  }));
 
   const handleSend = () => {
     const messageToSend = isLinkedMode && linkedMessage !== undefined ? linkedMessage : message;
@@ -320,6 +330,8 @@ const MessageInput = ({
     />
     </>
   );
-};
+});
+
+MessageInput.displayName = "MessageInput";
 
 export default MessageInput;

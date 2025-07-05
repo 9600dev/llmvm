@@ -1,0 +1,5 @@
+// Runtime configuration - this file is generated at container startup
+window.RUNTIME_CONFIG = {
+  LLMVM_BASE_URL: 'http://localhost:${LLMVM_SERVER_PORT}',
+  LLMVM_API_KEY: ''
+};

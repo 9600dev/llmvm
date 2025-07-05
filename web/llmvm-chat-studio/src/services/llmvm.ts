@@ -429,13 +429,17 @@ export function getLLMVMService(config?: LLMVMConfig): LLMVMService {
   if (!llmvmService) {
     // In development, use proxy path to avoid CORS
     const isDev = import.meta.env.DEV;
+    
+    // Check for runtime config first (from config.js loaded in index.html)
+    const runtimeConfig = (window as any).RUNTIME_CONFIG;
+    
     const baseUrl = isDev
       ? '/api' // Use /api prefix which gets proxied to localhost:8011
-      : (import.meta.env.VITE_LLMVM_BASE_URL || config?.baseUrl || 'http://localhost:8011');
+      : (runtimeConfig?.LLMVM_BASE_URL || import.meta.env.VITE_LLMVM_BASE_URL || config?.baseUrl || 'http://localhost:8011');
 
     llmvmService = new LLMVMService({
       baseUrl,
-      apiKey: import.meta.env.VITE_LLMVM_API_KEY || config?.apiKey,
+      apiKey: runtimeConfig?.LLMVM_API_KEY || import.meta.env.VITE_LLMVM_API_KEY || config?.apiKey,
       ...config
     });
   }

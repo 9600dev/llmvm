@@ -128,8 +128,9 @@ if (
     and not os.environ.get('GEMINI_API_KEY')
     and not os.environ.get('DEEPSEEK_API_KEY')
     and not os.environ.get('BEDROCK_API_KEY')
+    and not os.environ.get('LLAMA_API_KEY')
 ):
-    rich.print('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, BEDROCK_API_KEY, or DEEPSEEK_API_KEY are set.')
+    rich.print('Neither OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, BEDROCK_API_KEY, DEEPSEEK_API_KEY, or LLAMA_API_KEY are set.')
     rich.print('One of these API keys needs to be set in your terminal environment[/red]')
     sys.exit(1)
 

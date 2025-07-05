@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ThreadSidebar from "./ThreadSidebar";
 import MessageDisplay, { MessageDisplayHandle } from "./MessageDisplay";
-import MessageInput from "./MessageInput";
+import MessageInput, { MessageInputHandle } from "./MessageInput";
 import ThreadSettingsDialog, { ThreadSettings } from "./ThreadSettingsDialog";
 import TabManager, { Tab } from "./TabManager";
 import { Button } from "@/components/ui/button";
@@ -85,6 +85,7 @@ const ChatInterface = () => {
   const [isLinkedInputMode, setIsLinkedInputMode] = useState(false);
   const [linkedInputMessage, setLinkedInputMessage] = useState("");
   const messageDisplayRefs = useRef<{ [key: string]: MessageDisplayHandle | null }>({});
+  const messageInputRefs = useRef<{ [key: string]: MessageInputHandle | null }>({});
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const activeThreadId = activeTab?.threadId || "1";
@@ -994,7 +995,20 @@ const ChatInterface = () => {
 
     // Add new thread at the beginning (newest first)
     setThreads(prev => [newThread, ...prev]);
-    setActiveThreadId(newThread.id);
+    
+    // Update the current tab to show the new thread
+    if (activeTab) {
+      setTabs(tabs.map(tab => 
+        tab.id === activeTabId 
+          ? { ...tab, threadId: newThread.id, title: newThread.title }
+          : tab
+      ));
+    }
+    
+    // Focus the message input after creating new thread
+    setTimeout(() => {
+      messageInputRefs.current[activeTabId]?.focus();
+    }, 100);
   };
 
   const forkThreadAtMessage = async (messageIndex: number) => {
@@ -1600,6 +1614,7 @@ const ChatInterface = () => {
                        }
                      }}>
                   <MessageInput
+                    ref={(el) => messageInputRefs.current[tabId] = el}
                     onSend={(content, files) => {
                       // Set this tab as active when sending a message
                       setActiveTabId(tabId);
