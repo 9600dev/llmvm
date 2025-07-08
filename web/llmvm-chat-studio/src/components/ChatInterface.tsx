@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { getLLMVMService } from "@/services/llmvm";
 import { useToast } from "@/hooks/use-toast";
+import { ExploreDialog } from "./ExploreDialog";
 import type { Thread as LLMVMThread, Message as LLMVMMessage } from "llmvm-sdk";
 
 export interface Message {
@@ -19,6 +20,12 @@ export interface Message {
   status?: "sending" | "success" | "error";
   llmvmContent?: any;
   images?: Array<{id: string, data: string}>; // Separate storage for image data
+  explorations?: Array<{
+    selectedText: string;
+    explorationThreadId: string;
+    startIndex: number;
+    endIndex: number;
+  }>;
 }
 
 export interface Thread {
@@ -84,8 +91,14 @@ const ChatInterface = () => {
   const [visibleTabIds, setVisibleTabIds] = useState<string[]>(["tab-1"]); // Track which tabs are visible in split view
   const [isLinkedInputMode, setIsLinkedInputMode] = useState(false);
   const [linkedInputMessage, setLinkedInputMessage] = useState("");
+  const [exploreDialogState, setExploreDialogState] = useState<{
+    open: boolean;
+    selectedText: string;
+    sourceThreadId: string;
+    messageIndex: number;
+  }>({ open: false, selectedText: "", sourceThreadId: "", messageIndex: 0 });
   const messageDisplayRefs = useRef<{ [key: string]: MessageDisplayHandle | null }>({});
-  const messageInputRefs = useRef<{ [key: string]: MessageInputHandle | null }>({});
+  const messageInputRefs = useRef<{ [key: string]: MessageInputHandle | null }>({}); 
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const activeThreadId = activeTab?.threadId || "1";
@@ -315,8 +328,15 @@ const ChatInterface = () => {
     checkConnectionAndLoadThreads();
   }, [llmvmService]);
 
-  const sendMessage = async (content: string, files?: File[]) => {
-    if (!activeThread) return;
+  const sendMessage = async (content: string, files?: File[], threadId?: string) => {
+    const targetThread = threadId 
+      ? (threads.find(t => t.id === threadId) || programs.find(p => p.id === threadId))
+      : activeThread;
+    
+    if (!targetThread) {
+      console.error('Target thread not found:', threadId, 'Available threads:', threads.map(t => t.id));
+      return;
+    }
 
     // Check for /compile command
     if (content.trim().startsWith('/compile')) {
@@ -469,34 +489,34 @@ const ChatInterface = () => {
     };
 
     setThreads(prev => prev.map(thread =>
-      thread.id === activeThreadId
+      thread.id === (threadId || activeThreadId)
         ? { ...thread, messages: [...thread.messages, assistantMessage], lastActivity: new Date() }
         : thread
     ));
 
     try {
       // Ensure we have an LLMVM thread
-      let llmvmThreadId = activeThread.llmvmThreadId;
+      let llmvmThreadId = targetThread.llmvmThreadId;
       if (!llmvmThreadId) {
         const llmvmThread = await llmvmService.createNewThread(
           [],
           {
-            model: activeThread.settings.model,
-            temperature: activeThread.settings.temperature,
-            output_token_len: activeThread.settings.outputTokenLen || 0,
-            current_mode: activeThread.mode,
-            thinking: activeThread.settings.thinking ? 1 : 0,
-            executor: activeThread.settings.executor,
-            compression: activeThread.settings.compression,
-            api_endpoint: activeThread.settings.endpoint,
-            api_key: activeThread.settings.apiKey
+            model: targetThread.settings.model,
+            temperature: targetThread.settings.temperature,
+            output_token_len: targetThread.settings.outputTokenLen || 0,
+            current_mode: targetThread.mode,
+            thinking: targetThread.settings.thinking ? 1 : 0,
+            executor: targetThread.settings.executor,
+            compression: targetThread.settings.compression,
+            api_endpoint: targetThread.settings.endpoint,
+            api_key: targetThread.settings.apiKey
           }
         );
         llmvmThreadId = String(llmvmThread.id);
 
         // Update thread with LLMVM ID
         setThreads(prev => prev.map(thread =>
-          thread.id === activeThreadId
+          thread.id === (threadId || activeThreadId)
             ? { ...thread, llmvmThreadId }
             : thread
         ));
@@ -509,15 +529,15 @@ const ChatInterface = () => {
         llmvmThreadId,
         userMessage.llmvmContent || content, // Use processed content if available
         {
-          model: activeThread.settings.model,
-          temperature: activeThread.settings.temperature,
-          maxTokens: activeThread.settings.outputTokenLen || undefined,
-          mode: activeThread.mode,
-          thinking: activeThread.settings.thinking,
-          executor: activeThread.settings.executor,
-          compression: activeThread.settings.compression,
-          api_endpoint: activeThread.settings.endpoint,
-          api_key: activeThread.settings.apiKey,
+          model: targetThread.settings.model,
+          temperature: targetThread.settings.temperature,
+          maxTokens: targetThread.settings.outputTokenLen || undefined,
+          mode: targetThread.mode,
+          thinking: targetThread.settings.thinking,
+          executor: targetThread.settings.executor,
+          compression: targetThread.settings.compression,
+          api_endpoint: targetThread.settings.endpoint,
+          api_key: targetThread.settings.apiKey,
           onChunk: (chunk: any) => {
             // Handle different types of chunks
             if (typeof chunk === 'object' && chunk.type === 'image' && chunk.data) {
@@ -546,7 +566,7 @@ const ChatInterface = () => {
 
             // Update assistant message with streamed content and images
             setThreads(prev => prev.map(thread =>
-              thread.id === activeThreadId
+              thread.id === (threadId || activeThreadId)
                 ? {
                     ...thread,
                     messages: thread.messages.map(msg =>
@@ -570,7 +590,7 @@ const ChatInterface = () => {
 
       // Update status to success but keep the streamed content
       setThreads(prev => prev.map(thread =>
-        thread.id === activeThreadId
+        thread.id === (threadId || activeThreadId)
           ? {
               ...thread,
               messages: thread.messages.map(msg =>
@@ -592,7 +612,7 @@ const ChatInterface = () => {
       console.error('Failed to send message:', error);
       // Update message status to error
       setThreads(prev => prev.map(thread =>
-        thread.id === activeThreadId
+        thread.id === (threadId || activeThreadId)
           ? {
               ...thread,
               messages: thread.messages.map(msg =>
@@ -1101,6 +1121,317 @@ const ChatInterface = () => {
     });
   };
 
+  const handleExploreText = (selectedText: string, messageIndex: number, threadId: string) => {
+    setExploreDialogState({
+      open: true,
+      selectedText,
+      sourceThreadId: threadId,
+      messageIndex
+    });
+  };
+
+  const handleOpenExploration = (threadId: string) => {
+    const thread = threads.find(t => t.id === threadId) || programs.find(p => p.id === threadId);
+    if (!thread) {
+      toast({
+        title: "Exploration not found",
+        description: "The exploration thread no longer exists.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Check if thread is already open in a tab
+    const existingTab = tabs.find(t => t.threadId === threadId);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      if (!visibleTabIds.includes(existingTab.id)) {
+        setVisibleTabIds([...visibleTabIds, existingTab.id]);
+      }
+    } else {
+      // Open in new tab
+      openThreadInNewTab(threadId);
+    }
+  };
+
+  const handleExploreConfirm = async (prompt: string) => {
+    const { selectedText, sourceThreadId, messageIndex } = exploreDialogState;
+    const sourceThread = threads.find(t => t.id === sourceThreadId) || programs.find(p => p.id === sourceThreadId);
+    
+    if (!sourceThread) return;
+
+    // Get messages up to and including the message where text was selected
+    const contextMessages = sourceThread.messages.slice(0, messageIndex + 1);
+    
+    // Create the exploration content
+    const explorationContent = `${selectedText}\n\n${prompt}`;
+    
+    // Create initial user message for the new thread
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: explorationContent,
+      role: "user",
+      timestamp: new Date(),
+      type: "text",
+      status: "sending"
+    };
+    
+    // Create a new thread with the initial message
+    const newThread: Thread = {
+      id: Date.now().toString(),
+      title: prompt.substring(0, 30) + (prompt.length > 30 ? '...' : ''),
+      messages: [userMessage],
+      lastActivity: new Date(),
+      model: sourceThread.model,
+      mode: sourceThread.mode,
+      settings: { ...sourceThread.settings }
+    };
+
+    // Create LLMVM thread if connected with hidden context
+    if (isConnected) {
+      try {
+        // Build context prompt from previous messages
+        let contextPrompt = "Previous conversation context:\n\n";
+        
+        contextMessages.forEach(msg => {
+          console.log('Processing message:', msg);
+          let messageText = '';
+          
+          // Try multiple ways to extract text content
+          if (typeof msg.content === 'string') {
+            messageText = msg.content;
+          } else if (msg.llmvmContent) {
+            // Handle llmvmContent which might be complex
+            if (typeof msg.llmvmContent === 'string') {
+              messageText = msg.llmvmContent;
+            } else if (msg.llmvmContent.text) {
+              messageText = msg.llmvmContent.text;
+            } else if (msg.llmvmContent.content) {
+              messageText = msg.llmvmContent.content;
+            } else if (msg.llmvmContent.sequence) {
+              messageText = msg.llmvmContent.sequence;
+            } else if (typeof msg.llmvmContent.getText === 'function') {
+              try {
+                messageText = msg.llmvmContent.getText();
+              } catch (e) {
+                console.error('Error calling getText:', e);
+              }
+            }
+          } else if (Array.isArray(msg.content)) {
+            // Handle array content
+            messageText = msg.content
+              .map(item => {
+                if (typeof item === 'string') return item;
+                if (item?.type === 'text' && item?.text) return item.text;
+                if (item?.content) return item.content;
+                if (item?.sequence) return item.sequence;
+                return '';
+              })
+              .filter(Boolean)
+              .join(' ');
+          } else if (msg.content && typeof msg.content === 'object') {
+            // Handle object content
+            if (msg.content.text) messageText = msg.content.text;
+            else if (msg.content.content) messageText = msg.content.content;
+            else if (msg.content.sequence) messageText = msg.content.sequence;
+          }
+          
+          console.log('Extracted text:', messageText);
+          
+          if (messageText && messageText.trim()) {
+            contextPrompt += `${msg.role.toUpperCase()}: ${messageText}\n\n`;
+          }
+        });
+        
+        // If we couldn't extract any context, just provide a simple message
+        if (contextPrompt === "Previous conversation context:\n\n") {
+          contextPrompt = "Continue exploring the selected text from the conversation.\n\n";
+        } else {
+          contextPrompt += "---\n\nBased on the above conversation, please explore the following:\n\n";
+        }
+        
+        console.log('Final context prompt:', contextPrompt);
+        
+        // Create a thread with the context as a system message
+        const llmvmThread = await llmvmService.createNewThread(
+          [{
+            role: "system",
+            message: contextPrompt
+          }],
+          {
+            model: sourceThread.settings.model,
+            temperature: sourceThread.settings.temperature,
+            output_token_len: sourceThread.settings.outputTokenLen || 0,
+            current_mode: sourceThread.mode,
+            thinking: sourceThread.settings.thinking ? 1 : 0,
+            executor: sourceThread.settings.executor,
+            compression: sourceThread.settings.compression,
+            api_endpoint: sourceThread.settings.endpoint,
+            api_key: sourceThread.settings.apiKey
+          }
+        );
+        newThread.llmvmThreadId = String(llmvmThread.id);
+      } catch (error) {
+        console.error('Failed to create LLMVM thread:', error);
+      }
+    }
+
+    // Add the new thread and get the updated state
+    setThreads(prev => [newThread, ...prev]);
+
+    // Create and open new tab
+    const newTab: Tab = {
+      id: `tab-${Date.now()}`,
+      threadId: newThread.id,
+      title: newThread.title
+    };
+
+    const activeIndex = tabs.findIndex(t => t.id === activeTabId);
+    const newTabs = [...tabs];
+    newTabs.splice(activeIndex + 1, 0, newTab);
+    
+    setTabs(newTabs);
+    setActiveTabId(newTab.id);
+    
+    if (!visibleTabIds.includes(newTab.id)) {
+      setVisibleTabIds([...visibleTabIds, newTab.id]);
+    }
+
+    // Close the dialog
+    setExploreDialogState({ open: false, selectedText: "", sourceThreadId: "", messageIndex: 0 });
+    
+    // Add exploration link to the original message
+    setThreads(prev => prev.map(thread => {
+      if (thread.id === sourceThreadId) {
+        return {
+          ...thread,
+          messages: thread.messages.map((msg, idx) => {
+            if (idx === messageIndex) {
+              const explorations = msg.explorations || [];
+              return {
+                ...msg,
+                explorations: [...explorations, {
+                  selectedText: selectedText,
+                  explorationThreadId: newThread.id,
+                  startIndex: 0, // Not used for now
+                  endIndex: 0    // Not used for now
+                }]
+              };
+            }
+            return msg;
+          })
+        };
+      }
+      return thread;
+    }));
+
+    // Send the message to the LLMVM backend
+    if (newThread.llmvmThreadId && isConnected) {
+      // Create assistant message placeholder
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "",
+        role: "assistant",
+        timestamp: new Date(),
+        type: "text",
+        status: "sending"
+      };
+      
+      // Add assistant message to the thread
+      setThreads(prev => prev.map(thread =>
+        thread.id === newThread.id
+          ? { ...thread, messages: [...thread.messages, assistantMessage] }
+          : thread
+      ));
+      
+      try {
+        // Send message with streaming
+        let streamedContent = "";
+        const streamedImages: Array<{id: string, data: string}> = [];
+        
+        // Send the exploration message
+        await llmvmService.sendMessage(
+          newThread.llmvmThreadId,
+          explorationContent,
+          {
+            model: newThread.settings.model,
+            temperature: newThread.settings.temperature,
+            maxTokens: newThread.settings.outputTokenLen || undefined,
+            mode: newThread.mode,
+            thinking: newThread.settings.thinking,
+            executor: newThread.settings.executor,
+            compression: newThread.settings.compression,
+            api_endpoint: newThread.settings.endpoint,
+            api_key: newThread.settings.apiKey,
+            onChunk: (chunk: any) => {
+              if (typeof chunk === 'object' && chunk.type === 'image' && chunk.data) {
+                const imageId = `img-${Date.now()}-${streamedImages.length}`;
+                streamedImages.push({ id: imageId, data: chunk.data });
+                streamedContent += `[IMAGE:${imageId}]\n`;
+              } else if (typeof chunk === 'string') {
+                streamedContent += chunk;
+              } else {
+                if (chunk && typeof chunk === 'object') {
+                  const text = chunk.text || chunk.content || chunk.message;
+                  if (text) {
+                    streamedContent += text;
+                  }
+                }
+              }
+              
+              // Update the assistant message with streamed content
+              setThreads(prev => prev.map(thread =>
+                thread.id === newThread.id
+                  ? {
+                      ...thread,
+                      messages: thread.messages.map(msg =>
+                        msg.id === assistantMessage.id
+                          ? { ...msg, content: streamedContent, status: "sending", images: streamedImages }
+                          : msg
+                      )
+                    }
+                  : thread
+              ));
+            }
+          }
+        );
+        
+        // Update final status
+        setThreads(prev => prev.map(thread =>
+          thread.id === newThread.id
+            ? {
+                ...thread,
+                messages: thread.messages.map(msg =>
+                  msg.id === assistantMessage.id
+                    ? { ...msg, status: "success" }
+                    : msg.id === userMessage.id
+                    ? { ...msg, status: "success" }
+                    : msg
+                )
+              }
+            : thread
+        ));
+        
+      } catch (error) {
+        console.error('Failed to send exploration message:', error);
+        setThreads(prev => prev.map(thread =>
+          thread.id === newThread.id
+            ? {
+                ...thread,
+                messages: thread.messages.map(msg =>
+                  msg.id === assistantMessage.id
+                    ? { ...msg, content: "Failed to get response", status: "error" }
+                    : msg.id === userMessage.id
+                    ? { ...msg, status: "error" }
+                    : msg
+                )
+              }
+            : thread
+        ));
+      }
+    }
+  };
+
   const updateThreadSettings = (settings: ThreadSettings) => {
     setThreads(prev => prev.map(thread =>
       thread.id === activeThreadId
@@ -1600,6 +1931,10 @@ const ChatInterface = () => {
                       setActiveTabId(tabId);
                       forkThreadAtMessage(messageIndex);
                     }}
+                    onExploreText={(selectedText, messageIndex) => {
+                      handleExploreText(selectedText, messageIndex, thread.id);
+                    }}
+                    onOpenExploration={handleOpenExploration}
                   />
                 </div>
                 
@@ -1646,6 +1981,13 @@ const ChatInterface = () => {
           })}
         </div>
       </div>
+      
+      <ExploreDialog
+        open={exploreDialogState.open}
+        onOpenChange={(open) => setExploreDialogState(prev => ({ ...prev, open }))}
+        selectedText={exploreDialogState.selectedText}
+        onExplore={handleExploreConfirm}
+      />
     </div>
   );
 };

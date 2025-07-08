@@ -6,17 +6,21 @@ import { Copy, User, Bot, CheckCircle, XCircle, Clock, GitBranch } from "lucide-
 import { Message } from "./ChatInterface";
 import { useToast } from "@/hooks/use-toast";
 import { ContentRenderer } from "./ContentRenderer";
+import { SelectableMessageContent } from "./SelectableMessageContent";
+import { ExplorationLinks } from "./ExplorationLinks";
 
 interface MessageDisplayProps {
   messages: Message[];
   onForkMessage?: (messageIndex: number) => void;
+  onExploreText?: (selectedText: string, messageIndex: number) => void;
+  onOpenExploration?: (threadId: string) => void;
 }
 
 export interface MessageDisplayHandle {
   scrollToBottom: () => void;
 }
 
-const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ messages, onForkMessage }, ref) => {
+const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ messages, onForkMessage, onExploreText, onOpenExploration }, ref) => {
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -282,34 +286,72 @@ const MessageDisplay = forwardRef<MessageDisplayHandle, MessageDisplayProps>(({ 
           </div>
           
           <div className="max-w-none overflow-x-auto">
-            {(() => {
-              if (message.llmvmContent) {
-                return (
-                  <ContentRenderer 
-                    content={message.llmvmContent} 
-                    type={message.type} 
-                    isStreaming={message.status === 'sending'}
-                    images={message.images}
-                  />
-                );
-              } else if (message.type === "code") {
-                return (
-                  <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto border max-w-full">
-                    <code className="text-green-700 block whitespace-pre-wrap break-all">{message.content}</code>
-                  </pre>
-                );
-              } else {
-                return (
-                  <ContentRenderer 
-                    content={message.content} 
-                    type={message.type} 
-                    isStreaming={message.status === 'sending'}
-                    images={message.images}
-                  />
-                );
-              }
-            })()}
+            {onExploreText ? (
+              <SelectableMessageContent onExplore={(text) => onExploreText(text, index)}>
+                {(() => {
+                  if (message.llmvmContent) {
+                    return (
+                      <ContentRenderer 
+                        content={message.llmvmContent} 
+                        type={message.type} 
+                        isStreaming={message.status === 'sending'}
+                        images={message.images}
+                      />
+                    );
+                  } else if (message.type === "code") {
+                    return (
+                      <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto border max-w-full">
+                        <code className="text-green-700 block whitespace-pre-wrap break-all">{message.content}</code>
+                      </pre>
+                    );
+                  } else {
+                    return (
+                      <ContentRenderer 
+                        content={message.content} 
+                        type={message.type} 
+                        isStreaming={message.status === 'sending'}
+                        images={message.images}
+                      />
+                    );
+                  }
+                })()}
+              </SelectableMessageContent>
+            ) : (
+              (() => {
+                if (message.llmvmContent) {
+                  return (
+                    <ContentRenderer 
+                      content={message.llmvmContent} 
+                      type={message.type} 
+                      isStreaming={message.status === 'sending'}
+                      images={message.images}
+                    />
+                  );
+                } else if (message.type === "code") {
+                  return (
+                    <pre className="bg-gray-100 p-4 rounded-lg overflow-x-auto border max-w-full">
+                      <code className="text-green-700 block whitespace-pre-wrap break-all">{message.content}</code>
+                    </pre>
+                  );
+                } else {
+                  return (
+                    <ContentRenderer 
+                      content={message.content} 
+                      type={message.type} 
+                      isStreaming={message.status === 'sending'}
+                      images={message.images}
+                    />
+                  );
+                }
+              })()
+            )}
           </div>
+
+          {/* Exploration links */}
+          <ExplorationLinks 
+            explorations={message.explorations}
+            onOpenExploration={onOpenExploration || (() => {})}
+          />
 
           <div className="flex items-center gap-2 mt-3">
             <Button

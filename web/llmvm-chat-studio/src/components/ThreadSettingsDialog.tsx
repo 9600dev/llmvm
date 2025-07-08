@@ -71,6 +71,10 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
   }, [settings]);
 
   const handleSave = () => {
+    // Save API key to localStorage for the current executor
+    if (localSettings.apiKey) {
+      localStorage.setItem(`${localSettings.executor}_api_key`, localSettings.apiKey);
+    }
     onSettingsChange(localSettings);
     setOpen(false); // Close the dialog after saving
   };
@@ -88,6 +92,12 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
       // Set endpoint URL for Llama
       if (value === 'llama') {
         updatedSettings.endpoint = 'https://api.llama.com/compat/v1';
+      }
+      
+      // Auto-populate API key from localStorage for any executor
+      const savedApiKey = localStorage.getItem(`${value}_api_key`);
+      if (savedApiKey && !localSettings.apiKey) {
+        updatedSettings.apiKey = savedApiKey;
       }
     }
 
@@ -141,7 +151,7 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
                 <SelectValue placeholder="Select model" />
               </SelectTrigger>
               <SelectContent>
-                {modelOptions[localSettings.executor].map((model) => (
+                {(modelOptions[localSettings.executor] || []).map((model) => (
                   <SelectItem key={model} value={model}>{model}</SelectItem>
                 ))}
               </SelectContent>

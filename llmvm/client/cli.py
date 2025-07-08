@@ -571,10 +571,9 @@ class Repl():
         def _(event):
             global thread_id
             llmvm_client = LLMVMClient(
-                api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+                llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
                 default_executor_name='openai',
                 default_model_name='',
-                api_key='',
             )
 
             thread = asyncio.run(llmvm_client.get_thread(0))
@@ -589,10 +588,9 @@ class Repl():
             global last_thread
             global thread_id
             llmvm_client = LLMVMClient(
-                api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+                llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
                 default_executor_name='openai',
                 default_model_name='',
-                api_key='',
             )
 
             editor = os.environ.get('EDITOR', 'vim')
@@ -731,7 +729,7 @@ class Repl():
                     ctx.invoke(python,
                         python_str=rest,
                         id=thread_id,
-                        endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
+                        llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
                     )
                     continue
 
@@ -872,10 +870,9 @@ class Repl():
 
                 if query.startswith(':title '):
                     llmvm_client = LLMVMClient(
-                        api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+                        llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
                         default_executor_name='',
                         default_model_name='',
-                        api_key='',
                     )
                     last_thread_t: SessionThreadModel = last_thread
                     title = query[7:]
@@ -904,7 +901,7 @@ class Repl():
                     ctx.invoke(python,
                         python_str=query,
                         id=thread_id,
-                        endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
+                        llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011')
                     )
                     continue
 
@@ -1004,15 +1001,15 @@ def cli(ctx):
 
 
 @cli.command('status')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def status(
-    endpoint: str,
+    llmvm_endpoint: str,
 ):
     # don't need an executor or model name set for status
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint, default_executor_name='openai', default_model_name='', api_key='',
+        llmvm_endpoint=llmvm_endpoint, default_executor_name='openai', default_model_name=''
     )
     rich.print(asyncio.run(llmvm_client.status()))
 
@@ -1043,21 +1040,20 @@ def mode(
 @cli.command('python', help='Execute python code in the current thread.')
 @click.argument('python_str', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0)
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'))
 def python(
     python_str: str,
     id: int,
-    endpoint: str,
+    llmvm_endpoint: str,
 ):
     global last_thread
     global thread_id
 
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
-        default_executor_name='anthropic',
+        llmvm_endpoint=llmvm_endpoint,
+        default_executor_name='openai',
         default_model_name='',
-        api_key='',
     )
     last_thread = asyncio.run(llmvm_client.get_thread(id))
     thread_id = last_thread.id
@@ -1066,7 +1062,7 @@ def python(
     if id <= 0:
         raise ValueError('Thread id must be greater than 0')
 
-    execute_python_in_thread(python_str, id, endpoint)
+    execute_python_in_thread(python_str, id, llmvm_endpoint)
 
     last_thread = asyncio.run(llmvm_client.get_thread(id))
     thread_id = last_thread.id
@@ -1143,10 +1139,9 @@ def todo(
             f.write('')
 
     llmvm_client = LLMVMClient(
-        api_endpoint=Container().get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+        llmvm_endpoint=Container().get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
         default_executor_name=Container().get_config_variable('LLMVM_EXECUTOR', default='anthropic'),
         default_model_name=Container().get_config_variable('LLMVM_MODEL', default='claude-3-7-sonnet-latest'),
-        api_key='',
         throw_if_server_down=False,
     )
 
@@ -1299,13 +1294,17 @@ def cookies(
 @click.argument('actor', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to retrieve.')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),  # type: ignore
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
+@click.option('--api_endpoint', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_EXECUTOR_API_BASE', default=''),
+              help='API endpoint. Used to change _API_BASE for each executor. Default is $LLMVM_EXECUTOR_API_BASE or empty.')
 def act(
     actor: str,
     id: int,
-    endpoint: str,
+    llmvm_endpoint: str,
+    api_endpoint: str,
 ):
     global thread_id
     global last_thread
@@ -1339,10 +1338,10 @@ def act(
 
         try:
             llmvm_client = LLMVMClient(
-                api_endpoint=endpoint,
+                llmvm_endpoint=llmvm_endpoint,
+                api_endpoint=api_endpoint,
                 default_executor_name='anthropic',
                 default_model_name='',
-                api_key='',
             )
         except Exception as ex:
             if int_id >=0:
@@ -1359,6 +1358,7 @@ def act(
                 executor=last_thread.executor,
                 model=last_thread.model,
                 current_mode=last_thread.current_mode,
+                api_endpoint=last_thread.api_endpoint,
                 cookies=last_thread.cookies,
             )
         elif id <= 0:
@@ -1388,13 +1388,13 @@ def act(
 @click.argument('url', type=str, required=False, default='')
 @click.option('--id', '-i', type=int, required=False, default=0,
               help='thread ID to download and push the content to. Default is last thread.')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def url(
     url: str,
     id: int,
-    endpoint: str,
+    llmvm_endpoint: str,
 ):
     item = DownloadItemModel(url=url, id=id)
     global thread_id
@@ -1408,11 +1408,11 @@ def url(
 
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get(f'{endpoint}/health')
+                response = await client.get(f'{llmvm_endpoint}/health')
                 response.raise_for_status()
 
             async with httpx.AsyncClient(timeout=400.0) as client:
-                async with client.stream('POST', f'{endpoint}/download', json=item.model_dump()) as response:
+                async with client.stream('POST', f'{llmvm_endpoint}/download', json=item.model_dump()) as response:
                     objs = await stream_response(response, StreamPrinter().write)
             await response.aclose()
 
@@ -1424,7 +1424,7 @@ def url(
 
                 with click.Context(new) as ctx:
                     ctx.ensure_object(dict)
-                    ctx.params['endpoint'] = endpoint
+                    ctx.params['llmvm_endpoint'] = llmvm_endpoint
                     new.invoke(ctx)
 
             message = get_path_as_messages([url])[0]
@@ -1435,6 +1435,7 @@ def url(
                 executor=last_thread.executor,
                 model=last_thread.model,
                 current_mode=last_thread.current_mode,
+                api_endpoint=last_thread.api_endpoint,
                 cookies=last_thread.cookies,
                 messages=last_thread.messages + [MessageModel.from_message(message)],
             )
@@ -1455,21 +1456,25 @@ def url(
               help='model to use. Default is $LLMVM_EXECUTOR or LLMVM server default.')
 @click.option('--model', '-m', type=str, required=False, default=Container.get_config_variable('LLMVM_MODEL', default=''),
               help='model to use. Default is $LLMVM_MODEL or LLMVM server default.')
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
+              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
+@click.option('--api_endpoint', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_EXECUTOR_API_BASE', default=''),
+              help='API endpoint. Used to change _API_BASE for each executor. Default is $LLMVM_EXECUTOR_API_BASE or empty.')
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
               default='lifo', help='context window compression method if the message is too large. Default is "lifo" last in first out.')
 @click.option('--thinking', '-z', type=THINKING, required=False, default=0, help='enable thinking mode. Token count int for Anthropic, "low", "medium", or "high" for OpenAI.')
-@click.option('--endpoint', '-e', type=str, required=False,
-              default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
-              help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def compile(
     id: str,
     program_name: str,
     compile_instructions: str,
     executor: str,
     model: str,
+    api_endpoint: str,
+    llmvm_endpoint: str,
     compression: str,
     thinking: int,
-    endpoint: str,
 ):
     global thread_id
     global last_thread
@@ -1483,10 +1488,10 @@ def compile(
         int_id = int(id)
 
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
+        llmvm_endpoint=llmvm_endpoint,
         default_executor_name=executor,
         default_model_name=model,
-        api_key='',
+        api_endpoint=api_endpoint,
     )
     session_thread: SessionThreadModel = asyncio.run(llmvm_client.compile(
         thread=int_id,
@@ -1494,6 +1499,7 @@ def compile(
         compile_instructions=compile_instructions,
         executor_name=executor,
         model_name=model,
+        api_endpoint=api_endpoint,
         compression=TokenCompressionMethod.from_str(compression),
         thinking=thinking,
     ))
@@ -1502,20 +1508,19 @@ def compile(
 
 
 @cli.command('programs', help='List all the compiled threads that can be used as helpers.')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def programs(
-    endpoint: str,
+    llmvm_endpoint: str,
 ):
     global thread_id
     global last_thread
 
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
+        llmvm_endpoint=llmvm_endpoint,
         default_executor_name='anthropic',
         default_model_name='',
-        api_key='',
     )
 
     threads = asyncio.run(llmvm_client.get_threads())
@@ -1528,20 +1533,19 @@ def programs(
 
 
 @cli.command('threads', help='List all message threads and set to last.')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def threads(
-    endpoint: str,
+    llmvm_endpoint: str,
 ):
     global thread_id
     global last_thread
 
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
+        llmvm_endpoint=llmvm_endpoint,
         default_executor_name='anthropic',
         default_model_name='',
-        api_key='',
     )
 
     threads = asyncio.run(llmvm_client.get_threads())
@@ -1562,22 +1566,21 @@ def threads(
 
 @cli.command('thread', help='List all message threads.')
 @click.argument('id', type=str, required=True)
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def thread(
     id: str,
-    endpoint: str,
+    llmvm_endpoint: str,
 ):
     global thread_id
     global last_thread
     global console
 
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
+        llmvm_endpoint=llmvm_endpoint,
         default_executor_name='',
         default_model_name='',
-        api_key='',
     )
 
     if id.startswith('"') and id.endswith('"'):
@@ -1593,12 +1596,12 @@ def thread(
 
 
 @cli.command('messages', help='List all messages in a message thread.')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 @click.option('--escape', '-s', type=bool, is_flag=True, required=False, default=False)
 def messages(
-    endpoint: str,
+    llmvm_endpoint: str,
     escape: bool,
 ):
     global thread_id
@@ -1606,10 +1609,9 @@ def messages(
     global console
 
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
+        llmvm_endpoint=llmvm_endpoint,
         default_executor_name='anthropic',
         default_model_name='',
-        api_key='',
     )
 
     try:
@@ -1624,19 +1626,18 @@ def messages(
 
 
 @cli.command('new', help='Create a new message thread.')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is http://127.0.0.1:8011')
 def new(
-    endpoint: str,
+    llmvm_endpoint: str,
 ):
     global thread_id
     global last_thread
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
+        llmvm_endpoint=llmvm_endpoint,
         default_executor_name='anthropic',
         default_model_name='',
-        api_key='',
     )
 
     try:
@@ -1670,9 +1671,12 @@ def new(
               help='a string to add as a context message to the User message stack. Use quotes \"\' .. \'\" for multi-word strings.')
 @click.option('--direct', '-d', is_flag=True, required=False, default=False,
               help='avoid using LLMVM tools and talk directly to the LLM provider. Default is false.')
-@click.option('--endpoint', '-e', type=str, required=False,
+@click.option('--llmvm_endpoint', '-e', type=str, required=False,
               default=Container.get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
               help='llmvm endpoint to use. Default is $LLMVM_ENDPOINT or http://127.0.0.1:8011')
+@click.option('--api_endpoint', type=str, required=False,
+              default=Container.get_config_variable('LLMVM_EXECUTOR_API_BASE', default=''),
+              help='API endpoint. Used to change _API_BASE for each executor. Default is $LLMVM_EXECUTOR_API_BASE or empty.')
 @click.option('--cookies', '-k', type=str, required=False, default=Container.get_config_variable('LLMVM_COOKIES', default=''),
               help='cookies.txt file (Netscape) for the request. Default is $LLMVM_COOKIES or empty.')
 @click.option('--executor', '-x', type=str, required=False, default=Container.get_config_variable('LLMVM_EXECUTOR', default=''),
@@ -1697,7 +1701,8 @@ def message(
     path_names: list[str],
     context: list[str],
     direct: bool,
-    endpoint: str,
+    llmvm_endpoint: str,
+    api_endpoint: str,
     cookies: str,
     executor: str,
     model: str,
@@ -1864,10 +1869,10 @@ def message(
         raise ValueError('not supported')
 
     llmvm_client = LLMVMClient(
-        api_endpoint=endpoint,
+        llmvm_endpoint=llmvm_endpoint,
         default_executor_name=executor,
         default_model_name=model,
-        api_key='',
+        api_endpoint=api_endpoint,
         throw_if_server_down=throw,
         default_stream_handler=StreamPrinter().write
     )
@@ -1880,6 +1885,7 @@ def message(
         messages=thread_messages,
         executor_name=executor,
         model_name=model,
+        api_endpoint=api_endpoint,
         temperature=temperature,
         output_token_len=output_token_len,
         stop_tokens=stop_tokens,

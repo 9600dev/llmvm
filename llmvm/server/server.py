@@ -180,6 +180,10 @@ def get_executor(
     if not executor:
         raise EnvironmentError('No executor specified in environment or config file')
 
+    # LLMVM_EXECUTOR_API_BASE overrides the default API endpoint for each executor
+    if not api_endpoint and Container().get_config_variable('LLMVM_EXECUTOR_API_BASE', default=''):
+        api_endpoint = Container().get_config_variable('LLMVM_EXECUTOR_API_BASE', default='')
+
     default_model_config = Container().get_config_variable(f'default_{executor}_model', 'LLMVM_MODEL')
     override_max_input_len = Container().get_config_variable(f'override_max_input_tokens', 'LLMVM_OVERRIDE_MAX_INPUT_TOKENS', default=None)
     override_max_output_len = Container().get_config_variable(f'override_max_output_tokens', 'LLMVM_OVERRIDE_MAX_OUTPUT_TOKENS', default=None)
@@ -190,7 +194,7 @@ def get_executor(
         executor_instance = AnthropicExecutor(
             api_key=api_key or os.environ.get('ANTHROPIC_API_KEY', ''),
             default_model=default_model_config,
-            api_endpoint=Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE'),
+            api_endpoint=api_endpoint or Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE', 'https://api.anthropic.com/v1'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=8192),
         )
@@ -198,6 +202,7 @@ def get_executor(
         executor_instance = GeminiExecutor(
             api_key=api_key or os.environ.get('GEMINI_API_KEY', ''),
             default_model=default_model_config,
+            api_endpoint=api_endpoint or Container().get_config_variable('gemini_api_base', 'GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta/openai/'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
         )
@@ -205,6 +210,7 @@ def get_executor(
         executor_instance = DeepSeekExecutor(
             api_key=api_key or os.environ.get('DEEPSEEK_API_KEY', ''),
             default_model=default_model_config,
+            api_endpoint=api_endpoint or Container().get_config_variable('deepseek_api_base', 'DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
         )
@@ -222,7 +228,7 @@ def get_executor(
         executor_instance = OpenAIExecutor(
             api_key=api_key or os.environ.get('OPENAI_API_KEY', ''),
             default_model=default_model_config,
-            api_endpoint=api_endpoint or Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE'),
+            api_endpoint=api_endpoint or Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
             default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
             default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
         )
@@ -557,7 +563,11 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
     # and update the thread
     else:
         logging.debug('Either the executor or the model is not set. Updating thread.')
-        controller = get_controller(thread_id=thread.id, api_key=api_key, api_endpoint=api_endpoint)
+        controller = get_controller(
+            thread_id=thread.id,
+            api_key=api_key,
+            api_endpoint=api_endpoint
+        )
         model = controller.get_executor().default_model
         thread.executor = controller.get_executor().name()
         thread.model = model

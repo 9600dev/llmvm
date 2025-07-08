@@ -452,7 +452,7 @@ class OpenAIExecutor(Executor):
                     text_response += token.token
 
                 # non-stopping models are a pain.
-                if self.does_not_stop(model) and any(stop_token in text_response[-max_stop_token_len*5:] for stop_token in stop_tokens):
+                if self.does_not_stop(model) and any(stop_token in text_response[-max_stop_token_len*10:] for stop_token in stop_tokens):
                     await stream_async.stream.close()
                     # figure out what stop token was in the response
                     max_index = max(enumerate([text_response.rfind(stop_token) for stop_token in stop_tokens]), key=lambda x: x[1])[0]

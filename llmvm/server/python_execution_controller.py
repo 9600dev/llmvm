@@ -1317,7 +1317,7 @@ class ExecutionController(Controller):
                     response.get_str().strip() != ""
                     and response.get_str().strip() != "</complete>"
                 ):
-                    results.append(Answer(result=response.get_str()))
+                    results.append(Answer(result=response.get_str().replace("</complete>", "")))
                 # empty assistant, maybe we got a </helpers_result> that was correct. this should be in the code_execution_result
                 elif code_blocks and code_execution_result:
                     results.extend(

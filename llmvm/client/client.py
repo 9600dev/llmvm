@@ -63,7 +63,7 @@ def llm(
 
     return asyncio.run(
         LLMVMClient(
-            api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
+            llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
             default_executor_name=executor.name() if executor else Container.get_config_variable('LLMVM_EXECUTOR'),
             default_model_name=model if model else Container.get_config_variable('LLMVM_MODEL'),
             api_key='',
@@ -109,7 +109,7 @@ def llmvm(
 
     return asyncio.run(
         LLMVMClient(
-            api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
+            llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
             default_executor_name=executor_name or Container.get_config_variable('LLMVM_EXECUTOR'),
             default_model_name=model_name or Container.get_config_variable('LLMVM_MODEL'),
             api_key='',
@@ -168,7 +168,7 @@ def get_client(
         raise ValueError('executor_name, model_name, and api_key must be set')
 
     return LLMVMClient(
-        api_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
+        llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
         default_executor_name=executor_name,
         default_model_name=model_name,
         api_key=api_key if api_key else ''
@@ -178,26 +178,30 @@ def get_client(
 class LLMVMClient():
     def __init__(
         self,
-        api_endpoint: str,
+        llmvm_endpoint: str,
         default_executor_name: str,
         default_model_name: str,
-        api_key: str,
+        api_key: Optional[str] = None,
+        api_endpoint: Optional[str] = None,
         throw_if_server_down: bool = False,
         default_stream_handler: Optional[Callable[[AstNode], Awaitable[None]]] = default_stream_handler
     ):
-        self.api_endpoint = api_endpoint
+        self.llmvm_endpoint= llmvm_endpoint
         self.throw_if_server_down = throw_if_server_down
         self.default_stream_handler = default_stream_handler
         self.executor = default_executor_name
         self.model = default_model_name
-        self.__set_defaults(default_executor_name, default_model_name, api_key)
+        self.api_endpoint = api_endpoint
+        self.__set_defaults(default_executor_name, default_model_name, api_key, api_endpoint)
         self.role_strings = ['Assistant: ', 'System: ', 'User: ']
         self.action_strings = ['[ImageContent(', '[PdfContent(', '[FileContent(']
 
-    def __set_defaults(self, executor: str, model: str, api_key: str):
+    def __set_defaults(self, executor: str, model: str, api_key: Optional[str], api_endpoint: Optional[str]):
         executor_instance = self.get_executor(executor, model, api_key)
         self.default_executor = executor_instance
         self.model = executor_instance.default_model
+        if api_endpoint: self.api_endpoint = api_endpoint
+        if api_key: self.api_key = api_key
 
     def __parse_template(self, message: Message, template_args: Optional[dict[str, Any]]) -> Message:
         if not template_args:
@@ -238,9 +242,10 @@ class LLMVMClient():
 
     def get_executor(self, executor_name: str, model_name: Optional[str], api_key: Optional[str]) -> Executor:
         if executor_name == 'anthropic':
-            if Container.get_config_variable('ANTHROPIC_API_KEY') or api_key:
+            if api_key or Container.get_config_variable('ANTHROPIC_API_KEY'):
                 return AnthropicExecutor(
                     api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('ANTHROPIC_API_BASE', 'ANTHROPIC_API_BASE', 'https://api.anthropic.com'),
                     default_model=cast(str, model_name) if model_name else 'claude-sonnet-4-20250514'
                 )
             else:
@@ -250,7 +255,7 @@ class LLMVMClient():
             if Container.get_config_variable('OPENAI_API_KEY') or api_key:
                 return OpenAIExecutor(
                     api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
-                    api_endpoint=Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
                     default_model=cast(str, model_name) if model_name else 'gpt-4.1'
                 )
             else:
@@ -260,7 +265,8 @@ class LLMVMClient():
             if Container.get_config_variable('GEMINI_API_KEY') or api_key:
                 return GeminiExecutor(
                     api_key=api_key or Container.get_config_variable('GEMINI_API_KEY'),
-                    default_model=cast(str, model_name) if model_name else 'gemini-2.5-pro-preview-05-06'
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('GEMINI_API_BASE', 'GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta/openai/'),
+                    default_model=cast(str, model_name) if model_name else 'gemini-2.5-pro-preview-06-05',
                 )
             else:
                 raise ValueError('GeminiExecutor requires a model name and API key.')
@@ -269,6 +275,7 @@ class LLMVMClient():
             if Container.get_config_variable('DEEPSEEK_API_KEY') or api_key:
                 return DeepSeekExecutor(
                     api_key=api_key or Container.get_config_variable('DEEPSEEK_API_KEY'),
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('DEEPSEEK_API_BASE', 'DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1'),
                     default_model=cast(str, model_name) if model_name else 'deepseek-chat'
                 )
             else:
@@ -282,25 +289,28 @@ class LLMVMClient():
             )
 
         else:
-            if Container.get_config_variable('ANTHROPIC_API_KEY'):
+            if api_key or Container.get_config_variable('ANTHROPIC_API_KEY'):
                 return AnthropicExecutor(
-                    api_key=Container.get_config_variable('ANTHROPIC_API_KEY'),
+                    api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('ANTHROPIC_API_BASE', 'ANTHROPIC_API_BASE', 'https://api.anthropic.com'),
                     default_model='claude-sonnet-4-20250514'
                 )
             elif Container.get_config_variable('OPENAI_API_KEY'):
                 return OpenAIExecutor(
-                    api_key=Container.get_config_variable('OPENAI_API_KEY'),
-                    api_endpoint=Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
+                    api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
                     default_model='gpt-4.1'
                 )
             elif Container.get_config_variable('GEMINI_API_KEY'):
                 return GeminiExecutor(
-                    api_key=Container.get_config_variable('GEMINI_API_KEY'),
+                    api_key=api_key or Container.get_config_variable('GEMINI_API_KEY'),
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('GEMINI_API_BASE', 'GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta/openai/'),
                     default_model='gemini-2.5-pro-preview-05-06'
                 )
             elif Container.get_config_variable('DEEPSEEK_API_KEY'):
                 return DeepSeekExecutor(
-                    api_key=Container.get_config_variable('DEEPSEEK_API_KEY'),
+                    api_key=api_key or Container.get_config_variable('DEEPSEEK_API_KEY'),
+                    api_endpoint=self.api_endpoint or Container.get_config_variable('DEEPSEEK_API_BASE', 'DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1'),
                     default_model='deepseek-chat'
                 )
             raise ValueError('No API key is set for any executor in ENV. Unable to set default executor.')
@@ -353,7 +363,7 @@ class LLMVMClient():
         }
 
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.api_endpoint}/v1/chat/get_thread", params=params)
+            response = await client.get(f"{self.llmvm_endpoint}/v1/chat/get_thread", params=params)
             return SessionThreadModel.model_validate(response.json())
 
     async def get_program(
@@ -367,7 +377,7 @@ class LLMVMClient():
         }
 
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{self.api_endpoint}/v1/chat/get_program", params=params)
+            response = await client.get(f"{self.llmvm_endpoint}/v1/chat/get_program", params=params)
             result = SessionThreadModel.model_validate(response.json())
             return result
 
@@ -377,7 +387,7 @@ class LLMVMClient():
     ) -> SessionThreadModel:
         async with httpx.AsyncClient(timeout=400.0) as client:
             response = await client.post(
-                f'{self.api_endpoint}/v1/chat/set_thread',
+                f'{self.llmvm_endpoint}/v1/chat/set_thread',
                 json=thread.model_dump()
             )
             session_thread = SessionThreadModel.model_validate(response.json())
@@ -389,14 +399,14 @@ class LLMVMClient():
         title: str,
     ) -> SessionThreadModel:
         async with httpx.AsyncClient(timeout=400.0) as client:
-            response = await client.post(f'{self.api_endpoint}/v1/chat/set_thread_title', json={'id': id, 'title': title})
+            response = await client.post(f'{self.llmvm_endpoint}/v1/chat/set_thread_title', json={'id': id, 'title': title})
             session_thread = SessionThreadModel.model_validate(response.json())
             return session_thread
 
     async def get_threads(
         self,
     ) -> list[SessionThreadModel]:
-        response: httpx.Response = httpx.get(f'{self.api_endpoint}/v1/chat/get_threads')
+        response: httpx.Response = httpx.get(f'{self.llmvm_endpoint}/v1/chat/get_threads')
         threads = cast(list[SessionThreadModel], TypeAdapter(list[SessionThreadModel]).validate_python(response.json()))
 
         return threads
@@ -410,10 +420,10 @@ class LLMVMClient():
     async def status(self) -> dict[str, str]:
         async with httpx.AsyncClient(timeout=2.0) as client:
             try:
-                response = await client.get(f'{self.api_endpoint}/health')
+                response = await client.get(f'{self.llmvm_endpoint}/health')
                 return response.json()
             except (httpx.HTTPError, httpx.HTTPStatusError, httpx.RequestError, httpx.ConnectError, httpx.ConnectTimeout) as ex:
-                return {'status': f'LLMVM server not available at {self.api_endpoint}. Set endpoint using $LLMVM_ENDPOINT.'}
+                return {'status': f'LLMVM server not available at {self.llmvm_endpoint}. Set endpoint using $LLMVM_ENDPOINT.'}
 
     async def count_tokens(
         self,
@@ -433,6 +443,7 @@ class LLMVMClient():
         compile_instructions: str = '',
         executor_name: Optional[str] = None,
         model_name: Optional[str] = None,
+        api_endpoint: Optional[str] = None,
         cookies: list[dict[str, Any]] = [],
         compression: TokenCompressionMethod = TokenCompressionMethod.AUTO,
         thinking: int = 0,
@@ -448,12 +459,13 @@ class LLMVMClient():
         thread_model.cookies = cookies or thread_model.cookies
         thread_model.title = program_name
         thread_model.compile_prompt = compile_instructions
+        thread_model.api_endpoint = api_endpoint or thread_model.api_endpoint
 
         try:
             async with httpx.AsyncClient(timeout=400.0) as client:
                 async with client.stream(
                     'POST',
-                    f'{self.api_endpoint}/v1/tools/compile',
+                    f'{self.llmvm_endpoint}/v1/tools/compile',
                     json=thread_model.model_dump(),
                 ) as response:
                     objs = await stream_response(response, stream_handler)
@@ -476,6 +488,7 @@ class LLMVMClient():
         thread: int | SessionThreadModel,
         messages: Union[list[Message], None] = None,
         executor_name: Optional[str] = None,
+        api_endpoint: Optional[str] = None,
         model_name: Optional[str] = None,
         temperature: float = 1.0,
         output_token_len: int = 8192,
@@ -506,7 +519,7 @@ class LLMVMClient():
 
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get(f'{self.api_endpoint}/health')
+                response = await client.get(f'{self.llmvm_endpoint}/health')
                 response.raise_for_status()
 
             if isinstance(thread, int):
@@ -522,6 +535,9 @@ class LLMVMClient():
             if not thread.executor: thread.executor = executor_name
             if not thread.model: thread.model = model_name
             if not thread.output_token_len: thread.output_token_len = output_token_len
+
+            if api_endpoint:
+                thread.api_endpoint = api_endpoint
             if temperature:
                 thread.temperature = temperature
             if cookies:
@@ -540,7 +556,7 @@ class LLMVMClient():
             async with httpx.AsyncClient(timeout=400.0) as client:
                 async with client.stream(
                     'POST',
-                    f'{self.api_endpoint}/v1/tools/completions',
+                    f'{self.llmvm_endpoint}/v1/tools/completions',
                     json=thread.model_dump(),
                 ) as response:
                     objs = await stream_response(response, stream_handler)

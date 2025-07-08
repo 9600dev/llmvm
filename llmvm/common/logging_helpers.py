@@ -184,6 +184,8 @@ def setup_logging(
     logging.getLogger('pytesseract').setLevel(logging.CRITICAL)
     logging.getLogger('tzlocal').setLevel(logging.CRITICAL)
     logging.getLogger('botocore').setLevel(logging.WARNING)
+    logging.getLogger('transformers').setLevel(logging.CRITICAL)
+    logging.getLogger("transformers.utils.import_utils").setLevel(logging.ERROR)
 
     logger: Logger = logging.getLogger()
 
@@ -230,6 +232,7 @@ def suppress_logging():
     logging.getLogger('grpc').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
     logging.getLogger('matplotlib.font_manager').setLevel(logging.WARNING)
+    logging.getLogger('transformers').setLevel(logging.CRITICAL)
 
 
 def get_timer():
