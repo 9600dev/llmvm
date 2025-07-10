@@ -62,6 +62,9 @@ class OpenAIExecutor(Executor):
         if model and 'Llama' in model:
             return False
 
+        if model and 'grok' in model:
+            return False
+
         return self.does_not_stop(model)
 
     def user_token(self) -> str:
@@ -402,10 +405,10 @@ class OpenAIExecutor(Executor):
                 "temperature": temperature,
                 "max_tokens": max_output_tokens,
                 "messages": messages_cast,
-                "stop": stop_tokens if stop_tokens else None,
                 "functions": functions_cast if functions else None,
                 "stream_options": {"include_usage": True},
                 "stream": True,
+                **({'stop': stop_tokens} if 'grok' not in model else {})
             }
 
             params = {k: v for k, v in base_params.items() if v is not None}
