@@ -987,11 +987,13 @@ class Executor(ABC):
         self,
         default_model: str,
         api_endpoint: str,
+        api_key: str,
         default_max_input_len: int,
         default_max_output_len: int,
     ):
         self._default_model = default_model
         self.api_endpoint = api_endpoint
+        self.api_key = api_key
         self.default_max_input_len = default_max_input_len
         self.default_max_output_len = default_max_output_len
 

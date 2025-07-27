@@ -66,7 +66,6 @@ def llm(
             llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
             default_executor_name=executor.name() if executor else Container.get_config_variable('LLMVM_EXECUTOR'),
             default_model_name=model if model else Container.get_config_variable('LLMVM_MODEL'),
-            api_key='',
         ).call_direct(
             messages=cast(list[Message], messages),
             executor=executor,
@@ -112,7 +111,6 @@ def llmvm(
             llmvm_endpoint=Container.get_config_variable('LLMVM_ENDPOINT', default='http://localhost:8011'),
             default_executor_name=executor_name or Container.get_config_variable('LLMVM_EXECUTOR'),
             default_model_name=model_name or Container.get_config_variable('LLMVM_MODEL'),
-            api_key='',
         ).call(
             thread=-1,
             messages=cast(list[Message], messages),
@@ -133,10 +131,16 @@ def llmvm(
 
 def get_executor(
     executor_name: str,
-    model_name: Optional[str] = None,
+    default_model_name: Optional[str] = None,
     api_key: Optional[str] = None,
+    api_endpoint: Optional[str] = None,
 ) -> Executor:
-    return get_client(executor_name, model_name, api_key).get_executor(executor_name, model_name, api_key)
+    return get_client(executor_name, default_model_name, api_key).get_executor(
+        executor_name=executor_name,
+        model_name=default_model_name,
+        api_key=api_key,
+        api_endpoint=api_endpoint
+    )
 
 
 def get_client(
@@ -149,7 +153,7 @@ def get_client(
     elif executor_name == 'openai' and not model_name:
         model_name = 'gpt-4.1'
     elif executor_name == 'gemini' and not model_name:
-        model_name = 'gemini-2.5-pro-preview-05-06'
+        model_name = 'gemini-2.5-pro'
     elif executor_name == 'deepseek' and not model_name:
         model_name = 'deepseek-chat'
     elif executor_name == 'bedrock' and not model_name:
@@ -192,16 +196,18 @@ class LLMVMClient():
         self.executor = default_executor_name
         self.model = default_model_name
         self.api_endpoint = api_endpoint
+
         self.__set_defaults(default_executor_name, default_model_name, api_key, api_endpoint)
         self.role_strings = ['Assistant: ', 'System: ', 'User: ']
         self.action_strings = ['[ImageContent(', '[PdfContent(', '[FileContent(']
 
     def __set_defaults(self, executor: str, model: str, api_key: Optional[str], api_endpoint: Optional[str]):
-        executor_instance = self.get_executor(executor, model, api_key)
+        executor_instance = self.get_executor(executor, model, api_key, api_endpoint)
         self.default_executor = executor_instance
         self.model = executor_instance.default_model
-        if api_endpoint: self.api_endpoint = api_endpoint
-        if api_key: self.api_key = api_key
+        self.api_endpoint = executor_instance.api_endpoint
+        self.api_key = executor_instance.api_key
+
 
     def __parse_template(self, message: Message, template_args: Optional[dict[str, Any]]) -> Message:
         if not template_args:
@@ -240,80 +246,19 @@ class LLMVMClient():
                     thread_messages_copy.append(message)
         return thread_messages_copy
 
-    def get_executor(self, executor_name: str, model_name: Optional[str], api_key: Optional[str]) -> Executor:
-        if executor_name == 'anthropic':
-            if api_key or Container.get_config_variable('ANTHROPIC_API_KEY'):
-                return AnthropicExecutor(
-                    api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('ANTHROPIC_API_BASE', 'ANTHROPIC_API_BASE', 'https://api.anthropic.com'),
-                    default_model=cast(str, model_name) if model_name else 'claude-sonnet-4-20250514'
-                )
-            else:
-                raise ValueError('anthropic executor requested, but unable to find Anthropic API key.')
-
-        elif executor_name == 'openai':
-            if Container.get_config_variable('OPENAI_API_KEY') or api_key:
-                return OpenAIExecutor(
-                    api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
-                    default_model=cast(str, model_name) if model_name else 'gpt-4.1'
-                )
-            else:
-                raise ValueError('openai executor requested, but unable to find OpenAI API key.')
-
-        elif executor_name == 'gemini':
-            if Container.get_config_variable('GEMINI_API_KEY') or api_key:
-                return GeminiExecutor(
-                    api_key=api_key or Container.get_config_variable('GEMINI_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('GEMINI_API_BASE', 'GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta/openai/'),
-                    default_model=cast(str, model_name) if model_name else 'gemini-2.5-pro-preview-06-05',
-                )
-            else:
-                raise ValueError('GeminiExecutor requires a model name and API key.')
-
-        elif executor_name == 'deepseek':
-            if Container.get_config_variable('DEEPSEEK_API_KEY') or api_key:
-                return DeepSeekExecutor(
-                    api_key=api_key or Container.get_config_variable('DEEPSEEK_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('DEEPSEEK_API_BASE', 'DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1'),
-                    default_model=cast(str, model_name) if model_name else 'deepseek-chat'
-                )
-            else:
-                raise ValueError('DeepSeekExecutor requires a model name and API key.')
-
-        elif executor_name == 'bedrock':
-            return BedrockExecutor(
-                api_key=api_key or Container.get_config_variable('BEDROCK_API_KEY'),
-                default_model=cast(str, model_name) if model_name else 'amazon.nova-pro-v1:0',
-                region_name=Container.get_config_variable('BEDROCK_API_BASE', default='us-east-1'),
-            )
-
-        else:
-            if api_key or Container.get_config_variable('ANTHROPIC_API_KEY'):
-                return AnthropicExecutor(
-                    api_key=api_key or Container.get_config_variable('ANTHROPIC_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('ANTHROPIC_API_BASE', 'ANTHROPIC_API_BASE', 'https://api.anthropic.com'),
-                    default_model='claude-sonnet-4-20250514'
-                )
-            elif Container.get_config_variable('OPENAI_API_KEY'):
-                return OpenAIExecutor(
-                    api_key=api_key or Container.get_config_variable('OPENAI_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('OPENAI_API_BASE', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
-                    default_model='gpt-4.1'
-                )
-            elif Container.get_config_variable('GEMINI_API_KEY'):
-                return GeminiExecutor(
-                    api_key=api_key or Container.get_config_variable('GEMINI_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('GEMINI_API_BASE', 'GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta/openai/'),
-                    default_model='gemini-2.5-pro-preview-05-06'
-                )
-            elif Container.get_config_variable('DEEPSEEK_API_KEY'):
-                return DeepSeekExecutor(
-                    api_key=api_key or Container.get_config_variable('DEEPSEEK_API_KEY'),
-                    api_endpoint=self.api_endpoint or Container.get_config_variable('DEEPSEEK_API_BASE', 'DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1'),
-                    default_model='deepseek-chat'
-                )
-            raise ValueError('No API key is set for any executor in ENV. Unable to set default executor.')
+    def get_executor(
+        self,
+        executor_name: str,
+        default_model_name: Optional[str],
+        api_key: Optional[str],
+        api_endpoint: Optional[str]
+    ) -> Executor:
+        return Helpers.get_executor(
+            executor_name=executor_name,
+            default_model_name=default_model_name,
+            api_key=api_key,
+            api_endpoint=api_endpoint
+        )
 
     async def call_direct(
         self,
@@ -489,6 +434,7 @@ class LLMVMClient():
         messages: Union[list[Message], None] = None,
         executor_name: Optional[str] = None,
         api_endpoint: Optional[str] = None,
+        api_key: Optional[str] = None,
         model_name: Optional[str] = None,
         temperature: float = 1.0,
         output_token_len: int = 8192,
@@ -538,6 +484,11 @@ class LLMVMClient():
 
             if api_endpoint:
                 thread.api_endpoint = api_endpoint
+            # my god this is bad.
+            if api_key:
+                thread.api_key = api_key
+            if not api_key and not thread.api_key and self.api_key:
+                thread.api_key = self.api_key
             if temperature:
                 thread.temperature = temperature
             if cookies:
@@ -548,6 +499,7 @@ class LLMVMClient():
                 thread.compression = TokenCompressionMethod.get_str(compression)
             if mode:
                 thread.current_mode = mode
+
             thread.thinking = thinking
 
             # attach the messages to the thread
@@ -579,7 +531,12 @@ class LLMVMClient():
 
         executor = self.default_executor
         if executor_name:
-            executor = self.get_executor(executor_name, model_name, None)
+            executor = self.get_executor(
+                executor_name=executor_name,
+                default_model_name=model_name,
+                api_key=self.api_key,
+                api_endpoint=api_endpoint
+            )
 
         # server is down, go direct. this means that executor and model can't be nothing
         assistant = await self.call_direct(

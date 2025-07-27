@@ -35,6 +35,7 @@ class BedrockExecutor(Executor):
         super().__init__(
             default_model=default_model,
             api_endpoint=api_endpoint,
+            api_key=api_key,
             default_max_input_len=default_max_input_len,
             default_max_output_len=default_max_output_len,
         )

@@ -51,6 +51,7 @@ class OpenAIExecutor(Executor):
         super().__init__(
             default_model=default_model,
             api_endpoint=api_endpoint,
+            api_key=api_key,
             default_max_input_len=default_max_input_len,
             default_max_output_len=default_max_output_len,
         )
@@ -363,6 +364,17 @@ class OpenAIExecutor(Executor):
         )  # type: ignore
         token_trace.start()
 
+        # reasoning (supported by gemini etc also)
+        effort = None
+        if thinking == 1:
+            effort = "low"
+        elif thinking == 2:
+            effort = "medium"
+        elif thinking == 3:
+            effort = "high"
+        elif thinking > 3:
+            raise ValueError(f'Invalid thinking value: {thinking}. Valid values are 1, 2, or 3 for low, medium, or high.')
+
         if model is not None and self.responses(model):
             # responses API
             instructions_message = "You are a helpful assistant."
@@ -370,14 +382,6 @@ class OpenAIExecutor(Executor):
             if instructions_message_list:
                 instructions_message = instructions_message_list[0]['content'][0]['text']  # type: ignore
             messages_cast = [message for message in messages_cast if message['role'] != 'developer' and message['role'] != 'system']
-
-            effort = "low"
-            if thinking == 1:
-                effort = "medium"
-            elif thinking == 2:
-                effort = "high"
-            elif thinking > 2:
-                raise ValueError(f'Invalid thinking value: {thinking}. Valid values are 0, 1, or 2 for low, medium, or high.')
 
             reasoning = {
                 'effort': effort,
@@ -408,8 +412,14 @@ class OpenAIExecutor(Executor):
                 "functions": functions_cast if functions else None,
                 "stream_options": {"include_usage": True},
                 "stream": True,
+                **({'reasoning_effort': effort} if thinking else {}),
                 **({'stop': stop_tokens} if 'grok' not in model else {})
             }
+
+            # weird bug in gemini OAI compat where it believes stop needs to be a list
+            # so if not attached to llmvm server, this will fail
+            if 'gemini' in model and not base_params['stop']:
+                del base_params['stop']
 
             params = {k: v for k, v in base_params.items() if v is not None}
             response = await self.aclient.chat.completions.create(**params)
@@ -439,6 +449,7 @@ class OpenAIExecutor(Executor):
             model=model,
             temperature=temperature,
             stop_tokens=stop_tokens,
+            thinking=thinking
         )
 
         text_response: str = ""

@@ -18,7 +18,7 @@ gemini_api_base: 'https://generativelanguage.googleapis.com/v1beta'
 bedrock_api_base: 'us-east-1'
 default_openai_model: 'gpt-4.1'
 default_anthropic_model: 'claude-sonnet-4-20250514'
-default_gemini_model: 'gemini-2.5-pro-preview-05-06'
+default_gemini_model: 'gemini-2.5-pro'
 default_deepseek_model: 'deepseek-chat'
 default_bedrock_model: 'amazon.nova-pro-v1:0'
 executor: 'anthropic'  # openai, anthropic, gemini, deepseek, bedrock

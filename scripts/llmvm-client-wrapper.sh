@@ -9,7 +9,7 @@ echo "1) claude-sonnet-4-20250514 (default)"
 echo "2) gpt-4.1"
 echo "3) o4-mini"
 echo "4) o3"
-echo "5) gemini-2.5-pro-preview-05-06"
+echo "5) gemini-2.5-pro"
 echo ""
 read -p "Enter selection (1-5) or model name [default: 1]: " selection
 
@@ -37,7 +37,7 @@ case "$selection" in
   executor="openai"
   ;;
 5)
-  model="gemini-2.5-pro-preview-05-06"
+  model="gemini-2.5-pro"
   executor="gemini"
   ;;
 *)

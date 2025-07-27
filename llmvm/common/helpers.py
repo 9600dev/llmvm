@@ -28,7 +28,6 @@ import platform
 import sys
 import tempfile
 import termios
-import threading
 import dill
 import traceback
 import types
@@ -57,7 +56,7 @@ from PIL import Image
 import pyte
 
 from llmvm.common.objects import (AstNode, Content, FunctionCall, ImageContent, MarkdownContent, HTMLContent,
-                                  Message, PandasMeta, Statement, StreamNode, SupportedMessageContent, System, TextContent, User)
+                                  Message, PandasMeta, Statement, StreamNode, SupportedMessageContent, System, TextContent, TokenPriceCalculator, User, Executor)
 from llmvm.common.container import Container
 
 
@@ -142,6 +141,88 @@ class LateBindDefaults(ast.NodeTransformer):
 
 
 class Helpers():
+    def get_executor(
+        executor_name: Optional[str] = None,
+        default_model_name: Optional[str] = None,
+        max_input_tokens: Optional[int] = None,
+        max_output_tokens: Optional[int] = None,
+        api_key: Optional[str] = None,
+        api_endpoint: Optional[str] = None,
+    ) -> Executor:
+        if not executor_name:
+            executor_name = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
+
+        if not executor_name:
+            raise EnvironmentError('No executor specified in environment (LLMVM_EXECUTOR) or config file')
+
+        # LLMVM_EXECUTOR_API_BASE overrides the default API endpoint for each executor
+        if not api_endpoint and Container().get_config_variable('LLMVM_EXECUTOR_API_BASE', default=''):
+            api_endpoint = Container().get_config_variable('LLMVM_EXECUTOR_API_BASE', default='')
+
+        default_model_config = default_model_name or Container().get_config_variable(f'default_{executor_name}_model', 'LLMVM_MODEL', '')
+
+        override_max_input_len = Container().get_config_variable('override_max_input_tokens', 'LLMVM_OVERRIDE_MAX_INPUT_TOKENS', default=None)
+        override_max_output_len = Container().get_config_variable('override_max_output_tokens', 'LLMVM_OVERRIDE_MAX_OUTPUT_TOKENS', default=None)
+
+        executor_instance: Executor
+
+        if not api_key and Container().get_config_variable('LLMVM_EXECUTOR_API_KEY', default=''):
+            api_key = Container().get_config_variable('LLMVM_EXECUTOR_API_KEY', default='')
+
+        if executor_name == 'anthropic':
+            from llmvm.common.anthropic_executor import AnthropicExecutor
+
+            executor_instance = AnthropicExecutor(
+                api_key=api_key or os.environ.get('ANTHROPIC_API_KEY', ''),
+                default_model=default_model_config,
+                api_endpoint=api_endpoint or Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE', 'https://api.anthropic.com/v1'),
+                default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
+                default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=8192),
+            )
+        elif executor_name == 'gemini':
+            from llmvm.common.gemini_executor import GeminiExecutor
+
+            executor_instance = GeminiExecutor(
+                api_key=api_key or os.environ.get('GEMINI_API_KEY', ''),
+                default_model=default_model_config,
+                api_endpoint=api_endpoint or Container().get_config_variable('gemini_api_base', 'GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta/openai/'),
+                default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
+                default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
+            )
+        elif executor_name == 'deepseek':
+            from llmvm.common.deepseek_executor import DeepSeekExecutor
+
+            executor_instance = DeepSeekExecutor(
+                api_key=api_key or os.environ.get('DEEPSEEK_API_KEY', ''),
+                default_model=default_model_config,
+                api_endpoint=api_endpoint or Container().get_config_variable('deepseek_api_base', 'DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1'),
+                default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
+                default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
+            )
+        elif executor_name == 'bedrock':
+            from llmvm.common.bedrock_executor import BedrockExecutor
+
+            executor_instance = BedrockExecutor(
+                api_key='',
+                default_model=default_model_config,
+                default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='bedrock', default=300000),
+                default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='bedrock', default=4096),
+                region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
+            )
+        else:
+            # openai is the only one we'd change the api_endpoint for, given everyone provides
+            # openai API compatibility endpoints these days.
+            from llmvm.common.openai_executor import OpenAIExecutor
+
+            executor_instance = OpenAIExecutor(
+                api_key=api_key or os.environ.get('OPENAI_API_KEY', ''),
+                default_model=default_model_config,
+                api_endpoint=api_endpoint or Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
+                default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
+                default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
+            )
+        return executor_instance
+
     @staticmethod
     def dump_assertion(assertion: Callable[[], bool]) -> str:
         result = ''
@@ -511,7 +592,7 @@ class Helpers():
         # Special handling for MCPToolWrapper
         if hasattr(function, 'get_function_description'):
             return function.get_function_description()
-            
+
         docstring = inspect.getdoc(function) or ""
         signature = inspect.signature(function)
 
@@ -532,7 +613,7 @@ class Helpers():
 
         # Check if the function is async
         is_async = inspect.iscoroutinefunction(function)
-        
+
         return {
             "parameters": parameters,
             "types": types,
@@ -556,7 +637,7 @@ class Helpers():
         if hasattr(func, 'get_function_description'):
             # MCP tools are standalone functions, not methods
             return (True, None)
-            
+
         # Attempt to discover the class (if bound method)
         cls_candidate = getattr(func, '__self__', None)
         if cls_candidate is not None:
@@ -573,7 +654,7 @@ class Helpers():
         except (ValueError, TypeError):
             # If we can't get a signature, treat as static
             pass
-            
+
         # In more thorough code, you might also check `params[0] == "cls"` for a class method.
         # For simplicity, we treat everything else as static
         return (True, cls_candidate)

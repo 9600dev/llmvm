@@ -323,12 +323,12 @@ class ThinkingParamType(click.ParamType):
         value = value.lower()
         if value in ('low', 'medium', 'high'):
             if value == 'low':
-                return 0
-            elif value == 'medium':
                 return 1
-            else:
+            elif value == 'medium':
                 return 2
-        self.fail(f'{value} is not a valid thinking value. Must be an integer (Anthropic) or one of "low", "medium", "high" (OpenAI).', param, ctx)
+            else:
+                return 3
+        self.fail(f'{value} is not a valid thinking value. Must be an integer > 0 (Anthropic) or one of "low", "medium", "high" (OpenAI).', param, ctx)
 
 
 def execute_python_in_thread(python_str: str, id: int, endpoint: str) -> None:
@@ -1140,8 +1140,8 @@ def todo(
 
     llmvm_client = LLMVMClient(
         llmvm_endpoint=Container().get_config_variable('LLMVM_ENDPOINT', default='http://127.0.0.1:8011'),
-        default_executor_name=Container().get_config_variable('LLMVM_EXECUTOR', default='anthropic'),
-        default_model_name=Container().get_config_variable('LLMVM_MODEL', default='claude-3-7-sonnet-latest'),
+        default_executor_name='openai',
+        default_model_name='',
         throw_if_server_down=False,
     )
 
@@ -1339,9 +1339,9 @@ def act(
         try:
             llmvm_client = LLMVMClient(
                 llmvm_endpoint=llmvm_endpoint,
-                api_endpoint=api_endpoint,
-                default_executor_name='anthropic',
+                default_executor_name='openai',
                 default_model_name='',
+                api_endpoint=api_endpoint,
             )
         except Exception as ex:
             if int_id >=0:
@@ -1492,6 +1492,7 @@ def compile(
         default_executor_name=executor,
         default_model_name=model,
         api_endpoint=api_endpoint,
+        api_key=Container().get_config_variable('LLMVM_EXECUTOR_API_KEY', default='')
     )
     session_thread: SessionThreadModel = asyncio.run(llmvm_client.compile(
         thread=int_id,
@@ -1519,7 +1520,7 @@ def programs(
 
     llmvm_client = LLMVMClient(
         llmvm_endpoint=llmvm_endpoint,
-        default_executor_name='anthropic',
+        default_executor_name='openai',
         default_model_name='',
     )
 
@@ -1544,7 +1545,7 @@ def threads(
 
     llmvm_client = LLMVMClient(
         llmvm_endpoint=llmvm_endpoint,
-        default_executor_name='anthropic',
+        default_executor_name='openai',
         default_model_name='',
     )
 
@@ -1579,7 +1580,7 @@ def thread(
 
     llmvm_client = LLMVMClient(
         llmvm_endpoint=llmvm_endpoint,
-        default_executor_name='',
+        default_executor_name='openai',
         default_model_name='',
     )
 
@@ -1610,7 +1611,7 @@ def messages(
 
     llmvm_client = LLMVMClient(
         llmvm_endpoint=llmvm_endpoint,
-        default_executor_name='anthropic',
+        default_executor_name='openai',
         default_model_name='',
     )
 
@@ -1636,7 +1637,7 @@ def new(
     global last_thread
     llmvm_client = LLMVMClient(
         llmvm_endpoint=llmvm_endpoint,
-        default_executor_name='anthropic',
+        default_executor_name='openai',
         default_model_name='',
     )
 
@@ -1774,8 +1775,8 @@ def message(
     if output_token_len == 0:
         output_token_len = TokenPriceCalculator().max_output_tokens(model, executor=executor, default=8192)
 
-    if thinking > output_token_len:
-        raise ValueError(f'--thinking value {thinking} is greater than --output_token_len {output_token_len}. Thinking must be less than or equal to output_token_len.')
+    if thinking >= output_token_len:
+        raise ValueError(f'--thinking value {thinking} is greater than or equal to --output_token_len {output_token_len}. Thinking must be less than or equal to output_token_len.')
 
     # input is coming from a pipe, could be binary or text
     if not sys.stdin.isatty():
@@ -1873,6 +1874,7 @@ def message(
         default_executor_name=executor,
         default_model_name=model,
         api_endpoint=api_endpoint,
+        api_key=Container().get_config_variable('LLMVM_EXECUTOR_API_KEY', default=''),
         throw_if_server_down=throw,
         default_stream_handler=StreamPrinter().write
     )

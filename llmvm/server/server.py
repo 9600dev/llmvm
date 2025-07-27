@@ -168,72 +168,21 @@ class PrettyJSONResponse(JSONResponse):
         ).encode("utf-8") + b"\n"
 
 def get_executor(
-    executor: Optional[str] = None,
+    executor_name: Optional[str] = None,
+    default_model_name: Optional[str] = None,
     max_input_tokens: Optional[int] = None,
     max_output_tokens: Optional[int] = None,
     api_key: Optional[str] = None,
     api_endpoint: Optional[str] = None,
  ) -> Executor:
-    if not executor:
-        executor = Container().get_config_variable('executor', 'LLMVM_EXECUTOR', default='')
-
-    if not executor:
-        raise EnvironmentError('No executor specified in environment or config file')
-
-    # LLMVM_EXECUTOR_API_BASE overrides the default API endpoint for each executor
-    if not api_endpoint and Container().get_config_variable('LLMVM_EXECUTOR_API_BASE', default=''):
-        api_endpoint = Container().get_config_variable('LLMVM_EXECUTOR_API_BASE', default='')
-
-    default_model_config = Container().get_config_variable(f'default_{executor}_model', 'LLMVM_MODEL')
-    override_max_input_len = Container().get_config_variable(f'override_max_input_tokens', 'LLMVM_OVERRIDE_MAX_INPUT_TOKENS', default=None)
-    override_max_output_len = Container().get_config_variable(f'override_max_output_tokens', 'LLMVM_OVERRIDE_MAX_OUTPUT_TOKENS', default=None)
-
-    executor_instance: Executor
-
-    if executor == 'anthropic':
-        executor_instance = AnthropicExecutor(
-            api_key=api_key or os.environ.get('ANTHROPIC_API_KEY', ''),
-            default_model=default_model_config,
-            api_endpoint=api_endpoint or Container().get_config_variable('anthropic_api_base', 'ANTHROPIC_API_BASE', 'https://api.anthropic.com/v1'),
-            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='anthropic', default=200000),
-            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='anthropic', default=8192),
-        )
-    elif executor == 'gemini':
-        executor_instance = GeminiExecutor(
-            api_key=api_key or os.environ.get('GEMINI_API_KEY', ''),
-            default_model=default_model_config,
-            api_endpoint=api_endpoint or Container().get_config_variable('gemini_api_base', 'GEMINI_API_BASE', 'https://generativelanguage.googleapis.com/v1beta/openai/'),
-            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='gemini', default=2000000),
-            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='gemini', default=8192),
-        )
-    elif executor == 'deepseek':
-        executor_instance = DeepSeekExecutor(
-            api_key=api_key or os.environ.get('DEEPSEEK_API_KEY', ''),
-            default_model=default_model_config,
-            api_endpoint=api_endpoint or Container().get_config_variable('deepseek_api_base', 'DEEPSEEK_API_BASE', 'https://api.deepseek.com/v1'),
-            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='deepseek', default=64000),
-            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='deepseek', default=4096),
-        )
-    elif executor == 'bedrock':
-        executor_instance = BedrockExecutor(
-            api_key='',
-            default_model=default_model_config,
-            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='bedrock', default=300000),
-            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='bedrock', default=4096),
-            region_name=Container().get_config_variable('bedrock_api_base', 'BEDROCK_API_BASE'),
-        )
-    else:
-        # openai is the only one we'd change the api_endpoint for, given everyone provides
-        # openai API compatibility endpoints these days.
-        executor_instance = OpenAIExecutor(
-            api_key=api_key or os.environ.get('OPENAI_API_KEY', ''),
-            default_model=default_model_config,
-            api_endpoint=api_endpoint or Container().get_config_variable('openai_api_base', 'OPENAI_API_BASE', 'https://api.openai.com/v1'),
-            default_max_input_len=max_input_tokens or override_max_input_len or TokenPriceCalculator().max_input_tokens(default_model_config, executor='openai', default=128000),
-            default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
-        )
-    return executor_instance
-
+    return Helpers.get_executor(
+        executor_name=executor_name,
+        default_model_name=default_model_name,
+        max_input_tokens=max_input_tokens,
+        max_output_tokens=max_output_tokens,
+        api_key=api_key,
+        api_endpoint=api_endpoint
+    )
 
 async def __get_helpers_async() -> list[Callable]:
     """Get all helpers including dynamically discovered MCP tools (async version)"""
@@ -274,12 +223,20 @@ def __get_helpers() -> list[Callable]:
 def get_controller(
         thread_id: int = 0,
         executor: Optional[str] = None,
+        default_model_name: Optional[str] = None,
         max_input_tokens: Optional[int] = None,
         max_output_tokens: Optional[int] = None,
         api_key: Optional[str] = None,
         api_endpoint: Optional[str] = None
     ) -> ExecutionController:
-    executor_instance = get_executor(executor, max_input_tokens, max_output_tokens, api_key, api_endpoint)
+    executor_instance = get_executor(
+        executor,
+        default_model_name,
+        max_input_tokens,
+        max_output_tokens,
+        api_key,
+        api_endpoint
+    )
 
     return ExecutionController(
         executor=executor_instance,
@@ -555,10 +512,12 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
         controller = get_controller(
             thread_id=thread.id,
             executor=thread.executor,
+            default_model_name=thread.model,
             api_key=api_key,
             api_endpoint=api_endpoint
         )
         model = thread.model if thread.model else controller.get_executor().default_model
+
     # either the executor or the model is not set, so use the defaults
     # and update the thread
     else:
@@ -572,7 +531,7 @@ async def _tools_completions_generator(thread: SessionThreadModel) -> AsyncItera
         thread.executor = controller.get_executor().name()
         thread.model = model
 
-    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&thinking={thread.thinking}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}&temperature={thread.temperature}')  # NOQA: E501
+    logging.debug(f'/v1/tools/completions?id={thread.id}&mode={mode}&thinking={thread.thinking}&model={model}&executor={thread.executor}&compression={thread.compression}&cookies={thread.cookies}&temperature={thread.temperature}&api_endpoint={thread.api_endpoint}')  # NOQA: E501
 
     if len(messages) == 0:
         raise HTTPException(status_code=400, detail='No messages provided')
