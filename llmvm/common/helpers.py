@@ -1996,43 +1996,34 @@ class Helpers():
             return False
 
     @staticmethod
-    def __find_terminal_emulator(process):
+    def get_parent_pid(pid):
         try:
-            if process.parent():
-                # Check if the process name matches known terminal emulators
-                name = process.parent().name()
-                if 'Terminal' in name:
-                    return 'Terminal'
-                elif 'iTerm' in name:
-                    return 'iTerm2'
-                elif 'alacritty' in name:
-                    return 'alacritty'
-                elif 'kitty' in name:
-                    return 'kitty'
-                elif 'tmux' in name:
-                    return 'tmux'
-                elif 'wezterm-gui' in name:
-                    return 'wezterm'
-                elif 'wezterm' in name:
-                    return 'wezterm'
-                # If no match, check the next parent
-                return Helpers.__find_terminal_emulator(process.parent())
-            else:
-                # No more parents, terminal emulator not found
-                return 'Unknown'
-        except Exception as e:
-            return str(e)
+            output = subprocess.check_output(['ps', '-p', str(pid), '-o', 'ppid='], text=True)
+            return int(output.strip())
+        except Exception:
+            return None
 
     @staticmethod
-    def is_emulator(emulator: str):
+    def get_process_name(pid):
         try:
-            pid = os.getpid()
-            # Get the parent process (emulator) of the current process
-            output = subprocess.check_output(['ps', '-o', 'comm=', '-p', str(pid)], text=True)
-            current_process_name = output.strip()
-            return emulator.lower() == current_process_name.lower()
+            output = subprocess.check_output(['ps', '-p', str(pid), '-o', 'comm='], text=True)
+            return output.strip()
         except Exception:
-            return False
+            return None
+
+    @staticmethod
+    def is_emulator(emulator: str, max_depth=10):
+        pid = os.getpid()
+        depth = 0
+
+        while pid and depth < max_depth:
+            proc_name = Helpers.get_process_name(pid)
+            if proc_name and emulator.lower() in proc_name.lower():
+                return True
+            pid = Helpers.get_parent_pid(pid)
+            depth += 1
+
+        return False
 
     @staticmethod
     def is_pdf(byte_stream):
