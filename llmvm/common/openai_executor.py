@@ -372,7 +372,7 @@ class OpenAIExecutor(Executor):
             effort = "medium"
         elif thinking == 3:
             effort = "high"
-        elif thinking > 3:
+        elif thinking > 3 and 'gemini' not in model:
             raise ValueError(f'Invalid thinking value: {thinking}. Valid values are 1, 2, or 3 for low, medium, or high.')
 
         if model is not None and self.responses(model):
@@ -412,14 +412,36 @@ class OpenAIExecutor(Executor):
                 "functions": functions_cast if functions else None,
                 "stream_options": {"include_usage": True},
                 "stream": True,
-                **({'reasoning_effort': effort} if thinking else {}),
-                **({'stop': stop_tokens} if 'grok' not in model else {})
+                **({'reasoning_effort': effort} if thinking and 'gemini' not in model else {}),
+                **({'stop': stop_tokens} if stop_tokens and 'grok' not in model else {})
             }
 
             # weird bug in gemini OAI compat where it believes stop needs to be a list
             # so if not attached to llmvm server, this will fail
-            if 'gemini' in model and not base_params['stop']:
+            if 'gemini' in model and 'stop' in base_params and not base_params['stop']:
                 del base_params['stop']
+
+            if thinking and 'gemini' in model:
+                if thinking == 1:
+                    thinking_budget = 2048
+                elif thinking == 2:
+                    thinking_budget = 4096
+                elif thinking == 3:
+                    thinking_budget = 8192
+                else:
+                    thinking_budget = thinking
+
+                extra_body = {
+                    'extra_body': {
+                        "google": {
+                        "thinking_config": {
+                            "thinking_budget": thinking_budget,
+                            "include_thoughts": True
+                            }
+                        }
+                    }
+                }
+                base_params['extra_body'] = extra_body
 
             params = {k: v for k, v in base_params.items() if v is not None}
             response = await self.aclient.chat.completions.create(**params)
