@@ -20,14 +20,15 @@ class DeepSeekExecutor(OpenAIExecutor):
 
         api_endpoint: str = 'https://api.deepseek.com/v1',
         default_max_input_len: int = 64000,
-        default_max_output_len: int = 4096,
+        default_max_output_len: int = 8000,
         max_images: int = 0,
     ):
         if max_images > 0:
-            raise ValueError('Deepseek does not support images. max_images must be 0.')
+            logging.debug('Deepseek does not support images. Setting max_images to 0')
+            max_images = 0
 
         if default_max_input_len > 64000:
-            logging.debug('Deepseek does not support more than 64k tokens. default_max_input_len must be 64000 or less.')
+            logging.debug('Deepseek does not support more than 64k tokens. default_max_input_len must be 64000 or less. Setting to 64000.')
             default_max_input_len = 64000
 
         super().__init__(
@@ -220,8 +221,9 @@ class DeepSeekExecutor(OpenAIExecutor):
         max_output_tokens: int = 4096,
         temperature: float = 0.2,
         stop_tokens: list[str] = [],
+        thinking: int = 0,
     ) -> TokenStreamManager:
-        return await super().aexecute_direct(messages, functions, model, max_output_tokens, temperature, stop_tokens)
+        return await super().aexecute_direct(messages, functions, model, max_output_tokens, temperature, stop_tokens, thinking)
 
     async def aexecute(
         self,

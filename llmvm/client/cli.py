@@ -430,8 +430,9 @@ class Repl():
         rich.print('[white](:wh filename to save the current thread as HTML to a file)[/white]')
         rich.print('[white](:.) to open the LLMVM memory/sandbox directory in finder.')
         rich.print('[white](:ohc open ```html block in browser)[/white]')
-        rich.print('[white](:omc open last message in browser)[/white]')
+        rich.print('[white](:omm open ```markdown block in browser)[/white]')
         rich.print('[white](:otc open message thread in browser)[/white]')
+        rich.print('[white](:omc open last message in browser)[/white]')
         rich.print('[white](:cb Show all code blocks)[/white]')
         rich.print('[white](:ycb0 Copy code block 0, 1, 2... ycb for all)[/white]')
         rich.print('[white](:vcb0 $EDITOR code block 0, 1, 2... vcb for all)[/white]')
@@ -879,6 +880,14 @@ class Repl():
                     asyncio.run(llmvm_client.set_thread_title(last_thread_t.id, title))
                     continue
 
+                if query.startswith(':otc'):
+                    last_thread_t: SessionThreadModel = last_thread
+                    with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
+                        html_printer = HTMLPrinter(temp_file.name)
+                        html_printer.print_messages([MessageModel.to_message(message) for message in last_thread_t.messages])
+                        Helpers.find_and_run_chrome(temp_file.name)
+                    continue
+
                 if query.startswith(':omc'):
                     last_thread_t: SessionThreadModel = last_thread
                     with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
@@ -888,11 +897,19 @@ class Repl():
                         Helpers.find_and_run_chrome(temp_file.name)
                     continue
 
-                if query.startswith(':otc'):
+                if query.startswith(':omm'):
                     last_thread_t: SessionThreadModel = last_thread
                     with tempfile.NamedTemporaryFile(mode='w+b', suffix='.html', delete=False) as temp_file:
+                        last_message = last_thread_t.messages[-1]
                         html_printer = HTMLPrinter(temp_file.name)
-                        html_printer.print_messages([MessageModel.to_message(message) for message in last_thread_t.messages])
+                        # get the markdown blocks from the thread
+                        markdown_blocks = []
+                        for m in [MessageModel.to_message(m).get_str() for m in last_thread_t.messages]:
+                            if '```markdown' in m:
+                                markdown_blocks.extend(Helpers.extract_blocks(m, 'markdown'))
+
+                        html_result = '\n'.join([html_printer.markdown_to_html(m) for m in markdown_blocks])
+                        html_printer.print(html_printer.header() + "\n\n" + html_result + "\n\n" + html_printer.footer())
                         Helpers.find_and_run_chrome(temp_file.name)
                     continue
 
@@ -1366,7 +1383,7 @@ def act(
         else:
             thread = asyncio.run(llmvm_client.get_thread(int_id))
 
-        prompt_result = Helpers.tfidf_similarity(actor, [row[0] + ' ' + row[1] for row in rows[1:]])
+        prompt_result = Helpers.tfidf_similarity(actor, [row[0] + ' ' + row[1] for row in rows[1:] if len(row) >= 2])
 
         rich.print()
         rich.print('[bold green]Setting actor mode by adding the actor to the current message prompt.[/bold green]')

@@ -856,6 +856,7 @@ class HTMLMessageRenderer:
         return "\n".join(out)
 
 
+
 class HTMLPrinter:
     def __init__(self, filename: str):
         self.filename = filename
@@ -943,7 +944,17 @@ class HTMLPrinter:
         h2 {
             font-weight: 600;
             margin: 0;
-            font-size: 1rem;
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+            font-size: 1.2em;
+        }
+
+        h3 {
+            font-weight: 500;
+            margin: 0;
+            padding-top: 0.5rem;
+            padding-bottom: 0.5rem;
+            font-size: 1.0em;
         }
 
         p {
@@ -1128,4 +1139,20 @@ class HTMLPrinter:
     ):
         with open(self.filename, 'w') as f:
             f.write(self.get_str(messages))
+
+    def markdown_to_html(self, m: str) -> str:
+        if '```markdown' in m:
+            m = m.replace('```markdown', '').replace('```', '')
+
+        return markdown2.markdown(
+            m,
+            extras=[
+                "tables",
+                "fenced-code-blocks",
+                "code-friendly",
+                "break-on-newline",
+                "smarty-pants",
+                "cuddled-lists",
+            ],
+        )
 
