@@ -110,30 +110,29 @@ USER llmvm
 ENV HOME /home/llmvm
 ENV TMPDIR $HOME/.tmp
 
-# Detect architecture and download appropriate Miniconda installer
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
-        MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"; \
+        MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh"; \
     elif [ "$ARCH" = "aarch64" ]; then \
-        MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-aarch64.sh"; \
+        MINIFORGE_URL="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-aarch64.sh"; \
     else \
         echo "Unsupported architecture: $ARCH" && exit 1; \
     fi && \
-    wget -q "$MINICONDA_URL" -O ~/miniconda.sh && \
-    bash ~/miniconda.sh -b -p $HOME/miniconda && \
-    rm ~/miniconda.sh
+    wget -q "$MINIFORGE_URL" -O ~/miniforge.sh && \
+    bash ~/miniforge.sh -b -p $HOME/miniforge && \
+    rm ~/miniforge.sh
 
 # Add conda to PATH
-ENV PATH=$HOME/miniconda/bin:$PATH
+ENV PATH=$HOME/miniforge/bin:$PATH
 
 # Initialize conda for bash
 RUN conda init bash
 
 # setup defaults for bash
-RUN echo 'if [ -f ~/.bashrc ]; then\n   source ~/.bashrc\nfi' >> /home/llmvm/.bash_profile
 
+RUN echo 'if [ -f ~/.bashrc ]; then\n   source ~/.bashrc\nfi' >> /home/llmvm/.bash_profile
 # Add conda initialization to .bashrc
-RUN echo 'export PATH="$HOME/miniconda/bin:$PATH"' >> /home/llmvm/.bashrc
+RUN echo 'export PATH="$HOME/miniforge/bin:$PATH"' >> /home/llmvm/.bashrc
 RUN echo 'cd llmvm' >> /home/llmvm/.bashrc
 
 WORKDIR /home/llmvm/llmvm
