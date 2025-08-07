@@ -42,7 +42,7 @@ class Browser():
         self.current_screenshot: ImageContent
         self.current_markdown: MarkdownContent
 
-    async def __find_html_element_handle(self, html_string: str) -> ElementHandle | None:
+    async def _find_html_element_handle(self, html_string: str) -> ElementHandle | None:
         # Extract attributes from the HTML string
         page = self.current_page
         attr_pattern = r'(\w+)=["\']([^"\']*)["\']'
@@ -89,7 +89,7 @@ class Browser():
 
         return None
 
-    async def __resolve_selector(self, selector: str) -> None | ElementHandle:
+    async def _resolve_selector(self, selector: str) -> None | ElementHandle:
         logging.debug(f"Browser.__resolve_selector() resolving {selector}")
 
         # Handle coordinate-based selector
@@ -112,7 +112,7 @@ class Browser():
 
         try:
             if selector.startswith('<'):
-                return await self.__find_html_element_handle(selector)
+                return await self._find_html_element_handle(selector)
 
             result = await __locator(selector)
             if result: return result
@@ -138,16 +138,16 @@ class Browser():
             logging.debug(f"Browser.__resolve_selector() Exception resolving {original_selector}: {ex}")
             raise Exception(f"Exception resolving selector {selector}: {ex}")
 
-    def __handle_navigate_expression(self, selector: str) -> BrowserContent:
+    def _handle_navigate_expression(self, selector: str) -> BrowserContent:
         def __internal_click(selector: str) -> BrowserContent:
             if 'current_page' not in self.__dict__:
                 raise ValueError('The browser instance is either closed, or has not been opened yet. Call goto() first.')
 
             logging.debug(f"Browser.__handle_navigate_expression() clicking {selector}")
-            element_handle = asyncio.run(self.__resolve_selector(selector))
+            element_handle = asyncio.run(self._resolve_selector(selector))
             asyncio.run(self.browser.click(element_handle))
             asyncio.run(self.browser.wait(500))
-            return self.__get_state()
+            return self._get_state()
 
         result = selector.strip()
 
@@ -180,9 +180,9 @@ class Browser():
         else:
             return __internal_click(result)
 
-    def __get_state(self) -> BrowserContent:
+    def _get_state(self) -> BrowserContent:
         url: str = asyncio.run(self.browser.url())
-        self.current_markdown: MarkdownContent = self.__element_markdown(url)
+        self.current_markdown: MarkdownContent = self._element_markdown(url)
         screenshot: bytes = asyncio.run(self.browser.screenshot())
 
         write_client_stream(
@@ -195,19 +195,19 @@ class Browser():
         self.current_screenshot = ImageContent(screenshot)
         return BrowserContent(sequence=[self.current_screenshot, self.current_markdown], url=url)
 
-    def __input_boxes(self) -> List[ClickableElementHandle]:
+    def _input_boxes(self) -> List[ClickableElementHandle]:
         logging.debug("Getting input elements")
         return asyncio.run(self.browser.get_input_elements())
 
-    def __clickable(self) -> List[ClickableElementHandle]:
+    def _clickable(self) -> List[ClickableElementHandle]:
         logging.debug("Getting clickable elements")
         return asyncio.run(self.browser.get_clickable_elements())
 
-    def __element_markdown(self, url: str = '') -> MarkdownContent:
+    def _element_markdown(self, url: str = '') -> MarkdownContent:
         html = asyncio.run(self.browser.get_html())
 
-        clickable_elements = self.__clickable()
-        input_elements = self.__input_boxes()
+        clickable_elements = self._clickable()
+        input_elements = self._input_boxes()
         append_str = ''
         if clickable_elements:
             append_str += '\n\nClickable Elements:\n'
@@ -231,6 +231,11 @@ class Browser():
         asyncio.run(self.browser.close())
 
     def find_selector_or_mouse_x_y(self, expression: str) -> str:
+        write_client_stream(
+            TextContent(
+                f"Finding Browser selector or mouse x, y for {expression}\n"
+            )
+        )
         """
         Returns the best matching element selector for the expression, or the x, y coordinates for a mouse click.
         It can be either a 1) <a href...> link (/path/link.html), 2) a html id (#id), 3) x, y coordinates for a mouse click in the format of (x,y),
@@ -284,22 +289,19 @@ class Browser():
         ))
 
         result = result.get_str().strip()
+
+        write_client_stream(
+            TextContent(
+                f"Browser selector or mouse x, y for {expression} is {result}\n"
+            )
+        )
         return result
 
     def find_and_click_on_expression(self, expression: str) -> BrowserContent:
         """
-        Finds and then clicks on an element that matches the natural languagedescription in expression.
+        Finds and then clicks on an element that matches the natural language description in expression.
 
         Example:
-        User: open formula1.com and find the latest race results
-
-        Assistant:
-        <helpers>
-        browser = Browser()
-        page_content = browser.goto("https://formula1.com")
-        result(page_content)
-        </helpers>
-
         I can see a "Race Results" button in the page. Let's click the "Race Results" button:
 
         <helpers>
@@ -312,7 +314,7 @@ class Browser():
         """
         logging.debug(f'Browser.find_and_click_on_expression({expression}')
         result = self.find_selector_or_mouse_x_y(expression)
-        return self.__handle_navigate_expression(selector=result)
+        return self._handle_navigate_expression(selector=result)
 
     def goto(self, url: str) -> BrowserContent:
         """
@@ -343,7 +345,7 @@ class Browser():
         asyncio.run(self.browser.goto(url))
         self.current_page = asyncio.run(self.browser.page())
         asyncio.run(self.browser.wait(500))
-        return self.__get_state()
+        return self._get_state()
 
     def click_selector(
         self,
@@ -374,7 +376,7 @@ class Browser():
         :return: The current state of the browser
         """
         logging.debug(f"Browser.click() clicking {selector}")
-        return self.__handle_navigate_expression(selector=selector)
+        return self._handle_navigate_expression(selector=selector)
 
     def type_into_selector_or_mouse_x_y(
         self,
@@ -414,16 +416,16 @@ class Browser():
 
         logging.debug(f"Inserting {text} into {selector}")
         try:
-            element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+            element_handle: ElementHandle | None = asyncio.run(self._resolve_selector(selector))
         except Exception as ex:
             logging.debug(f"Browser.type_into() Exception resolving selector {selector}: {ex}")
             # try again with a # id selector
             if not selector.startswith('#'):
                 selector = f'#{selector}'
-                element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+                element_handle: ElementHandle | None = asyncio.run(self._resolve_selector(selector))
             else:
                 selector = f'{selector}[id="{selector}"]'
-                element_handle: ElementHandle | None = asyncio.run(self.__resolve_selector(selector))
+                element_handle: ElementHandle | None = asyncio.run(self._resolve_selector(selector))
 
         if element_handle:
             asyncio.run(self.browser.fill(element=element_handle, value=text))
@@ -431,11 +433,11 @@ class Browser():
             if hit_enter:
                 asyncio.run(element_handle.press('Enter', timeout=1000))
                 asyncio.run(self.browser.wait(500))
-            return self.__get_state()
+            return self._get_state()
         else:
             logging.debug(f"Browser.type_into() Element not found for selector {selector}")
             # todo: this is wrong, we should probably return an error with the current state
-            return self.__get_state()
+            return self._get_state()
 
     def mouse_move_x_y_and_click(
         self,
@@ -468,5 +470,5 @@ class Browser():
 
         asyncio.run(self.browser.mouse_move_x_y_and_click(x, y))
         asyncio.run(self.browser.wait(500))
-        return self.__get_state()
+        return self._get_state()
 

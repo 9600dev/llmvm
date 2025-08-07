@@ -137,7 +137,7 @@ def get_executor(
 ) -> Executor:
     return get_client(executor_name, default_model_name, api_key).get_executor(
         executor_name=executor_name,
-        model_name=default_model_name,
+        default_model_name=default_model_name,
         api_key=api_key,
         api_endpoint=api_endpoint
     )
@@ -151,7 +151,7 @@ def get_client(
     if executor_name == 'anthropic' and not model_name:
         model_name = 'claude-sonnet-4-20250514'
     elif executor_name == 'openai' and not model_name:
-        model_name = 'gpt-4.1'
+        model_name = 'gpt-5'
     elif executor_name == 'gemini' and not model_name:
         model_name = 'gemini-2.5-pro'
     elif executor_name == 'deepseek' and not model_name:

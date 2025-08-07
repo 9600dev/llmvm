@@ -141,6 +141,8 @@ class LateBindDefaults(ast.NodeTransformer):
 
 
 class Helpers():
+
+    @staticmethod
     def get_executor(
         executor_name: Optional[str] = None,
         default_model_name: Optional[str] = None,
@@ -222,6 +224,30 @@ class Helpers():
                 default_max_output_len=max_output_tokens or override_max_output_len or TokenPriceCalculator().max_output_tokens(default_model_config, executor='openai', default=4096),
             )
         return executor_instance
+
+    @staticmethod
+    def get_controller(
+            thread_id: int = 0,
+            executor: Optional[str] = None,
+            default_model_name: Optional[str] = None,
+            max_input_tokens: Optional[int] = None,
+            max_output_tokens: Optional[int] = None,
+            api_key: Optional[str] = None,
+            api_endpoint: Optional[str] = None
+        ) -> 'ExecutionController':
+        executor_instance = Helpers.get_executor(
+            executor,
+            default_model_name,
+            max_input_tokens,
+            max_output_tokens,
+            api_key,
+            api_endpoint
+        )
+        from llmvm.server.python_execution_controller import ExecutionController
+        return ExecutionController(
+            executor=executor_instance,
+            thread_id=thread_id
+        )
 
     @staticmethod
     def dump_assertion(assertion: Callable[[], bool]) -> str:

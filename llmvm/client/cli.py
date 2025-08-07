@@ -321,14 +321,16 @@ class ThinkingParamType(click.ParamType):
 
         # Then check if it's a valid string option
         value = value.lower()
-        if value in ('low', 'medium', 'high'):
-            if value == 'low':
+        if value in ('minimal', 'low', 'medium', 'high'):
+            if value == 'minimal':
+                return 0
+            elif value == 'low':
                 return 1
             elif value == 'medium':
                 return 2
             else:
                 return 3
-        self.fail(f'{value} is not a valid thinking value. Must be an integer > 0 (Anthropic) or one of "low", "medium", "high" (OpenAI).', param, ctx)
+        self.fail(f'{value} is not a valid thinking value. Must be an integer > 0 (Anthropic) or one of "minimal", "low", "medium", "high" (OpenAI).', param, ctx)
 
 
 def execute_python_in_thread(python_str: str, id: int, endpoint: str) -> None:
@@ -1481,7 +1483,7 @@ def url(
               help='API endpoint. Used to change _API_BASE for each executor. Default is $LLMVM_EXECUTOR_API_BASE or empty.')
 @click.option('--compression', '-c', type=click.Choice(['auto', 'lifo', 'similarity', 'mapreduce', 'summary']), required=False,
               default='lifo', help='context window compression method if the message is too large. Default is "lifo" last in first out.')
-@click.option('--thinking', '-z', type=THINKING, required=False, default=0, help='enable thinking mode. Token count int for Anthropic, "low", "medium", or "high" for OpenAI.')
+@click.option('--thinking', '-z', type=THINKING, required=False, default=0, help='enable thinking mode. Token count int for Anthropic, "minimal", "low", "medium", or "high" for OpenAI.')
 def compile(
     id: str,
     program_name: str,

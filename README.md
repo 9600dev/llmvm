@@ -366,7 +366,7 @@ or, you can set environment variables that specify the execution backend and the
 
 ```bash
 export LLMVM_EXECUTOR='openai'
-export LLMVM_MODEL='gpt-4.1'
+export LLMVM_MODEL='gpt-5'
 python -m llmvm.client "hello, who are you?"
 ```
 

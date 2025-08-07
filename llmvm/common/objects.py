@@ -1105,7 +1105,7 @@ class Executor(ABC):
 
     def does_not_stop(self, model: Optional[str]) -> bool:
         if not model: model = self.default_model
-        if 'o1' in model or 'o3' in model or 'o4' in model or 'Llama' in model or 'grok' in model:
+        if 'o1' in model or 'o3' in model or 'o4' in model or 'Llama' in model or 'grok' in model or 'gpt-5' in model:
             return True
         else:
             return False

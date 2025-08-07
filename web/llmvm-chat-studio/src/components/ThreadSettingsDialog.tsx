@@ -45,6 +45,7 @@ const modelOptions = {
     "claude-3-7-sonnet-latest"
   ],
   openai: [
+    "gpt-5",
     "gpt-4.1",
     "o3",
     "o3-pro",
@@ -88,12 +89,12 @@ const ThreadSettingsDialog = ({ settings, onSettingsChange, trigger }: ThreadSet
     // If executor changes, reset model to first available option
     if (key === 'executor') {
       updatedSettings.model = modelOptions[value as keyof typeof modelOptions][0];
-      
+
       // Set endpoint URL for Llama
       if (value === 'llama') {
         updatedSettings.endpoint = 'https://api.llama.com/compat/v1';
       }
-      
+
       // Auto-populate API key from localStorage for any executor
       const savedApiKey = localStorage.getItem(`${value}_api_key`);
       if (savedApiKey && !localSettings.apiKey) {

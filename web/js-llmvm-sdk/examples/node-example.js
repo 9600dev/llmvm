@@ -29,7 +29,7 @@ async function main() {
             system('You are a helpful assistant.'),
             user('What is the capital of France?')
         ], {
-            model: 'gpt-4.1',
+            model: 'gpt-5',
             temperature: 1.0,
             maxTokens: 8192
         });
@@ -72,7 +72,7 @@ async function main() {
         await client.complete([
             user('Write a haiku about programming.')
         ], {
-            model: 'gpt-4.1',
+            model: 'gpt-5',
             temperature: 1.0,
             onChunk: (chunk) => {
                 // In a real application, you might update UI here

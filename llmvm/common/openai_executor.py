@@ -42,10 +42,10 @@ class OpenAIExecutor(Executor):
     def __init__(
         self,
         api_key: str = cast(str, Container().get_config_variable("OPENAI_API_KEY")),
-        default_model: str = "gpt-4.1",
+        default_model: str = "gpt-5",
         api_endpoint: str = Container().get_config_variable("OPENAI_API_BASE", "OPENAI_API_BASE", "https://api.openai.com/v1"),
-        default_max_input_len: int = 1047576,
-        default_max_output_len: int = 32768,
+        default_max_input_len: int = 4000000,
+        default_max_output_len: int = 128000,
         max_images: int = 20,
     ):
         super().__init__(
@@ -366,14 +366,16 @@ class OpenAIExecutor(Executor):
 
         # reasoning (supported by gemini etc also)
         effort = None
-        if thinking == 1:
+        if thinking == 0:
+            effort = "minimal"
+        elif thinking == 1:
             effort = "low"
         elif thinking == 2:
             effort = "medium"
         elif thinking == 3:
             effort = "high"
         elif thinking > 3 and 'gemini' not in model:
-            raise ValueError(f'Invalid thinking value: {thinking}. Valid values are 1, 2, or 3 for low, medium, or high.')
+            raise ValueError(f'Invalid thinking value: {thinking}. Valid values are 0, 1, 2, or 3 for minimal, low, medium, or high.')
 
         if model is not None and self.responses(model):
             # responses API
@@ -422,7 +424,9 @@ class OpenAIExecutor(Executor):
                 del base_params['stop']
 
             if thinking and 'gemini' in model:
-                if thinking == 1:
+                if thinking == 0:
+                    thinking_budget = 0
+                elif thinking == 1:
                     thinking_budget = 2048
                 elif thinking == 2:
                     thinking_budget = 4096
@@ -451,7 +455,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: list[Message],
         max_output_tokens: int = 16384,
-        temperature: float = 0.2,
+        temperature: float = 1.0,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         thinking: int = 0,
@@ -521,7 +525,7 @@ class OpenAIExecutor(Executor):
         self,
         messages: list[Message],
         max_output_tokens: int = 16384,
-        temperature: float = 0.2,
+        temperature: float = 1.0,
         stop_tokens: list[str] = [],
         model: Optional[str] = None,
         thinking: int = 0,

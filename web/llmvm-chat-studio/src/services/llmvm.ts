@@ -50,15 +50,15 @@ export class LLMVMService {
 
     // Map 'llama' executor to 'openai' for the API
     const executorForAPI = options?.executor === 'llama' ? 'openai' : (options?.executor || 'openai');
-    
+
     const thread: Partial<LLMVMThread> = {
       id: Date.now(),
       executor: executorForAPI,
-      model: options?.model || 'gpt-4.1',
+      model: options?.model || 'gpt-5',
       compression: options?.compression || 'auto',
       temperature: options?.temperature || 1.0,
       stop_tokens: options?.stop_tokens || [],
-      output_token_len: options?.output_token_len || 8192,
+      output_token_len: options?.output_token_len || 128000,
       current_mode: options?.current_mode || 'tools',
       thinking: options?.thinking || 0,
       cookies: [],
@@ -429,10 +429,10 @@ export function getLLMVMService(config?: LLMVMConfig): LLMVMService {
   if (!llmvmService) {
     // In development, use proxy path to avoid CORS
     const isDev = import.meta.env.DEV;
-    
+
     // Check for runtime config first (from config.js loaded in index.html)
     const runtimeConfig = (window as any).RUNTIME_CONFIG;
-    
+
     const baseUrl = isDev
       ? '/api' // Use /api prefix which gets proxied to localhost:8011
       : (runtimeConfig?.LLMVM_BASE_URL || import.meta.env.VITE_LLMVM_BASE_URL || config?.baseUrl || 'http://localhost:8011');

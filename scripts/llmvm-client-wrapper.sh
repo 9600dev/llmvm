@@ -6,7 +6,7 @@ conda activate llmvm
 # Model selection
 echo "Select a model:"
 echo "1) claude-sonnet-4-20250514 (default)"
-echo "2) gpt-4.1"
+echo "2) gpt-5"
 echo "3) o4-mini"
 echo "4) o3"
 echo "5) gemini-2.5-pro"
@@ -25,7 +25,7 @@ case "$selection" in
   executor="anthropic"
   ;;
 2)
-  model="gpt-4.1"
+  model="gpt-5"
   executor="openai"
   ;;
 3)
