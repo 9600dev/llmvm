@@ -66,6 +66,9 @@ class OpenAIExecutor(Executor):
         if model and 'grok' in model:
             return False
 
+        if model and 'gen' in model:
+            return False
+
         return self.does_not_stop(model)
 
     def user_token(self) -> str:
